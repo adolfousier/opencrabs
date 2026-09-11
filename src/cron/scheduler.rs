@@ -493,7 +493,7 @@ impl CronScheduler {
                                     job.name,
                                     crate::config::opencrabs_home()
                                 );
-                                match resolve_or_create_cron_session(&ctx).await {
+                                match resolve_or_create_cron_session(&ctx, &job).await {
                                     Ok(cron_sid) => {
                                         execute_job(
                                             &job,
@@ -510,7 +510,7 @@ impl CronScheduler {
                             })
                             .await
                         } else {
-                            match resolve_or_create_cron_session(&ctx).await {
+                            match resolve_or_create_cron_session(&ctx, &job).await {
                                 Ok(cron_sid) => {
                                     execute_job(
                                         &job,
@@ -578,12 +578,51 @@ impl CronScheduler {
     }
 }
 
-/// Find an existing "Cron" session or create one. All cron jobs share this
-/// session for logging/debugging, but each run inserts a compaction marker
-/// after completion so the next run starts with empty context (no history
-/// contamination between jobs).
-async fn resolve_or_create_cron_session(ctx: &ServiceContext) -> anyhow::Result<Uuid> {
-    const CRON_SESSION_NAME: &str = "Cron";
+/// The stable per-job title suffix used as the session lookup key. Derived
+/// from the job's UUID — unique per job row, rename-safe (LIKE-unsafe
+/// characters are impossible in a UUID), and shared by the resolution path
+/// and tests via this single definition.
+pub(crate) fn cron_session_title_suffix(job: &CronJob) -> String {
+    format!("[cron-job:{}]", job.id)
+}
+
+/// Resolve the session a cron job runs in — ONE SESSION PER JOB (#149).
+///
+/// Legacy behavior (pre-#149) resolved a single shared "Cron" session for
+/// every job. That design cross-pollinates whenever jobs overlap in time,
+/// which the 60s tick makes routine, not exceptional:
+///
+/// 1. **History**: a run inserts its `[CONTEXT COMPACTION]` marker only at
+///    the END of the turn, and context loads from the LAST marker in the
+///    session (`messages_from_last_compaction`). A job B starting while job
+///    A is mid-flight reads A's prompt + partial tool activity as its own
+///    context. Two concurrent turns also interleave writes into one history.
+/// 2. **Provider/model**: `execute_job` swaps the per-session provider keyed
+///    to the session id — with one shared id, a concurrent job's swap
+///    overwrites the running job's provider mid-turn (last writer wins).
+///
+/// Sessions are resolved by a stable TITLE suffix carrying the job id
+/// (`Cron: <job_name> [cron-job:<uuid>]`), mirroring the channel-handler pattern
+/// (`[chat:N]` suffix) so a user rename of the readable part still resolves
+/// to the same session row while different jobs never share one.
+///
+/// Cross-RUN contamination within a single job is still bounded by the
+/// end-of-run compaction marker: the job's own next fire starts from an
+/// empty context (deliberate — cron prompts are self-contained).
+///
+/// There is no per-run single-flight guard here: overlapping fires of the
+/// same job each get a session that ONLY that job writes, so the two
+/// pollution vectors above cannot cross jobs; self-overlap remains visible
+/// in `cron_job_runs` and is addressed separately if it proves harmful.
+pub(crate) async fn resolve_or_create_cron_session(
+    ctx: &ServiceContext,
+    job: &CronJob,
+) -> anyhow::Result<Uuid> {
+    // Stable lookup key: survives renames of the readable part, unique per
+    // job id (a UUID — LIKE-escape characters cannot occur).
+    let suffix = cron_session_title_suffix(job);
+    let title = format!("Cron: {} {}", job.name, suffix);
+
     use crate::db::repository::SessionListOptions;
     let session_svc = SessionService::new(ctx.clone());
     let sessions = session_svc
@@ -597,7 +636,7 @@ async fn resolve_or_create_cron_session(ctx: &ServiceContext) -> anyhow::Result<
         .await?;
     if let Some(existing) = sessions
         .iter()
-        .find(|s| s.title.as_deref().is_some_and(|n| n == CRON_SESSION_NAME))
+        .find(|s| s.title.as_deref().is_some_and(|n| n.ends_with(&suffix)))
     {
         return Ok(existing.id);
     }
@@ -605,7 +644,7 @@ async fn resolve_or_create_cron_session(ctx: &ServiceContext) -> anyhow::Result<
     let provider = config.cron.default_provider.clone();
     let model = config.cron.default_model.clone();
     let session = session_svc
-        .create_session_with_provider(Some(CRON_SESSION_NAME.to_string()), provider, model, None)
+        .create_session_with_provider(Some(title), provider, model, None)
         .await?;
     Ok(session.id)
 }
