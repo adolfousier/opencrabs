@@ -31,7 +31,7 @@ impl AgentService {
     /// 1. Temporal grounding: inject [Current time: YYYY-MM-DD HH:MM:SS UTC (user: ...)] (#153).
     /// 2. Active plan reminder.
     /// 3. Memory recall.
-    pub(super) async fn augment_user_message(
+    pub(crate) async fn augment_user_message(
         session_id: Uuid,
         user_message: &str,
         brain_dir: Option<&std::path::Path>,

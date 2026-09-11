@@ -8,9 +8,10 @@
 
 use chrono::{DateTime, Utc};
 use chrono_tz::Tz;
+use once_cell::sync::Lazy;
 use std::fs;
-use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::path::Path;
+use std::sync::Mutex;
 use std::time::SystemTime;
 
 /// Resolved timezone info with display label.
@@ -285,10 +286,8 @@ impl UserTimezoneCache {
     }
 }
 
-lazy_static::lazy_static! {
-    /// Process-wide singleton cache for user timezone.
-    pub static ref GLOBAL_TZ_CACHE: UserTimezoneCache = UserTimezoneCache::new();
-}
+/// Process-wide singleton cache for user timezone.
+pub static GLOBAL_TZ_CACHE: Lazy<UserTimezoneCache> = Lazy::new(UserTimezoneCache::new);
 
 #[cfg(test)]
 mod tests {

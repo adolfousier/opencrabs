@@ -3,7 +3,7 @@
 //! Reads workspace markdown files and assembles the system brain dynamically
 //! each turn, so edits to brain files take effect immediately.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Core brain files — always injected (user context).
 ///
