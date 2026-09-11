@@ -228,18 +228,23 @@ fn eligibility_consults_the_fact_check() {
 #[test]
 fn the_detection_block_fires_on_unbacked_facts() {
     // Eligibility alone only un-skips the logging; the detection block is what
-    // increments the retry budget and injects the nudge.
-    let block = TOOL_LOOP_SRC
-        .split("if phantom_retries_used < MAX_PHANTOM_RETRIES")
-        .nth(1)
+    // increments the retry budget and injects the nudge. Since #1506 the
+    // block collects named `fired_branches` and gates the kill on the list,
+    // so the sentinel anchors on that collection and scans to the budget
+    // increment (the old `if phantom_retries_used < ...` header is gone).
+    let (_, rest) = TOOL_LOOP_SRC
+        .split_once("let fired_branches: Vec<&str> = {")
         .expect("detection block not found");
-    let block = block
-        .split("phantom_detections_total += 1;")
-        .next()
-        .unwrap();
+    let (block, _) = rest
+        .split_once("phantom_detections_total += 1;")
+        .expect("detection block never increments the retry budget");
     assert!(
-        block.contains("|| !unbacked_facts.is_empty()"),
+        block.contains(r#"("unbacked_facts", !unbacked_facts.is_empty())"#),
         "the detection block does not fire on unbacked_facts"
+    );
+    assert!(
+        block.contains("!fired_branches.is_empty()"),
+        "the kill gate does not consult the fired-branch list"
     );
 }
 
