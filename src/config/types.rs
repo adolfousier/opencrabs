@@ -581,7 +581,7 @@ pub struct RateLimiterConfig {
     #[serde(default = "default_typing_max_hold_secs")]
     pub typing_max_hold_secs: u64,
     /// G2 edits: steady-state `editMessageText` budget per forum peer per
-    /// minute (32/min observed with exactly one 429 all day). Default: 30.
+    /// minute (sized safely below Telegram's ~20/min group limit). Default: 18.
     #[serde(default = "default_edits_per_minute")]
     pub edits_per_minute: u32,
     /// G2 edits: burst capacity of the edit bucket. Default: 10.
@@ -599,11 +599,8 @@ pub struct RateLimiterConfig {
     #[serde(default = "default_sends_burst")]
     pub sends_burst: u32,
     /// G4 rich: steady-state budget per forum peer per minute for the rich
-    /// message endpoint (`sendRichMessage` / its edit sibling), which sits in
-    /// its own method family with its own bucket. Sized from a deployment
-    /// taking 260 real 429s/day on this endpoint against a median of 18
-    /// calls/min, p90 23, p99 40: a 30/min ceiling paces only the p99 spikes
-    /// the 429s cluster in and leaves ordinary traffic untouched. Default: 30.
+    /// message endpoint (`sendRichMessage` / its edit sibling), sized safely
+    /// below Telegram's ~20/min group limit. Default: 18.
     #[serde(default = "default_rich_per_minute")]
     pub rich_per_minute: u32,
     /// G4 rich: burst capacity of the rich bucket. Default: 10.
@@ -650,7 +647,7 @@ fn default_typing_max_hold_secs() -> u64 {
 }
 
 fn default_edits_per_minute() -> u32 {
-    30
+    18
 }
 
 fn default_edit_burst() -> u32 {
@@ -670,7 +667,7 @@ fn default_sends_burst() -> u32 {
 }
 
 fn default_rich_per_minute() -> u32 {
-    30
+    18
 }
 
 fn default_rich_burst() -> u32 {
