@@ -884,6 +884,8 @@ pub mod telegram_thread_id_lookup_test;
 pub mod telegram_tool_group_test;
 pub mod telegram_topic_listing_test;
 pub mod text_complete_test;
+pub mod theme_catalog_converter_test;
+pub mod theme_pack_test;
 pub mod thinking_loop_fallback_test;
 pub mod tool_search_activation_test;
 pub mod tracing_session_id_test;

@@ -763,6 +763,8 @@ Born from two real incidents (#646, #1178): hard-coded fixture constants broke o
 | Tests — Telegram Userbot Session | 4 | `src/tests/telegram_userbot_session_test.rs` |
 | Tests — Template Governance | 20 | `src/tests/template_governance_test.rs` |
 | Tests — Text Complete | 21 | `src/tests/text_complete_test.rs` |
+| Tests — Theme Catalog Converter | 11 | `src/tests/theme_catalog_converter_test.rs` |
+| Tests — Theme Pack | 3 | `src/tests/theme_pack_test.rs` |
 | Tests — Theme Persist Roundtrip | 4 | `src/tests/theme_persist_roundtrip_test.rs` |
 | Tests — Thinking Loop Fallback | 5 | `src/tests/thinking_loop_fallback_test.rs` |
 | Tests — Token Report Calibration | 9 | `src/tests/token_report_calibration_test.rs` |

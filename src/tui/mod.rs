@@ -15,6 +15,7 @@ pub mod provider_selector;
 pub mod remote_upload;
 pub mod render;
 pub mod runner;
+pub mod theme_catalog;
 
 // Enhanced rendering modules
 pub mod highlight;

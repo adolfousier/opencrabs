@@ -13,6 +13,8 @@
 //! spec's ladder (commented "derived"). The regression tests pin every
 //! spec-listed value so silent drift fails CI.
 
+use std::sync::OnceLock;
+
 use ratatui::style::Color;
 
 use super::theme::{AnsiColors, Theme, ThemeColors};
@@ -525,27 +527,50 @@ pub static CATPPUCCIN_LATTE: Theme = Theme {
 /// is first because it is the default and byte-identical to pre-S2
 /// colors by construction. The array is `static` so the returned slice
 /// is `'static` — a literal `&[...]` would be a temporary.
+/// The hand-built presets, in `/theme list` order. crab-dark (from
+/// `theme.rs`) is first because it is the default.
+static HAND_BUILT_INS: [&Theme; 8] = [
+    &super::theme::CRAB_DARK,
+    &DRACULA,
+    &ALUCARD,
+    &MONOKAI,
+    &SOLARIZED_LIGHT,
+    &SOLARIZED_DARK,
+    &CATPPUCCIN_MOCHA,
+    &CATPPUCCIN_LATTE,
+];
+
+/// Full built-in roster: hand-built presets first, then the embedded
+/// curated pack (#1461). Pack themes are built once through the existing
+/// user-theme validator; see `crate::tui::theme_catalog::theme_pack` for
+/// the initialization-order invariants (the validator's collision check
+/// re-enters `by_name`, so `by_name` must never force this).
 pub fn built_ins() -> &'static [&'static Theme] {
-    static BUILT_INS: [&Theme; 8] = [
-        &super::theme::CRAB_DARK,
-        &DRACULA,
-        &ALUCARD,
-        &MONOKAI,
-        &SOLARIZED_LIGHT,
-        &SOLARIZED_DARK,
-        &CATPPUCCIN_MOCHA,
-        &CATPPUCCIN_LATTE,
-    ];
-    &BUILT_INS
+    static ALL: OnceLock<Vec<&'static Theme>> = OnceLock::new();
+    ALL.get_or_init(|| {
+        HAND_BUILT_INS
+            .iter()
+            .copied()
+            .chain(crate::tui::theme_catalog::theme_pack::themes().iter())
+            .collect()
+    })
 }
 
 /// Case-insensitive preset lookup by name (what `/theme set` feeds).
+/// Scans the hand-built statics, then the embedded pack through its
+/// NON-FORCING view: during pack initialization the validator's collision
+/// check lands here, and forcing `built_ins()` (or `themes()`) from that
+/// path would re-enter the `OnceLock` initializer.
 pub fn by_name(name: &str) -> Option<&'static Theme> {
     let lowered = name.to_ascii_lowercase();
-    built_ins()
+    HAND_BUILT_INS
         .iter()
-        .copied()
         .find(|t| t.name.to_ascii_lowercase() == lowered)
+        .copied()
+        .or_else(|| {
+            crate::tui::theme_catalog::theme_pack::themes_if_built()
+                .and_then(|pack| pack.iter().find(|t| t.name.to_ascii_lowercase() == lowered))
+        })
 }
 
 // ── Solarized Light / Dark ──────────────────────────────────────────────────

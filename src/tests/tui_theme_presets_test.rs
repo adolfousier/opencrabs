@@ -180,12 +180,16 @@ fn catppuccin_latte_matches_upstream_spec() {
     assert_eq!(c.accent_teal, rgb(0x179299), "teal");
 }
 
-/// Roster contract: 8 entries, crab-dark first (default), names unique.
+/// Roster contract: the 8 hand-built presets first in pinned order
+/// (crab-dark default at the head), then the embedded curated pack
+/// (#1461); names unique across the full roster.
 #[test]
 fn roster_is_complete_and_ordered() {
     let roster = presets::built_ins();
-    assert_eq!(roster.len(), 8, "roster size");
+    let expected = 8 + crate::tui::theme_catalog::theme_pack::sources().len();
+    assert_eq!(roster.len(), expected, "roster = hand-built + pack");
     assert_eq!(roster[0].name, "crab-dark", "default first");
+    assert_eq!(roster[1].name, "dracula", "hand-built order preserved");
     let mut names: Vec<&str> = roster.iter().map(|t| t.name).collect();
     let before = names.len();
     names.sort_unstable();
