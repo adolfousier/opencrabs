@@ -1049,13 +1049,21 @@ pub(crate) async fn handle_message(
         agent_input
     };
 
-    // Tell the LLM its text response is automatically delivered to the chat.
+    // Tell the LLM its text response is automatically delivered to the chat,
+    // so it should NOT use whatsapp_send for plain replies — but the tool
+    // EXISTS and is the only path for media, polls, and reactions (#1489:
+    // the old text denied the tool outright while catalog.rs registered it,
+    // so photo requests fell back to generic tools or bare paths).
     // Surface the chat JID so the agent can target THIS chat for cron reports
     // without guessing (#533, mirror of upstream #510).
     let chat_id = info.source.chat.to_string();
     let agent_input = format!(
         "[Channel: WhatsApp (chat_id: {chat_id}) — your text response is automatically sent to this chat. \
-         There is no whatsapp_send tool. Just reply with text.]\n{agent_input}"
+         Do NOT call whatsapp_send to deliver your answer. Only use whatsapp_send for: \
+         sending to a different chat_id, media (photo/video/audio/document/sticker), polls, \
+         reactions, quote-replies, locations, contacts, or deleting a message. \
+         ORDERING: send any files/documents/photos FIRST, then write your final text — \
+         the turn must never end on a bare attachment with no closing text after it.]\n{agent_input}"
     );
 
     // Typing indicator — send composing every 5 s while the agent thinks
@@ -1661,7 +1669,8 @@ pub(crate) async fn send_connection_greeting(
     // reads as a genuine message in the agent's own voice rather than a canned
     // "online and ready" line repeated verbatim every time.
     let prompt = "[Channel: WhatsApp — your text response is automatically sent to this chat. \
-         There is no whatsapp_send tool. Just reply with text.]\n\
+         Do NOT call whatsapp_send to deliver your answer; it exists only for media, polls, \
+         reactions, quote-replies, and sends to a different chat_id. Just reply with text.]\n\
          You have just connected to the owner over WhatsApp. Send one short, \
          natural first message in your own voice letting them know you are here. \
          Do not use a generic canned status line."
