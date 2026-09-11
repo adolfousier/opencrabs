@@ -2476,6 +2476,16 @@ respond_to = "mention"           # all | mention | dm_only | auto
 enabled = true
 allowed_phones = ["+1234567890"] # E.164 format
 
+# Outbound send budget (#1407), ban mitigation. Both keys optional; the
+# values shown are the defaults, and 0 disables either knob. Over-budget
+# sends are paced (slept, never dropped); over-cap sends queue FIFO and
+# flush automatically as the rolling 24h window slides, with exactly one
+# owner alert per saturation episode. Messages to the owner always
+# bypass the budget so reactivity is preserved.
+[channels.whatsapp.rate_limit]
+messages_per_minute = 30         # token-bucket pacing (burst = rate)
+daily_cap = 800                  # rolling 24h hard cap with queueing
+
 [channels.trello]
 enabled = true
 board_ids = ["your-board-id"]    # From the board URL

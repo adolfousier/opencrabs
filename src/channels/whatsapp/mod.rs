@@ -20,6 +20,7 @@ pub(crate) mod handler;
 mod onboarding_events;
 mod pairing;
 mod photos;
+pub(crate) mod rate_limit;
 pub(crate) mod resume;
 mod sessions;
 mod state;

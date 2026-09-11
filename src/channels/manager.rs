@@ -360,6 +360,7 @@ impl ChannelManager {
                 let enqueue_cb = crate::channels::whatsapp::resume::build_enqueue_callback(
                     self.whatsapp_state.clone(),
                     agent_holder.clone(),
+                    wa.clone(),
                 );
                 let wa_agent_service = self
                     .channel_factory

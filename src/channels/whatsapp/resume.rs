@@ -12,10 +12,12 @@ use std::sync::Arc;
 pub(crate) fn build_enqueue_callback(
     state: Arc<WhatsAppState>,
     agent_holder: AgentHolder,
+    wa_cfg: crate::config::types::WhatsAppConfig,
 ) -> MessageEnqueueCallback {
     Arc::new(move |session_id, msg| {
         let state = state.clone();
         let agent_holder = agent_holder.clone();
+        let wa_cfg = wa_cfg.clone();
         tokio::spawn(async move {
             let Some(jid_str) = state.session_jid(session_id).await else {
                 tracing::warn!(
@@ -54,6 +56,24 @@ pub(crate) fn build_enqueue_callback(
                 tracing::warn!("[bg-resume] whatsapp: bad jid '{jid_str}'; dropping delivery");
                 return;
             };
+            // #1407: bg-resume results are agent-output sends: gate them
+            // through the shared limiter. Over-budget sends park in the
+            // FIFO queue (the drainer flushes and persists them as the
+            // rolling 24h window slides); owner-bound resumes bypass.
+            let rl_owner = wa_cfg.is_owner(jid_str.split('@').next().unwrap_or(&jid_str));
+            match state
+                .rate_limiter
+                .gate(&wa_cfg.rate_limit, &jid_str, &content, rl_owner)
+                .await
+            {
+                super::rate_limit::GateOutcome::Queued { .. } => {
+                    tracing::info!(
+                        "[bg-resume] whatsapp: daily cap reached; result queued for drainer flush"
+                    );
+                    return;
+                }
+                super::rate_limit::GateOutcome::SendNow => {}
+            }
             let out = waproto::whatsapp::Message {
                 conversation: Some(content),
                 ..Default::default()

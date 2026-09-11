@@ -890,6 +890,11 @@ pub struct WhatsAppConfig {
     /// answer everyone (`open`) or a fixed contact list (`allowlist`).
     #[serde(default)]
     pub response_policy: WaResponsePolicy,
+    /// Outbound send budget (#1407): token-bucket pacing plus a rolling
+    /// 24h cap with a FIFO queue. Defaults sit in the sane-automation
+    /// band; `0` disables either knob. See [`WaRateLimitConfig`].
+    #[serde(default)]
+    pub rate_limit: WaRateLimitConfig,
 }
 
 impl WhatsAppConfig {
@@ -898,6 +903,35 @@ impl WhatsAppConfig {
     /// `allowed_phones` (WhatsApp's allow list).
     pub fn is_owner(&self, user_id: &str) -> bool {
         crate::config::owner::is_owner(&self.allowed_phones, &self.bot_owner, user_id)
+    }
+}
+
+/// `[channels.whatsapp.rate_limit]` - outbound send budget (#1407).
+///
+/// Defaults sit in the sane-automation band from the issue (30-60
+/// msgs/hr stays under Meta's heuristics; 500+/hr draws blocks):
+/// 30/min burst-bucketed pacing plus an 800-per-rolling-24h hard cap.
+/// `0` disables either knob. Over-budget sends pace or queue - never
+/// drop. Owner-bound messages bypass the budget entirely.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct WaRateLimitConfig {
+    /// Token-bucket rate: sustained sends per minute (also the burst
+    /// capacity). Over-budget sends sleep for refill, never dropped.
+    /// `0` = no per-minute pacing.
+    pub messages_per_minute: u32,
+    /// Rolling 24h hard cap. On saturation further sends queue (FIFO,
+    /// flushed by the drainer as the window slides) and the owner is
+    /// alerted exactly once per episode. `0` = no daily cap.
+    pub daily_cap: u32,
+}
+
+impl Default for WaRateLimitConfig {
+    fn default() -> Self {
+        Self {
+            messages_per_minute: 30,
+            daily_cap: 800,
+        }
     }
 }
 

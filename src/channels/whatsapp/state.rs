@@ -88,6 +88,11 @@ pub struct WhatsAppState {
     /// lockstep with `session_jids` at `register_session_jid` (the ONLY
     /// write site for both). Last writer wins — mirrors the forward map.
     pub(super) jid_sessions: Mutex<HashMap<String, Uuid>>,
+    /// Outbound rate limiter (#1407): token-bucket pacing + rolling 24h
+    /// cap with a FIFO queue. Shared by the send tool, the handler chunk
+    /// loops, the resume path and the drainer task - one budget for the
+    /// whole channel. `pub(crate)` so brain/tools can gate through it.
+    pub(crate) rate_limiter: std::sync::Arc<super::rate_limit::WhatsappRateLimiter>,
 }
 
 impl Default for WhatsAppState {
@@ -120,6 +125,7 @@ impl WhatsAppState {
             photo_debounce: Mutex::new(HashMap::new()),
             session_jids: Mutex::new(HashMap::new()),
             jid_sessions: Mutex::new(HashMap::new()),
+            rate_limiter: std::sync::Arc::new(super::rate_limit::WhatsappRateLimiter::new()),
         }
     }
 }

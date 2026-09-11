@@ -858,6 +858,7 @@ Born from two real incidents (#646, #1178): hard-coded fixture constants broke o
 | Tests — Whatsapp Owner Filter | 15 | `src/tests/whatsapp_owner_filter_test.rs` |
 | Tests — Whatsapp Photo Batching | 11 | `src/tests/whatsapp_photo_batching_test.rs` |
 | Tests — Whatsapp Qr Replay | 4 | `src/tests/whatsapp_qr_replay_test.rs` |
+| Tests — Whatsapp Rate Limit | 10 | `src/tests/whatsapp_rate_limit_test.rs` |
 | Tests — Whatsapp State | 8 | `src/tests/whatsapp_state_test.rs` |
 | Tests — Whatsapp Store | 15 | `src/tests/whatsapp_store_test.rs` |
 | Tests — Word Delete Keybinding | 7 | `src/tests/word_delete_keybinding_test.rs` |

@@ -54,6 +54,15 @@ impl WhatsAppAgent {
     /// If already paired, reconnects and handles messages.
     pub fn start(self) -> tokio::task::JoinHandle<()> {
         tokio::spawn(async move {
+            // Spawn the outbound rate-limit drainer exactly once per
+            // process (#1407). The drainer snapshots the rate_limit
+            // config here; later config changes reach the inline gate
+            // paths immediately (they re-read config per turn) but the
+            // drainer keeps this snapshot until restart (v1 tradeoff,
+            // documented in rate_limit.rs).
+            let rl_cfg = self.config_rx.borrow().channels.whatsapp.rate_limit.clone();
+            super::rate_limit::spawn_drainer(self.whatsapp_state.clone(), rl_cfg);
+
             let db_path = crate::config::opencrabs_home()
                 .join("whatsapp")
                 .join("session.db");

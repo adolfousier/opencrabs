@@ -1118,6 +1118,13 @@ pub(crate) async fn handle_message(
         let jid_cb = reply_target.clone();
         let was_streamed_cb = was_streamed.clone();
         let wa_state_cb = wa_state.clone();
+        // #1407: streaming intermediates are agent-output sends: pace
+        // them through the shared limiter (the exact failure mode the
+        // issue names, every chunk posted as its own message). Owner
+        // bypass keys on the TARGET jid, not the sender.
+        let rl_cfg = wa_cfg.rate_limit.clone();
+        let rl_jid = jid_cb.to_string();
+        let rl_owner = wa_cfg.is_owner(rl_jid.split('@').next().unwrap_or(&rl_jid));
         Arc::new(move |session_id, event| match event {
             ProgressEvent::IntermediateText { text, .. } => {
                 let (clean, _) = crate::utils::extract_img_markers(&text);
@@ -1137,8 +1144,24 @@ pub(crate) async fn handle_message(
                     let client = client_cb.clone();
                     let jid = jid_cb.clone();
                     let tagged = format!("{}\n\n{}", MSG_HEADER, clean.trim());
+                    let rl_state = wa_state_cb.clone();
+                    let rl_cfg_c = rl_cfg.clone();
+                    let rl_owner_c = rl_owner;
                     let handle = tokio::spawn(async move {
                         for chunk in split_message(&tagged, 4000) {
+                            // Ephemeral: pace on the bucket, DROP (never
+                            // queue) under a saturated daily cap (#1407).
+                            if !rl_state
+                                .rate_limiter
+                                .gate_ephemeral(&rl_cfg_c, rl_owner_c)
+                                .await
+                            {
+                                tracing::debug!(
+                                    target: "whatsapp",
+                                    "daily cap reached; dropping ephemeral intermediate chunk"
+                                );
+                                continue;
+                            }
                             let msg = waproto::whatsapp::Message {
                                 conversation: Some(chunk.to_string()),
                                 ..Default::default()
@@ -1477,12 +1500,35 @@ pub(crate) async fn handle_message(
                 } else if !footer.is_empty() {
                     chunks.push(footer.clone());
                 }
+                // #1407: final-text chunks are agent-output sends: gate
+                // them through the shared limiter. Queued chunks park
+                // FIFO for the drainer; order is preserved across flush.
+                let rl_jid = reply_jid.to_string();
+                let rl_owner = wa_cfg.is_owner(rl_jid.split('@').next().unwrap_or(&rl_jid));
+                let mut rl_queued = 0usize;
                 for chunk in &chunks {
+                    match wa_state
+                        .rate_limiter
+                        .gate(&wa_cfg.rate_limit, &rl_jid, chunk, rl_owner)
+                        .await
+                    {
+                        super::rate_limit::GateOutcome::Queued { .. } => {
+                            rl_queued += 1;
+                            continue;
+                        }
+                        super::rate_limit::GateOutcome::SendNow => {}
+                    }
                     let reply_msg = waproto::whatsapp::Message {
                         conversation: Some(chunk.to_string()),
                         ..Default::default()
                     };
                     send_resilient(&client, reply_jid.clone(), reply_msg).await;
+                }
+                if rl_queued > 0 {
+                    tracing::warn!(
+                        target: "whatsapp",
+                        "daily cap reached; {rl_queued} final-text chunk(s) queued for drainer flush"
+                    );
                 }
             }
 

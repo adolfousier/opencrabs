@@ -8,6 +8,7 @@
 use super::error::Result;
 use super::r#trait::{Tool, ToolCapability, ToolExecutionContext, ToolHints, ToolResult};
 use crate::channels::whatsapp::WhatsAppState;
+use crate::channels::whatsapp::rate_limit::GateOutcome;
 use crate::config::Config;
 use async_trait::async_trait;
 use serde_json::Value;
@@ -167,7 +168,7 @@ pub(crate) fn partial_failure_report(total: usize, delivered: usize, err: &str) 
 }
 
 /// Persist outgoing messages to `channel_messages` for reply-recovery.
-async fn persist_outgoing(jid: &Jid, content: &str) {
+pub(crate) async fn persist_outgoing(jid: &Jid, content: &str) {
     if content.trim().is_empty() {
         return;
     }
@@ -414,7 +415,27 @@ impl Tool for WhatsAppSendTool {
                 let chunks = crate::channels::whatsapp::handler::split_message(&tagged, 4000);
                 let total = chunks.len();
                 let mut delivered: Vec<&str> = Vec::with_capacity(total);
+                // #1407: pace sends through the shared limiter; over-cap
+                // chunks park FIFO for the drainer (queued text must NOT
+                // be resent by the model). Owner-bound sends bypass.
+                let (rl_cfg, rl_owner) = {
+                    let wa = &self.config_rx.borrow().channels.whatsapp;
+                    (
+                        wa.rate_limit.clone(),
+                        wa.is_owner(jid_str.split('@').next().unwrap_or(&jid_str)),
+                    )
+                };
+                let mut queued_any = false;
                 for chunk in chunks {
+                    if let GateOutcome::Queued { .. } = self
+                        .whatsapp_state
+                        .rate_limiter
+                        .gate(&rl_cfg, &jid_str, chunk, rl_owner)
+                        .await
+                    {
+                        queued_any = true;
+                        continue;
+                    }
                     let wa_msg = waproto::whatsapp::Message {
                         conversation: Some(chunk.to_string()),
                         ..Default::default()
@@ -437,6 +458,22 @@ impl Tool for WhatsAppSendTool {
                     delivered.push(chunk);
                 }
 
+                if queued_any {
+                    // Queued chunks flush via the drainer (which persists
+                    // them); record only what actually left now.
+                    if !delivered.is_empty() {
+                        let prefix = delivered_prefix(&delivered);
+                        if !prefix.trim().is_empty() {
+                            persist_outgoing(&jid, &prefix).await;
+                        }
+                    }
+                    return Ok(ToolResult::success(format!(
+                        "WhatsApp daily cap reached: {} of {} chunk(s) queued for automatic delivery as the 24h window slides (owner alerted once); {} delivered now. Do NOT resend the queued part.",
+                        total - delivered.len(),
+                        total,
+                        delivered.len()
+                    )));
+                }
                 persist_outgoing(&jid, &tagged).await;
                 Ok(ToolResult::success(format!(
                     "Message sent to {} via WhatsApp.",
@@ -464,7 +501,27 @@ impl Tool for WhatsAppSendTool {
                 let chunks = crate::channels::whatsapp::handler::split_message(&tagged, 4000);
                 let total = chunks.len();
                 let mut delivered: Vec<&str> = Vec::with_capacity(total);
+                // #1407: same limiter gating as the send arm. Queued reply
+                // chunks lose their quote context on drainer flush
+                // (documented tradeoff); ordering is preserved FIFO.
+                let (rl_cfg, rl_owner) = {
+                    let wa = &self.config_rx.borrow().channels.whatsapp;
+                    (
+                        wa.rate_limit.clone(),
+                        wa.is_owner(jid_str.split('@').next().unwrap_or(&jid_str)),
+                    )
+                };
+                let mut queued_any = false;
                 for (i, chunk) in chunks.into_iter().enumerate() {
+                    if let GateOutcome::Queued { .. } = self
+                        .whatsapp_state
+                        .rate_limiter
+                        .gate(&rl_cfg, &jid_str, chunk, rl_owner)
+                        .await
+                    {
+                        queued_any = true;
+                        continue;
+                    }
                     let wa_msg = if i == 0 {
                         waproto::whatsapp::Message {
                             extended_text_message: Some(Box::new(
@@ -501,6 +558,20 @@ impl Tool for WhatsAppSendTool {
                     delivered.push(chunk);
                 }
 
+                if queued_any {
+                    if !delivered.is_empty() {
+                        let prefix = delivered_prefix(&delivered);
+                        if !prefix.trim().is_empty() {
+                            persist_outgoing(&jid, &prefix).await;
+                        }
+                    }
+                    return Ok(ToolResult::success(format!(
+                        "WhatsApp daily cap reached: {} of {} reply chunk(s) queued for automatic delivery as the 24h window slides (owner alerted once); {} delivered now. Do NOT resend the queued part.",
+                        total - delivered.len(),
+                        total,
+                        delivered.len()
+                    )));
+                }
                 persist_outgoing(&jid, &tagged).await;
                 Ok(ToolResult::success(format!(
                     "Reply sent to {} via WhatsApp.",
