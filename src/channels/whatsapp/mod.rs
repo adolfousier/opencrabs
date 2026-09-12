@@ -29,12 +29,13 @@ pub(crate) mod rate_limit;
 pub(crate) mod poll;
 pub(crate) mod resume;
 pub(crate) mod reaction;
+pub(crate) mod recent;
 mod sessions;
 mod state;
 pub(crate) mod store;
 
-pub use agent::WhatsAppAgent;
 pub(crate) mod stream;
 pub(crate) mod voice_note;
+pub use agent::WhatsAppAgent;
 pub use approval::WaApproval;
 pub use state::WhatsAppState;

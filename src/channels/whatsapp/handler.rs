@@ -490,6 +490,12 @@ pub(crate) async fn handle_message(
         has_audio(&msg),
     );
 
+    // #1484: keep the raw proto so `forward` can hand the original message to
+    // `Client::forward_message` (which relays media from the same CDN blob
+    // instead of re-uploading). Recorded before any content filtering, because
+    // a message worth forwarding is not always one worth answering.
+    wa_state.recent.remember(info.id.clone(), msg.clone()).await;
+
     // Skip bot's own outgoing replies (they echo back as is_from_me).
     // User messages from their phone are also is_from_me (same account),
     // so we only skip if the text starts with our agent header.
@@ -510,7 +516,22 @@ pub(crate) async fn handle_message(
     let has_img = has_image(&msg);
     let has_aud = has_audio(&msg);
     let has_doc = has_document(&msg);
+    let has_vid = has_video(&msg);
+    let has_stk = has_sticker(&msg);
     let text = extract_text(&msg);
+    // #1488: a media URL expires, and the server will re-upload the blob if
+    // asked with the message's own coordinates. Built once and handed to every
+    // downloader so an old photo comes back instead of erroring.
+    let media_ctx = super::media_retry::MediaContext {
+        msg_id: info.id.clone(),
+        chat: info.source.chat.clone(),
+        is_from_me: info.source.is_from_me,
+        participant: if info.source.is_group {
+            Some(info.source.sender.clone())
+        } else {
+            None
+        },
+    };
 
     // Location, contact card and inbound reaction carry no blob to download;
     // they turn straight into a line of text for the agent.
@@ -552,22 +573,7 @@ pub(crate) async fn handle_message(
     {
         return;
     }
-    let has_vid = has_video(&msg);
-    let has_stk = has_sticker(&msg);
 
-    // #1488: a media URL expires, and the server will re-upload the blob if
-    // asked with the message's own coordinates. Built once and handed to every
-    // downloader so an old photo comes back instead of erroring.
-    let media_ctx = super::media_retry::MediaContext {
-        msg_id: info.id.clone(),
-        chat: info.source.chat.clone(),
-        is_from_me: info.source.is_from_me,
-        participant: if info.source.is_group {
-            Some(info.source.sender.clone())
-        } else {
-            None
-        },
-    };
     // Passively capture message for channel history (groups and DMs)
     if let Some(ref t) = text
         && !t.is_empty()
@@ -779,12 +785,6 @@ pub(crate) async fn handle_message(
         }
     }
 
-    // Handle document attachment
-    if has_doc
-        && !has_aud
-        && !has_img
-        && let Some((bytes, mime, fname)) = download_document(&msg, &client, &media_ctx).await
-    {
     // Stickers are WebP images: same funnel as an inbound photo (#1483).
     if has_stk
         && !has_img
@@ -834,6 +834,12 @@ pub(crate) async fn handle_message(
         }
     }
 
+    // Handle document attachment
+    if has_doc
+        && !has_aud
+        && !has_img
+        && let Some((bytes, mime, fname)) = download_document(&msg, &client, &media_ctx).await
+    {
         use crate::utils::{inject_file_content, process_file_with_vision};
         let cfg = crate::config::Config::load();
         if let Ok(cfg) = cfg {
@@ -1807,12 +1813,6 @@ pub(crate) async fn handle_message(
                 }
             }
 
-            // If input was voice AND TTS is enabled, also send voice note after text
-            if has_aud && voice_config.tts_enabled {
-                match crate::channels::voice::synthesize(&response.content, &voice_config).await {
-                    Ok(audio_bytes) => {
-                        // WhatsApp requires uploading media to its servers first,
-                        // then sending the message with the returned URL + crypto keys.
             // #1409: acknowledge a finished multi-step turn with a reaction on
             // our own final message, the way the crab does on Telegram. Only
             // on streamed turns: those are the ones that ran tools and took
@@ -1829,8 +1829,8 @@ pub(crate) async fn handle_message(
                 .await;
             }
 
-                        use wacore::download::MediaType;
-                        use waproto::whatsapp::message::AudioMessage;
+            // If input was voice AND TTS is enabled, also send voice note after text
+            if has_aud && voice_config.tts_enabled {
                 // Show "recording..." across synthesis and upload, the way a
                 // human preparing a voice note appears (#1486). Cleared on
                 // every exit path below, success or failure, so the chat is
@@ -1838,6 +1838,12 @@ pub(crate) async fn handle_message(
                 if let Err(e) = client.chatstate().send_recording(&reply_jid).await {
                     tracing::warn!(error = %e, "WhatsApp: recording indicator failed");
                 }
+                match crate::channels::voice::synthesize(&response.content, &voice_config).await {
+                    Ok(audio_bytes) => {
+                        // WhatsApp requires uploading media to its servers first,
+                        // then sending the message with the returned URL + crypto keys.
+                        use wacore::download::MediaType;
+                        use waproto::whatsapp::message::AudioMessage;
                         use whatsapp_rust::upload::UploadOptions;
                         match client
                             .upload(audio_bytes, MediaType::Audio, UploadOptions::new())
@@ -1873,15 +1879,15 @@ pub(crate) async fn handle_message(
                         tracing::error!("WhatsApp: TTS synthesis error: {}", e);
                     }
                 }
+                if let Err(e) = client.chatstate().send_paused(&reply_jid).await {
+                    tracing::warn!(error = %e, "WhatsApp: clearing recording indicator failed");
+                }
             }
 
             // ctx footer already appended inline above
         }
         Err(ref e) if matches!(e, crate::brain::agent::AgentError::Cancelled) => {
             tracing::info!("WhatsApp: agent call cancelled for session {}", session_id);
-                if let Err(e) = client.chatstate().send_paused(&reply_jid).await {
-                    tracing::warn!(error = %e, "WhatsApp: clearing recording indicator failed");
-                }
         }
         Err(e) => {
             tracing::error!("WhatsApp: agent error: {}", e);

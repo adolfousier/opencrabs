@@ -331,6 +331,7 @@ impl Tool for WhatsAppSendTool {
                     "enum": [
                         "send", "reply", "delete",
                         "send_photo", "send_document", "send_audio", "send_video", "send_sticker",
+                        "pin", "unpin", "forward", "set_profile_name", "set_profile_status",
                         "send_location", "send_contact",
                         "react", "send_poll",
                         "typing", "mark_read"
@@ -339,7 +340,7 @@ impl Tool for WhatsAppSendTool {
                 },
                 "message": {
                     "type": "string",
-                    "description": "Message text (send, reply, caption for media)"
+                    "description": "Message text (send, reply, caption for media); the new name or status text for set_profile_name / set_profile_status"
                 },
                 "phone": {
                     "type": "string",
@@ -347,7 +348,7 @@ impl Tool for WhatsAppSendTool {
                 },
                 "message_id": {
                     "type": "string",
-                    "description": "WhatsApp message ID for reply, delete, react, mark_read"
+                    "description": "WhatsApp message ID for reply, delete, react, mark_read, forward"
                 },
                 "from_me": {
                     "type": "boolean",
@@ -361,11 +362,11 @@ impl Tool for WhatsAppSendTool {
                     "type": "string",
                     "description": "Caption for media messages (send_photo, send_video, send_document)"
                 },
-                "latitude": {
                 "voice_note": {
                     "type": "boolean",
                     "description": "For send_audio: true (default) renders a native WhatsApp voice note (tap-to-play bubble) and shows a recording indicator while uploading. false sends a plain audio file attachment."
                 },
+                "latitude": {
                     "type": "number",
                     "description": "Latitude for send_location"
                 },
@@ -426,11 +427,11 @@ impl Tool for WhatsAppSendTool {
 
     async fn execute(&self, input: Value, _context: &ToolExecutionContext) -> Result<ToolResult> {
         let action = match input.get("action").and_then(|v| v.as_str()) {
-            Some(a) if !a.is_empty() => a.to_string(),
                 },
                 "ephemeral": {
                     "type": "integer",
                     "description": "For send: disappearing-message TTL in seconds (86400 = 24h, 604800 = 7d, 7776000 = 90d max). 0 means the message does not expire, overriding the channel default. Omit to use the channel default."
+            Some(a) if !a.is_empty() => a.to_string(),
             _ => {
                 return Ok(ToolResult::error(
                     "Missing required 'action' parameter.".to_string(),
@@ -494,7 +495,6 @@ impl Tool for WhatsAppSendTool {
                         // reality, and the error names exactly what arrived vs
                         // what failed so a retry cannot duplicate chunk 1.
                         let prefix = delivered_prefix(&delivered);
-                        if !prefix.trim().is_empty() {
                 // #1487: disappearing messages. An explicit `ephemeral: 0`
                 // means "do not expire" and overrides the channel default,
                 // so this is not a plain `or`.
@@ -506,6 +506,7 @@ impl Tool for WhatsAppSendTool {
                     ephemeral_expiration: ttl,
                     ..Default::default()
                 };
+                        if !prefix.trim().is_empty() {
                             persist_outgoing(&jid, &prefix).await;
                         }
                         return Ok(ToolResult::error(partial_failure_report(
@@ -684,10 +685,96 @@ impl Tool for WhatsAppSendTool {
                         media_key: Some(upload.media_key.to_vec()),
                         file_enc_sha256: Some(upload.file_enc_sha256.to_vec()),
                         file_sha256: Some(upload.file_sha256.to_vec()),
+            // ── pin / unpin ──────────────────────────────────────────────────
+            // #1484. The lib pins a CHAT, not a message (`pin_chat` /
+            // `unpin_chat` in features/chat_actions.rs), so these take a
+            // phone and no message id - the issue's "chat_id + message_id"
+            // shape does not exist in the protocol.
+            "pin" | "unpin" => {
+                let (jid, jid_str) =
+                    pget!(resolve_jid(&input, &self.whatsapp_state, &self.config_rx).await);
+                let pinning = action == "pin";
+                let result = if pinning {
+                    client.chat_actions().pin_chat(&jid).await
+                } else {
+                    client.chat_actions().unpin_chat(&jid).await
+                };
+                match result {
+                    Ok(_) => Ok(ToolResult::success(format!(
+                        "Chat with {} {}.",
+                        jid_str,
+                        if pinning { "pinned" } else { "unpinned" }
+                    ))),
+                    Err(e) => Ok(ToolResult::error(format!(
+                        "Failed to {} chat {jid_str}: {e}",
+                        if pinning { "pin" } else { "unpin" }
+                    ))),
+                }
+            }
+
+            // ── forward ──────────────────────────────────────────────────────
+            // #1484. `Client::forward_message` needs the ORIGINAL proto, not an
+            // id: it rebuilds the body with the forward flags and relays media
+            // from the same CDN blob. The channel remembers the last 200
+            // inbound messages for exactly this (see `recent.rs`); anything
+            // older is honestly reported as out of the window rather than
+            // silently sending nothing.
+            "forward" => {
+                let (jid, jid_str) =
+                    pget!(resolve_jid(&input, &self.whatsapp_state, &self.config_rx).await);
+                gate_send!(self, jid_str, "the forwarded message");
+                let msg_id = pget!(get_str(&input, "message_id")).to_string();
+                let Some(original) = self.whatsapp_state.recent.get(&msg_id).await else {
+                    return Ok(ToolResult::error(format!(
+                        "Message {msg_id} is not in the recent-message window, so it cannot be \
+                         forwarded. Only messages this session has seen can be forwarded."
+                    )));
+                };
+                match client.forward_message(jid, &original).await {
+                    Ok(result) => Ok(ToolResult::success(format!(
+                        "Forwarded message {} to {} via WhatsApp (new id {}).",
+                        msg_id, jid_str, result.message_id
+                    ))),
+                    Err(e) => Ok(ToolResult::error(format!(
+                        "Failed to forward {msg_id} to {jid_str}: {e}"
+                    ))),
+                }
+            }
+
+            // ── set_profile_name / set_profile_status ────────────────────────
+            // #1484 asked for a separate `whatsapp_profile` tool. Kept as
+            // actions here instead: the channel already routes every WhatsApp
+            // operation through one tool, and a second one would split that
+            // surface for two setters.
+            "set_profile_name" => {
+                let name = pget!(get_str(&input, "message")).to_string();
+                match client.profile().set_push_name(&name).await {
+                    Ok(_) => Ok(ToolResult::success(format!(
+                        "WhatsApp profile name set to '{name}'."
+                    ))),
+                    Err(e) => Ok(ToolResult::error(format!(
+                        "Failed to set the profile name: {e}"
+                    ))),
+                }
+            }
+
+            "set_profile_status" => {
+                let status = pget!(get_str(&input, "message")).to_string();
+                match client.profile().set_status_text(&status).await {
+                    Ok(_) => Ok(ToolResult::success(format!(
+                        "WhatsApp profile status set to '{status}'."
+                    ))),
+                    Err(e) => Ok(ToolResult::error(format!(
+                        "Failed to set the profile status: {e}"
+                    ))),
+                }
+            }
+
                         file_length: Some(upload.file_length),
                         mimetype: Some(mime),
                         caption,
                         ..Default::default()
+                gate_send!(self, jid_str, "the photo");
                     })),
                     ..Default::default()
                 };
@@ -725,6 +812,7 @@ impl Tool for WhatsAppSendTool {
                         file_sha256: Some(upload.file_sha256.to_vec()),
                         file_length: Some(upload.file_length),
                         mimetype: Some(mime),
+                gate_send!(self, jid_str, "the document");
                         file_name: Some(filename),
                         caption,
                         ..Default::default()
@@ -765,23 +853,37 @@ impl Tool for WhatsAppSendTool {
                 };
                 match client.send_message(jid, wa_msg).await {
                     Ok(_) => Ok(ToolResult::success(format!(
+                gate_send!(self, jid_str, "the audio");
                         "{} sent to {} via WhatsApp.",
                         if ptt { "Voice note" } else { "Audio" },
                         jid_str
                     ))),
+                // #1486: WhatsApp renders a tap-to-play voice bubble only when
+                // the message carries ptt. Without it the same bytes arrive as
+                // an unstyled file attachment. Default on, because the caller
+                // that wants a plain audio FILE is the rare one, and pass
+                // `voice_note: false` to get the old rendering.
+                let ptt = crate::channels::whatsapp::voice_note::wants_voice_note(&input);
+                let mime = crate::channels::whatsapp::voice_note::voice_note_mimetype(&mime, ptt);
                     Err(e) => Ok(ToolResult::error(format!("Failed to send audio: {}", e))),
                 }
             }
+                // Show "recording..." while the upload is in flight, exactly
+                // as a human sending a voice note would appear (#1486).
+                if ptt && let Err(e) = client.chatstate().send_recording(&jid).await {
+                    tracing::warn!(error = %e, "WhatsApp: recording indicator failed");
+                }
+
 
             // ── send_video ───────────────────────────────────────────────────
             "send_video" => {
-                gate_send!(self, jid_str, "the photo");
                 let (jid, jid_str) =
                     pget!(resolve_jid(&input, &self.whatsapp_state, &self.config_rx).await);
                 let path = pget!(get_str(&input, "media_path")).to_string();
                 let caption = input
                     .get("caption")
                     .and_then(|v| v.as_str())
+                        ptt: Some(ptt),
                     .map(|s| s.to_string());
 
                 let (bytes, mime, _filename) = pget!(read_local_media(&path, "video/mp4").await);
@@ -802,7 +904,14 @@ impl Tool for WhatsAppSendTool {
                     })),
                     ..Default::default()
                 };
-                match client.send_message(jid, wa_msg).await {
+                let sent = client.send_message(jid.clone(), wa_msg).await;
+                // Clear the indicator whether or not the send worked, so the
+                // chat is not left showing "recording..." forever.
+                gate_send!(self, jid_str, "the video");
+                if ptt && let Err(e) = client.chatstate().send_paused(&jid).await {
+                    tracing::warn!(error = %e, "WhatsApp: clearing recording indicator failed");
+                }
+                match sent {
                     Ok(_) => Ok(ToolResult::success(format!(
                         "Video sent to {} via WhatsApp.",
                         jid_str
@@ -813,7 +922,6 @@ impl Tool for WhatsAppSendTool {
 
             // ── send_sticker ─────────────────────────────────────────────────
             "send_sticker" => {
-                gate_send!(self, jid_str, "the document");
                 let (jid, jid_str) =
                     pget!(resolve_jid(&input, &self.whatsapp_state, &self.config_rx).await);
                 let path = pget!(get_str(&input, "media_path")).to_string();
@@ -837,6 +945,7 @@ impl Tool for WhatsAppSendTool {
                 };
                 match client.send_message(jid, wa_msg).await {
                     Ok(_) => Ok(ToolResult::success(format!(
+                gate_send!(self, jid_str, "the sticker");
                         "Sticker sent to {} via WhatsApp.",
                         jid_str
                     ))),
@@ -854,26 +963,12 @@ impl Tool for WhatsAppSendTool {
                         return Ok(ToolResult::error(
                             "Missing required 'latitude' parameter.".to_string(),
                         ));
-                gate_send!(self, jid_str, "the audio");
                     }
                 };
                 let lng = match get_f64(&input, "longitude") {
-                // #1486: WhatsApp renders a tap-to-play voice bubble only when
-                // the message carries ptt. Without it the same bytes arrive as
-                // an unstyled file attachment. Default on, because the caller
-                // that wants a plain audio FILE is the rare one, and pass
-                // `voice_note: false` to get the old rendering.
-                let ptt = crate::channels::whatsapp::voice_note::wants_voice_note(&input);
-                let mime = crate::channels::whatsapp::voice_note::voice_note_mimetype(&mime, ptt);
                     Some(v) => v,
                     None => {
                         return Ok(ToolResult::error(
-                // Show "recording..." while the upload is in flight, exactly
-                // as a human sending a voice note would appear (#1486).
-                if ptt && let Err(e) = client.chatstate().send_recording(&jid).await {
-                    tracing::warn!(error = %e, "WhatsApp: recording indicator failed");
-                }
-
                             "Missing required 'longitude' parameter.".to_string(),
                         ));
                     }
@@ -883,7 +978,7 @@ impl Tool for WhatsAppSendTool {
                     .and_then(|v| v.as_str())
                     .map(|s| s.to_string());
                 let address = input
-                        ptt: Some(ptt),
+                gate_send!(self, jid_str, "the location");
                     .get("location_address")
                     .and_then(|v| v.as_str())
                     .map(|s| s.to_string());
@@ -898,16 +993,9 @@ impl Tool for WhatsAppSendTool {
                     })),
                     ..Default::default()
                 };
-                let sent = client.send_message(jid.clone(), wa_msg).await;
-                // Clear the indicator whether or not the send worked, so the
-                // chat is not left showing "recording..." forever.
-                if ptt && let Err(e) = client.chatstate().send_paused(&jid).await {
-                    tracing::warn!(error = %e, "WhatsApp: clearing recording indicator failed");
-                }
-                match sent {
+                match client.send_message(jid, wa_msg).await {
                     Ok(_) => Ok(ToolResult::success(format!(
                         "Location ({}, {}) sent to {} via WhatsApp.",
-                gate_send!(self, jid_str, "the video");
                         lat, lng, jid_str
                     ))),
                     Err(e) => Ok(ToolResult::error(format!("Failed to send location: {}", e))),
@@ -939,13 +1027,13 @@ impl Tool for WhatsAppSendTool {
                 }
             }
 
+                gate_send!(self, jid_str, "the contact card");
             // ── react ────────────────────────────────────────────────────────
             "react" => {
                 let (jid, jid_str) =
                     pget!(resolve_jid(&input, &self.whatsapp_state, &self.config_rx).await);
                 let msg_id = pget!(get_str(&input, "message_id")).to_string();
                 let emoji = input
-                gate_send!(self, jid_str, "the sticker");
                     .get("emoji")
                     .and_then(|v| v.as_str())
                     .unwrap_or("")
@@ -965,6 +1053,7 @@ impl Tool for WhatsAppSendTool {
                 #[cfg(crates_publish)]
                 let boxed_reaction = waproto::whatsapp::message::ReactionMessage {
                     key: Some(message_key),
+                gate_send!(self, jid_str, "the reaction");
                     text: if emoji.is_empty() {
                         None
                     } else {
@@ -978,7 +1067,6 @@ impl Tool for WhatsAppSendTool {
                     key: Some(message_key),
                     text: if emoji.is_empty() {
                         None
-                gate_send!(self, jid_str, "the location");
                     } else {
                         Some(emoji.clone())
                     },
@@ -1027,13 +1115,13 @@ impl Tool for WhatsAppSendTool {
                 if opts.len() < 2 {
                     return Ok(ToolResult::error(
                         "'poll_options' must have at least 2 options.".to_string(),
-                gate_send!(self, jid_str, "the contact card");
                     ));
                 }
                 if opts.len() > 12 {
                     return Ok(ToolResult::error(
                         "'poll_options' supports a maximum of 12 options.".to_string(),
                     ));
+                gate_send!(self, jid_str, "the poll");
                 }
 
                 // Build poll options with SHA-256 hashes of option names
@@ -1053,7 +1141,6 @@ impl Tool for WhatsAppSendTool {
 
                 let wa_msg = waproto::whatsapp::Message {
                     poll_creation_message: Some(Box::new(
-                gate_send!(self, jid_str, "the reaction");
                         waproto::whatsapp::message::PollCreationMessage {
                             name: Some(question.clone()),
                             options: poll_options,
@@ -1131,7 +1218,6 @@ impl Tool for WhatsAppSendTool {
                     ))),
                     Err(e) => Ok(ToolResult::error(format!(
                         "Failed to mark message as read: {}",
-                gate_send!(self, jid_str, "the poll");
                         e
                     ))),
                 }

@@ -96,14 +96,17 @@ pub struct WhatsAppState {
     /// options by hash, never by name, so labelling a vote needs the poll's
     /// own list. See `poll.rs`.
     pub(crate) polls: super::poll::PollOptions,
-    /// Outbound rate limiter (#1407): token-bucket pacing + rolling 24h
-    /// cap with a FIFO queue. Shared by the send tool, the handler chunk
-    /// loops, the resume path and the drainer task - one budget for the
+    /// Bounded memory of recently seen messages (#1484), so `forward` can
+    /// hand `Client::forward_message` the original proto. See `recent.rs`.
+    pub(crate) recent: super::recent::RecentMessages,
     /// Last editable message per session (#1408). `SendResult.message_id`
     /// used to be discarded at every send site; edit-in-place streaming,
     /// self-reactions and pin/forward all need it, so it is captured once
     /// here. See `outbox.rs`.
     pub(crate) outbox: super::outbox::Outbox,
+    /// Outbound rate limiter (#1407): token-bucket pacing + rolling 24h
+    /// cap with a FIFO queue. Shared by the send tool, the handler chunk
+    /// loops, the resume path and the drainer task - one budget for the
     /// whole channel. `pub(crate)` so brain/tools can gate through it.
     pub(crate) rate_limiter: std::sync::Arc<super::rate_limit::WhatsappRateLimiter>,
 }
@@ -138,10 +141,11 @@ impl WhatsAppState {
             photo_debounce: Mutex::new(HashMap::new()),
             session_jids: Mutex::new(HashMap::new()),
             jid_sessions: Mutex::new(HashMap::new()),
+            polls: super::poll::PollOptions::default(),
+            recent: super::recent::RecentMessages::default(),
+            blocklist: super::blocklist::Blocklist::default(),
+            outbox: super::outbox::Outbox::default(),
             rate_limiter: std::sync::Arc::new(super::rate_limit::WhatsappRateLimiter::new()),
         }
     }
-            polls: super::poll::PollOptions::default(),
 }
-            blocklist: super::blocklist::Blocklist::default(),
-            outbox: super::outbox::Outbox::default(),
