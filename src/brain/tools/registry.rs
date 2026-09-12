@@ -430,32 +430,19 @@ impl ToolRegistry {
             .capabilities()
             .contains(&crate::brain::tools::r#trait::ToolCapability::WriteFiles)
             && super::plan_gate::write_targets_session_md(plan_sid, &input).await;
-        let mut result = tool.execute(input, context).await?;
+        let result = tool.execute(input, context).await?;
 
         // Editing mirror: a successful write to the session plan .md syncs
         // the full body into the JSON `description` (tasks stay empty), so
         // the .md remains the Editing source of truth and every JSON reader
-        // (TUI chrome, Telegram sections) sees the fresh design. Advisory
-        // template warnings are logged, never blocking.
-        if result.success && is_md_write {
-            let warnings = crate::utils::plan_files::sync_md_to_json(plan_sid).await;
-            if !warnings.is_empty() {
-                tracing::debug!(
-                    "Plan .md template warnings after write: {}",
-                    warnings.join("; ")
-                );
-                // #1103: these warnings used to stop at that debug line, so the
-                // agent wrote a skeleton plan, saw `success`, and only the human
-                // discovered the empty labels at the approval gate. Surface the
-                // validator's own words in the result the agent reads, once per
-                // plan, so the fix happens in the next write instead of after a
-                // refusal.
-                if let Some(nudge) = crate::utils::plan_files::template_nudge(plan_sid, &warnings) {
-                    tracing::info!("Plan .md template nudge emitted (#1103)");
-                    result.output.push_str("\n\n");
-                    result.output.push_str(&nudge);
-                }
-            }
+        // (TUI chrome, Telegram sections) sees the fresh design. Malformed
+        // template writes are refused and restored by the sync boundary.
+        if result.success
+            && is_md_write
+            && let Err(error) = crate::utils::plan_files::sync_md_to_json(plan_sid).await
+        {
+            tracing::info!("Plan .md write refused by template guard");
+            return Ok(ToolResult::error(error));
         }
 
         if result.success {
