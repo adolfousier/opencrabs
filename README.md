@@ -4585,9 +4585,9 @@ cargo build --release
 # Small release build
 cargo build --profile release-small
 
-# Run tests (8,227 tests across 833 modules: 8,207 of them under src/tests/,
-# where tests belong, plus 20 inline in src/tui/render/presets_test.rs and
-# src/channels/telegram/rich/inline.rs;
+# Run tests (8,412 tests across 863 modules: 8,361 of them under src/tests/,
+# where tests belong, plus 48 inline across nine production files (brain 28,
+# channels 18, tui 2);
 # 34 slower ones are #[ignore]d to keep the default
 # run fast: profile tests that touch ~/.opencrabs, browser end-to-end
 # tests, and opencode provider tests. Opt in with
