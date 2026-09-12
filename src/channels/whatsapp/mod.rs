@@ -14,28 +14,29 @@
 mod agent;
 mod approval;
 pub(crate) mod blocklist;
+pub(crate) mod broadcast;
 mod cancel;
 mod connection;
-mod followups;
 pub(crate) mod ephemeral;
+mod followups;
 pub(crate) mod handler;
-mod onboarding_events;
 pub(crate) mod inbound;
 pub(crate) mod media_retry;
-mod pairing;
+mod onboarding_events;
 pub(crate) mod outbox;
+mod pairing;
 mod photos;
-pub(crate) mod rate_limit;
 pub(crate) mod poll;
-pub(crate) mod resume;
+pub(crate) mod rate_limit;
 pub(crate) mod reaction;
 pub(crate) mod recent;
+pub(crate) mod resume;
 mod sessions;
 mod state;
 pub(crate) mod store;
-
 pub(crate) mod stream;
 pub(crate) mod voice_note;
+
 pub use agent::WhatsAppAgent;
 pub use approval::WaApproval;
 pub use state::WhatsAppState;

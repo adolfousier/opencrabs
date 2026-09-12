@@ -892,21 +892,47 @@ pub struct WhatsAppConfig {
     /// band; `0` disables either knob. See [`WaRateLimitConfig`].
     #[serde(default)]
     pub rate_limit: WaRateLimitConfig,
-}
-
-impl WhatsAppConfig {
-    /// Check if a phone number is a bot owner. See
-    /// [`crate::config::owner::is_owner`]. Owners are resolved against
-    /// `allowed_phones` (WhatsApp's allow list).
+    /// `[channels.whatsapp.broadcast]` - opt-in rails for the newsletter,
+    /// status and label surfaces (#1485). Empty allowlist = nobody, on
+    /// purpose: an unconfigured install must not be one tool call away from
+    /// messaging arbitrary numbers.
+    #[serde(default)]
+    pub broadcast: WaBroadcastConfig,
     /// Channel-wide disappearing-message TTL in seconds (#1487). Unset or
     /// `0` means messages do not expire, which is the WhatsApp default.
     /// Common values: 86400 (24h), 604800 (7d), 7776000 (90d, the maximum).
     /// A `whatsapp_send` call may override it per message.
     #[serde(default)]
     pub ephemeral_ttl: Option<u32>,
+}
+
+impl WhatsAppConfig {
+    /// Check if a phone number is a bot owner. See
+    /// [`crate::config::owner::is_owner`]. Owners are resolved against
+    /// `allowed_phones` (WhatsApp's allow list).
     pub fn is_owner(&self, user_id: &str) -> bool {
         crate::config::owner::is_owner(&self.allowed_phones, &self.bot_owner, user_id)
     }
+}
+
+/// `[channels.whatsapp.broadcast]` - rails for the broadcast surfaces (#1485).
+///
+/// Newsletter posts and status updates are the highest-signal spam pattern
+/// Meta watches, and on this channel the phone number IS the bot: there is no
+/// token to rotate if it gets banned. So the rails are config, not a
+/// convention the caller is trusted to follow.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct WaBroadcastConfig {
+    /// Numbers (E.164 or any formatting) that may receive a status update.
+    /// EMPTY MEANS NOBODY, which is the opposite of the usual convention and
+    /// is deliberate: broadcast has to be switched on by a human.
+    pub allowed_targets: Vec<String>,
+    /// Minimum seconds between two broadcast sends. `0` or unset falls back
+    /// to the 5s default rather than disabling pacing - turning the rail off
+    /// is not a knob this offers, because a config typo must not become a
+    /// mass-send.
+    pub min_delay_seconds: Option<u64>,
 }
 
 /// `[channels.whatsapp.rate_limit]` - outbound send budget (#1407).
