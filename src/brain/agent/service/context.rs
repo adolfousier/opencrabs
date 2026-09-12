@@ -439,6 +439,16 @@ impl AgentService {
     /// extends the bound every HTTP provider already honours to the ones that
     /// do not, and a provider that blows it is handed on rather than waited
     /// out: `Timeout` is retryable, so `should_try_next_provider` walks.
+    ///
+    /// HTTP providers are asked through `stream()` and the stream is folded
+    /// into one response by [`super::compaction_stream::collect_stream`]
+    /// (#1519). The non-streaming request held the gateway's connection open
+    /// until the whole summary existed, and a summary of a full window does
+    /// not finish inside a gateway idle limit of about two minutes, so the
+    /// request came back 504 on every retry while chat turns on the same
+    /// model streamed fine. CLI providers keep `complete()`: there is no
+    /// gateway in front of a subprocess, and their stream path is the one
+    /// that runs tools.
     async fn compaction_attempt(
         provider: &Arc<dyn Provider>,
         request: LLMRequest,
@@ -447,7 +457,15 @@ impl AgentService {
         crate::brain::provider::LLMResponse,
         crate::brain::provider::ProviderError,
     > {
-        match tokio::time::timeout(deadline, provider.complete(request)).await {
+        let attempt = async {
+            if provider.cli_handles_tools() {
+                provider.complete(request).await
+            } else {
+                let stream = provider.stream(request).await?;
+                super::compaction_stream::collect_stream(stream).await
+            }
+        };
+        match tokio::time::timeout(deadline, attempt).await {
             Ok(result) => result,
             Err(_) => {
                 tracing::warn!(
@@ -770,8 +788,9 @@ impl AgentService {
         request.working_directory = Some(working_directory.to_string_lossy().to_string());
         request.session_id = Some(session_id);
 
-        // Non-streaming call so no compaction text leaks to the TUI in the
-        // background-spawn case. `cancel` aborts the request mid-flight if the
+        // The summariser's output never reaches a UI: the stream is folded
+        // into one response inside `compaction_attempt`, no progress callback
+        // is attached (#1519). `cancel` aborts the request mid-flight if the
         // caller signals (e.g. 90% hard-truncate firing on the same session).
         let response = Self::complete_compaction_request(
             &provider,

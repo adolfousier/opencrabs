@@ -25,7 +25,8 @@ use crate::brain::provider::chain_order::widest_first;
 use crate::brain::provider::error::{should_try_next_provider, with_chain_summary};
 use crate::brain::provider::fallback::substitute_model;
 use crate::brain::provider::{
-    LLMRequest, LLMResponse, Message, Provider, ProviderError, ProviderStream, TokenUsage,
+    ContentDelta, LLMRequest, LLMResponse, Message, Provider, ProviderError, ProviderStream, Role,
+    StreamEvent, StreamMessage, TokenUsage,
 };
 
 /// Long enough that no mock in this file can reach it: these tests are about
@@ -134,11 +135,43 @@ impl Provider for CountingMock {
         }
     }
 
+    /// Same behaviour as `complete()`: compaction asks an HTTP provider
+    /// through the stream path and folds the events into one response
+    /// (#1519), so the mock answers both the same way.
     async fn stream(
         &self,
-        _request: LLMRequest,
+        request: LLMRequest,
     ) -> crate::brain::provider::error::Result<ProviderStream> {
-        Ok(Box::pin(futures::stream::empty()))
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        *self.last_model.lock().unwrap() = Some(request.model.clone());
+        match self.behaviour {
+            Behaviour::Ok => Ok(Box::pin(futures::stream::iter(vec![
+                Ok(StreamEvent::MessageStart {
+                    message: StreamMessage {
+                        id: format!("{}-response", self.name),
+                        model: request.model,
+                        role: Role::Assistant,
+                        usage: TokenUsage::default(),
+                    },
+                }),
+                Ok(StreamEvent::ContentBlockDelta {
+                    index: 0,
+                    delta: ContentDelta::TextDelta {
+                        text: format!("summary from {}", self.name),
+                    },
+                }),
+                Ok(StreamEvent::MessageStop),
+            ]))),
+            Behaviour::QuotaExhausted => Err(ProviderError::RateLimitExceeded(
+                "Insufficient balance or no resource package. Please recharge.".to_string(),
+            )),
+            Behaviour::Fatal => Err(ProviderError::Internal("mock fatal".to_string())),
+            Behaviour::TooLong => Err(ProviderError::ContextLengthExceeded(0)),
+            Behaviour::Hangs => {
+                futures::future::pending::<()>().await;
+                unreachable!("a hanging provider never returns")
+            }
+        }
     }
 
     fn name(&self) -> &str {

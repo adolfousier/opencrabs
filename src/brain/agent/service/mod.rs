@@ -9,6 +9,7 @@ pub(crate) mod boot_report;
 mod builder;
 pub(crate) mod compaction;
 pub(crate) mod compaction_prompts;
+pub(crate) mod compaction_stream;
 pub(crate) mod context;
 pub(crate) mod work_status;
 #[allow(unused_imports)] // only used in test code
