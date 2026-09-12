@@ -90,3 +90,101 @@ fn loader_anchors_on_a_truncation_marker() {
     assert!(kept[0].content.starts_with(MARKER_PREFIX));
     assert_eq!(kept[1].content, "after the truncation");
 }
+
+/// #175: a message that merely QUOTES the prefix must not re-anchor the window.
+///
+/// A marker is `role == "user" && starts_with(prefix)`. An `assistant` row
+/// echoing the banner — which is what happened when a lane read one back out
+/// of a tool result or a compaction summary — is not a marker. Before the fix
+/// a bare substring match found the LATER quoting row, so the window silently
+/// discarded everything between the real marker and the quote: the session
+/// threw away its own history and re-anchored on a sentence about compaction
+/// rather than on the compaction itself.
+#[test]
+fn loader_ignores_an_assistant_row_quoting_the_marker() {
+    let row = |role: &str, content: &str| crate::db::models::Message {
+        id: uuid::Uuid::new_v4(),
+        session_id: uuid::Uuid::nil(),
+        role: role.to_string(),
+        content: content.to_string(),
+        sequence: 0,
+        created_at: chrono::Utc::now(),
+        token_count: None,
+        cost: None,
+        input_tokens: None,
+        cache_creation_tokens: None,
+        cache_read_tokens: None,
+        thinking: None,
+        duration_secs: None,
+    };
+
+    let all = vec![
+        row("ancient history"),
+        row(
+            "user",
+            &CompactionOutcome::Summarised("real anchor".into()).marker(""),
+        ),
+        row("user", "work done after the real compaction"),
+        // An assistant row echoing the banner — the 2026-09-12 self-re-anchor.
+        row(
+            "assistant",
+            "Found compaction marker at message 613/614 - loading 1 messages\n\
+             [CONTEXT COMPACTION - quoted back out of a tool result]",
+        ),
+        row("user", "work done after the quote"),
+    ];
+
+    let kept = AgentService::messages_from_last_compaction(all);
+
+    assert_eq!(
+        kept.len(),
+        3,
+        "a quoting assistant row re-anchored the window (#175)"
+    );
+    assert!(
+        kept[0].content.starts_with(MARKER_PREFIX),
+        "loader anchored on the quote instead of the real marker"
+    );
+    assert_eq!(kept[1].content, "work done after the real compaction");
+    assert_eq!(kept[2].content, "work done after the quote");
+}
+
+/// A `user` row is only a marker when the prefix BEGINS its content — quoting
+/// it mid-text (as a lane does when it pastes one out of a log) is not an
+/// anchor either.
+#[test]
+fn loader_ignores_a_user_row_quoting_the_marker_mid_text() {
+    let row = |content: &str| crate::db::models::Message {
+        id: uuid::Uuid::new_v4(),
+        session_id: uuid::Uuid::nil(),
+        role: "user".to_string(),
+        content: content.to_string(),
+        sequence: 0,
+        created_at: chrono::Utc::now(),
+        token_count: None,
+        cost: None,
+        input_tokens: None,
+        cache_creation_tokens: None,
+        cache_read_tokens: None,
+        thinking: None,
+        duration_secs: None,
+    };
+
+    let all = vec![
+        row(&CompactionOutcome::Summarised("real anchor".into()).marker("")),
+        row("kept history"),
+        row("I read this out of the log: [CONTEXT COMPACTION - a lane's tool result]"),
+    ];
+
+    let kept = AgentService::messages_from_last_compaction(all);
+
+    assert_eq!(
+        kept.len(),
+        3,
+        "a user row quoting the prefix mid-text re-anchored the window (#175)"
+    );
+    assert!(
+        kept[0].content.starts_with(MARKER_PREFIX),
+        "loader anchored on the mid-text quote instead of the real marker"
+    );
+}

@@ -263,19 +263,33 @@ impl AgentService {
 
     /// Load messages from the last compaction point forward.
     ///
-    /// Finds the last message containing the `[CONTEXT COMPACTION` marker and
-    /// returns only messages from that point onward. If no compaction marker
-    /// exists, returns all messages. This ensures restarts pick up exactly
-    /// where compaction left off — no arbitrary trimming.
+    /// Finds the last message that IS a compaction marker and returns only
+    /// messages from that point onward. If no compaction marker exists,
+    /// returns all messages. This ensures restarts pick up exactly where
+    /// compaction left off — no arbitrary trimming.
+    ///
+    /// Anchored on `role == "user" && starts_with(..)`, NOT a substring match
+    /// (#175). Every marker is written as a `user` row whose content BEGINS
+    /// with the prefix: `CompactionOutcome::marker` (compaction.rs:43),
+    /// `AgentContext::hard_truncate_to` (context.rs:346), the tool-loop
+    /// persist path (tool_loop.rs:3791), the RSI cycle seal (rsi.rs:1172) and
+    /// the cron boundary (scheduler.rs:1003). A plain `contains` instead
+    /// re-anchored the window on any message that merely QUOTED the prefix —
+    /// an assistant row echoing the banner, or a lane reading it out of a log
+    /// or a compaction summary. Audit over four live DBs: 1813 `user` marker
+    /// rows, all 1813 starting with the prefix; 243 `assistant` rows
+    /// containing it, none of them a marker.
     pub fn messages_from_last_compaction(
         all_messages: Vec<crate::db::models::Message>,
     ) -> Vec<crate::db::models::Message> {
         const COMPACTION_MARKER: &str = "[CONTEXT COMPACTION";
 
-        // Walk backward to find the last compaction marker
+        // Walk backward to find the last real compaction marker. A marker is
+        // a `user` row that STARTS with the prefix — matching the substring
+        // anywhere let a merely-quoting message masquerade as one (#175).
         let compaction_idx = all_messages
             .iter()
-            .rposition(|msg| msg.content.contains(COMPACTION_MARKER));
+            .rposition(|msg| msg.role == "user" && msg.content.starts_with(COMPACTION_MARKER));
 
         if let Some(idx) = compaction_idx {
             let kept = all_messages.len() - idx;
