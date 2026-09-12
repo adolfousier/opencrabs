@@ -609,11 +609,13 @@ enabled = false
 # typing_min_interval_secs = 3          # G1 spacing per forum peer.
 # typing_burst = 8                      # G1 burst capacity.
 # typing_max_hold_secs = 30             # G1 longest hold before dropping.
-# edits_per_minute = 30                 # G2 steady-state edit budget.
+# edits_per_minute = 18                 # G2 steady-state edit budget (sized under ~20/min group limit).
 # edit_burst = 10                       # G2 burst capacity.
 # send_min_interval_millis = 1000       # G3 spacing between sends (~1/s).
 # sends_ceiling_per_minute = 18         # G3 group ceiling (official ~20/min).
 # sends_burst = 5                       # G3 burst capacity.
+# rich_per_minute = 18                  # G4 steady-state rich budget.
+# rich_burst = 10                       # G4 burst capacity.
 # summary_log_secs = 300                # Telemetry summary line spacing.
 # [channels.telegram.userbot]
 # enabled = false

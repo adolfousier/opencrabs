@@ -21,7 +21,7 @@
 //!   [`Limits::typing_max_hold`] is dropped — the indicator is cosmetic and
 //!   the next tick re-fires it.
 //! - **G2 edits** ([`edit_admission`] + [`EditClass`]): token bucket
-//!   ~30/min per forum peer. On an empty bucket the priority drop ladder
+//!   ~18/min per forum peer. On an empty bucket the priority drop ladder
 //!   applies — clock → brain preview → intermediary flow updates → status
 //!   line — because each dropped class self-heals: every flow refresh
 //!   re-renders FULL current state, so the next admitted edit carries the
@@ -273,7 +273,7 @@ impl Counters {
             EditClass::BrainPreview => self.dropped_brain_preview += 1,
             EditClass::Intermediary => self.dropped_intermediary += 1,
             EditClass::Status => self.dropped_status += 1,
-            EditClass::Final => {}
+            EditClass::Final | EditClass::Interactive => {}
         }
     }
 
@@ -519,6 +519,10 @@ pub(crate) enum EditClass {
     /// Settle renders and plan-card refreshes — NEVER dropped, queued
     /// latest-wins per message id until the edit bucket refills.
     Final,
+    /// User-initiated interactive UI edits (e.g. menu navigation in /cd, /models)
+    /// or tap consequences — NEVER dropped, NEVER queued. Admitted directly
+    /// or via reserved floor, falling back to direct send or reactive retry.
+    Interactive,
 }
 
 impl EditClass {
@@ -531,6 +535,7 @@ impl EditClass {
             EditClass::Intermediary => 2,
             EditClass::Status => 3,
             EditClass::Final => 4,
+            EditClass::Interactive => 5,
         }
     }
 }
@@ -579,6 +584,9 @@ pub(crate) async fn edit_admission(
         let bucket = ensure_bucket(&mut peer.edits, lim.edit_burst, lim.edit_rate_per_sec);
         if bucket.take(now).is_ok() {
             peer.counters.admitted_edits += 1;
+            Admission::Now
+        } else if class == EditClass::Interactive {
+            // Interactive UI edits never drop and never queue; pass through immediately
             Admission::Now
         } else if class == EditClass::Final {
             let superseded = peer

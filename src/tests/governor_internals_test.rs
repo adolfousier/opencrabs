@@ -68,8 +68,9 @@ fn ladder_order_drops_clock_first_and_final_never_drops() {
             "ladder must drop {pair:?} in ascending value order"
         );
     }
-    // Final outranks everything and is refused by the dropper.
+    // Final and Interactive outrank intermediate drops.
     assert_eq!(EditClass::Final.drop_rank(), 4);
+    assert_eq!(EditClass::Interactive.drop_rank(), 5);
     let c = Counters {
         admitted_typing: 12,
         admitted_edits: 34,
@@ -106,4 +107,14 @@ fn permanent_edit_error_vocabulary_is_exact() {
     ));
     assert!(!is_permanent_edit_error("Too Many Requests: retry after 3"));
     assert!(!is_permanent_edit_error("timeout"));
+}
+
+/// D1 (#171): Rate limiter defaults are sized safely below Telegram's ~20/min
+/// group rate limit across edits, rich messages, and sends.
+#[test]
+fn rate_limiter_defaults_sized_below_group_limit() {
+    let cfg = crate::config::RateLimiterConfig::default();
+    assert_eq!(cfg.edits_per_minute, 18);
+    assert_eq!(cfg.rich_per_minute, 18);
+    assert_eq!(cfg.sends_ceiling_per_minute, 18);
 }
