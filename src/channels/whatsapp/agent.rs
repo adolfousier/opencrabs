@@ -221,6 +221,21 @@ impl WhatsAppAgent {
                                     None => owner_jid.clone(),
                                 };
                                 // Greet only on a fresh pairing (first-time or
+                                // #1488: announce availability once per
+                                // connection. Without it the paired account
+                                // reads as permanently offline to everyone it
+                                // talks to, and WhatsApp withholds presence
+                                // updates from a client that never publishes
+                                // its own. Non-fatal: a failure costs presence,
+                                // not messaging.
+                                if let Err(e) = client.presence().set_available().await {
+                                    tracing::warn!(
+                                        target: "whatsapp",
+                                        error = %e,
+                                        "could not publish availability; the account will \
+                                         appear offline and contact presence may not arrive"
+                                    );
+                                }
                                 // re-pair after reset), not on every app restart
                                 // or reconnect. The `first_pair_pending` flag is
                                 // set by PairSuccess and consumed here: it is

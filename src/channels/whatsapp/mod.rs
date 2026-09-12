@@ -21,14 +21,15 @@ mod onboarding_events;
 mod pairing;
 mod photos;
 pub(crate) mod rate_limit;
+pub(crate) mod media_retry;
 pub(crate) mod resume;
-mod sessions;
 pub(crate) mod outbox;
+mod sessions;
 mod state;
 pub(crate) mod store;
 
-pub use agent::WhatsAppAgent;
 pub(crate) mod reaction;
+pub use agent::WhatsAppAgent;
 pub use approval::WaApproval;
 pub use state::WhatsAppState;
 pub(crate) mod stream;

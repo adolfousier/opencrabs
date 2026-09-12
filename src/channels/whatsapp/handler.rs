@@ -164,45 +164,54 @@ fn has_document(msg: &Message) -> bool {
 }
 
 /// Download a document from WhatsApp. Returns (bytes, mime, filename) on success.
-async fn download_document(msg: &Message, client: &Client) -> Option<(Vec<u8>, String, String)> {
+async fn download_document(
+    msg: &Message,
+    client: &Client,
+    ctx: &super::media_retry::MediaContext,
+) -> Option<(Vec<u8>, String, String)> {
     let msg = unwrap_message(msg);
     let doc = msg.document_message.as_ref()?;
     let mime = doc.mimetype.clone().unwrap_or_default();
     let fname = doc.file_name.clone().unwrap_or_else(|| "file".to_string());
-    match client.download(doc.as_ref()).await {
-        Ok(bytes) => {
-            tracing::debug!(
-                "WhatsApp: downloaded document {} ({} bytes)",
-                fname,
-                bytes.len()
-            );
-            Some((bytes, mime, fname))
-        }
-        Err(e) => {
-            tracing::error!("WhatsApp: failed to download document: {e}");
-            None
-        }
-    }
+    let bytes = super::media_retry::download_with_retry(
+        client,
+        doc.as_ref(),
+        ctx,
+        "document",
+        |m, path| m.direct_path = Some(path),
+    )
+    .await?;
+    tracing::debug!(
+        "WhatsApp: downloaded document {} ({} bytes)",
+        fname,
+        bytes.len()
+    );
+    Some((bytes, mime, fname))
 }
 
 /// Download audio from WhatsApp. Returns raw bytes on success.
-async fn download_audio(msg: &Message, client: &Client) -> Option<Vec<u8>> {
+async fn download_audio(
+    msg: &Message,
+    client: &Client,
+    ctx: &super::media_retry::MediaContext,
+) -> Option<Vec<u8>> {
     let msg = unwrap_message(msg);
     let audio = msg.audio_message.as_ref()?;
-    match client.download(audio.as_ref()).await {
-        Ok(bytes) => {
-            tracing::debug!("WhatsApp: downloaded audio ({} bytes)", bytes.len());
-            Some(bytes)
-        }
-        Err(e) => {
-            tracing::error!("WhatsApp: failed to download audio: {e}");
-            None
-        }
-    }
+    let bytes =
+        super::media_retry::download_with_retry(client, audio.as_ref(), ctx, "audio", |m, path| {
+            m.direct_path = Some(path)
+        })
+        .await?;
+    tracing::debug!("WhatsApp: downloaded audio ({} bytes)", bytes.len());
+    Some(bytes)
 }
 
 /// Download image from WhatsApp. Returns (bytes, mime, filename) on success.
-async fn download_image(msg: &Message, client: &Client) -> Option<(Vec<u8>, String, String)> {
+async fn download_image(
+    msg: &Message,
+    client: &Client,
+    ctx: &super::media_retry::MediaContext,
+) -> Option<(Vec<u8>, String, String)> {
     let msg = unwrap_message(msg);
     let img = msg.image_message.as_ref()?;
 
@@ -215,8 +224,12 @@ async fn download_image(msg: &Message, client: &Client) -> Option<(Vec<u8>, Stri
     };
     let fname = format!("image.{ext}");
 
-    match client.download(img.as_ref()).await {
-        Ok(bytes) => {
+    match super::media_retry::download_with_retry(client, img.as_ref(), ctx, "image", |m, path| {
+        m.direct_path = Some(path)
+    })
+    .await
+    {
+        Some(bytes) => {
             tracing::debug!(
                 "WhatsApp: downloaded image ({} bytes, mime={})",
                 bytes.len(),
@@ -224,8 +237,8 @@ async fn download_image(msg: &Message, client: &Client) -> Option<(Vec<u8>, Stri
             );
             Some((bytes, mime, fname))
         }
-        Err(e) => {
-            tracing::error!("WhatsApp: failed to download image: {e}");
+        None => {
+            tracing::error!("WhatsApp: image unavailable even after a re-upload request");
             None
         }
     }
@@ -506,6 +519,19 @@ pub(crate) async fn handle_message(
         if let Some(c) = choice {
             let is_owner =
                 crate::config::owner::is_owner(&wa_cfg.allowed_phones, &wa_cfg.bot_owner, &phone);
+    // #1488: a media URL expires, and the server will re-upload the blob if
+    // asked with the message's own coordinates. Built once and handed to every
+    // downloader so an old photo comes back instead of erroring.
+    let media_ctx = super::media_retry::MediaContext {
+        msg_id: info.id.clone(),
+        chat: info.source.chat.clone(),
+        is_from_me: info.source.is_from_me,
+        participant: if info.source.is_group {
+            Some(info.source.sender.clone())
+        } else {
+            None
+        },
+    };
             if !is_owner {
                 tracing::warn!(
                     "WhatsApp: non-owner {} replied approval {:?} — refused (OC-01)",
@@ -542,7 +568,7 @@ pub(crate) async fn handle_message(
     let mut content;
     if has_aud
         && voice_config.stt_enabled
-        && let Some(audio_bytes) = download_audio(&msg, &client).await
+        && let Some(audio_bytes) = download_audio(&msg, &client, &media_ctx).await
     {
         match crate::channels::voice::transcribe(audio_bytes, &voice_config).await {
             Ok(transcript) => {
@@ -564,7 +590,8 @@ pub(crate) async fn handle_message(
     // Download image if present, use photo batching for multi-image support
     if has_img
         && !has_aud
-        && let Some((img_bytes, img_mime, img_fname)) = download_image(&msg, &client).await
+        && let Some((img_bytes, img_mime, img_fname)) =
+            download_image(&msg, &client, &media_ctx).await
     {
         use crate::utils::{inject_file_content, process_file_with_vision};
         let cfg = crate::config::Config::load();
@@ -610,7 +637,7 @@ pub(crate) async fn handle_message(
     if has_doc
         && !has_aud
         && !has_img
-        && let Some((bytes, mime, fname)) = download_document(&msg, &client).await
+        && let Some((bytes, mime, fname)) = download_document(&msg, &client, &media_ctx).await
     {
         use crate::utils::{inject_file_content, process_file_with_vision};
         let cfg = crate::config::Config::load();
@@ -1791,10 +1818,6 @@ pub(crate) async fn send_connection_greeting(
         Err(e) => {
             wa_state.broadcast_error(&format!(
                 "WhatsApp connected but the agent could not generate a greeting: {e}"
-            ));
-        }
-    }
-}
             // #1409: acknowledge a finished multi-step turn with a reaction on
             // our own final message, the way the crab does on Telegram. Only
             // on streamed turns: those are the ones that ran tools and took
@@ -1811,3 +1834,7 @@ pub(crate) async fn send_connection_greeting(
                 .await;
             }
 
+            ));
+        }
+    }
+}
