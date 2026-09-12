@@ -462,6 +462,25 @@ pub(crate) async fn handle_message(
     channel_msg_repo: ChannelMessageRepository,
 ) {
     let phone = sender_phone(&info);
+
+    // #1487: a blocked contact must not reach the handlers. WhatsApp stops
+    // delivering from a blocked account server-side, so this is a second line
+    // rather than the only one - it closes the window between the bot issuing
+    // a block and the server acting on it, and it costs a set lookup instead
+    // of the server round trip `Blocking::is_blocked` would need per message.
+    // Never applies to our own echoes, which carry the paired account's JID.
+    if !info.source.is_from_me
+        && wa_state
+            .blocklist
+            .contains(&info.source.sender.to_string())
+            .await
+    {
+        tracing::info!(
+            target: "whatsapp",
+            "dropping inbound message from a blocked contact (#1487)"
+        );
+        return;
+    }
     tracing::debug!(
         "WhatsApp handler: from={}, is_from_me={}, has_text={}, has_image={}, has_audio={}",
         phone,
@@ -533,7 +552,22 @@ pub(crate) async fn handle_message(
     {
         return;
     }
+    let has_vid = has_video(&msg);
+    let has_stk = has_sticker(&msg);
 
+    // #1488: a media URL expires, and the server will re-upload the blob if
+    // asked with the message's own coordinates. Built once and handed to every
+    // downloader so an old photo comes back instead of erroring.
+    let media_ctx = super::media_retry::MediaContext {
+        msg_id: info.id.clone(),
+        chat: info.source.chat.clone(),
+        is_from_me: info.source.is_from_me,
+        participant: if info.source.is_group {
+            Some(info.source.sender.clone())
+        } else {
+            None
+        },
+    };
     // Passively capture message for channel history (groups and DMs)
     if let Some(ref t) = text
         && !t.is_empty()
@@ -552,22 +586,7 @@ pub(crate) async fn handle_message(
             phone.clone(),
             push_name,
             t.clone(),
-    let has_vid = has_video(&msg);
-    let has_stk = has_sticker(&msg);
             "text".into(),
-    // #1488: a media URL expires, and the server will re-upload the blob if
-    // asked with the message's own coordinates. Built once and handed to every
-    // downloader so an old photo comes back instead of erroring.
-    let media_ctx = super::media_retry::MediaContext {
-        msg_id: info.id.clone(),
-        chat: info.source.chat.clone(),
-        is_from_me: info.source.is_from_me,
-        participant: if info.source.is_group {
-            Some(info.source.sender.clone())
-        } else {
-            None
-        },
-    };
             None,
         );
         if let Err(e) = channel_msg_repo.insert(&cm).await {
@@ -766,25 +785,6 @@ pub(crate) async fn handle_message(
         && !has_img
         && let Some((bytes, mime, fname)) = download_document(&msg, &client, &media_ctx).await
     {
-        use crate::utils::{inject_file_content, process_file_with_vision};
-        let cfg = crate::config::Config::load();
-        if let Ok(cfg) = cfg {
-            let fc = process_file_with_vision(&bytes, &mime, &fname, &cfg);
-            let injected = inject_file_content(&fc).0;
-            if !injected.is_empty() {
-                content.push_str(&format!("\n\n{injected}"));
-            }
-        }
-    }
-
-    if content.is_empty() {
-        return;
-    }
-
-    // The bot pairs AS the owner, so the owner's own messages arrive in the
-    // "Message Yourself" self-chat addressed by LID (e.g. 236927743742100),
-    // while the connection greeting and config identify the owner by PN
-    // (351933536442). Keying the session by the raw sender would create a
     // Stickers are WebP images: same funnel as an inbound photo (#1483).
     if has_stk
         && !has_img
@@ -834,6 +834,25 @@ pub(crate) async fn handle_message(
         }
     }
 
+        use crate::utils::{inject_file_content, process_file_with_vision};
+        let cfg = crate::config::Config::load();
+        if let Ok(cfg) = cfg {
+            let fc = process_file_with_vision(&bytes, &mime, &fname, &cfg);
+            let injected = inject_file_content(&fc).0;
+            if !injected.is_empty() {
+                content.push_str(&format!("\n\n{injected}"));
+            }
+        }
+    }
+
+    if content.is_empty() {
+        return;
+    }
+
+    // The bot pairs AS the owner, so the owner's own messages arrive in the
+    // "Message Yourself" self-chat addressed by LID (e.g. 236927743742100),
+    // while the connection greeting and config identify the owner by PN
+    // (351933536442). Keying the session by the raw sender would create a
     // SECOND owner session (wa-<LID>) separate from the greeting's (wa-<PN>) —
     // the "two sessions every time" bug. Collapse the owner's self-chat to the
     // configured owner number (the same one the greeting uses) so the owner
@@ -1794,8 +1813,31 @@ pub(crate) async fn handle_message(
                     Ok(audio_bytes) => {
                         // WhatsApp requires uploading media to its servers first,
                         // then sending the message with the returned URL + crypto keys.
+            // #1409: acknowledge a finished multi-step turn with a reaction on
+            // our own final message, the way the crab does on Telegram. Only
+            // on streamed turns: those are the ones that ran tools and took
+            // long enough that an acknowledgement means something. A plain
+            // chat reply needs no tick on itself.
+            if streamed {
+                super::reaction::acknowledge_completion(
+                    &client,
+                    &reply_jid,
+                    &wa_state,
+                    session_id,
+                    super::reaction::COMPLETION_EMOJI,
+                )
+                .await;
+            }
+
                         use wacore::download::MediaType;
                         use waproto::whatsapp::message::AudioMessage;
+                // Show "recording..." across synthesis and upload, the way a
+                // human preparing a voice note appears (#1486). Cleared on
+                // every exit path below, success or failure, so the chat is
+                // never left stuck on the indicator.
+                if let Err(e) = client.chatstate().send_recording(&reply_jid).await {
+                    tracing::warn!(error = %e, "WhatsApp: recording indicator failed");
+                }
                         use whatsapp_rust::upload::UploadOptions;
                         match client
                             .upload(audio_bytes, MediaType::Audio, UploadOptions::new())
@@ -1813,31 +1855,8 @@ pub(crate) async fn handle_message(
                                         mimetype: Some("audio/ogg; codecs=opus".to_string()),
                                         ptt: Some(true),
                                         ..Default::default()
-            // #1409: acknowledge a finished multi-step turn with a reaction on
-            // our own final message, the way the crab does on Telegram. Only
-            // on streamed turns: those are the ones that ran tools and took
-            // long enough that an acknowledgement means something. A plain
-            // chat reply needs no tick on itself.
-            if streamed {
-                super::reaction::acknowledge_completion(
-                    &client,
-                    &reply_jid,
-                    &wa_state,
-                    session_id,
-                    super::reaction::COMPLETION_EMOJI,
-                )
-                .await;
-            }
-
                                     })),
                                     ..Default::default()
-                // Show "recording..." across synthesis and upload, the way a
-                // human preparing a voice note appears (#1486). Cleared on
-                // every exit path below, success or failure, so the chat is
-                // never left stuck on the indicator.
-                if let Err(e) = client.chatstate().send_recording(&reply_jid).await {
-                    tracing::warn!(error = %e, "WhatsApp: recording indicator failed");
-                }
                                 };
                                 if let Err(e) =
                                     client.send_message(reply_jid.clone(), audio_msg).await
@@ -1860,6 +1879,9 @@ pub(crate) async fn handle_message(
         }
         Err(ref e) if matches!(e, crate::brain::agent::AgentError::Cancelled) => {
             tracing::info!("WhatsApp: agent call cancelled for session {}", session_id);
+                if let Err(e) = client.chatstate().send_paused(&reply_jid).await {
+                    tracing::warn!(error = %e, "WhatsApp: clearing recording indicator failed");
+                }
         }
         Err(e) => {
             tracing::error!("WhatsApp: agent error: {}", e);
@@ -1879,9 +1901,6 @@ pub(crate) async fn handle_message(
             }
         }
     }
-                if let Err(e) = client.chatstate().send_paused(&reply_jid).await {
-                    tracing::warn!(error = %e, "WhatsApp: clearing recording indicator failed");
-                }
 }
 
 /// Send a real agent-generated confirmation greeting into the owner's self-chat

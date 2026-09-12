@@ -213,14 +213,14 @@ impl WhatsAppAgent {
                             }
                             Event::Connected(_) => {
                                 tracing::info!("WhatsApp: connected successfully");
-                                // Prefer the freshly-paired owner (set on
-                                // PairSuccess) over the startup-derived one,
-                                // which is None on a first-time pairing.
-                                let owner = match wa_state.owner_jid().await {
-                                    Some(j) => Some(j),
-                                    None => owner_jid.clone(),
-                                };
-                                // Greet only on a fresh pairing (first-time or
+                                // #1487: refresh the local blocklist mirror so
+                                // the inbound guard reflects blocks the owner
+                                // made from their phone, not only ones the bot
+                                // issued. One query per connection, never per
+                                // message. A failure leaves the previous mirror
+                                // in place; the server still enforces the block,
+                                // so the worst case is the belt-and-braces layer
+                                // being stale for this session.
                                 // #1488: announce availability once per
                                 // connection. Without it the paired account
                                 // reads as permanently offline to everyone it
@@ -236,6 +236,32 @@ impl WhatsAppAgent {
                                          appear offline and contact presence may not arrive"
                                     );
                                 }
+                                match client.blocking().get_blocklist().await {
+                                    Ok(entries) => {
+                                        let jids: Vec<String> =
+                                            entries.iter().map(|e| e.jid.to_string()).collect();
+                                        let count = jids.len();
+                                        wa_state.blocklist.replace(jids).await;
+                                        tracing::debug!(
+                                            target: "whatsapp",
+                                            count,
+                                            "blocklist mirror refreshed"
+                                        );
+                                    }
+                                    Err(e) => tracing::warn!(
+                                        target: "whatsapp",
+                                        error = %e,
+                                        "could not refresh the blocklist mirror; keeping the previous one"
+                                    ),
+                                }
+                                // Prefer the freshly-paired owner (set on
+                                // PairSuccess) over the startup-derived one,
+                                // which is None on a first-time pairing.
+                                let owner = match wa_state.owner_jid().await {
+                                    Some(j) => Some(j),
+                                    None => owner_jid.clone(),
+                                };
+                                // Greet only on a fresh pairing (first-time or
                                 // re-pair after reset), not on every app restart
                                 // or reconnect. The `first_pair_pending` flag is
                                 // set by PairSuccess and consumed here: it is

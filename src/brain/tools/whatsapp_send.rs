@@ -427,6 +427,10 @@ impl Tool for WhatsAppSendTool {
                     (
                         wa.rate_limit.clone(),
                         wa.is_owner(jid_str.split('@').next().unwrap_or(&jid_str)),
+                },
+                "ephemeral": {
+                    "type": "integer",
+                    "description": "For send: disappearing-message TTL in seconds (86400 = 24h, 604800 = 7d, 7776000 = 90d max). 0 means the message does not expire, overriding the channel default. Omit to use the channel default."
                     )
                 };
                 let mut queued_any = false;
@@ -479,15 +483,30 @@ impl Tool for WhatsAppSendTool {
                     )));
                 }
                 persist_outgoing(&jid, &tagged).await;
-                Ok(ToolResult::success(format!(
-                    "Message sent to {} via WhatsApp.",
-                    jid_str
-                )))
+                Ok(ToolResult::success(match ttl {
+                    Some(seconds) => format!(
+                        "Message sent to {} via WhatsApp; it disappears after {}.",
+                        jid_str,
+                        crate::channels::whatsapp::ephemeral::describe(seconds)
+                    ),
+                    None => format!("Message sent to {} via WhatsApp.", jid_str),
+                }))
             }
 
             // ── reply ────────────────────────────────────────────────────────
             "reply" => {
                 let message = pget!(get_str(&input, "message")).to_string();
+                // #1487: disappearing messages. An explicit `ephemeral: 0`
+                // means "do not expire" and overrides the channel default,
+                // so this is not a plain `or`.
+                let ttl = crate::channels::whatsapp::ephemeral::resolve(
+                    input.get("ephemeral").and_then(|v| v.as_u64()),
+                    self.config_rx.borrow().channels.whatsapp.ephemeral_ttl,
+                );
+                let send_opts = whatsapp_rust::send::SendOptions {
+                    ephemeral_expiration: ttl,
+                    ..Default::default()
+                };
                 let (jid, jid_str) =
                     pget!(resolve_jid(&input, &self.whatsapp_state, &self.config_rx).await);
                 let msg_id = pget!(get_str(&input, "message_id")).to_string();
@@ -547,7 +566,10 @@ impl Tool for WhatsAppSendTool {
                             ..Default::default()
                         }
                     };
-                    if let Err(e) = client.send_message(jid.clone(), wa_msg).await {
+                    if let Err(e) = client
+                        .send_message_with_options(jid.clone(), wa_msg, send_opts.clone())
+                        .await
+                    {
                         // Same accounting as the send path (#1490-B).
                         let prefix = delivered_prefix(&delivered);
                         if !prefix.trim().is_empty() {
@@ -836,9 +858,22 @@ impl Tool for WhatsAppSendTool {
                 let (jid, jid_str) =
                     pget!(resolve_jid(&input, &self.whatsapp_state, &self.config_rx).await);
                 let contact_name = pget!(get_str(&input, "contact_name")).to_string();
+                // #1486: WhatsApp renders a tap-to-play voice bubble only when
+                // the message carries ptt. Without it the same bytes arrive as
+                // an unstyled file attachment. Default on, because the caller
+                // that wants a plain audio FILE is the rare one, and pass
+                // `voice_note: false` to get the old rendering.
+                let ptt = crate::channels::whatsapp::voice_note::wants_voice_note(&input);
+                let mime = crate::channels::whatsapp::voice_note::voice_note_mimetype(&mime, ptt);
                 let contact_phone = pget!(get_str(&input, "contact_phone")).to_string();
 
                 let vcard = build_vcard(&contact_name, &contact_phone);
+                // Show "recording..." while the upload is in flight, exactly
+                // as a human sending a voice note would appear (#1486).
+                if ptt && let Err(e) = client.chatstate().send_recording(&jid).await {
+                    tracing::warn!(error = %e, "WhatsApp: recording indicator failed");
+                }
+
                 let wa_msg = waproto::whatsapp::Message {
                     contact_message: Some(Box::new(waproto::whatsapp::message::ContactMessage {
                         display_name: Some(contact_name.clone()),
@@ -854,6 +889,7 @@ impl Tool for WhatsAppSendTool {
                     tracing::warn!(error = %e, "WhatsApp: clearing recording indicator failed");
                 }
                 match sent {
+                        ptt: Some(ptt),
                     Ok(_) => Ok(ToolResult::success(format!(
                         "Contact '{}' sent to {} via WhatsApp.",
                         contact_name, jid_str
@@ -864,22 +900,9 @@ impl Tool for WhatsAppSendTool {
 
             // ── react ────────────────────────────────────────────────────────
             "react" => {
-                // #1486: WhatsApp renders a tap-to-play voice bubble only when
-                // the message carries ptt. Without it the same bytes arrive as
-                // an unstyled file attachment. Default on, because the caller
-                // that wants a plain audio FILE is the rare one, and pass
-                // `voice_note: false` to get the old rendering.
-                let ptt = crate::channels::whatsapp::voice_note::wants_voice_note(&input);
-                let mime = crate::channels::whatsapp::voice_note::voice_note_mimetype(&mime, ptt);
                 let (jid, jid_str) =
                     pget!(resolve_jid(&input, &self.whatsapp_state, &self.config_rx).await);
                 let msg_id = pget!(get_str(&input, "message_id")).to_string();
-                // Show "recording..." while the upload is in flight, exactly
-                // as a human sending a voice note would appear (#1486).
-                if ptt && let Err(e) = client.chatstate().send_recording(&jid).await {
-                    tracing::warn!(error = %e, "WhatsApp: recording indicator failed");
-                }
-
                 let emoji = input
                     .get("emoji")
                     .and_then(|v| v.as_str())
@@ -889,7 +912,6 @@ impl Tool for WhatsAppSendTool {
                     .get("from_me")
                     .and_then(|v| v.as_bool())
                     .unwrap_or(false);
-                        ptt: Some(ptt),
 
                 let message_key = waproto::whatsapp::MessageKey {
                     remote_jid: Some(jid.to_string()),
@@ -1078,3 +1100,76 @@ impl Tool for WhatsAppSendTool {
         }
     }
 }
+            // ── block_contact ────────────────────────────────────────────────
+            // #1487: the owner's first-line defence against a spamming number.
+            // The resolved JID is logged so the block is auditable after the
+            // fact, and the local mirror is updated so the inbound guard drops
+            // that sender on the very next message without a server round trip.
+            "block_contact" => {
+                let (jid, jid_str) =
+                    pget!(resolve_jid(&input, &self.whatsapp_state, &self.config_rx).await);
+                match client.blocking().block(&jid).await {
+                    Ok(_) => {
+                        tracing::info!(
+                            target: "whatsapp",
+                            jid = %jid,
+                            "blocked contact on owner request (#1487)"
+                        );
+                        self.whatsapp_state.blocklist.insert(&jid.to_string()).await;
+                        Ok(ToolResult::success(format!(
+                            "Blocked {} on WhatsApp. Their messages no longer reach the bot.",
+                            jid_str
+                        )))
+                    }
+                    Err(e) => Ok(ToolResult::error(format!("Failed to block {jid_str}: {e}"))),
+                }
+            }
+
+            // ── unblock_contact ──────────────────────────────────────────────
+            "unblock_contact" => {
+                let (jid, jid_str) =
+                    pget!(resolve_jid(&input, &self.whatsapp_state, &self.config_rx).await);
+                match client.blocking().unblock(&jid).await {
+                    Ok(_) => {
+                        tracing::info!(
+                            target: "whatsapp",
+                            jid = %jid,
+                            "unblocked contact on owner request (#1487)"
+                        );
+                        self.whatsapp_state.blocklist.remove(&jid.to_string()).await;
+                        Ok(ToolResult::success(format!(
+                            "Unblocked {} on WhatsApp.",
+                            jid_str
+                        )))
+                    }
+                    Err(e) => Ok(ToolResult::error(format!(
+                        "Failed to unblock {jid_str}: {e}"
+                    ))),
+                }
+            }
+
+            // ── list_blocked ─────────────────────────────────────────────────
+            // Reads the server, not the mirror: the owner may have blocked
+            // someone from their phone, and reporting a stale local set as
+            // fact would be worse than one extra round trip. The mirror is
+            // refreshed from the answer.
+            "list_blocked" => match client.blocking().get_blocklist().await {
+                Ok(entries) => {
+                    let jids: Vec<String> = entries.iter().map(|e| e.jid.to_string()).collect();
+                    self.whatsapp_state.blocklist.replace(jids.clone()).await;
+                    if jids.is_empty() {
+                        return Ok(ToolResult::success(
+                            "No blocked contacts on this WhatsApp account.".to_string(),
+                        ));
+                    }
+                    Ok(ToolResult::success(format!(
+                        "{} blocked contact(s):\n{}",
+                        jids.len(),
+                        jids.join("\n")
+                    )))
+                }
+                Err(e) => Ok(ToolResult::error(format!(
+                    "Failed to fetch the blocklist: {e}"
+                ))),
+            },
+

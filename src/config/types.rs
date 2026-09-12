@@ -898,6 +898,12 @@ impl WhatsAppConfig {
     /// Check if a phone number is a bot owner. See
     /// [`crate::config::owner::is_owner`]. Owners are resolved against
     /// `allowed_phones` (WhatsApp's allow list).
+    /// Channel-wide disappearing-message TTL in seconds (#1487). Unset or
+    /// `0` means messages do not expire, which is the WhatsApp default.
+    /// Common values: 86400 (24h), 604800 (7d), 7776000 (90d, the maximum).
+    /// A `whatsapp_send` call may override it per message.
+    #[serde(default)]
+    pub ephemeral_ttl: Option<u32>,
     pub fn is_owner(&self, user_id: &str) -> bool {
         crate::config::owner::is_owner(&self.allowed_phones, &self.bot_owner, user_id)
     }

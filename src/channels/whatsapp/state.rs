@@ -88,22 +88,26 @@ pub struct WhatsAppState {
     /// lockstep with `session_jids` at `register_session_jid` (the ONLY
     /// write site for both). Last writer wins — mirrors the forward map.
     pub(super) jid_sessions: Mutex<HashMap<String, Uuid>>,
-    /// Outbound rate limiter (#1407): token-bucket pacing + rolling 24h
-    /// cap with a FIFO queue. Shared by the send tool, the handler chunk
-    /// loops, the resume path and the drainer task - one budget for the
-    /// whole channel. `pub(crate)` so brain/tools can gate through it.
+    /// Local mirror of the server blocklist (#1487), so the inbound guard
+    /// can drop a blocked sender without a server round trip per message.
+    /// See `blocklist.rs`.
+    pub(crate) blocklist: super::blocklist::Blocklist,
     /// Option lists for polls this bot created (#1482). Votes reference
     /// options by hash, never by name, so labelling a vote needs the poll's
     /// own list. See `poll.rs`.
     pub(crate) polls: super::poll::PollOptions,
-    pub(crate) rate_limiter: std::sync::Arc<super::rate_limit::WhatsappRateLimiter>,
-}
-
+    /// Outbound rate limiter (#1407): token-bucket pacing + rolling 24h
+    /// cap with a FIFO queue. Shared by the send tool, the handler chunk
+    /// loops, the resume path and the drainer task - one budget for the
     /// Last editable message per session (#1408). `SendResult.message_id`
     /// used to be discarded at every send site; edit-in-place streaming,
     /// self-reactions and pin/forward all need it, so it is captured once
     /// here. See `outbox.rs`.
     pub(crate) outbox: super::outbox::Outbox,
+    /// whole channel. `pub(crate)` so brain/tools can gate through it.
+    pub(crate) rate_limiter: std::sync::Arc<super::rate_limit::WhatsappRateLimiter>,
+}
+
 impl Default for WhatsAppState {
     fn default() -> Self {
         Self::new()
@@ -137,6 +141,7 @@ impl WhatsAppState {
             rate_limiter: std::sync::Arc::new(super::rate_limit::WhatsappRateLimiter::new()),
         }
     }
-}
             polls: super::poll::PollOptions::default(),
+}
+            blocklist: super::blocklist::Blocklist::default(),
             outbox: super::outbox::Outbox::default(),
