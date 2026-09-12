@@ -10,7 +10,7 @@
 
 use crate::db::Database;
 use crate::db::models::Project;
-use crate::services::project_match::match_by_directory;
+use crate::services::project_match::{DirectoryIdentity, match_by_directory};
 use crate::services::{ProjectService, ServiceContext, SessionService};
 
 async fn services() -> (ProjectService, SessionService) {
@@ -24,13 +24,7 @@ async fn services() -> (ProjectService, SessionService) {
 }
 
 fn project_named(name: &str) -> Project {
-    Project {
-        id: uuid::Uuid::new_v4(),
-        name: name.to_string(),
-        description: None,
-        created_at: chrono::Utc::now(),
-        updated_at: chrono::Utc::now(),
-    }
+    Project::new(name.to_string(), None)
 }
 
 // ── the rule itself ─────────────────────────────────────────────────────────
@@ -40,12 +34,20 @@ fn a_directory_matches_the_project_its_basename_names() {
     let projects = vec![project_named("Alpha"), project_named("project-b")];
 
     assert_eq!(
-        match_by_directory("/home/u/src/project-b", &projects).map(|p| p.name.as_str()),
+        match_by_directory(
+            &DirectoryIdentity::path_only("/home/u/src/project-b"),
+            &projects,
+        )
+        .map(|p| p.name.as_str()),
         Some("project-b")
     );
     // The project name is slugified, so display casing and spacing still match.
     assert_eq!(
-        match_by_directory("/home/u/src/alpha", &projects).map(|p| p.name.as_str()),
+        match_by_directory(
+            &DirectoryIdentity::path_only("/home/u/src/alpha"),
+            &projects
+        )
+        .map(|p| p.name.as_str()),
         Some("Alpha")
     );
 }
@@ -54,7 +56,11 @@ fn a_directory_matches_the_project_its_basename_names() {
 fn a_trailing_separator_is_still_the_same_directory() {
     let projects = vec![project_named("Alpha")];
     assert_eq!(
-        match_by_directory("/home/u/src/alpha/", &projects).map(|p| p.name.as_str()),
+        match_by_directory(
+            &DirectoryIdentity::path_only("/home/u/src/alpha/"),
+            &projects
+        )
+        .map(|p| p.name.as_str()),
         Some("Alpha"),
         "a path typed with a trailing slash names the same directory"
     );
@@ -63,9 +69,15 @@ fn a_trailing_separator_is_still_the_same_directory() {
 #[test]
 fn an_unrelated_directory_matches_nothing() {
     let projects = vec![project_named("Alpha")];
-    assert!(match_by_directory("/home/u/src/something-else", &projects).is_none());
     assert!(
-        match_by_directory("", &projects).is_none(),
+        match_by_directory(
+            &DirectoryIdentity::path_only("/home/u/src/something-else"),
+            &projects
+        )
+        .is_none()
+    );
+    assert!(
+        match_by_directory(&DirectoryIdentity::path_only(""), &projects).is_none(),
         "a session with no path must not match by accident"
     );
 }

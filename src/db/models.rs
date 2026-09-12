@@ -99,6 +99,10 @@ pub struct Project {
     pub id: Uuid,
     pub name: String,
     pub description: Option<String>,
+    /// Normalized origin remote (`host/owner/repo`), adopted from a session
+    /// whose checkout proved it (#1510). The identity stronger than the name:
+    /// basename matching conflates unrelated checkouts that share a name.
+    pub repo_remote: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -109,6 +113,10 @@ impl Project {
             id: uuid_col(row, "id")?,
             name: row.get("name")?,
             description: row.get("description")?,
+            // `unwrap_or` rather than `?`: heal tests build partial schemas
+            // via `to_version(N)` and a project row read from a pre-#1510
+            // schema has no remote for it to be, exactly like a NULL.
+            repo_remote: row.get("repo_remote").unwrap_or(None),
             created_at: timestamp_col(row, "created_at")?,
             updated_at: timestamp_col(row, "updated_at")?,
         })
@@ -121,6 +129,7 @@ impl Project {
             id: Uuid::new_v4(),
             name,
             description,
+            repo_remote: None,
             created_at: now,
             updated_at: now,
         }

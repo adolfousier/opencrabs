@@ -161,6 +161,14 @@ impl ProjectService {
         repo.unassign_session(session_id).await
     }
 
+    /// Record a project's repository remote when it has none yet (#1510).
+    /// Returns whether this call was the one that recorded it, so callers can
+    /// tell an adoption from a no-op against a project that already has one.
+    pub async fn set_project_repo_remote(&self, id: Uuid, remote: &str) -> Result<bool> {
+        let repo = ProjectRepository::new(self.context.pool());
+        repo.set_repo_remote_if_none(id, remote).await
+    }
+
     /// Get all sessions in a project
     pub async fn get_sessions_for_project(&self, project_id: Uuid) -> Result<Vec<Session>> {
         let repo = ProjectRepository::new(self.context.pool());
@@ -188,19 +196,44 @@ impl ProjectService {
             return Ok(None);
         };
         let projects = self.list_projects().await?;
+        let identity =
+            crate::services::project_match::resolve_directory_identity(working_directory);
         let Some(project) =
-            crate::services::project_match::match_by_directory(working_directory, &projects)
+            crate::services::project_match::match_by_directory(&identity, &projects)
         else {
             return Ok(None);
         };
         self.assign_session(session.id, project.id).await?;
+        let mut project = project.clone();
+        // Adoption (#1510): the first session that proves which repository a
+        // project is records its remote, so every later session can match on
+        // it instead of the basename. Never overwrites a recorded remote.
+        if project.repo_remote.is_none()
+            && let Some(ref remote) = identity.remote
+        {
+            match self.set_project_repo_remote(project.id, remote).await {
+                Ok(true) => {
+                    project.repo_remote = Some(remote.clone());
+                    tracing::info!(
+                        "Adopted repo remote '{remote}' for project '{}'",
+                        project.name
+                    );
+                }
+                Ok(false) => {}
+                Err(e) => tracing::warn!(
+                    error = %e,
+                    "failed to adopt repo remote for project '{}'",
+                    project.name
+                ),
+            }
+        }
         tracing::info!(
             "Linked session {} to project '{}' from working directory {}",
             session.id,
             project.name,
             working_directory,
         );
-        Ok(Some(project.clone()))
+        Ok(Some(project))
     }
 
     /// Link every unassigned session whose working directory names a project.
@@ -215,28 +248,57 @@ impl ProjectService {
     /// bad row keeps every later session unlinked forever.
     pub async fn backfill_unassigned_sessions(&self) -> Result<usize> {
         let sessions = self.get_unassigned_sessions().await?;
-        let projects = self.list_projects().await?;
+        let mut projects = self.list_projects().await?;
         if projects.is_empty() {
             return Ok(0);
         }
+        // Two git subprocesses per directory is not free, and a real DB has
+        // dozens of sessions sharing a handful of directories.
+        let mut identities: std::collections::HashMap<
+            String,
+            crate::services::project_match::DirectoryIdentity,
+        > = std::collections::HashMap::new();
         let mut linked = 0usize;
         for session in &sessions {
             let Some(ref working_directory) = session.working_directory else {
                 continue;
             };
+            let identity = identities
+                .entry(working_directory.clone())
+                .or_insert_with(|| {
+                    crate::services::project_match::resolve_directory_identity(working_directory)
+                })
+                .clone();
             let Some(project) =
-                crate::services::project_match::match_by_directory(working_directory, &projects)
+                crate::services::project_match::match_by_directory(&identity, &projects)
             else {
                 continue;
             };
-            match self.assign_session(session.id, project.id).await {
+            let project_id = project.id;
+            let project_name = project.name.clone();
+            let adoption = project
+                .repo_remote
+                .is_none()
+                .then(|| identity.remote.clone())
+                .flatten();
+            match self.assign_session(session.id, project_id).await {
                 Ok(()) => linked += 1,
                 Err(e) => tracing::warn!(
                     error = %e,
                     "backfill: could not link session {} to project '{}'",
                     session.id,
-                    project.name,
+                    project_name,
                 ),
+            }
+            // Mirror the adopted remote into the in-memory list: a later
+            // session in the same sweep must see the collision guard armed.
+            if let Some(remote) = adoption
+                && let Ok(true) = self.set_project_repo_remote(project_id, &remote).await
+            {
+                if let Some(p) = projects.iter_mut().find(|p| p.id == project_id) {
+                    p.repo_remote = Some(remote.clone());
+                }
+                tracing::info!("Adopted repo remote '{remote}' for project '{project_name}'");
             }
         }
         if linked > 0 {

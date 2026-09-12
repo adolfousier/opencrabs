@@ -90,6 +90,10 @@ pub(crate) const MIGRATION_SQL: &[&str] = &[
     // repaired by `heal_notify_queue` after `to_latest` (#1401).
     include_str!("../migrations/20260906000001_add_notify_queue.sql"),
     include_str!("../migrations/20260908000001_pending_requests_thread_id.sql"),
+    // #1510: projects.repo_remote, the adoption-only second identity. Appended
+    // last per the list invariant; the column is NULL by design on existing
+    // rows so no heal pass is needed.
+    include_str!("../migrations/20260912000001_add_project_repo_remote.sql"),
 ];
 
 pub(crate) fn build_migrations() -> Migrations<'static> {

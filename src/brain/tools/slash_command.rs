@@ -450,26 +450,37 @@ impl SlashCommandTool {
             let project_svc = crate::services::ProjectService::new(svc_ctx);
             let sid = context.session_id;
             let dir_str = canonical.to_string_lossy().to_string();
-            let dir_name = canonical
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("")
-                .to_string();
             assigned_project = tokio::task::block_in_place(|| {
                 tokio::runtime::Handle::current().block_on(async {
                     let _ = session_svc
-                        .update_session_working_directory(sid, Some(dir_str))
+                        .update_session_working_directory(sid, Some(dir_str.clone()))
                         .await;
 
                     // Auto-assign session to project if WD matches a known project dir (#220).
                     // Through the shared matcher so this and the first-turn
-                    // link (#1445) cannot answer the same question differently.
+                    // link (#1445) cannot answer the same question differently,
+                    // and through the same git identity so /cd records the
+                    // remote it just proved (#1510).
+                    let identity =
+                        crate::services::project_match::resolve_directory_identity(&dir_str);
                     if let Ok(projects) = project_svc.list_projects().await
                         && let Some(project) =
-                            crate::services::project_match::match_by_directory(&dir_name, &projects)
+                            crate::services::project_match::match_by_directory(&identity, &projects)
                     {
                         if let Err(e) = project_svc.assign_session(sid, project.id).await {
                             tracing::warn!(error = %e, "failed to assign session to project");
+                        }
+                        if project.repo_remote.is_none()
+                            && let Some(ref remote) = identity.remote
+                            && let Err(e) = project_svc
+                                .set_project_repo_remote(project.id, remote)
+                                .await
+                        {
+                            tracing::warn!(
+                                error = %e,
+                                "failed to adopt repo remote for project '{}'",
+                                project.name
+                            );
                         }
                         tracing::info!(
                             "Auto-assigned session {} to project '{}'",

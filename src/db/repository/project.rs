@@ -127,6 +127,33 @@ impl ProjectRepository {
         Ok(())
     }
 
+    /// Adopt the first remote ever recorded for a project, #1510.
+    ///
+    /// Writes only when the column is still NULL: once a project's identity is
+    /// established, a later session cannot redefine it. Deliberately does not
+    /// stamp `updated_at` — the project listing sorts by it and derived
+    /// metadata must not float old projects to the top (the #1460 lesson).
+    /// Returns whether this call was the one that recorded it.
+    pub async fn set_repo_remote_if_none(&self, id: Uuid, remote: &str) -> Result<bool> {
+        let id_str = id.to_string();
+        let r = remote.to_string();
+        let changed = self
+            .pool
+            .get()
+            .await
+            .context("Failed to get connection")?
+            .interact(move |conn| {
+                conn.execute(
+                    "UPDATE projects SET repo_remote = ?2 WHERE id = ?1 AND repo_remote IS NULL",
+                    params![id_str, r],
+                )
+            })
+            .await
+            .map_err(interact_err)?
+            .context("Failed to adopt project repo_remote")?;
+        Ok(changed > 0)
+    }
+
     /// Delete a project (sessions get project_id set to NULL via FK ON DELETE SET NULL)
     pub async fn delete(&self, id: Uuid) -> Result<()> {
         let id_str = id.to_string();

@@ -336,6 +336,7 @@ pub mod profile_pid_lock_test;
 pub mod profile_preempt_test;
 pub mod profiles_dialog_test;
 pub mod progress_callback_fanout_test;
+pub mod project_remote_identity_test;
 pub mod project_runner_test;
 pub mod provider_matches_session_test;
 pub mod provider_models_isolation_test;
