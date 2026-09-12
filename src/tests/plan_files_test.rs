@@ -326,6 +326,35 @@ async fn sync_refuses_malformed_body_and_restores_previous_mirror() {
     .await;
 }
 
+#[tokio::test]
+async fn sync_refused_first_write_restores_scaffold_not_empty() {
+    in_temp_home(async {
+        // A fresh plan has never mirrored a body: description is empty. A
+        // refused first draft must restore the scaffold, not wipe the file.
+        let sid = Uuid::new_v4();
+        let plan = PlanDocument::new(sid, "Fresh design".to_string());
+        save_plan(&plan).await.unwrap();
+        let md_path = create_design_md(sid, "Fresh design").await.unwrap();
+        let draft = "# Fresh design\n\n## Context\n- **Problem:**\n  pushed to the next line\n";
+        std::fs::write(&md_path, draft).unwrap();
+        let error = sync_md_to_json(sid).await.unwrap_err();
+        assert!(error.contains("PLAN TEMPLATE WRITE REFUSED"));
+        let restored = std::fs::read_to_string(&md_path).unwrap();
+        assert!(restored.contains("## Context"));
+        assert!(restored.contains("## Implementation steps"));
+        assert!(restored.contains("1. \n   - Done when: "));
+        assert!(!restored.contains("pushed to the next line"));
+        assert_eq!(load_plan(sid).await.unwrap().description, "");
+
+        // The writer can fix forward: a valid rewrite syncs normally.
+        let good = "# Fresh design\n\n## Context\n- **Problem:** real\n- **Target state:** fixed\n- **Intent:** test\n\n## Implementation steps\n1. Do it\n";
+        std::fs::write(&md_path, good).unwrap();
+        sync_md_to_json(sid).await.unwrap();
+        assert_eq!(load_plan(sid).await.unwrap().description, good);
+    })
+    .await;
+}
+
 #[test]
 fn template_warnings_flag_missing_sections() {
     let empty = template_section_warnings("just prose, no structure");
