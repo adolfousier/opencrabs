@@ -103,3 +103,4 @@ desktop/dist/
 # ignoring the path here does not affect files already tracked there. Drop
 # this line when the branch lands on main.
 desktop/
+bench_scratch/
