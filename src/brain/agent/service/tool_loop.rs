@@ -1,4 +1,5 @@
 use super::builder::AgentService;
+use super::compaction_notice::CompactionNotifier;
 use super::types::*;
 use crate::brain::agent::context::AgentContext;
 use crate::brain::agent::error::{AgentError, Result};
@@ -1246,7 +1247,13 @@ impl AgentService {
         // confirmation to the user. The full summary is for the agent, not the user.
         if is_manual_compact {
             let compacted = self
-                .compact_context(session_id, &mut context, &model_name, None)
+                .compact_context(
+                    session_id,
+                    &mut context,
+                    &model_name,
+                    None,
+                    CompactionNotifier::manual_from(session_id, progress_callback.as_ref()),
+                )
                 .await;
             // The summariser retried in silence before #1520: its provider
             // records the attempts, nothing drained them until the next chat
@@ -2144,6 +2151,7 @@ impl AgentService {
                             &mut context,
                             &model_name,
                             cancel_token.as_ref(),
+                            CompactionNotifier::auto_from(session_id, progress_callback.as_ref()),
                         )
                         .await
                     {
@@ -3761,7 +3769,13 @@ impl AgentService {
                     context.hard_truncate_to(too_long_pre_truncate);
                 }
                 let compacted = self
-                    .compact_context(session_id, &mut context, &model_name, cancel_token.as_ref())
+                    .compact_context(
+                        session_id,
+                        &mut context,
+                        &model_name,
+                        cancel_token.as_ref(),
+                        CompactionNotifier::auto_from(session_id, progress_callback.as_ref()),
+                    )
                     .await;
                 emit_retry_notices(
                     &self.provider_for_session(session_id),

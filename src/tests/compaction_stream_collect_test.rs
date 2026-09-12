@@ -248,6 +248,7 @@ async fn an_http_provider_is_summarised_through_the_stream_path() {
         request(),
         &CancellationToken::new(),
         std::time::Duration::from_secs(30),
+        None,
     )
     .await
     .expect("served");
@@ -270,6 +271,7 @@ async fn a_cli_provider_keeps_the_non_streaming_request() {
         request(),
         &CancellationToken::new(),
         std::time::Duration::from_secs(30),
+        None,
     )
     .await
     .expect("served");

@@ -217,6 +217,7 @@ async fn quota_on_primary_falls_through_to_the_chain() {
         request("primary-model"),
         &CancellationToken::new(),
         ATTEMPT_DEADLINE,
+        None,
     )
     .await
     .expect("#1247: the chain must serve compaction when the primary is dead");
@@ -248,6 +249,7 @@ async fn fallback_model_is_remapped_when_unsupported() {
         request("a-model-only-the-primary-has"),
         &CancellationToken::new(),
         ATTEMPT_DEADLINE,
+        None,
     )
     .await
     .expect("remapped request must succeed");
@@ -281,6 +283,7 @@ async fn a_fallback_listing_the_requested_model_still_runs_its_own_default() {
         request("shared-model"),
         &CancellationToken::new(),
         ATTEMPT_DEADLINE,
+        None,
     )
     .await
     .expect("the substitute answers");
@@ -318,6 +321,7 @@ async fn two_providers_sharing_an_endpoint_get_different_requests() {
         request("big"),
         &CancellationToken::new(),
         ATTEMPT_DEADLINE,
+        None,
     )
     .await
     .expect("the last substitute answers");
@@ -362,6 +366,7 @@ async fn context_overflow_on_primary_reaches_the_first_fallback() {
         request("mock-default"),
         &CancellationToken::new(),
         ATTEMPT_DEADLINE,
+        None,
     )
     .await
     .expect("the wider fallback summarises");
@@ -395,6 +400,7 @@ async fn an_overflow_walks_the_widest_window_first() {
         request("mock-default"),
         &CancellationToken::new(),
         ATTEMPT_DEADLINE,
+        None,
     )
     .await
     .expect("the wide fallback summarises");
@@ -428,6 +434,7 @@ async fn a_quota_failure_keeps_the_configured_order() {
         request("mock-default"),
         &CancellationToken::new(),
         ATTEMPT_DEADLINE,
+        None,
     )
     .await
     .expect("the first configured fallback answers");
@@ -506,6 +513,7 @@ async fn empty_chain_surfaces_the_primary_error() {
         request("primary-model"),
         &CancellationToken::new(),
         ATTEMPT_DEADLINE,
+        None,
     )
     .await
     .expect_err("nothing to fall back to");
@@ -531,6 +539,7 @@ async fn fatal_error_does_not_walk_the_chain() {
         request("primary-model"),
         &CancellationToken::new(),
         ATTEMPT_DEADLINE,
+        None,
     )
     .await
     .expect_err("a fatal error stays fatal");
@@ -561,6 +570,7 @@ async fn exhausted_chain_reports_what_was_tried() {
         request("primary-model"),
         &CancellationToken::new(),
         ATTEMPT_DEADLINE,
+        None,
     )
     .await
     .expect_err("every provider failed");
@@ -592,6 +602,7 @@ async fn cancellation_short_circuits_the_walk() {
         request("m"),
         &cancel,
         ATTEMPT_DEADLINE,
+        None,
     )
     .await
     .expect_err("cancelled");
@@ -684,6 +695,7 @@ mod watchdog {
             request("primary-model"),
             &CancellationToken::new(),
             SHORT,
+            None,
         )
         .await
         .expect("the chain should have rescued a wedged primary");
@@ -716,6 +728,7 @@ mod watchdog {
             request("primary-model"),
             &CancellationToken::new(),
             SHORT,
+            None,
         )
         .await
         .expect("a hang mid-chain must not strand the entries behind it");
@@ -734,6 +747,7 @@ mod watchdog {
             request("primary-model"),
             &CancellationToken::new(),
             SHORT,
+            None,
         )
         .await
         .expect_err("a wedged provider with no chain is a failure, not a wait");

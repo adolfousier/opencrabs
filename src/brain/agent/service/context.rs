@@ -339,6 +339,7 @@ impl AgentService {
         context: &mut AgentContext,
         model_name: &str,
         cancel_token: Option<&CancellationToken>,
+        notifier: Option<super::compaction_notice::CompactionNotifier>,
     ) -> Result<String> {
         // This call replaces the whole context, so a background summariser
         // still describing the pre-call conversation is describing something
@@ -366,6 +367,7 @@ impl AgentService {
             self.auto_approve_tools,
             cancel,
             self.compaction_attempt_deadline(session_id),
+            notifier,
         )
         .await?;
 
@@ -487,7 +489,9 @@ impl AgentService {
         request: LLMRequest,
         cancel: &CancellationToken,
         attempt_deadline: std::time::Duration,
+        notifier: Option<&super::compaction_notice::CompactionNotifier>,
     ) -> Result<crate::brain::provider::LLMResponse> {
+        use super::compaction_notice::CompactionStep;
         use crate::brain::provider::error as provider_error;
 
         let primary_name = primary.name().to_string();
@@ -504,6 +508,15 @@ impl AgentService {
         };
 
         if fallbacks.is_empty() || !provider_error::should_try_next_provider(&first_err) {
+            if let Some(n) = notifier {
+                n.step(CompactionStep::Failed {
+                    detail: format!(
+                        "'{}': {}",
+                        primary_name,
+                        provider_error::short_error_reason(&first_err)
+                    ),
+                });
+            }
             return Err(AgentError::Provider(first_err));
         }
 
@@ -512,6 +525,12 @@ impl AgentService {
             primary_name,
             provider_error::short_error_reason(&first_err),
         );
+        if let Some(n) = notifier {
+            n.step(CompactionStep::AttemptFailed {
+                provider: primary_name.clone(),
+                reason: provider_error::short_error_reason(&first_err),
+            });
+        }
 
         // Size is the one failure where the order matters: a narrower window
         // than the one that just refused is a refusal spent before the
@@ -544,6 +563,12 @@ impl AgentService {
                 name,
                 fb_request.model
             );
+            if let Some(n) = notifier {
+                n.step(CompactionStep::TryingFallback {
+                    provider: name.clone(),
+                    model: fb_request.model.clone(),
+                });
+            }
 
             let err = tokio::select! {
                 biased;
@@ -565,6 +590,12 @@ impl AgentService {
                 name,
                 provider_error::short_error_reason(&err)
             ));
+            if let Some(n) = notifier {
+                n.step(CompactionStep::AttemptFailed {
+                    provider: name.clone(),
+                    reason: provider_error::short_error_reason(&err),
+                });
+            }
             last_err = err;
         }
 
@@ -574,6 +605,11 @@ impl AgentService {
             &tried,
         );
         tracing::error!("Compaction: fallback chain exhausted: {summary}");
+        if let Some(n) = notifier {
+            n.step(CompactionStep::Failed {
+                detail: summary.clone(),
+            });
+        }
         Err(AgentError::Provider(provider_error::with_chain_summary(
             last_err, summary,
         )))
@@ -603,6 +639,7 @@ impl AgentService {
         auto_approve_tools: bool,
         cancel: CancellationToken,
         attempt_deadline: std::time::Duration,
+        notifier: Option<super::compaction_notice::CompactionNotifier>,
     ) -> Result<String> {
         let remaining_budget = snapshot_max_tokens.saturating_sub(snapshot_token_count);
 
@@ -798,6 +835,7 @@ impl AgentService {
             request,
             &cancel,
             attempt_deadline,
+            notifier.as_ref(),
         )
         .await?;
 

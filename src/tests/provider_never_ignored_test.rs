@@ -239,6 +239,7 @@ async fn compaction_re_attempts_a_quota_failed_provider_on_the_next_run() {
             request(),
             &tokio_util::sync::CancellationToken::new(),
             ATTEMPT_DEADLINE,
+            None,
         )
         .await;
         assert!(outcome.is_err(), "run {run}: every entry is quota-dead");

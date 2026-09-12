@@ -14,6 +14,7 @@
 //! cancellation race details, the failed async-spawn variant).
 
 use super::builder::AgentService;
+use super::compaction_notice::CompactionNotifier;
 use super::types::{ProgressCallback, ProgressEvent};
 use crate::brain::agent::context::AgentContext;
 use uuid::Uuid;
@@ -341,7 +342,13 @@ impl AgentService {
         const MAX_ATTEMPTS: u32 = 3;
         for attempt in 1..=MAX_ATTEMPTS {
             match self
-                .compact_context(session_id, context, model_name, cancel_token)
+                .compact_context(
+                    session_id,
+                    context,
+                    model_name,
+                    cancel_token,
+                    CompactionNotifier::auto_from(session_id, progress_callback.as_ref()),
+                )
                 .await
             {
                 Ok(summary) => {
@@ -369,7 +376,13 @@ impl AgentService {
                 target_tokens,
             );
             if let Ok(summary) = self
-                .compact_context(session_id, context, model_name, cancel_token)
+                .compact_context(
+                    session_id,
+                    context,
+                    model_name,
+                    cancel_token,
+                    CompactionNotifier::auto_from(session_id, progress_callback.as_ref()),
+                )
                 .await
             {
                 summary_result = Some(summary);
@@ -582,6 +595,17 @@ impl AgentService {
                     "Background compaction failed after {:?}: {e}",
                     started.elapsed()
                 );
+                // A background summariser that dies used to die in the log
+                // only; the user saw the context climb and nothing else
+                // (#1521).
+                if let Some(cb) = progress_callback {
+                    cb(
+                        session_id,
+                        ProgressEvent::SelfHealingAlert {
+                            message: format!("Background compaction failed: {e}"),
+                        },
+                    );
+                }
                 PendingState::Failed
             }
             Err(e) => {
@@ -639,6 +663,7 @@ impl AgentService {
                 auto_approve,
                 cancel,
                 attempt_deadline,
+                None,
             )
             .await?;
             Ok(Self::decorate_compaction_summary(summary, session_id, subagents).await)
