@@ -3416,8 +3416,13 @@ impl Provider for OpenAIProvider {
             }
         }
 
-        // Retry the entire API call with exponential backoff
-        let result = retry(
+        // Retry the entire API call with exponential backoff. Each retry is
+        // recorded into `retry_notices` exactly like the streaming path, so a
+        // caller of the non-streaming request (compaction above all) can
+        // surface "Retry N/M" instead of retrying in silence (#1520).
+        let notices = self.retry_notices.clone();
+        let pname = self.name().to_string();
+        let result = crate::utils::retry::retry_with_notify(
             || async {
                 tracing::debug!("Sending request to OpenAI API: {}", self.base_url);
                 let body = self.encode_body(&openai_request)?;
@@ -3475,6 +3480,15 @@ impl Provider for OpenAIProvider {
                 Ok(llm_response)
             },
             &retry_config,
+            |attempt, max, err| {
+                if let Ok(mut v) = notices.lock() {
+                    v.push((
+                        attempt,
+                        max,
+                        format!("{}/{}: {}", pname, model, retry_reason(err)),
+                    ));
+                }
+            },
         )
         .await;
 

@@ -1245,10 +1245,18 @@ impl AgentService {
         // Manual /compact: force compaction, persist summary to DB, return a brief
         // confirmation to the user. The full summary is for the agent, not the user.
         if is_manual_compact {
-            match self
+            let compacted = self
                 .compact_context(session_id, &mut context, &model_name, None)
-                .await
-            {
+                .await;
+            // The summariser retried in silence before #1520: its provider
+            // records the attempts, nothing drained them until the next chat
+            // turn. Surface them here, success or failure.
+            emit_retry_notices(
+                &self.provider_for_session(session_id),
+                session_id,
+                progress_callback.as_ref(),
+            );
+            match compacted {
                 Ok(summary) => {
                     // Persist compaction marker to DB so restarts load from this point
                     let compaction_marker = format!(
@@ -3752,10 +3760,15 @@ impl AgentService {
                 if context.token_count > too_long_pre_truncate {
                     context.hard_truncate_to(too_long_pre_truncate);
                 }
-                match self
+                let compacted = self
                     .compact_context(session_id, &mut context, &model_name, cancel_token.as_ref())
-                    .await
-                {
+                    .await;
+                emit_retry_notices(
+                    &self.provider_for_session(session_id),
+                    session_id,
+                    progress_callback.as_ref(),
+                );
+                match compacted {
                     Ok(summary) => {
                         let compaction_marker = format!(
                             "[CONTEXT COMPACTION — The conversation was automatically compacted. \
