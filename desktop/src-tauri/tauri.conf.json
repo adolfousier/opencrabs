@@ -1,0 +1,38 @@
+{
+  "$schema": "https://raw.githubusercontent.com/nickknapton12/tauri-docs/refs/heads/v2/src/content/docs/_schema/config.schema.json",
+  "productName": "OpenCrabs",
+  "version": "0.1.1",
+  "identifier": "com.opencrabs.desktop",
+  "build": {
+    "frontendDist": "../target/dx/opencrabs-desktop-ui/release/web/public",
+    "devUrl": "http://localhost:8080",
+    "beforeDevCommand": "dx serve --port 8080",
+    "beforeBuildCommand": "dx build --release"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "title": "OpenCrabs",
+        "width": 1200,
+        "height": 800,
+        "minWidth": 900,
+        "minHeight": 600,
+        "center": true,
+        "decorations": true,
+        "transparent": false,
+        "resizable": true,
+        "fullscreen": false
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval'; style-src 'self'; img-src 'self' data: blob: https:; connect-src 'self' https: ws://127.0.0.1:8080 ws://localhost:8080; font-src 'self' data:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": ["icons/32x32.png", "icons/icon.png"],
+    "resources": []
+  }
+}
