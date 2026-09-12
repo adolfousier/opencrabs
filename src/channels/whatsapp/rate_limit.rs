@@ -254,6 +254,22 @@ impl WhatsappRateLimiter {
     /// would confuse the edit-handle tracking. Returns true when the send
     /// may proceed. A saturating episode still arms the one-time owner
     /// alert (#1407).
+    /// Pace one non-text send (media, reaction, poll, profile change) through
+    /// the same budget as text (#1485 prerequisite).
+    ///
+    /// `gate` cannot be used for these: it parks the send in a queue that
+    /// holds `{ jid, text }`, and the drainer replays it as a plain text
+    /// message. Queueing a photo there would silently deliver the caption
+    /// as a bare message and drop the image. So this paces on the bucket
+    /// exactly like `gate`, but a saturated daily cap returns false and the
+    /// caller reports the refusal to the agent instead of pretending the
+    /// send happened.
+    pub async fn gate_action(&self, cfg: &WaRateLimitConfig, is_owner: bool) -> bool {
+        // Same admit loop as `gate_ephemeral`; they differ only in what the
+        // caller does with a false (drop a progress chunk vs. tell the agent).
+        self.gate_ephemeral(cfg, is_owner).await
+    }
+
     pub async fn gate_ephemeral(&self, cfg: &WaRateLimitConfig, is_owner: bool) -> bool {
         loop {
             let decision = {
