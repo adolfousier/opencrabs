@@ -399,6 +399,14 @@ profile_id = ""
 # to reach for `tool_search`.
 # lazy_tools = false
 
+# Skill glob gate (default: true). When a SKILL.md declares a `globs:`
+# frontmatter field, tool calls touching a path matching one of those globs
+# are rejected until the skill body is loaded in the current session context
+# (fresh sessions AND after compaction). The rejection carries the full skill
+# body; the identical retry then succeeds. Per-skill opt-out: delete the
+# skill's `globs` key. Set false to disable the gate entirely.
+# skill_glob_gate = true
+
 # Provider/model for Recursive Self-Improvement (RSI) cycles. The model is
 # paired with the provider, same as subagent_provider/subagent_model.
 # Unset self_improvement_provider → inherit the active provider; unset

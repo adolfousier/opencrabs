@@ -1383,6 +1383,14 @@ pub struct AgentConfig {
     #[serde(default = "default_background_compaction")]
     pub background_compaction: bool,
 
+    /// Skill glob gate master switch (issue #150). **On by default.**
+    /// When a skill declares `globs:` frontmatter, tool calls touching a
+    /// matching path are rejected until the skill body is loaded in the
+    /// current session context (fresh sessions AND post-compaction).
+    /// Per-skill opt-out: delete the skill's `globs` key.
+    #[serde(default = "default_skill_glob_gate")]
+    pub skill_glob_gate: bool,
+
     /// Lazy tool-schema loading. **On by default.** A request ships only the
     /// CORE tool schemas (~4k tokens) plus `tool_search`, instead of all ~95
     /// (~20k counted in every request's input); the agent calls `tool_search`
@@ -1445,6 +1453,10 @@ impl AgentConfig {
 }
 
 fn default_background_compaction() -> bool {
+    true
+}
+
+fn default_skill_glob_gate() -> bool {
     true
 }
 
@@ -1544,6 +1556,7 @@ impl Default for AgentConfig {
             default_model: None,
             silent_compaction: false,
             background_compaction: default_background_compaction(),
+            skill_glob_gate: default_skill_glob_gate(),
             lazy_tools: default_lazy_tools(),
             redact_sensitive_data: default_redact_sensitive_data(),
             redact_group: None,

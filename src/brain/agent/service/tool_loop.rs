@@ -472,6 +472,12 @@ impl AgentService {
             .active_skills_for_session(session_id)
             .into_iter()
             .collect();
+        // Epoch bump (#150) BEFORE the seen-inventory read below is NOT
+        // required and after it is not harmful: `note_compaction` bumps a
+        // per-session epoch counter and clears nothing, so
+        // `seen_for_session` is unaffected either way (decision 5 — a
+        // clearing implementation would empty the stamp's inventory).
+        crate::brain::tools::seen_skills::note_compaction(session_id);
         let seen: std::collections::BTreeSet<String> =
             crate::brain::tools::seen_skills::seen_for_session(session_id)
                 .into_iter()

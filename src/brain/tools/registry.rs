@@ -86,6 +86,9 @@ pub struct ToolRegistry {
     session_active: RwLock<HashMap<uuid::Uuid, HashMap<String, u64>>>,
     /// Monotonic counter stamping each activation/touch for LRU ordering.
     activation_seq: std::sync::atomic::AtomicU64,
+    /// Skill glob gate master switch (`[agent] skill_glob_gate`, #150).
+    /// Default true; the AgentService wiring sets this from config.
+    skill_gate_enabled: bool,
 }
 
 impl ToolRegistry {
@@ -95,7 +98,14 @@ impl ToolRegistry {
             tools: RwLock::new(HashMap::new()),
             session_active: RwLock::new(HashMap::new()),
             activation_seq: std::sync::atomic::AtomicU64::new(0),
+            skill_gate_enabled: true,
         }
+    }
+
+    /// Set the skill glob gate master switch (#150). Called by the
+    /// AgentService wiring with the `[agent] skill_glob_gate` config value.
+    pub fn set_skill_gate_enabled(&mut self, enabled: bool) {
+        self.skill_gate_enabled = enabled;
     }
 
     /// Mark EXTENDED tools as active for a session (or refresh their recency),
@@ -360,6 +370,50 @@ impl ToolRegistry {
                     return Err(ToolError::ApprovalRequired(reason));
                 }
             }
+        }
+
+        // Skill glob gate (issue #150): a tool call touching a path that
+        // matches a globs-declaring skill the session hasn't loaded is
+        // rejected with the skill's FULL body as the error content (the
+        // plan_gate deny precedent) and `mark_seen` arms the identical
+        // retry. Fires per call inside `execute` — sequential, parallel,
+        // and sub-agent dispatch all pass through here, so there is no
+        // batch-splice logic to get wrong. Fail-open: any internal gate
+        // error is a `Pass` inside `skill_gate::check` itself.
+        let verdict = super::skill_gate::check(
+            context.session_id,
+            name,
+            &input,
+            &context.working_directory,
+            self.skill_gate_enabled,
+        );
+        if let super::skill_gate::GateVerdict::Block {
+            skill,
+            matched_path,
+            body,
+            globs,
+        } = verdict
+        {
+            tracing::info!(
+                "skill_gate: blocked '{}' — path '{}' matches skill '{}' (not loaded in context)",
+                name,
+                matched_path,
+                skill
+            );
+            // Arm the retry BEFORE the agent sees the result: with the
+            // epoch-carrying registry (#150) this upserts the current
+            // epoch, so the identical re-issued call passes.
+            super::seen_skills::mark_seen(context.session_id, &skill);
+            let content = format!(
+                "[SKILL GATE] This call touches '{}' which matches skill '{}' (globs: {}), \
+                 not loaded in the current session context. The full skill body follows. \
+                 Read it, then re-issue the identical call.\n\n---\n\n{}",
+                matched_path,
+                skill,
+                globs.join(", "),
+                body
+            );
+            return Ok(ToolResult::error(content));
         }
 
         // Check if approval is required

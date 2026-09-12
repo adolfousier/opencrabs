@@ -1,7 +1,7 @@
 //! Tests for the skill loader — frontmatter parsing, built-in registry,
 //! and user-directory overlay.
 
-use crate::brain::skills::{Skill, SkillSource, load_all_skills, resolve_skill};
+use crate::brain::skills::{load_all_skills, resolve_skill, Skill, SkillSource};
 
 #[test]
 fn parses_minimal_frontmatter() {
@@ -271,4 +271,66 @@ fn every_shipped_skill_template_is_registered_as_a_builtin() {
              so it reaches no user. BUILTIN_SKILLS: {names:?}"
         );
     }
+}
+
+// --- globs frontmatter (issue #150) ---
+
+#[test]
+fn globs_comma_string_form() {
+    let raw =
+        "---\nname: foo\ndescription: d\nglobs: skills/opencrabs-dev/**, README.md\n---\nBody.\n";
+    let skill = Skill::parse("foo", raw, SkillSource::Builtin).unwrap();
+    assert_eq!(skill.globs, vec!["skills/opencrabs-dev/**", "README.md"]);
+}
+
+#[test]
+fn globs_inline_flow_form() {
+    let raw = "---\nname: foo\ndescription: d\nglobs: [a/**, b.md]\n---\nBody.\n";
+    let skill = Skill::parse("foo", raw, SkillSource::Builtin).unwrap();
+    assert_eq!(skill.globs, vec!["a/**", "b.md"]);
+}
+
+#[test]
+fn globs_block_list_form() {
+    let raw = "---\nname: foo\ndescription: d\nglobs:\n  - one/**\n  - \"two.md\"\n  - 'three.md'\n---\nBody.\n";
+    let skill = Skill::parse("foo", raw, SkillSource::Builtin).unwrap();
+    assert_eq!(skill.globs, vec!["one/**", "two.md", "three.md"]);
+}
+
+#[test]
+fn globs_quotes_stripped_comma_string() {
+    let raw = "---\nname: foo\ndescription: d\nglobs: \"a/**\", 'b.md'\n---\nBody.\n";
+    let skill = Skill::parse("foo", raw, SkillSource::Builtin).unwrap();
+    assert_eq!(skill.globs, vec!["a/**", "b.md"]);
+}
+
+#[test]
+fn globs_empty_when_absent() {
+    let raw = "---\nname: foo\ndescription: d\n---\nBody.\n";
+    let skill = Skill::parse("foo", raw, SkillSource::Builtin).unwrap();
+    assert!(skill.globs.is_empty());
+}
+
+#[test]
+fn globs_nested_metadata_ignored() {
+    // A nested `metadata:` block is an unknown-key region for the
+    // top-level parser; its `globs:` line must NOT be picked up.
+    let raw = "---\nname: foo\ndescription: d\nmetadata:\n  globs: nested/**\n---\nBody.\n";
+    let skill = Skill::parse("foo", raw, SkillSource::Builtin).unwrap();
+    assert!(skill.globs.is_empty());
+}
+
+#[test]
+fn globs_block_list_closed_by_next_key() {
+    let raw = "---\nname: foo\ndescription: d\nglobs:\n  - a/**\nreview_gate: true\n---\nBody.\n";
+    let skill = Skill::parse("foo", raw, SkillSource::Builtin).unwrap();
+    assert_eq!(skill.globs, vec!["a/**"]);
+    assert!(skill.review_gate);
+}
+
+#[test]
+fn globs_empty_items_skipped() {
+    let raw = "---\nname: foo\ndescription: d\nglobs: a/**, , b.md,\n---\nBody.\n";
+    let skill = Skill::parse("foo", raw, SkillSource::Builtin).unwrap();
+    assert_eq!(skill.globs, vec!["a/**", "b.md"]);
 }

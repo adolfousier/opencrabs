@@ -31,11 +31,7 @@ never assume the capability is missing before searching.
 
 ## What belongs here
 
-- Skill pointers (what/where to load on demand)
-- Commands vs Tools vs Skills distinction
-- Profile-aware paths
-- Custom routing rules specific to your setup
-
+Skill pointers, command/tool/skill distinction, profile-aware paths, custom routing rules.
 
 ## Skills (load on demand)
 
@@ -52,11 +48,20 @@ never assume the capability is missing before searching.
 
 ## Commands vs Tools vs Skills
 
-| Concept | What it is | Example |
-|---------|-----------|---------|
-| Tool | A function the agent calls directly | `bash`, `read_file`, `grep` |
-| Command | A slash shortcut defined in commands.toml | `/check`, `/rebuild`, `/status` |
-| Skill | A workflow template loaded on demand | `/browser-cdp`, `/channels` |
+Tool = function the agent calls (`bash`, `grep`); command = slash shortcut in commands.toml (`/check`); skill = workflow template loaded on demand (`/browser-cdp`).
+
+## Skill `globs:` frontmatter (path-scoped skill gate, #150)
+
+A `SKILL.md` may declare `globs:` so its topic is ENFORCED, not advisory: a tool call referencing a matching path is rejected (with the full skill body in the rejection) when the skill body is not in the current session context (fresh session or after compaction); the identical retry succeeds. Accepted forms — Cursor comma-string `globs: a/**, b.md`, inline flow `globs: [a/**, b.md]`, block list — quotes stripped; `metadata.globs` is ignored.
+
+- **Opt-in per skill:** no `globs` key = invisible to the gate; built-ins ship glob-less.
+- **Match:** case-insensitive against the normalized ABSOLUTE candidate path; `*` = one segment, `**` = recursive — write `**/` prefixes.
+- **Pattern resolution (narrow by design):** a leading `~` expands to the home directory; a WILDCARD-LED pattern (`**/x`, `*/x`, `[ab]/x`) is UNANCHORED and used verbatim, matching at any depth — never prefix it with a path, or the skill is silently disarmed; any other relative pattern anchors at the tool cwd; the result is normalized.
+- **Harvested:** `path`/`file_path`/`filePath` + path-like tokens in bash `command`; `grep`/`glob` tool `pattern`s never are.
+- **Exempt (recovery) tools:** `load_brain_file`, `read_file`, `slash_command`, `session_search`, `tool_search`, `write_opencrabs_file`, `execute_code` — a blocked agent must be able to re-arm itself.
+- **Sub-agents:** gated too (shared registry path) — one extra blocked round-trip per matching skill per fresh sub-agent.
+- **Fail-open law:** any gate-internal error passes the call through; malformed globs WARN once and are skipped.
+- **Master switch:** `[agent] skill_glob_gate = true` (default) in config.toml.
 
 ## Build & Runtime Commands
 
@@ -67,7 +72,7 @@ never assume the capability is missing before searching.
 
 ## Scheduling (Cron)
 
-Manage scheduled jobs with the **`cron_manage`** tool (`action`: create / list / delete / enable / disable / test). Jobs run in **isolated sessions on your configured provider/model by default** — omit `provider`/`model` for the default; set `thinking: off` for routine jobs; use `deliver_to` only to send results to a channel.
+Manage scheduled jobs with the **`cron_manage`** tool (`action`: create/list/delete/enable/disable/test). Jobs run in isolated sessions on your configured provider/model by default; set `thinking: off` for routine jobs; `deliver_to` sends results to a channel.
 
 **Cron expression format (the common trap):** 5 fields `min hour dom mon dow`. Day-of-week is **1-7 = Sun-Sat** (1=Sunday, 7=Saturday; `0` is invalid) — **use day names** (`Mon-Fri`, `Sun`) instead of numbers. No `@daily`/`@hourly` macros. Set `tz` (IANA, e.g. `America/New_York`) and the job runs in that zone's local time, DST-aware. **Validate before you confirm:** `create` echoes the next run times — read them back; a wrong day-of-week parses fine but the next-run list exposes it. Fix and recreate before telling the user it's set.
 
@@ -75,16 +80,11 @@ Manage scheduled jobs with the **`cron_manage`** tool (`action`: create / list /
 
 STT providers: `voicebox` (local server) > `openai_compatible` > `groq` (Whisper API) > `local` (rwhisper, `local-stt` feature). Override with `stt_fallback_chain`.
 TTS providers: `voicebox` (local server) > `openai_compatible` > `openai` (OpenAI TTS) > `local` (Piper, `local-tts` feature). Override with `tts_fallback_chain`.
-Config: `[providers.stt.*]` / `[providers.tts.*]` in config.toml. Piper voices: `ryan`(default), `amy`, `lessac`, `kristin`, `joe`, `cori`. Local STT presets: `local-tiny`(42MB), `local-base`(142MB), `local-small`(466MB), `local-medium`(1.5GB).
-Audio: all output OGG/Opus via ffmpeg. Models: whisper in `~/.local/share/opencrabs/models/whisper/`, piper in `~/.local/share/opencrabs/models/piper/`. Setup: `/onboard:voice`.
+Config: `[providers.stt.*]` / `[providers.tts.*]`. Piper voices: `ryan`(default), `amy`, `lessac`, `kristin`, `joe`, `cori`. Local STT presets: `local-tiny`(42MB)…`local-medium`(1.5GB). Audio: OGG/Opus via ffmpeg. Models: `~/.local/share/opencrabs/models/{whisper,piper}/`. Setup: `/onboard:voice`.
 
 ## Reporting
 
-- `/mission-control`: analytics (tool usage, failure rates, RSI improvements, brain files), activity feed, inbox proposals, and scheduled cron jobs.
-  Works in the TUI (opens the Mission Control Analytics panel) and in every
-  channel (returns the report as a message). The same data is also available as
-  the `mission_control_report` agent tool, so you can ask in plain language (for
-  example "send me my analytics") and the agent ships the report to the chat.
+- `/mission-control`: analytics (tool usage, failure rates, RSI improvements, brain files), activity feed, inbox proposals, scheduled cron jobs. Works in the TUI and every channel; also available as the `mission_control_report` agent tool ("send me my analytics").
 
 ## Profile-Aware Paths
 
