@@ -362,6 +362,10 @@ impl Tool for WhatsAppSendTool {
                     "description": "Array of poll option strings (2-12) for send_poll"
                 },
                 "typing_active": {
+                "voice_note": {
+                    "type": "boolean",
+                    "description": "For send_audio: true (default) renders a native WhatsApp voice note (tap-to-play bubble) and shows a recording indicator while uploading. false sends a plain audio file attachment."
+                },
                     "type": "boolean",
                     "description": "For typing action: true = composing, false = paused. Default true."
                 }
@@ -702,7 +706,8 @@ impl Tool for WhatsAppSendTool {
                 };
                 match client.send_message(jid, wa_msg).await {
                     Ok(_) => Ok(ToolResult::success(format!(
-                        "Audio sent to {} via WhatsApp.",
+                        "{} sent to {} via WhatsApp.",
+                        if ptt { "Voice note" } else { "Audio" },
                         jid_str
                     ))),
                     Err(e) => Ok(ToolResult::error(format!("Failed to send audio: {}", e))),
@@ -842,7 +847,13 @@ impl Tool for WhatsAppSendTool {
                     })),
                     ..Default::default()
                 };
-                match client.send_message(jid, wa_msg).await {
+                let sent = client.send_message(jid.clone(), wa_msg).await;
+                // Clear the indicator whether or not the send worked, so the
+                // chat is not left showing "recording..." forever.
+                if ptt && let Err(e) = client.chatstate().send_paused(&jid).await {
+                    tracing::warn!(error = %e, "WhatsApp: clearing recording indicator failed");
+                }
+                match sent {
                     Ok(_) => Ok(ToolResult::success(format!(
                         "Contact '{}' sent to {} via WhatsApp.",
                         contact_name, jid_str
@@ -853,9 +864,22 @@ impl Tool for WhatsAppSendTool {
 
             // ── react ────────────────────────────────────────────────────────
             "react" => {
+                // #1486: WhatsApp renders a tap-to-play voice bubble only when
+                // the message carries ptt. Without it the same bytes arrive as
+                // an unstyled file attachment. Default on, because the caller
+                // that wants a plain audio FILE is the rare one, and pass
+                // `voice_note: false` to get the old rendering.
+                let ptt = crate::channels::whatsapp::voice_note::wants_voice_note(&input);
+                let mime = crate::channels::whatsapp::voice_note::voice_note_mimetype(&mime, ptt);
                 let (jid, jid_str) =
                     pget!(resolve_jid(&input, &self.whatsapp_state, &self.config_rx).await);
                 let msg_id = pget!(get_str(&input, "message_id")).to_string();
+                // Show "recording..." while the upload is in flight, exactly
+                // as a human sending a voice note would appear (#1486).
+                if ptt && let Err(e) = client.chatstate().send_recording(&jid).await {
+                    tracing::warn!(error = %e, "WhatsApp: recording indicator failed");
+                }
+
                 let emoji = input
                     .get("emoji")
                     .and_then(|v| v.as_str())
@@ -865,6 +889,7 @@ impl Tool for WhatsAppSendTool {
                     .get("from_me")
                     .and_then(|v| v.as_bool())
                     .unwrap_or(false);
+                        ptt: Some(ptt),
 
                 let message_key = waproto::whatsapp::MessageKey {
                     remote_jid: Some(jid.to_string()),

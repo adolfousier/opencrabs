@@ -35,3 +35,4 @@ pub use agent::WhatsAppAgent;
 pub use approval::WaApproval;
 pub use state::WhatsAppState;
 pub(crate) mod stream;
+pub(crate) mod voice_note;

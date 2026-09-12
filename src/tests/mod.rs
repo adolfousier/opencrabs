@@ -927,3 +927,4 @@ pub mod write_partial_view_guard_test;
 pub mod whatsapp_reaction_test;
 pub mod zhipu_endpoint_test;
 pub mod whatsapp_stream_test;
+pub mod whatsapp_voice_note_test;

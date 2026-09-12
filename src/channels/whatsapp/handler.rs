@@ -1831,6 +1831,13 @@ pub(crate) async fn handle_message(
 
                                     })),
                                     ..Default::default()
+                // Show "recording..." across synthesis and upload, the way a
+                // human preparing a voice note appears (#1486). Cleared on
+                // every exit path below, success or failure, so the chat is
+                // never left stuck on the indicator.
+                if let Err(e) = client.chatstate().send_recording(&reply_jid).await {
+                    tracing::warn!(error = %e, "WhatsApp: recording indicator failed");
+                }
                                 };
                                 if let Err(e) =
                                     client.send_message(reply_jid.clone(), audio_msg).await
@@ -1872,6 +1879,9 @@ pub(crate) async fn handle_message(
             }
         }
     }
+                if let Err(e) = client.chatstate().send_paused(&reply_jid).await {
+                    tracing::warn!(error = %e, "WhatsApp: clearing recording indicator failed");
+                }
 }
 
 /// Send a real agent-generated confirmation greeting into the owner's self-chat
