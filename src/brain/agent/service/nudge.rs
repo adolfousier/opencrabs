@@ -173,9 +173,14 @@ pub(crate) fn mermaid_regen_nudge(errors: &[String], attempt: u32, max: u32) -> 
     let quoted = errors.join("\n");
     format!(
         "[System: Your mermaid diagram failed to render — mermaid.ink returned:\n{quoted}\n\
-         This is a syntax error in the fence you wrote (the renderer text above names the \
-         offending line or token). Fix the mermaid source and re-emit the COMPLETE corrected \
-         fence in your reply — keep everything else you wrote. Regen attempt {attempt}/{max}.]"
+         Correction rules:\n\
+         1. Syntax & Notes: Fix the exact token or line reported above. For sequenceDiagrams, \
+         'Note over A,B:' supports at most two participants spanning the range — do not list three or more. \
+         Do not use backticks or HTML tags (except '<br/>') in labels.\n\
+         2. Mobile Layout & Dimensions: Use vertical orientation ('flowchart TD' or 'direction TB'), never wide 'LR' \
+         layouts or unbounded horizontal subgraphs that shrink illegibly on mobile screens. Break wide text with '<br/>'.\n\
+         Re-emit the COMPLETE corrected fence in your reply — keep everything else you wrote. \
+         Regen attempt {attempt}/{max}.]"
     )
 }
 

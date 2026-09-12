@@ -15,7 +15,8 @@
 //! source) instead of killing the message. Pre-validation never panics or
 //! hangs; failure paths yield [`MermaidResult::Failed`].
 
-use super::ast::{Block, MermaidResult};
+pub use super::ast::MermaidResult;
+use super::ast::Block;
 use futures::FutureExt;
 use futures::future::BoxFuture;
 use std::collections::HashMap;
