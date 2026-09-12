@@ -38,7 +38,7 @@ impl Tool for SuggestOptionsTool {
     }
 
     fn description(&self) -> &str {
-        "Surface up to 8 short option messages for the user to pick from as their next input. CHANNEL-AGNOSTIC interactive UI: tap-to-send buttons under your reply on chat channels (Telegram/Discord/...), a pick-list or gray ghost-text accept in the TUI. You MUST call this tool to make options interactive: writing them as plain text leaves dead text with no button to tap. If this is your final action of the turn, the turn ends with the options pending the user's pick (#1178 turn-halt); mid-turn calls attach the options to your message without stopping you. Use ONE option for an obvious single next step — a one-tap confirm (\"Go\", \"Confirm\", \"Agreed\") is often easier for the user than typing the word, and single-option sets are always legal; 2-8 for distinct next directions. Each option must be a complete, ready-to-send user message phrased in the user's voice (e.g. \"Add tests for the new endpoint\", not \"I could add tests\"). Keep each under ~60 chars. Do NOT use this to ask a question you need answered to proceed; do not also repeat the options in your prose."
+        "Surface up to 8 short option messages for the user to pick from as their next input. CHANNEL-AGNOSTIC interactive UI: tap-to-send buttons under your reply on chat channels (Telegram/Discord/...), a pick-list or gray ghost-text accept in the TUI. You MUST call this tool to make options interactive: writing them as plain text leaves dead text with no button to tap. If this is your final action of the turn, the turn ends with the options pending the user's pick. Use ONE option for an obvious single next step — a one-tap confirm (\"Go\", \"Confirm\", \"Agreed\") is often easier for the user than typing the word, and single-option sets are always legal; 2-8 for distinct next directions. Each option must be a complete, ready-to-send user message phrased in the user's voice (e.g. \"Add tests for the new endpoint\", not \"I could add tests\"). Keep labels concise: under 20 chars for multi-option sets, under 30 chars for a solo option (longer options collapse into numbered text or confirmation lines). Ask any open questions in your reply text; provide the candidate answers in options. Do NOT also repeat the options in your prose."
     }
 
     fn input_schema(&self) -> Value {
@@ -50,7 +50,7 @@ impl Tool for SuggestOptionsTool {
                     "items": { "type": "string" },
                     "minItems": 1,
                     "maxItems": MAX_OPTIONS,
-                    "description": "1 to 8 distinct, ready-to-send option messages in the user's voice. Rendered as interactive UI on every surface (tap-to-send buttons on chat channels; ghost-text/pick-list in the TUI) — never as plain text."
+                    "description": "1 to 8 distinct, ready-to-send option messages in the user's voice. Prefer concise labels (<=20 chars for multi-option sets, <=30 chars for a solo option) so they render as interactive buttons. Rendered on Telegram/Discord/Slack and pick-list in the TUI — never as plain text."
                 }
             },
             "required": ["options"]
