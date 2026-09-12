@@ -38,20 +38,30 @@ pub const MSG_HEADER: &str = "\u{1f980} *OpenCrabs*";
 /// device and lands. Reusing the message id makes the pair idempotent:
 /// recipients dedupe by id, so a first attempt that DID deliver is never shown
 /// twice. The resend is spawned so the caller is never blocked.
-async fn send_resilient(client: &Arc<Client>, jid: wacore_binary::jid::Jid, msg: Message) {
+///
+/// Returns the message id when the first send succeeded, so the caller can
+/// track it for a later edit or reaction (#1408). `None` means the send
+/// failed and there is nothing to track.
+async fn send_resilient(
+    client: &Arc<Client>,
+    jid: wacore_binary::jid::Jid,
+    msg: Message,
+) -> Option<String> {
     #[cfg(crates_publish)]
-    let _gen_id = client.generate_message_id().await;
+    let gen_id = client.generate_message_id().await;
     #[cfg(not(crates_publish))]
-    let _gen_id = client.generate_message_id();
+    let gen_id = client.generate_message_id();
     let opts = SendOptions {
-        message_id: Some(_gen_id),
+        message_id: Some(gen_id.clone()),
         ..Default::default()
     };
+    let mut sent = Some(gen_id);
     if let Err(e) = client
         .send_message_with_options(jid.clone(), msg.clone(), opts.clone())
         .await
     {
         tracing::error!("WhatsApp: send failed: {e}");
+        sent = None;
     }
     let client = client.clone();
     tokio::spawn(async move {
@@ -60,6 +70,7 @@ async fn send_resilient(client: &Arc<Client>, jid: wacore_binary::jid::Jid, msg:
             tracing::debug!("WhatsApp: idempotent resend failed: {e}");
         }
     });
+    sent
 }
 
 /// Unwrap nested message wrappers (device_sent, ephemeral, view_once, etc.)
@@ -1101,30 +1112,38 @@ pub(crate) async fn handle_message(
         }
     });
 
-    // Progress callback: forward intermediate texts (between tool-call iterations)
-    // to WhatsApp in real time. WhatsApp doesn't support message editing, so we
-    // send each chunk as a new message. Images (<<IMG:...>>) are stripped here —
-    // the main handler delivers them as actual WhatsApp image messages.
+    // Progress callback: forward intermediate texts (between tool-call
+    // iterations) to WhatsApp in real time. The comment that used to sit here
+    // claimed WhatsApp does not support message editing. It does, and the
+    // 15-minute window covers virtually every turn (#1408), so chunks now grow
+    // ONE living message instead of posting one message each. Images
+    // (<<IMG:...>>) are stripped here - the main handler delivers them as
+    // actual WhatsApp image messages.
     let was_streamed = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let sent_intermediates: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
-    // Track spawned intermediate sends so the follow-up-question callback
-    // can await them before posting the question (issue #142). Sync Mutex
-    // because the progress callback closure is synchronous.
-    let intermediate_handles: Arc<std::sync::Mutex<Vec<tokio::task::JoinHandle<()>>>> =
-        Arc::new(std::sync::Mutex::new(Vec::new()));
-    let intermediate_handles_cb = intermediate_handles.clone();
+    // A single consumer task owns send/edit ordering for this turn. The
+    // progress callback is synchronous and used to spawn one task per chunk,
+    // which let two chunks race for the same edit and land out of order.
+    let (stream_sink, stream_task) = {
+        let rl_jid = reply_target.to_string();
+        super::stream::spawn(super::stream::StreamConfig {
+            client: client.clone(),
+            jid: reply_target.clone(),
+            session_id,
+            state: wa_state.clone(),
+            rate_limit: wa_cfg.rate_limit.clone(),
+            is_owner: wa_cfg.is_owner(rl_jid.split('@').next().unwrap_or(&rl_jid)),
+            header: MSG_HEADER.to_string(),
+        })
+    };
+    let stream_sink_cb = stream_sink.clone();
     let progress_cb: ProgressCallback = {
         let client_cb = client.clone();
         let jid_cb = reply_target.clone();
         let was_streamed_cb = was_streamed.clone();
         let wa_state_cb = wa_state.clone();
-        // #1407: streaming intermediates are agent-output sends: pace
-        // them through the shared limiter (the exact failure mode the
-        // issue names, every chunk posted as its own message). Owner
-        // bypass keys on the TARGET jid, not the sender.
-        let rl_cfg = wa_cfg.rate_limit.clone();
-        let rl_jid = jid_cb.to_string();
-        let rl_owner = wa_cfg.is_owner(rl_jid.split('@').next().unwrap_or(&rl_jid));
+        // #1407 gating for streamed text now lives in `stream.rs`, alongside
+        // the send-or-edit choice it has to pace.
         Arc::new(move |session_id, event| match event {
             ProgressEvent::IntermediateText { text, .. } => {
                 let (clean, _) = crate::utils::extract_img_markers(&text);
@@ -1141,37 +1160,10 @@ pub(crate) async fn handle_message(
                     prev.push(clean.clone());
                     drop(prev);
                     was_streamed_cb.store(true, std::sync::atomic::Ordering::Relaxed);
-                    let client = client_cb.clone();
-                    let jid = jid_cb.clone();
-                    let tagged = format!("{}\n\n{}", MSG_HEADER, clean.trim());
-                    let rl_state = wa_state_cb.clone();
-                    let rl_cfg_c = rl_cfg.clone();
-                    let rl_owner_c = rl_owner;
-                    let handle = tokio::spawn(async move {
-                        for chunk in split_message(&tagged, 4000) {
-                            // Ephemeral: pace on the bucket, DROP (never
-                            // queue) under a saturated daily cap (#1407).
-                            if !rl_state
-                                .rate_limiter
-                                .gate_ephemeral(&rl_cfg_c, rl_owner_c)
-                                .await
-                            {
-                                tracing::debug!(
-                                    target: "whatsapp",
-                                    "daily cap reached; dropping ephemeral intermediate chunk"
-                                );
-                                continue;
-                            }
-                            let msg = waproto::whatsapp::Message {
-                                conversation: Some(chunk.to_string()),
-                                ..Default::default()
-                            };
-                            send_resilient(&client, jid.clone(), msg).await;
-                        }
-                    });
-                    if let Ok(mut g) = intermediate_handles_cb.lock() {
-                        g.push(handle);
-                    }
+                    // Ordering, rate limiting and the send-or-edit decision
+                    // all live in the consumer task (#1408); this side only
+                    // queues, so two fast chunks cannot race.
+                    stream_sink_cb.push(clean);
                 }
             }
             ProgressEvent::SelfHealingAlert { message } => {
@@ -1384,19 +1376,18 @@ pub(crate) async fn handle_message(
         )
         .await;
 
-    // Await any in-flight intermediate spawns before cleanup so dedup
-    // can compare against what was actually delivered (mirrors Slack's
-    // intermediate_handles_final pattern).
-    {
-        let pending = {
-            let mut g = intermediate_handles.lock().expect("poisoned");
-            std::mem::take(&mut *g)
-        };
-        for h in pending {
-            if let Err(e) = h.await {
-                tracing::warn!(error = %e, "WhatsApp message task panicked");
-            }
-        }
+    // Close the stream channel and let the consumer drain before the final
+    // response is handled: that block edits whatever the stream left tracked,
+    // so the stream has to be finished first. `progress_cb` was moved into the
+    // call above and dropped with it, which makes this the last sink clone.
+    drop(stream_sink);
+    match tokio::time::timeout(std::time::Duration::from_secs(60), stream_task).await {
+        Ok(Ok(())) => {}
+        Ok(Err(e)) => tracing::warn!(error = %e, "WhatsApp streaming task panicked"),
+        Err(_) => tracing::warn!(
+            "WhatsApp streaming task still running after 60s; a progress callback \
+             clone outlived the agent call, so the final edit may be skipped"
+        ),
     }
 
     wa_state.remove_cancel_token(session_id).await;
@@ -1416,12 +1407,15 @@ pub(crate) async fn handle_message(
             let text_content = crate::utils::slack_fmt::markdown_to_mrkdwn(&text_content);
 
             // Context budget footer is appended INLINE to the last chunk of
-            // the final response below (see the !was_streamed block) — never
-            // a separate message, never stored in DB. On fully-streamed turns
-            // (text already delivered as intermediate messages) the footer is
-            // intentionally skipped, matching the Telegram behaviour from
-            // commit 7a0ca1c9: the footer is per-turn metadata, and with no
-            // final text to attach it to there's nothing to footer.
+            // the final response below (see the `!streamed` block), never a
+            // separate message and never stored in the DB.
+            //
+            // Streamed turns still skip it, but the reason has changed. It
+            // used to be that a streamed turn had no final message to attach
+            // it to; since #1408 it has one, the edited message. The skip is
+            // kept on purpose: a footer on a growing message would either be
+            // re-sent with every edit or appear only once at the end, and
+            // matching Telegram (commit 7a0ca1c9) beats both.
 
             // Send images before text
             for img_path in img_paths {
@@ -1481,8 +1475,24 @@ pub(crate) async fn handle_message(
             // Skip if already delivered progressively via the intermediate-text callback
             // (happens when the agent used tool calls — text was sent between iterations).
             // Context budget footer is appended to last chunk for display only, never stored in DB.
-            if !text_content.is_empty() && !was_streamed.load(std::sync::atomic::Ordering::Relaxed)
-            {
+            let streamed = was_streamed.load(std::sync::atomic::Ordering::Relaxed);
+            if streamed && !text_content.trim().is_empty() {
+                // #1408 AC1: a streamed turn ends as exactly ONE message. Edit
+                // what the stream left behind up to the finished answer so the
+                // user is not left reading the last intermediate. A false here
+                // means the intermediates stand as the delivery, which is the
+                // pre-#1408 behaviour and loses nothing.
+                let finished = format!("{}\n\n{}", MSG_HEADER, text_content.trim());
+                if !super::stream::finalize(&client, &reply_jid, &wa_state, session_id, &finished)
+                    .await
+                {
+                    tracing::debug!(
+                        target: "whatsapp",
+                        "edit-in-place unavailable; streamed intermediates stand as the final answer"
+                    );
+                }
+            }
+            if !text_content.is_empty() && !streamed {
                 let ctx_max = agent.context_limit_for_session(session_id);
                 let footer = crate::utils::format_ctx_footer(
                     response.context_tokens,
@@ -1522,7 +1532,20 @@ pub(crate) async fn handle_message(
                         conversation: Some(chunk.to_string()),
                         ..Default::default()
                     };
-                    send_resilient(&client, reply_jid.clone(), reply_msg).await;
+                    match send_resilient(&client, reply_jid.clone(), reply_msg).await {
+                        Some(message_id) => {
+                            wa_state
+                                .record_outbound(
+                                    session_id,
+                                    super::outbox::OutboxEntry::new(message_id, chunk),
+                                )
+                                .await;
+                        }
+                        None => tracing::warn!(
+                            target: "whatsapp",
+                            "final-text chunk send failed; nothing tracked for this turn"
+                        ),
+                    }
                 }
                 if rl_queued > 0 {
                     tracing::warn!(
@@ -1756,7 +1779,12 @@ pub(crate) async fn send_connection_greeting(
                     conversation: Some(chunk.to_string()),
                     ..Default::default()
                 };
-                send_resilient(&client, jid.clone(), msg).await;
+                if send_resilient(&client, jid.clone(), msg).await.is_none() {
+                    tracing::warn!(
+                        target: "whatsapp",
+                        "onboarding greeting chunk failed to send"
+                    );
+                }
             }
             tracing::info!("WhatsApp: sent connection greeting to owner self-chat {jid_str}");
         }

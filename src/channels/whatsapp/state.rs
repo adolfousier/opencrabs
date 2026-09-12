@@ -99,6 +99,11 @@ impl Default for WhatsAppState {
     fn default() -> Self {
         Self::new()
     }
+    /// Last editable message per session (#1408). `SendResult.message_id`
+    /// used to be discarded at every send site; edit-in-place streaming,
+    /// self-reactions and pin/forward all need it, so it is captured once
+    /// here. See `outbox.rs`.
+    pub(crate) outbox: super::outbox::Outbox,
 }
 
 impl WhatsAppState {
@@ -129,3 +134,4 @@ impl WhatsAppState {
         }
     }
 }
+            outbox: super::outbox::Outbox::default(),

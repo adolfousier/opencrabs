@@ -23,9 +23,11 @@ mod photos;
 pub(crate) mod rate_limit;
 pub(crate) mod resume;
 mod sessions;
+pub(crate) mod outbox;
 mod state;
 pub(crate) mod store;
 
 pub use agent::WhatsAppAgent;
 pub use approval::WaApproval;
 pub use state::WhatsAppState;
+pub(crate) mod stream;

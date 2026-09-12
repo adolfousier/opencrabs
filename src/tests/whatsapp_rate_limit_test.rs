@@ -262,14 +262,21 @@ async fn ephemeral_gate_drops_instead_of_queueing() {
 
 /// Wiring sentinel (#1407): every agent-output send path gates through the
 /// shared limiter before hitting the wire - tool send + reply arms, the
-/// handler's streaming intermediates (ephemeral gate) and final-text
-/// chunks, and the bg-resume path. The drainer is spawned from the agent
-/// start path. The connection greeting, command replies and self-heal
-/// alerts are intentionally unwired (owner-bound or system traffic).
+/// streamed intermediates (ephemeral gate) and final-text chunks, and the
+/// bg-resume path. The drainer is spawned from the agent start path. The
+/// connection greeting, command replies and self-heal alerts are
+/// intentionally unwired (owner-bound or system traffic).
+///
+/// The streamed half moved to `stream.rs` with #1408, which turned chunk
+/// spam into one edited message. Both of its paths are checked, not just
+/// one: an edit is a stanza on the wire exactly like a fresh send, and a
+/// version that paced only the new-message path would look wired here
+/// while letting an edit-per-token turn run unbudgeted.
 #[test]
 fn agent_output_paths_gate_through_the_limiter() {
     const TOOL: &str = include_str!("../brain/tools/whatsapp_send.rs");
     const HANDLER: &str = include_str!("../channels/whatsapp/handler.rs");
+    const STREAM: &str = include_str!("../channels/whatsapp/stream.rs");
     const RESUME: &str = include_str!("../channels/whatsapp/resume.rs");
     const AGENT: &str = include_str!("../channels/whatsapp/agent.rs");
     assert_eq!(
@@ -277,9 +284,11 @@ fn agent_output_paths_gate_through_the_limiter() {
         2,
         "tool send and reply arms must gate per chunk"
     );
-    assert!(
-        HANDLER.contains(".gate_ephemeral(&rl_cfg_c"),
-        "streaming intermediates must use the ephemeral gate"
+    assert_eq!(
+        STREAM.matches(".gate_ephemeral(&config.rate_limit").count(),
+        2,
+        "both streamed paths must use the ephemeral gate: the edit and the \
+         new message that starts a fresh one"
     );
     assert!(
         HANDLER.contains(".gate(&wa_cfg.rate_limit"),
