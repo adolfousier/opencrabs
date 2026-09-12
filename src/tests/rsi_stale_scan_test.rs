@@ -12,12 +12,14 @@
 //!    `self_improve action='update'`; vanished paths queue for owner
 //!    sign-off; NO action is ever a delete;
 //! 4. schema membership against the compiled config types (never
-//!    `config.toml.example`), pinned by the top-level drift guard.
+//!    `config.toml.example`), pinned by the serde_ignored drift test (#83 —
+//!    the compiled struct IS the registry, so there is no hand-maintained
+//!    section list to drift).
 
 use crate::brain::rsi_stale_scan::{
     ALL_ANCHOR_KINDS, AnchorKind, FindingAction, LineClass, Verdict, anchor_kind, backtick_spans,
     classify_line, decide_action, provider_mentions, scan_brain_files, verify_binary,
-    verify_config_key, verify_path, verify_provider, witness_top_level_sections,
+    verify_config_key, verify_path, verify_provider,
 };
 use crate::config::{Config, ProviderConfig};
 
@@ -326,22 +328,39 @@ fn config_keys_verify_against_embedded_schema() {
     );
 }
 
-/// Drift guard: the witness top-level sections and the loader's known list
-/// must describe the same schema. If either side gains or loses a section,
-/// this fails and forces a conscious sync (loader's `KNOWN_TOP_LEVEL_KEYS`
-/// lives in src/config/types/loader.rs; `gateway` is an alias, handled
-/// before lookup, so it appears in neither set here).
+/// Drift guard, struct-derived (#83): the same `serde_ignored` pass the
+/// config write guard and the loader typo-warning use IS the registry — the
+/// compiled `Config` struct — so there is no hand-maintained section list
+/// left to pin (the old `KNOWN_TOP_LEVEL_KEYS` mirror blocked `doctor` and
+/// went unnoticed precisely because the pinning test compared the witness to
+/// its own hardcoded copy, never to the loader's list). These assertions pin
+/// the pass itself:
+/// - a section the struct knows (`[doctor]`, missing from the old list)
+///   yields no ignored path;
+/// - a typo (`[doctorr]`) yields exactly one, reported at its head;
+/// - the struct-derived known-sections view includes every real top-level
+///   section (and excludes the legacy `voice` and the `gateway` alias).
 #[test]
-fn witness_top_level_sections_match_known_list() {
-    let mut sections = witness_top_level_sections();
-    sections.sort();
-    let mut known: Vec<&str> = [
-        "provider_registry",
-        "database",
-        "logging",
-        "debug",
-        "providers",
-        "channels",
+fn schema_derived_sections_are_the_registry() {
+    // Known section — including `doctor`, whose absence from the old
+    // hand-maintained list caused a live false typo-warning on load.
+    assert!(
+        crate::config::sections::ignored_key_paths("[doctor]\nauto_fix = true\n")
+            .unwrap()
+            .is_empty(),
+        "doctor is a real Config section — the struct must not ignore it"
+    );
+
+    // A typo of a known section is a top-level ignored path.
+    assert_eq!(
+        crate::config::sections::ignored_key_paths("[doctorr]\nauto_fix = true\n").unwrap(),
+        vec!["doctorr".to_string()],
+        "an unknown section is reported at its head"
+    );
+
+    // The struct-derived view covers every real section and only those.
+    let known = crate::config::sections::known_sections();
+    for real in [
         "agent",
         "daemon",
         "a2a",
@@ -352,43 +371,20 @@ fn witness_top_level_sections_match_known_list() {
         "browser",
         "doctor",
         "tui",
-    ]
-    .to_vec();
-    known.sort_unstable();
-    assert_eq!(
-        sections, known,
-        "compiled schema and known-section list drifted — sync both consciously"
-    );
-
-    // Triangle closure: the loader's runtime typo-warning list must match the
-    // same schema. Before this assertion existed the const was referenced only
-    // by a comment and drifted (tui + doctor missing) while this test stayed
-    // green — the exact regression that shipped false "Unknown keys" warnings.
-    // `gateway` is a serde alias accepted by the loader but canonicalized
-    // before lookup, so it lives only in the loader list.
-    let mut loader_known: Vec<&str> = crate::config::Config::KNOWN_TOP_LEVEL_KEYS
-        .iter()
-        .copied()
-        .filter(|k| *k != "gateway")
-        .collect();
-    loader_known.sort_unstable();
-    assert_eq!(
-        known, loader_known,
-        "loader's KNOWN_TOP_LEVEL_KEYS drifted from the schema — add the section to src/config/types/loader.rs"
-    );
-
-    // Third leg (#1385): the #1199 write gate keeps its own copy of the
-    // schema. Nothing pinned it, so it drifted — a phantom `voice` entry
-    // (writes passed the gate, serde discarded the table) and eight real
-    // sections missing (writes to `daemon`, `memory`, `brain`… refused as
-    // orphans). `voice` is a derived read view, not a table, so it correctly
-    // appears in none of the three lists.
-    let mut gate: Vec<&str> = crate::config::sections::CONFIG_SECTIONS.to_vec();
-    gate.sort_unstable();
-    assert_eq!(
-        sections, gate,
-        "CONFIG_SECTIONS drifted from the schema — sync src/config/sections.rs"
-    );
+        "channels",
+        "provider_registry",
+        "database",
+        "logging",
+        "debug",
+        "providers",
+    ] {
+        assert!(
+            known.iter().any(|s| s == real),
+            "known_sections() must include {real}"
+        );
+    }
+    assert!(!known.iter().any(|s| s == "voice"));
+    assert!(!known.iter().any(|s| s == "gateway"));
 }
 
 // ---------------------------------------------------------------- providers

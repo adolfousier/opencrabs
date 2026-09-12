@@ -559,12 +559,13 @@ pub fn verify_provider(name: &str, config: &Config) -> Verdict {
     }
 }
 
-// Top-level config sections are mirrored from the loader's
-// `KNOWN_TOP_LEVEL_KEYS` (src/config/types/loader.rs; `gateway` is a serde
-// alias of `a2a`, canonicalized before lookup). The mirror lives as an
-// INDEPENDENT list inside the drift-guard test in
-// `src/tests/rsi_stale_scan_test.rs` — a copy in both places is the point:
-// either side drifting fails the test and forces a conscious sync.
+// The config-schema witness below is built from the compiled structs via
+// their serde impls (RFC design decision 3: the constants/schema are the
+// source of truth — never `config.toml.example`). The old independent mirror
+// of the loader's `KNOWN_TOP_LEVEL_KEYS` in the drift-guard test is gone:
+// #83 replaced the hand-maintained section lists with the struct itself (a
+// serde_ignored pass), so `verify_config_key` below and the write guard and
+// loader typo-warning in `src/config` all share one undriftable registry.
 
 /// One fully-populated provider section, used to fill the witness gap left
 /// by `skip_serializing_if` on every optional field of `ProviderConfig`.
@@ -784,17 +785,6 @@ pub fn verify_path(span: &str) -> Verdict {
     } else {
         Verdict::Unverifiable
     }
-}
-
-/// Expose the witness for the drift-guard test in
-/// `src/tests/rsi_stale_scan_test.rs` (pins `KNOWN_TOP_LEVEL_KEYS` against
-/// the compiled schema so the loader list and the struct can't diverge
-/// silently).
-pub fn witness_top_level_sections() -> Vec<String> {
-    schema_witness()
-        .as_object()
-        .map(|obj| obj.keys().cloned().collect())
-        .unwrap_or_default()
 }
 
 // ---------------------------------------------------------------- scan

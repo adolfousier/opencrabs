@@ -1,48 +1,153 @@
-//! A config write may only address a real section (#1199).
+//! Write-guard tests (#1199, #83).
 //!
-//! `write_item` creates any table its dotted path names, so a wrong section
-//! wrote successfully into an orphan table that serde discards on load:
-//! tooling reported success, the setting never applied, and reads kept
-//! honestly returning the old value — which reads exactly like a stale cache.
+//! #1199: reads and writes disagreed about what a section is. The read side
+//! resolves shorthand against a registry; the write side accepted any dotted
+//! string and created whatever tables it named. An unknown section wrote
+//! successfully into an orphan table that serde discards on load: tooling
+//! reported success, the setting never applied, and reads kept honestly
+//! returning the old value.
+//!
+//! #83: the guard is no longer a hand-maintained section list (two of those
+//! drifted already — `CONFIG_SECTIONS` missed eight real sections and still
+//! listed the migrated-away `[voice]`; `KNOWN_TOP_LEVEL_KEYS` missed
+//! `doctor`). The compiled `Config` struct is the registry: a candidate
+//! document is deserialized through it with `serde_ignored`, and a write is
+//! valid iff the struct does not ignore a key at the target path.
+//!
+//! These tests exercise the `write_guard` unit directly against real `Config`
+//! struct shapes; end-to-end behaviour through the actual write path (tool +
+//! tempdir home) lives in `config_write_existing_section_test`.
 
-use crate::config::sections::{resolve_section, validate_write_path};
+use crate::config::sections::{known_sections, write_guard};
 
+/// A candidate document containing only the requested section/key.
+fn candidate(section: &str, key: &str, value: &str) -> String {
+    format!("[{section}]\n{key} = {value}\n")
+}
+
+/// Unknown NEW top-level sections are hard-denied — a caller writing
+/// `opencode` instead of `providers.opencode` gets a refusal and a hint, not
+/// a silent orphan table (#1199, #83).
 #[test]
-fn test_the_three_reported_paths_are_rejected_with_the_right_suggestion() {
-    // Verbatim from the report: three writes that all returned Ok and left
-    // 11 lines of dead TOML behind.
-    let err = validate_write_path("opencode").expect_err("must reject");
-    assert!(err.contains("opencode"), "{err}");
+fn unknown_new_sections_are_denied() {
+    for (section, key, value) in [
+        ("opencode", "base_url", "\"https://x\""),
+        ("custom", "base_url", "\"https://x\""),
+        ("inferhub", "api_key", "\"x\""),
+        ("fallback", "enabled", "true"),
+    ] {
+        let err = write_guard(section, key, &candidate(section, key, value))
+            .expect_err("unknown top-level section must be denied");
+        assert!(
+            err.contains("unknown config path") && err.contains(section),
+            "denial must name the section: {err}"
+        );
+        assert!(err.contains("NOT changed"), "{err}");
+    }
+}
 
-    let err = validate_write_path("custom.inferhub").expect_err("must reject");
-    assert!(
-        err.contains("providers.custom.inferhub"),
-        "#1199: should name the intended path, got: {err}"
-    );
+/// Every real top-level `Config` field accepts a write at the exact path —
+/// the struct is the registry, so there is no hand-maintained list to drift.
+#[test]
+fn the_real_paths_are_accepted() {
+    for (section, key, value) in [
+        ("agent", "approval_policy", "\"auto\""),
+        ("a2a", "enabled", "false"),
+        ("channels.telegram.groups.mygroup", "name", "\"x\""),
+        ("brain", "strip_empty_sections", "false"),
+        ("browser", "cdp_endpoint", "\"\""),
+        ("cron", "default_model", "\"x\""),
+        ("database", "path", "\"/tmp/x.db\""),
+        ("debug", "debug_lsp", "false"),
+        ("image", "generation", "{ enabled = true, model = \"x\" }"),
+        ("logging", "level", "\"info\""),
+        ("providers.custom.myrepo", "base_url", "\"http://x\""),
+        ("providers.fallback", "enabled", "false"),
+        ("providers.opencode", "base_url", "\"http://x\""),
+        ("provider_registry", "enabled", "false"),
+    ] {
+        let section_head = section.split('.').next().unwrap_or(section);
+        assert!(
+            known_sections().iter().any(|s| s == section_head),
+            "test uses a real section: {section}"
+        );
+        write_guard(section, key, &candidate(section, key, value))
+            .expect("real struct path must pass the guard");
+    }
+}
 
-    let err = validate_write_path("fallback").expect_err("must reject");
-    assert!(
-        err.contains("providers.fallback"),
-        "#1199: should name the intended path, got: {err}"
-    );
+/// `memory` is a real section the guard accepts — the live incident that
+/// started #83 (agents reached for raw file edits because the guard denied
+/// `[memory].extra_paths`). A typo of it is denied, with the close match in
+/// the error.
+#[test]
+fn memory_is_accepted_and_a_typo_of_memory_is_denied() {
+    write_guard(
+        "memory",
+        "extra_paths",
+        &candidate("memory", "extra_paths", "[\"/srv/docs\"]"),
+    )
+    .expect("memory is a real Config section");
+
+    let err = write_guard(
+        "memroy",
+        "extra_paths",
+        &candidate("memroy", "extra_paths", "[]"),
+    )
+    .expect_err("typo of memory must be denied");
+    assert!(err.contains("memroy"), "{err}");
 }
 
 #[test]
-fn test_the_real_paths_are_accepted() {
-    for section in [
-        "providers.opencode",
-        "providers.custom.inferhub",
-        "providers.fallback",
+fn empty_and_dot_padded_sections_are_denied() {
+    assert!(write_guard("", "x", "true").unwrap_err().contains("empty"));
+    assert!(
+        write_guard("  providers.stt  ", "x", "true")
+            .unwrap_err()
+            .contains("whitespace")
+    );
+    assert!(
+        write_guard("providers..stt", "x", "true")
+            .unwrap_err()
+            .contains("empty segment")
+    );
+}
+
+/// The exact `section.key` path is judged, not just the section head: an
+/// unknown key under a known section is as much a silent-drop risk as an
+/// unknown section (#1199 at every depth).
+#[test]
+fn unknown_key_under_a_known_section_is_denied() {
+    let err = write_guard(
         "agent",
-        "channels.telegram",
-        "channels.telegram.groups",
-        "providers.stt",
-        "logging",
-        "debug",
-        "database",
-        "provider_registry",
-        // The #1385 drift: all eight of these were refused by the write gate
-        // despite being real tables serde loads fine.
+        "bogus_leaf",
+        &candidate("agent", "bogus_leaf", "true"),
+    )
+    .expect_err("unknown key under a known section must be denied");
+    assert!(err.contains("agent.bogus_leaf"), "{err}");
+}
+
+/// Child shorthand is a READ convenience, not a writeable path — the guard
+/// refuses a bare `[stt]` table and points at the real one.
+#[test]
+fn child_shorthand_in_the_section_is_denied_with_a_suggestion() {
+    let err = write_guard("stt", "enabled", &candidate("stt", "enabled", "true"))
+        .expect_err("child shorthand is not a writeable path");
+    assert!(
+        err.contains("providers.stt"),
+        "suggests the parent path: {err}"
+    );
+}
+
+/// The client-facing known-section list is struct-derived: every real
+/// top-level section is present, and the two non-sections that used to leak
+/// into hand-maintained lists are gone (`voice` is legacy — migrated into
+/// `providers.stt/tts`; `gateway` is a serde alias of `a2a`).
+#[test]
+fn client_facing_read_list_matches_the_struct_derivation() {
+    let known = known_sections();
+    for real in [
+        "agent",
         "daemon",
         "a2a",
         "image",
@@ -51,58 +156,43 @@ fn test_the_real_paths_are_accepted() {
         "brain",
         "browser",
         "doctor",
+        "channels",
+        "provider_registry",
+        "database",
+        "logging",
+        "debug",
+        "providers",
+        "tui",
     ] {
         assert!(
-            validate_write_path(section).is_ok(),
-            "#1199: rejected a real section: {section}"
+            known.iter().any(|s| s == real),
+            "known_sections() must include {real}"
         );
     }
-}
-
-#[test]
-fn voice_is_not_a_writable_section() {
-    // #1385: `voice` used to sit in CONFIG_SECTIONS, so writes passed the
-    // gate and created a `[voice.*]` table serde silently discards. It is a
-    // derived read-only view; the rejection must say where the keys live.
-    let err = validate_write_path("voice").expect_err("must reject voice writes");
     assert!(
-        err.contains("providers.stt") && err.contains("providers.tts"),
-        "must name the real tables, got: {err}"
+        !known.iter().any(|s| s == "voice"),
+        "voice is legacy (migrated to providers) — it must not be a section"
+    );
+    assert!(
+        !known.iter().any(|s| s == "gateway"),
+        "gateway is a serde alias — the canonical field is a2a"
     );
 }
 
 #[test]
-fn test_writes_are_stricter_than_reads_on_purpose() {
-    // `resolve_section` exists to ACCEPT shorthand, because the reader only
-    // renders the top level. That is the right call for a read and fatal for
-    // a write: `custom.inferhub` resolves to `providers` for a reader, while
-    // writing it creates a top-level `[custom.inferhub]` serde ignores. So
-    // the write rule is positional, not by-name.
-    for shorthand in ["custom.inferhub", "fallback", "telegram", "stt"] {
-        assert!(
-            resolve_section(shorthand).is_some(),
-            "reader still accepts the shorthand: {shorthand}"
-        );
-        assert!(
-            validate_write_path(shorthand).is_err(),
-            "#1199: writer must NOT accept the shorthand: {shorthand}"
-        );
-    }
-}
-
-#[test]
-fn test_empty_and_dot_padded_paths() {
-    assert!(validate_write_path("").is_err());
-    assert!(validate_write_path("   ").is_err());
-    assert!(validate_write_path("...").is_err());
-    // Padding is tolerated on a real path, matching the reader.
-    assert!(validate_write_path("  .providers.stt.  ").is_ok());
-}
-
-#[test]
-fn test_case_is_ignored_like_the_reader_does() {
-    assert!(validate_write_path("Providers.OpenCode").is_ok());
-    assert!(validate_write_path("CHANNELS.telegram").is_ok());
+fn voice_is_not_a_writable_section() {
+    // #1385: `voice` is a derived read-only view over providers.stt/tts;
+    // writes must be rejected with a helpful suggestion.
+    let err = write_guard(
+        "voice",
+        "tts_voice",
+        &candidate("voice", "tts_voice", "\"x\""),
+    )
+    .expect_err("must reject voice writes");
+    assert!(
+        err.contains("providers.stt") && err.contains("providers.tts"),
+        "must name the real tables, got: {err}"
+    );
 }
 
 // ── pre-write convergence: legacy provider spelling must not deny writes ──

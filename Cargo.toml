@@ -42,6 +42,10 @@ serde = { version = "1.0", features = ["derive", "rc"] }
 serde_json = "1.0"
 toml = "0.8"
 toml_edit = "0.25"
+# Reports every key the Config struct ignores during deserialization (#83) —
+# the compiled struct is the config registry, so no hand-maintained section
+# list can drift (CONFIG_SECTIONS and KNOWN_TOP_LEVEL_KEYS both had already).
+serde_ignored = "0.1"
 
 # Configuration
 config = "0.15"
