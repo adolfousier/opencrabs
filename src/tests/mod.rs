@@ -239,6 +239,7 @@ pub mod custom_provider_live_fetch_regression_test;
 pub mod custom_provider_rename_keys_toml_test;
 pub mod custom_provider_section_resolver_test;
 pub mod daily_backup_rotation_test;
+pub mod datetime_awareness_test;
 pub mod db_database_test;
 pub mod db_migration_33_heal_test;
 pub mod db_models_test;

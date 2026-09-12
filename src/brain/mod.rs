@@ -33,6 +33,7 @@ pub mod rsi_sync;
 pub mod section_rank;
 pub mod self_update;
 pub mod skills;
+pub mod timezone;
 pub mod tokenizer;
 pub mod toml_merge;
 pub mod tools;

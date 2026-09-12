@@ -1436,6 +1436,11 @@ pub struct AgentConfig {
     /// Set to 0 to disable.
     #[serde(default = "default_thinking_loop_timeout_secs")]
     pub thinking_loop_timeout_secs: u64,
+
+    /// Interval in seconds for injecting mid-turn time notices in long-running
+    /// tool execution loops (#153). Default: 900 (15 min). Set to 0 to disable.
+    #[serde(default = "default_time_marker_interval_secs")]
+    pub time_marker_interval_secs: u64,
 }
 
 impl AgentConfig {
@@ -1474,6 +1479,10 @@ fn default_debug_logs() -> bool {
 
 fn default_thinking_loop_timeout_secs() -> u64 {
     600
+}
+
+fn default_time_marker_interval_secs() -> u64 {
+    crate::brain::agent::service::tool_loop::DEFAULT_TIME_MARKER_INTERVAL_SECS
 }
 
 fn default_approval_policy() -> String {
@@ -1563,6 +1572,7 @@ impl Default for AgentConfig {
             redact_dm: None,
             debug_logs: default_debug_logs(),
             thinking_loop_timeout_secs: default_thinking_loop_timeout_secs(),
+            time_marker_interval_secs: default_time_marker_interval_secs(),
         }
     }
 }

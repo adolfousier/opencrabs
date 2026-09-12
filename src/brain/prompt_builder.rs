@@ -3,7 +3,7 @@
 //! Reads workspace markdown files and assembles the system brain dynamically
 //! each turn, so edits to brain files take effect immediately.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Core brain files — always injected (user context).
 ///
@@ -287,6 +287,11 @@ impl BrainLoader {
     /// Create a new BrainLoader with the given workspace path.
     pub fn new(workspace_path: PathBuf) -> Self {
         Self { workspace_path }
+    }
+
+    /// The root workspace path for brain files.
+    pub fn workspace_path(&self) -> &Path {
+        &self.workspace_path
     }
 
     /// Latest modification time across the brain markdown files at the
@@ -697,8 +702,8 @@ pub const RUNTIME_INFO_HEADER: &str = "--- Runtime Info ---";
 /// Returns `(stable_prefix, Some(runtime_block))` when the block is present,
 /// else `(brain, None)`. The suffix runs from [`RUNTIME_INFO_HEADER`] to the
 /// FIRST blank line after it — which, by construction of [`push_runtime_info`],
-/// falls right after the `Current date & time` line (the volatile PER-SESSION
-/// lines: model / provider / working directory / home / date-time). The blank
+/// falls right after the `Current date` line (the volatile PER-SESSION
+/// lines: model / provider / working directory / home / date). The blank
 /// line is emitted by `push_known_paths`'s leading newline, so everything from
 /// `Known paths` onward — the profile home and compiled features, which are
 /// per-INSTANCE constant, not per-session — stays in the CACHED prefix. That is
@@ -870,13 +875,14 @@ fn push_runtime_info(prompt: &mut String, runtime_info: Option<&RuntimeInfo>) {
         env!("CARGO_PKG_VERSION")
     ));
     prompt.push_str(&format!("OS: {}\n", std::env::consts::OS));
-    // Full timestamp (date AND time). #657 dropped time-of-day to keep the
-    // cached prefix stable, but #658 moved this whole block into the UNCACHED
-    // runtime suffix, so a per-second value no longer invalidates the cache —
-    // restore time-of-day awareness (#681).
+    // Date-only timestamp (YYYY-MM-DD (UTC)). Per #693, the system prompt is
+    // sent as a single string (system_suffix = None) across all providers to
+    // keep tool-calling reliable. Placing second-granular time here busts prefix
+    // caching across turns. Moving live time-of-day awareness to message-tail
+    // markers (#153) allows the system prompt to stay byte-stable for 24 hours.
     prompt.push_str(&format!(
-        "Current date & time: {} UTC\n",
-        chrono::Utc::now().format("%Y-%m-%d %H:%M:%S")
+        "Current date: {} (UTC)\n",
+        chrono::Utc::now().format("%Y-%m-%d")
     ));
     push_known_paths(prompt);
     push_compiled_features(prompt);

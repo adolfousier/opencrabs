@@ -1,15 +1,18 @@
-//! Prompt-cache stability of the system brain (#657, #658, #681).
+//! Prompt-cache stability of the system brain (#657, #658, #681, #693, #153).
 //!
 //! The cached prefix must stay byte-stable across turns so the provider prompt
 //! cache hits. #657 first achieved this by making Runtime Info date-only, but
 //! #658 moved the whole Runtime Info block into the UNCACHED suffix (providers
-//! stamp cache_control on the stable prefix only). Once the block is uncached, a
-//! per-second timestamp no longer touches the cached prefix — so #681 restored
-//! the full `Current date & time` line for time-of-day awareness.
+//! stamp cache_control on the stable prefix only). However, #693 disabled the
+//! split because the array-shaped 2-part system broke tool calling, sending the
+//! entire system prompt as a single string.
 //!
-//! These tests lock the real invariant: the CACHED PREFIX (what
-//! `split_runtime_suffix` leaves behind) is byte-stable even though the suffix
-//! carries a second-granular timestamp, and the split boundary keeps per-session
+//! Under #153, Runtime Info carries `Current date: YYYY-MM-DD (UTC)` (date-only),
+//! while live wall-clock awareness is injected into message-tail markers. This keeps
+//! the system prompt byte-stable for 24h while preserving temporal grounding.
+//!
+//! These tests lock the real invariant: both CACHED PREFIX and suffix are byte-stable
+//! across builds within the same UTC day, and the split boundary keeps per-session
 //! lines in the suffix while per-instance constants (Known paths, compiled
 //! features) stay cached.
 
@@ -42,16 +45,16 @@ fn contains_seconds_time(s: &str) -> bool {
 }
 
 #[test]
-fn runtime_info_now_carries_full_timestamp() {
-    // #681: time-of-day restored. The block must render a full date+time line
-    // (seconds present) since it rides uncached.
+fn runtime_info_carries_date_only() {
+    // #153: system prompt carries date-only. The block must render a YYYY-MM-DD
+    // line without volatile time-of-day (seconds absent).
     for brain in [
         loader().1.build_system_brain(Some(&runtime_info())),
         loader().1.build_core_brain(Some(&runtime_info())),
     ] {
         assert!(
-            brain.contains("Current date & time:"),
-            "expected a full date+time line, got:\n{}",
+            brain.contains("Current date:"),
+            "expected date-only line, got:\n{}",
             brain
                 .lines()
                 .filter(|l| l.contains("date") || l.contains("Runtime"))
@@ -59,42 +62,48 @@ fn runtime_info_now_carries_full_timestamp() {
                 .join("\n")
         );
         assert!(
-            contains_seconds_time(&brain),
-            "the restored timestamp must include HH:MM:SS"
+            !brain.contains("Current date & time:"),
+            "system prompt should not contain volatile time-of-day"
+        );
+        assert!(
+            !contains_seconds_time(&brain),
+            "system prompt must not include HH:MM:SS"
         );
     }
 }
 
 #[test]
-fn cached_prefix_is_byte_stable_despite_second_granular_time() {
-    // The real cache guarantee post-#658: the timestamp lives in the UNCACHED
-    // suffix, so the cached PREFIX is byte-identical across builds even when the
-    // clock ticks between them. (Two full brains may differ by a second; their
-    // prefixes must not.)
+fn cached_prefix_and_suffix_are_byte_stable_with_date_only() {
+    // Under date-only timestamps, both prefix and suffix are byte-identical
+    // across builds within the same day.
     let (_dir, loader) = loader();
     let a = loader.build_system_brain(Some(&runtime_info()));
     let b = loader.build_system_brain(Some(&runtime_info()));
     let (prefix_a, suffix_a) = split_runtime_suffix(&a);
-    let (prefix_b, _suffix_b) = split_runtime_suffix(&b);
+    let (prefix_b, suffix_b) = split_runtime_suffix(&b);
     assert_eq!(
         prefix_a, prefix_b,
         "the cached prefix must be byte-stable across builds (#658)"
     );
-    // The volatile timestamp belongs to the suffix, never the prefix.
+    assert_eq!(
+        suffix_a, suffix_b,
+        "the suffix must be byte-stable across builds on the same date (#153)"
+    );
+    // Neither prefix nor suffix should carry seconds.
     assert!(
         !contains_seconds_time(&prefix_a),
-        "a per-second timestamp leaked into the CACHED prefix (#658/#681)"
+        "seconds timestamp leaked into CACHED prefix"
     );
     assert!(
-        contains_seconds_time(suffix_a.as_deref().unwrap_or("")),
-        "the timestamp must ride in the uncached suffix"
+        !contains_seconds_time(suffix_a.as_deref().unwrap_or("")),
+        "seconds timestamp leaked into suffix"
     );
 }
 
 #[test]
 fn split_boundary_keeps_session_lines_in_suffix_and_constants_cached() {
     // #681 GAP 3: lock the split boundary. Per-SESSION lines (model, provider,
-    // working directory, date-time) ride in the uncached suffix; per-INSTANCE
+    // working directory, date) ride in the uncached suffix; per-INSTANCE
     // constants (Known paths, compiled features) stay in the cached prefix.
     let (_dir, loader) = loader();
     let brain = loader.build_system_brain(Some(&runtime_info()));
@@ -105,7 +114,7 @@ fn split_boundary_keeps_session_lines_in_suffix_and_constants_cached() {
         "Model: test-model",
         "Provider: test-provider",
         "Working directory:",
-        "Current date & time:",
+        "Current date:",
     ] {
         assert!(
             suffix.contains(volatile),
