@@ -362,6 +362,10 @@ impl Tool for WhatsAppSendTool {
                     "type": "string",
                     "description": "Local file path for media (send_photo, send_document, send_audio, send_video, send_sticker)"
                 },
+                "multi_select": {
+                    "type": "boolean",
+                    "description": "For send_poll: true lets a voter pick several options. Default false (single choice)."
+                },
                 "voice_note": {
                     "type": "boolean",
                     "description": "For send_audio: true (default) renders a native WhatsApp voice note (tap-to-play bubble) and shows a recording indicator while uploading. false sends a plain audio file attachment."
@@ -1145,38 +1149,35 @@ impl Tool for WhatsAppSendTool {
                     ));
                 }
 
-                // Build poll options with SHA-256 hashes of option names
-                use sha2::{Digest, Sha256};
-                let poll_options: Vec<waproto::whatsapp::message::poll_creation_message::Option> =
-                    opts.iter()
-                        .map(|opt| {
-                            let mut hasher = Sha256::new();
-                            hasher.update(opt.as_bytes());
-                            let hash = format!("{:x}", hasher.finalize());
-                            waproto::whatsapp::message::poll_creation_message::Option {
-                                option_name: Some(opt.clone()),
-                                option_hash: Some(hash),
-                            }
-                        })
-                        .collect();
-
-                let wa_msg = waproto::whatsapp::Message {
-                    poll_creation_message: Some(Box::new(
-                        waproto::whatsapp::message::PollCreationMessage {
-                            name: Some(question.clone()),
-                            options: poll_options,
-                            selectable_options_count: Some(0), // 0 = single choice
-                            ..Default::default()
-                        },
-                    )),
-                    ..Default::default()
+                // #1482: built through the lib rather than by hand. A poll
+                // whose MessageContextInfo carries no `message_secret` can
+                // never have its votes decrypted - voters derive their
+                // encryption key from it - and the hand-rolled version set
+                // none, so every vote on a bot poll was unreadable by
+                // construction. `polls().create` mints the secret, persists it
+                // for the decode path, and picks the proto version WhatsApp
+                // Web uses for the select count (v3 single, v1 multi).
+                // WhatsApp encodes "how many options a voter may pick".
+                // Default 1 (single choice); `multi_select: true` lets a voter
+                // pick any number, which is what the count means at its max.
+                let selectable = if input
+                    .get("multi_select")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false)
+                {
+                    opts.len() as u32
+                } else {
+                    1
                 };
-                match client.send_message(jid, wa_msg).await {
-                    Ok(result) => {
-                        // #1482: votes name their options by hash, never by
-                        // label, so a vote can only be read back against the
-                        // poll's own option list. Remember it now, keyed on the
-                        // poll's message id.
+                match client
+                    .polls()
+                    .create(jid, &question, &opts, selectable)
+                    .await
+                {
+                    Ok((result, _secret)) => {
+                        // Votes name their options by hash, never by label, so
+                        // a vote can only be read back against the poll's own
+                        // option list. Remember it, keyed on the message id.
                         self.whatsapp_state
                             .polls
                             .remember(result.message_id, opts)

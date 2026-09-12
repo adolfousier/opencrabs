@@ -123,11 +123,16 @@ pub(crate) async fn decode_vote(
 
     // The secret is keyed on the poll's own chat and author. We only track
     // polls WE created, so the author is this account.
-    let chat = chat_jid.to_non_ad().to_string();
+    // Both halves of the key are normalised the same way. The store writes
+    // `to_non_ad_string()` on both, so comparing a device-suffixed JID here
+    // would miss a secret that is actually present.
+    let chat = chat_jid.to_non_ad_string();
     let creator = key
         .remote_jid
-        .clone()
-        .unwrap_or_else(|| chat_jid.to_string());
+        .as_deref()
+        .and_then(|j| j.parse::<wacore_binary::jid::Jid>().ok())
+        .map(|j| j.to_non_ad_string())
+        .unwrap_or_else(|| chat.clone());
     let secret = match client
         .persistence_manager()
         .backend()
