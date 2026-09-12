@@ -119,7 +119,7 @@ fn loader_ignores_an_assistant_row_quoting_the_marker() {
     };
 
     let all = vec![
-        row("ancient history"),
+        row("user", "ancient history"),
         row(
             "user",
             &CompactionOutcome::Summarised("real anchor".into()).marker(""),
@@ -138,7 +138,7 @@ fn loader_ignores_an_assistant_row_quoting_the_marker() {
 
     assert_eq!(
         kept.len(),
-        3,
+        4,
         "a quoting assistant row re-anchored the window (#175)"
     );
     assert!(
@@ -146,7 +146,15 @@ fn loader_ignores_an_assistant_row_quoting_the_marker() {
         "loader anchored on the quote instead of the real marker"
     );
     assert_eq!(kept[1].content, "work done after the real compaction");
-    assert_eq!(kept[2].content, "work done after the quote");
+    assert_eq!(
+        kept[2].role, "assistant",
+        "the quoting row is history, not a marker — it must survive the window"
+    );
+    assert!(
+        kept[2].content.contains(MARKER_PREFIX),
+        "the quoting row must still be in the window (it is what the old match anchored on)"
+    );
+    assert_eq!(kept[3].content, "work done after the quote");
 }
 
 /// A `user` row is only a marker when the prefix BEGINS its content — quoting
