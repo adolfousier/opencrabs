@@ -163,6 +163,94 @@ fn has_document(msg: &Message) -> bool {
     msg.document_message.is_some()
 }
 
+/// Check if the message carries a video (#1410).
+fn has_video(msg: &Message) -> bool {
+    let msg = unwrap_message(msg);
+    msg.video_message.is_some()
+}
+
+/// Check if the message carries a sticker (#1483).
+fn has_sticker(msg: &Message) -> bool {
+    let msg = unwrap_message(msg);
+    msg.sticker_message.is_some()
+}
+
+/// Download a video from WhatsApp. Returns (bytes, mime, filename) on success.
+///
+/// WhatsApp does not name video blobs, so the filename is synthesised from the
+/// mimetype: the vision/file funnel keys off the extension, and "file" with no
+/// extension would land it in the wrong branch.
+async fn download_video(
+    msg: &Message,
+    client: &Client,
+    ctx: &super::media_retry::MediaContext,
+) -> Option<(Vec<u8>, String, String)> {
+    let msg = unwrap_message(msg);
+    let video = msg.video_message.as_ref()?;
+    let mime = video
+        .mimetype
+        .clone()
+        .unwrap_or_else(|| "video/mp4".to_string());
+    let ext = match mime.split(';').next().unwrap_or("").trim() {
+        "video/3gpp" => "3gp",
+        "video/quicktime" => "mov",
+        "video/webm" => "webm",
+        _ => "mp4",
+    };
+    let bytes =
+        super::media_retry::download_with_retry(client, video.as_ref(), ctx, "video", |m, path| {
+            m.direct_path = Some(path)
+        })
+        .await?;
+    tracing::debug!("WhatsApp: downloaded video ({} bytes)", bytes.len());
+    Some((bytes, mime, format!("video.{ext}")))
+}
+
+/// Download a sticker from WhatsApp. Returns (bytes, mime, filename) on
+/// success. Stickers are WebP images, so they ride the image funnel.
+async fn download_sticker(
+    msg: &Message,
+    client: &Client,
+    ctx: &super::media_retry::MediaContext,
+) -> Option<(Vec<u8>, String, String)> {
+    let msg = unwrap_message(msg);
+    let sticker = msg.sticker_message.as_ref()?;
+    let mime = sticker
+        .mimetype
+        .clone()
+        .unwrap_or_else(|| "image/webp".to_string());
+    let bytes = super::media_retry::download_with_retry(
+        client,
+        sticker.as_ref(),
+        ctx,
+        "sticker",
+        |m, path| m.direct_path = Some(path),
+    )
+    .await?;
+    tracing::debug!("WhatsApp: downloaded sticker ({} bytes)", bytes.len());
+    Some((bytes, mime, "sticker.webp".to_string()))
+}
+
+/// Render the inbound types that carry no media: location, live location,
+/// contact card and reaction (#1483). `None` means this message is not one of
+/// them, or is a reaction being removed.
+fn describe_non_media(msg: &Message) -> Option<String> {
+    let msg = unwrap_message(msg);
+    if let Some(loc) = msg.location_message.as_ref() {
+        return Some(super::inbound::describe_location(loc));
+    }
+    if let Some(loc) = msg.live_location_message.as_ref() {
+        return Some(super::inbound::describe_live_location(loc));
+    }
+    if let Some(contact) = msg.contact_message.as_ref() {
+        return Some(super::inbound::describe_contact(contact));
+    }
+    if let Some(reaction) = msg.reaction_message.as_ref() {
+        return super::inbound::describe_reaction(reaction);
+    }
+    None
+}
+
 /// Download a document from WhatsApp. Returns (bytes, mime, filename) on success.
 async fn download_document(
     msg: &Message,
@@ -398,14 +486,51 @@ pub(crate) async fn handle_message(
         }
     }
 
-    // Build message content: text, image, audio, or document
+    // Build message content: text, image, audio, document, video, sticker, or
+    // one of the non-media types (#1410, #1483).
     let has_img = has_image(&msg);
     let has_aud = has_audio(&msg);
     let has_doc = has_document(&msg);
     let text = extract_text(&msg);
 
-    // Require at least text, image, audio, or document
-    if text.is_none() && !has_img && !has_aud && !has_doc {
+    // Location, contact card and inbound reaction carry no blob to download;
+    // they turn straight into a line of text for the agent.
+    let non_media = describe_non_media(&msg);
+    // #1482: a poll vote carries no text either, but unlike the types above it
+    // cannot be decoded as a pure function: the vote is encrypted, and opening
+    // it needs the poll's stored message secret and the client's LID/PN
+    // resolution. A vote we cannot label yields None and is logged there.
+    let poll_vote = match unwrap_message(&msg).poll_update_message.as_ref() {
+        Some(update) => {
+            let voter = if info.push_name.trim().is_empty() {
+                phone.clone()
+            } else {
+                info.push_name.trim().to_string()
+            };
+            super::poll::decode_vote(
+                &client,
+                &wa_state,
+                update,
+                &info.source.chat,
+                &info.source.sender,
+                &voter,
+            )
+            .await
+        }
+        None => None,
+    };
+
+    // Require at least one thing we can act on. Everything else really is
+    // noise (receipts, protocol messages) and returning is correct.
+    if text.is_none()
+        && !has_img
+        && !has_aud
+        && !has_doc
+        && !has_vid
+        && !has_stk
+        && non_media.is_none()
+        && poll_vote.is_none()
+    {
         return;
     }
 
@@ -427,7 +552,22 @@ pub(crate) async fn handle_message(
             phone.clone(),
             push_name,
             t.clone(),
+    let has_vid = has_video(&msg);
+    let has_stk = has_sticker(&msg);
             "text".into(),
+    // #1488: a media URL expires, and the server will re-upload the blob if
+    // asked with the message's own coordinates. Built once and handed to every
+    // downloader so an old photo comes back instead of erroring.
+    let media_ctx = super::media_retry::MediaContext {
+        msg_id: info.id.clone(),
+        chat: info.source.chat.clone(),
+        is_from_me: info.source.is_from_me,
+        participant: if info.source.is_group {
+            Some(info.source.sender.clone())
+        } else {
+            None
+        },
+    };
             None,
         );
         if let Err(e) = channel_msg_repo.insert(&cm).await {
@@ -519,19 +659,6 @@ pub(crate) async fn handle_message(
         if let Some(c) = choice {
             let is_owner =
                 crate::config::owner::is_owner(&wa_cfg.allowed_phones, &wa_cfg.bot_owner, &phone);
-    // #1488: a media URL expires, and the server will re-upload the blob if
-    // asked with the message's own coordinates. Built once and handed to every
-    // downloader so an old photo comes back instead of erroring.
-    let media_ctx = super::media_retry::MediaContext {
-        msg_id: info.id.clone(),
-        chat: info.source.chat.clone(),
-        is_from_me: info.source.is_from_me,
-        participant: if info.source.is_group {
-            Some(info.source.sender.clone())
-        } else {
-            None
-        },
-    };
             if !is_owner {
                 tracing::warn!(
                     "WhatsApp: non-owner {} replied approval {:?} — refused (OC-01)",
@@ -658,6 +785,55 @@ pub(crate) async fn handle_message(
     // "Message Yourself" self-chat addressed by LID (e.g. 236927743742100),
     // while the connection greeting and config identify the owner by PN
     // (351933536442). Keying the session by the raw sender would create a
+    // Stickers are WebP images: same funnel as an inbound photo (#1483).
+    if has_stk
+        && !has_img
+        && !has_aud
+        && let Some((bytes, mime, fname)) = download_sticker(&msg, &client, &media_ctx).await
+    {
+        use crate::utils::{inject_file_content, process_file_with_vision};
+        if let Ok(cfg) = crate::config::Config::load() {
+            let fc = process_file_with_vision(&bytes, &mime, &fname, &cfg);
+            let injected = inject_file_content(&fc).0;
+            if !injected.is_empty() {
+                content.push_str(&format!("\n\n{injected}"));
+            }
+        }
+    }
+
+    // Video: stored and analysed through the same funnel as an image (#1410).
+    if has_vid
+        && !has_aud
+        && let Some((bytes, mime, fname)) = download_video(&msg, &client, &media_ctx).await
+    {
+        use crate::utils::{inject_file_content, process_file_with_vision};
+        if let Ok(cfg) = crate::config::Config::load() {
+            let fc = process_file_with_vision(&bytes, &mime, &fname, &cfg);
+            let injected = inject_file_content(&fc).0;
+            if !injected.is_empty() {
+                content.push_str(&format!("\n\n{injected}"));
+            }
+        }
+    }
+
+    // Poll vote: a decoded line naming the voter and what they picked (#1482).
+    if let Some(vote) = poll_vote {
+        if content.trim().is_empty() {
+            content = vote;
+        } else {
+            content.push_str(&format!("\n\n{vote}"));
+        }
+    }
+
+    // Location, contact card, inbound reaction: no blob, just a line (#1483).
+    if let Some(extract) = non_media {
+        if content.trim().is_empty() {
+            content = extract;
+        } else {
+            content.push_str(&format!("\n\n{extract}"));
+        }
+    }
+
     // SECOND owner session (wa-<LID>) separate from the greeting's (wa-<PN>) —
     // the "two sessions every time" bug. Collapse the owner's self-chat to the
     // configured owner number (the same one the greeting uses) so the owner
@@ -1637,6 +1813,22 @@ pub(crate) async fn handle_message(
                                         mimetype: Some("audio/ogg; codecs=opus".to_string()),
                                         ptt: Some(true),
                                         ..Default::default()
+            // #1409: acknowledge a finished multi-step turn with a reaction on
+            // our own final message, the way the crab does on Telegram. Only
+            // on streamed turns: those are the ones that ran tools and took
+            // long enough that an acknowledgement means something. A plain
+            // chat reply needs no tick on itself.
+            if streamed {
+                super::reaction::acknowledge_completion(
+                    &client,
+                    &reply_jid,
+                    &wa_state,
+                    session_id,
+                    super::reaction::COMPLETION_EMOJI,
+                )
+                .await;
+            }
+
                                     })),
                                     ..Default::default()
                                 };
@@ -1818,22 +2010,6 @@ pub(crate) async fn send_connection_greeting(
         Err(e) => {
             wa_state.broadcast_error(&format!(
                 "WhatsApp connected but the agent could not generate a greeting: {e}"
-            // #1409: acknowledge a finished multi-step turn with a reaction on
-            // our own final message, the way the crab does on Telegram. Only
-            // on streamed turns: those are the ones that ran tools and took
-            // long enough that an acknowledgement means something. A plain
-            // chat reply needs no tick on itself.
-            if streamed {
-                super::reaction::acknowledge_completion(
-                    &client,
-                    &reply_jid,
-                    &wa_state,
-                    session_id,
-                    super::reaction::COMPLETION_EMOJI,
-                )
-                .await;
-            }
-
             ));
         }
     }

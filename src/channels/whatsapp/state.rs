@@ -92,18 +92,22 @@ pub struct WhatsAppState {
     /// cap with a FIFO queue. Shared by the send tool, the handler chunk
     /// loops, the resume path and the drainer task - one budget for the
     /// whole channel. `pub(crate)` so brain/tools can gate through it.
+    /// Option lists for polls this bot created (#1482). Votes reference
+    /// options by hash, never by name, so labelling a vote needs the poll's
+    /// own list. See `poll.rs`.
+    pub(crate) polls: super::poll::PollOptions,
     pub(crate) rate_limiter: std::sync::Arc<super::rate_limit::WhatsappRateLimiter>,
 }
 
-impl Default for WhatsAppState {
-    fn default() -> Self {
-        Self::new()
-    }
     /// Last editable message per session (#1408). `SendResult.message_id`
     /// used to be discarded at every send site; edit-in-place streaming,
     /// self-reactions and pin/forward all need it, so it is captured once
     /// here. See `outbox.rs`.
     pub(crate) outbox: super::outbox::Outbox,
+impl Default for WhatsAppState {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl WhatsAppState {
@@ -134,4 +138,5 @@ impl WhatsAppState {
         }
     }
 }
+            polls: super::poll::PollOptions::default(),
             outbox: super::outbox::Outbox::default(),

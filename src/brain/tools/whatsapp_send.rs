@@ -972,10 +972,20 @@ impl Tool for WhatsAppSendTool {
                     ..Default::default()
                 };
                 match client.send_message(jid, wa_msg).await {
-                    Ok(_) => Ok(ToolResult::success(format!(
-                        "Poll '{}' sent to {} via WhatsApp.",
-                        question, jid_str
-                    ))),
+                    Ok(result) => {
+                        // #1482: votes name their options by hash, never by
+                        // label, so a vote can only be read back against the
+                        // poll's own option list. Remember it now, keyed on the
+                        // poll's message id.
+                        self.whatsapp_state
+                            .polls
+                            .remember(result.message_id, opts)
+                            .await;
+                        Ok(ToolResult::success(format!(
+                            "Poll '{}' sent to {} via WhatsApp.",
+                            question, jid_str
+                        )))
+                    }
                     Err(e) => Ok(ToolResult::error(format!("Failed to send poll: {}", e))),
                 }
             }
