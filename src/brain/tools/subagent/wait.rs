@@ -6,6 +6,7 @@ use crate::brain::tools::r#trait::{Tool, ToolCapability, ToolExecutionContext, T
 use async_trait::async_trait;
 use serde_json::Value;
 use std::sync::Arc;
+use uuid::Uuid;
 
 /// Holds a waiter registration for as long as the wait lasts.
 ///
@@ -87,7 +88,7 @@ impl Tool for WaitAgentTool {
         false
     }
 
-    async fn execute(&self, input: Value, _context: &ToolExecutionContext) -> Result<ToolResult> {
+    async fn execute(&self, input: Value, context: &ToolExecutionContext) -> Result<ToolResult> {
         let raw_agent_id = input
             .get("agent_id")
             .and_then(|v| v.as_str())
@@ -109,10 +110,16 @@ impl Tool for WaitAgentTool {
         //   3. label match (unique)
         // If none work, return a helpful error that lists every active
         // agent's id AND label so the model can self-correct instead of
-        // guessing again.
-        let agent_id = match self.resolve_agent_id(raw_agent_id) {
+        // guessing again. Both the resolver and that listing are scoped to
+        // the caller's own children (#191) — an unscoped listing handed the
+        // model another session's ids, which its next call would then resolve.
+        let agent_id = match self.resolve_agent_id(raw_agent_id, context.session_id) {
             Some(id) => id,
-            None => return Ok(ToolResult::error(self.unknown_agent_message(raw_agent_id))),
+            None => {
+                return Ok(ToolResult::error(
+                    self.unknown_agent_message(raw_agent_id, context.session_id),
+                ));
+            }
         };
         let agent_id = agent_id.as_str();
 
@@ -182,16 +189,26 @@ impl WaitAgentTool {
     ///   2. unique UUID prefix match (≥4 chars)
     ///   3. unique label match
     ///
+    /// All three run against the CALLER's children only (#191). The manager
+    /// is process-global, so an unscoped resolver let one session name — and
+    /// then block on — another session's child; and because the not-found
+    /// message lists every active agent, a foreign id leaked out and the
+    /// model's next call resolved it. `parent_session_id` is the waiting
+    /// session, threaded in from the execution context.
+    ///
     /// Returns None if nothing matches or the match is ambiguous.
     ///
     /// `pub(crate)` so `src/tests/wait_agent_resolver_test.rs` can
     /// exercise the resolver directly without spinning up a full
     /// agent runtime.
-    pub(crate) fn resolve_agent_id(&self, raw: &str) -> Option<String> {
-        if self.manager.exists(raw) {
+    pub(crate) fn resolve_agent_id(&self, raw: &str, parent_session_id: Uuid) -> Option<String> {
+        let active = self.manager.list_for_parent(parent_session_id);
+
+        // Exact match — checked against the scoped snapshot rather than
+        // `exists()`, so a foreign id cannot take this path.
+        if active.iter().any(|(id, _, _)| id == raw) {
             return Some(raw.to_string());
         }
-        let active = self.manager.list();
 
         // Prefix match — only accept ≥4 chars to avoid accidental
         // ambiguity on short strings.
@@ -217,17 +234,21 @@ impl WaitAgentTool {
         None
     }
 
-    /// Format a helpful error when no agent matches. Lists every active
-    /// agent so the caller can self-correct on the next turn instead of
-    /// guessing another string into the void.
+    /// Format a helpful error when no agent matches. Lists the caller's own
+    /// active agents so the caller can self-correct on the next turn instead
+    /// of guessing another string into the void.
+    ///
+    /// Scoped to the caller (#191) for the same reason as `resolve_agent_id`:
+    /// an unscoped listing leaked every session's ids into this message, and
+    /// the model's next call then resolved one of them.
     ///
     /// `pub(crate)` for the same testability reason as resolve_agent_id.
-    pub(crate) fn unknown_agent_message(&self, raw: &str) -> String {
-        let active = self.manager.list();
+    pub(crate) fn unknown_agent_message(&self, raw: &str, parent_session_id: Uuid) -> String {
+        let active = self.manager.list_for_parent(parent_session_id);
         if active.is_empty() {
             return format!(
                 "No sub-agent found with id or label '{}'. \
-                 There are no active sub-agents — spawn one first with spawn_agent.",
+                 You have no active sub-agents — spawn one first with spawn_agent.",
                 raw
             );
         }

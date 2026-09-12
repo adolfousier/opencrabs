@@ -98,3 +98,50 @@ fn prompt_builder_keeps_subagent_background_contract() {
         "subagent background contract missing from system prompt"
     );
 }
+
+/// #191 regression pin: `execute` reports only the CALLER's sub-agents.
+///
+/// The manager is process-global (one instance per channel factory), so
+/// pre-fix this iterated every session's children. That is not merely noise:
+/// the tool's framing tells the model these are *its* in-flight sub-agents
+/// ("do not spawn duplicates"), so a foreign row makes a lane silently skip
+/// work it believes is already running.
+///
+/// Pins the call site rather than the renderer — `render_tasks` takes rows the
+/// caller built, so it cannot see a scope regression.
+#[tokio::test]
+async fn execute_lists_only_the_callers_subagents() {
+    use crate::brain::tools::ToolExecutionContext;
+    use crate::brain::tools::subagent::{SubAgent, SubAgentManager};
+    use std::sync::Arc;
+
+    fn child(id: &str, label: &str, parent: Uuid) -> SubAgent {
+        SubAgent::new(id.to_string(), label.to_string(), Uuid::new_v4(), parent)
+    }
+
+    let me = Uuid::from_u128(0x191);
+    let other = Uuid::from_u128(0x192);
+
+    let mgr = Arc::new(SubAgentManager::new());
+    mgr.insert(child("mine0001", "my-research", me));
+    mgr.insert(child("theirs01", "their-research", other));
+
+    let mut ctx = ToolExecutionContext::new(me);
+    ctx.subagent_manager = Some(mgr);
+
+    let out = TasksListTool::new()
+        .execute(serde_json::json!({}), &ctx)
+        .await
+        .unwrap();
+    assert!(out.success, "tasks_list failed: {:?}", out.error);
+    assert!(
+        out.output.contains("mine0001"),
+        "own child missing: {}",
+        out.output
+    );
+    assert!(
+        !out.output.contains("theirs01"),
+        "another session's child leaked into the roster: {}",
+        out.output
+    );
+}

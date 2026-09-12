@@ -112,7 +112,13 @@ impl Tool for TasksListTool {
     async fn execute(&self, _input: Value, context: &ToolExecutionContext) -> Result<ToolResult> {
         let mut subagents = Vec::new();
         if let Some(mgr) = context.subagent_manager.as_ref() {
-            for (id, label, state) in mgr.list() {
+            // Scoped to the CALLER's children (#191). The manager is
+            // process-global (one instance per channel factory), so an
+            // unfiltered `list()` reported other sessions' sub-agents as this
+            // caller's in-flight work — and this tool's framing ("do not
+            // spawn duplicates") makes that a silent suppressor, not just
+            // noise. The detached half below is already scoped the same way.
+            for (id, label, state) in mgr.list_for_parent(context.session_id) {
                 let sf = crate::brain::agent::service::work_status::status_dir()
                     .join(format!("{id}.json"));
                 subagents.push(SubagentRow {

@@ -396,6 +396,27 @@ impl SubAgentManager {
             .collect()
     }
 
+    /// List agents belonging to one parent session (#191).
+    ///
+    /// Mirrors [`Self::alive_counts_for`] for the same reason: the manager is
+    /// process-global (one instance wired into every channel agent), so an
+    /// unfiltered [`Self::list`] reports another chat's fan-out as this chat's
+    /// in-flight work. A surface that frames those rows as *the caller's*
+    /// sub-agents then makes a lane adopt — or, worse, silently suppress —
+    /// work that is not its own.
+    ///
+    /// Unlike `alive_counts_for`, terminal agents ARE included: a caller
+    /// asking what it spawned wants its finished children too.
+    pub fn list_for_parent(&self, parent_session_id: Uuid) -> Vec<(String, String, SubAgentState)> {
+        self.agents
+            .read()
+            .expect("subagent manager lock poisoned")
+            .values()
+            .filter(|a| a.parent_session_id == parent_session_id)
+            .map(|a| (a.id.clone(), a.label.clone(), a.state.clone()))
+            .collect()
+    }
+
     /// Alive-agent counts for one parent session (#1183): `(working,
     /// awaiting)` — children mid-round (`Running`) vs parked at a round
     /// boundary with output ready to collect (`AwaitingInput`). Terminal
