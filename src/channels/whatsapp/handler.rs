@@ -1795,3 +1795,19 @@ pub(crate) async fn send_connection_greeting(
         }
     }
 }
+            // #1409: acknowledge a finished multi-step turn with a reaction on
+            // our own final message, the way the crab does on Telegram. Only
+            // on streamed turns: those are the ones that ran tools and took
+            // long enough that an acknowledgement means something. A plain
+            // chat reply needs no tick on itself.
+            if streamed {
+                super::reaction::acknowledge_completion(
+                    &client,
+                    &reply_jid,
+                    &wa_state,
+                    session_id,
+                    super::reaction::COMPLETION_EMOJI,
+                )
+                .await;
+            }
+

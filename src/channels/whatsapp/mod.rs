@@ -28,6 +28,7 @@ mod state;
 pub(crate) mod store;
 
 pub use agent::WhatsAppAgent;
+pub(crate) mod reaction;
 pub use approval::WaApproval;
 pub use state::WhatsAppState;
 pub(crate) mod stream;
