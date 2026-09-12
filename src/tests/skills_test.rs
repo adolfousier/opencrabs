@@ -1,7 +1,7 @@
 //! Tests for the skill loader — frontmatter parsing, built-in registry,
 //! and user-directory overlay.
 
-use crate::brain::skills::{load_all_skills, resolve_skill, Skill, SkillSource};
+use crate::brain::skills::{Skill, SkillSource, load_all_skills, resolve_skill};
 
 #[test]
 fn parses_minimal_frontmatter() {

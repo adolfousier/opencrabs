@@ -2029,9 +2029,7 @@ impl Tool for PlanTool {
 
                 #[cfg(feature = "telegram")]
                 if !description.is_empty()
-                    && crate::channels::telegram::rich::mermaid::should_render_mermaid(
-                        &description,
-                    )
+                    && crate::channels::telegram::rich::mermaid::should_render_mermaid(&description)
                 {
                     let parse_errors =
                         crate::channels::telegram::rich::mermaid::preflight_parse_errors(
