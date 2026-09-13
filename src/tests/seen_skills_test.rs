@@ -497,3 +497,36 @@ fn hydration_preserves_stamp_inventory_across_restart() {
         vec!["alpha".to_string(), "zeta".to_string()]
     );
 }
+
+// ══ the boot-hydration once-flag is claimed AFTER the readiness guards ═════
+//
+// Source-scan sentinel, because the flag is a function-local `static` with no
+// reader and no reset: a behavioural test would have to drive a process-wide
+// one-shot, which makes it order-dependent on every other test in the binary
+// — the exact flakiness class #1535/#1536 just removed. What can be pinned is
+// the ordering itself, and the ordering is the whole bug: claiming the flag
+// above the pool check lets a caller that hydrated NOTHING spend the
+// process's single attempt, silently disabling restart durability for that
+// run. `a2a::test_helpers` already builds a service before `Database::connect`
+// installs the pool, so the early-caller order is not hypothetical.
+
+#[test]
+fn boot_hydration_claims_its_flag_after_the_pool_guard() {
+    let src = include_str!("../brain/tools/seen_skills.rs");
+    let body = src
+        .split("pub fn hydrate_from_db()")
+        .nth(1)
+        .expect("hydrate_from_db must exist");
+    let pool = body
+        .find("global_pool()")
+        .expect("hydrate_from_db must still guard on the global pool");
+    let claim = body
+        .find("HYDRATED.swap")
+        .expect("hydrate_from_db must still claim a once-flag");
+    assert!(
+        claim > pool,
+        "the once-flag is claimed at byte {claim}, before the pool guard at \
+         {pool}: a boot with no pool would burn the process's only hydration \
+         attempt and restart durability would be lost for the whole run"
+    );
+}

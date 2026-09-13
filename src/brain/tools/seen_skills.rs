@@ -238,11 +238,16 @@ pub fn apply_seeds(seeds: HydrationSeeds) -> usize {
 /// I/O. A missing pool is not an error — unit tests and any construction
 /// before `Database::connect` simply have no durability target (acceptance
 /// 5: no panic paths, the in-memory registry keeps working regardless).
+///
+/// The once-flag is claimed AFTER the pool and runtime guards, never before:
+/// a caller that arrives while the pool is still uninstalled has not hydrated
+/// anything, so burning the flag there would disable hydration for the whole
+/// process on the strength of a `debug!` line. Construction before
+/// `Database::connect` is a real order that exists in this tree
+/// (`a2a::test_helpers`), so an early caller must leave the door open for the
+/// one that follows it.
 pub fn hydrate_from_db() {
     static HYDRATED: AtomicBool = AtomicBool::new(false);
-    if HYDRATED.swap(true, Ordering::SeqCst) {
-        return;
-    }
     let Some(pool) = crate::db::global_pool().cloned() else {
         tracing::debug!(
             "seen_skills: no DB pool at boot — registry stays in-memory only (restart \
@@ -254,6 +259,9 @@ pub fn hydrate_from_db() {
         tracing::debug!("seen_skills: no tokio runtime at boot — skipping DB hydration");
         return;
     };
+    if HYDRATED.swap(true, Ordering::SeqCst) {
+        return;
+    }
     handle.spawn(async move {
         let repo = crate::db::repository::SessionSkillsRepository::new(pool);
         match repo.all().await {
