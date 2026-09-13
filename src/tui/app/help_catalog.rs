@@ -103,3 +103,16 @@ pub fn load() -> Vec<HelpRow> {
 pub fn section_rows(rows: &[HelpRow], section: HelpSection) -> Vec<&HelpRow> {
     rows.iter().filter(|r| r.section == section).collect()
 }
+
+/// Largest scroll offset that still leaves content on screen.
+///
+/// The help screen used to call `saturating_add(1)` with no ceiling, so
+/// holding the down key wound the offset past the end and the reader was left
+/// staring at blank rows with no cue for how far back to scroll. Clamping to
+/// `content - viewport` keeps the last row visible at maximum scroll.
+///
+/// A viewport at least as tall as the content means there is nothing to
+/// scroll, so the answer is 0.
+pub fn max_scroll(content_rows: usize, viewport_rows: usize) -> usize {
+    content_rows.saturating_sub(viewport_rows)
+}

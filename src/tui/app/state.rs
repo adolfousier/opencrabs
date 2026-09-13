@@ -574,6 +574,12 @@ pub struct App {
     /// Built here rather than in the renderer because the renderer ran
     /// `load_all_skills()` and a `commands.toml` parse on every frame.
     pub help_catalog: Vec<super::help_catalog::HelpRow>,
+    /// Rows the help screen last rendered, and the height it had to show them
+    /// in. Written by the renderer, read by the key handler to clamp scroll —
+    /// without them `help_scroll_offset` had no ceiling and wound off the end
+    /// of the content into blank space.
+    pub help_content_rows: usize,
+    pub help_viewport_rows: usize,
     /// Scroll offset for the Plan overlay (Editing design .md viewer).
     pub plan_overlay_scroll: usize,
 
@@ -941,6 +947,8 @@ impl App {
             ctrl_c_pending_at: None,
             help_scroll_offset: 0,
             help_catalog: Vec::new(),
+            help_content_rows: 0,
+            help_viewport_rows: 0,
             plan_overlay_scroll: 0,
             approval_auto_session,
             approval_auto_always,
@@ -3690,17 +3698,23 @@ impl App {
                 self.handle_onboarding_key(event).await?;
             }
             AppMode::Help | AppMode::Settings => {
+                let max = super::help_catalog::max_scroll(
+                    self.help_content_rows,
+                    self.help_viewport_rows,
+                );
                 if keys::is_cancel(&event) {
                     self.help_scroll_offset = 0;
                     self.switch_mode(AppMode::Chat).await?;
                 } else if keys::is_up(&event) {
                     self.help_scroll_offset = self.help_scroll_offset.saturating_sub(1);
                 } else if keys::is_down(&event) {
-                    self.help_scroll_offset = self.help_scroll_offset.saturating_add(1);
+                    // Clamped: an unbounded offset used to scroll the screen
+                    // into blank space with no cue for how far back to go.
+                    self.help_scroll_offset = self.help_scroll_offset.saturating_add(1).min(max);
                 } else if keys::is_page_up(&event) {
                     self.help_scroll_offset = self.help_scroll_offset.saturating_sub(10);
                 } else if keys::is_page_down(&event) {
-                    self.help_scroll_offset = self.help_scroll_offset.saturating_add(10);
+                    self.help_scroll_offset = self.help_scroll_offset.saturating_add(10).min(max);
                 }
             }
             AppMode::PlanOverlay => {

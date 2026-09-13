@@ -4,7 +4,7 @@
 //! `commands.toml`, so its answer depends on the machine. What is pinned is
 //! the grouping the renderer depends on.
 
-use crate::tui::app::help_catalog::{HelpRow, HelpSection, section_rows};
+use crate::tui::app::help_catalog::{HelpRow, HelpSection, max_scroll, section_rows};
 
 fn row(name: &str, description: &str, section: HelpSection) -> HelpRow {
     HelpRow {
@@ -72,4 +72,29 @@ fn every_section_has_a_header() {
     for s in HelpSection::all() {
         assert!(!s.title().is_empty(), "{s:?} renders a header");
     }
+}
+
+#[test]
+fn scroll_stops_with_content_still_on_screen() {
+    // The bug this replaces: `saturating_add(1)` with no ceiling wound the
+    // offset past the end and left the reader on blank rows.
+    assert_eq!(max_scroll(100, 30), 70);
+}
+
+#[test]
+fn content_shorter_than_the_viewport_cannot_scroll() {
+    assert_eq!(max_scroll(10, 30), 0);
+    assert_eq!(max_scroll(0, 30), 0);
+}
+
+#[test]
+fn content_exactly_filling_the_viewport_cannot_scroll() {
+    assert_eq!(max_scroll(30, 30), 0);
+}
+
+#[test]
+fn a_zero_height_viewport_does_not_underflow() {
+    // Degenerate, but a panic here would take the whole TUI down on a
+    // terminal resized to nothing.
+    assert_eq!(max_scroll(50, 0), 50);
 }

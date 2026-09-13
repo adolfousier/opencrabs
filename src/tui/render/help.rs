@@ -14,7 +14,7 @@ use ratatui::{
 };
 
 /// Render the help screen
-pub(super) fn render_help(f: &mut Frame, app: &App, area: Rect) {
+pub(super) fn render_help(f: &mut Frame, app: &mut App, area: Rect) {
     // Helper to build a "key → description" line
     fn kv<'a>(key: &'a str, desc: &'a str, key_color: Color) -> Line<'a> {
         Line::from(vec![
@@ -236,6 +236,16 @@ pub(super) fn render_help(f: &mut Frame, app: &App, area: Rect) {
         left.push(Line::from(""));
     }
 
+    // Record what was rendered so the key handler can clamp scroll to it.
+    // `render_chat` does the same with `chat_area_height`; without it the
+    // offset has no ceiling and winds off the end of the content (#1527).
+    app.help_content_rows = left.len();
+    app.help_viewport_rows = area.height.saturating_sub(2) as usize; // minus borders
+    let scroll = app.help_scroll_offset.min(help_catalog::max_scroll(
+        app.help_content_rows,
+        app.help_viewport_rows,
+    )) as u16;
+
     let left_para = Paragraph::new(left)
         .block(
             Block::default()
@@ -248,7 +258,7 @@ pub(super) fn render_help(f: &mut Frame, app: &App, area: Rect) {
                 ))
                 .border_style(Style::default().fg(theme::role(Role::Gray))),
         )
-        .scroll((app.help_scroll_offset as u16, 0));
+        .scroll((scroll, 0));
 
     let right_para = Paragraph::new(right)
         .block(
@@ -256,14 +266,14 @@ pub(super) fn render_help(f: &mut Frame, app: &App, area: Rect) {
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(theme::role(Role::Gray))),
         )
-        .scroll((app.help_scroll_offset as u16, 0));
+        .scroll((scroll, 0));
 
     f.render_widget(left_para, columns[0]);
     f.render_widget(right_para, columns[1]);
 }
 
 /// Render the settings screen
-pub(super) fn render_settings(f: &mut Frame, app: &App, area: Rect) {
+pub(super) fn render_settings(f: &mut Frame, app: &mut App, area: Rect) {
     fn section(title: &str) -> Line<'_> {
         Line::from(Span::styled(
             format!("  {} ", title),
@@ -391,6 +401,18 @@ pub(super) fn render_settings(f: &mut Frame, app: &App, area: Rect) {
         lines.push(Line::from(""));
     }
 
+    // Settings shares `help_scroll_offset` and the key-handler arm that clamps
+    // it, so it has to record its own height too. Clamping against the help
+    // screen's numbers would be wrong when help was last open, and fatal when
+    // it was never opened: max_scroll(0, 0) is 0, and Settings would refuse to
+    // scroll at all.
+    app.help_content_rows = lines.len();
+    app.help_viewport_rows = area.height.saturating_sub(2) as usize; // minus borders
+    let scroll = app.help_scroll_offset.min(help_catalog::max_scroll(
+        app.help_content_rows,
+        app.help_viewport_rows,
+    )) as u16;
+
     let para = Paragraph::new(lines)
         .block(
             Block::default()
@@ -403,7 +425,7 @@ pub(super) fn render_settings(f: &mut Frame, app: &App, area: Rect) {
                 ))
                 .border_style(Style::default().fg(theme::role(Role::Gray))),
         )
-        .scroll((app.help_scroll_offset as u16, 0));
+        .scroll((scroll, 0));
 
     f.render_widget(para, area);
 }
