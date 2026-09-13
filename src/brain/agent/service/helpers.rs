@@ -1777,6 +1777,42 @@ pub fn normalize_loop_arg(text: &str) -> String {
     collapsed.chars().take(LOOP_MATCH_MAX_CHARS).collect()
 }
 
+/// Whether an argument key represents a pagination or continuation token (#199).
+///
+/// Pagination arguments (offsets, page numbers/tokens, cursors, markers)
+/// advance legitimate multi-step iteration loops over large datasets. When passed
+/// as string values (e.g. `"page": "2"`, `"cursor": "cur-2"`, `"offset": "50"`),
+/// running them through [`normalize_loop_arg`] would strip lone digits and punctuation,
+/// collapsing distinct pages into identical signatures and causing false-positive
+/// loop detection.
+pub fn is_pagination_key(key: &str) -> bool {
+    let k = key.to_ascii_lowercase();
+    matches!(
+        k.as_str(),
+        "offset"
+            | "page"
+            | "page_token"
+            | "next_page_token"
+            | "cursor"
+            | "next_cursor"
+            | "starting_after"
+            | "start_line"
+            | "token"
+            | "pagination_token"
+            | "after"
+            | "before"
+            | "skip"
+            | "marker"
+            | "continuation_token"
+            | "page_number"
+            | "page_idx"
+            | "page_index"
+    ) || k.ends_with("_token")
+        || k.ends_with("_cursor")
+        || k.ends_with("_offset")
+        || k.ends_with("_page")
+}
+
 /// Normalized near-match signature for one tool call (#961).
 ///
 /// Tool name + ':' + one normalized part per argument field. STRING values
@@ -1790,8 +1826,9 @@ pub fn normalize_loop_arg(text: &str) -> String {
 /// `timeout_secs: 30` vs `60` are genuinely different calls, and
 /// digit-stripping made the guard flag that legitimate work as a loop
 /// (#82: a plan checklist progression was nudged, then broken,
-/// 2026-09-02). Parts are sorted so argument insertion order never changes
-/// the signature.
+/// 2026-09-02). Pagination arguments (page, cursor, offset, continuation tokens)
+/// are preserved intact (#199) so legitimate paging loops do not collapse.
+/// Parts are sorted so argument insertion order never changes the signature.
 pub fn normalized_call_signature(name: &str, args: &Value) -> String {
     let mut sig = String::from(name);
     sig.push(':');
@@ -1802,8 +1839,20 @@ pub fn normalized_call_signature(name: &str, args: &Value) -> String {
                 .map(|(key, value)| match value {
                     Value::Number(n) => format!("{key}={n}"),
                     Value::Bool(b) => format!("{key}={b}"),
-                    Value::String(text) => format!("{key}={}", normalize_loop_arg(text)),
-                    other => format!("{key}={}", normalize_loop_arg(&other.to_string())),
+                    Value::String(text) => {
+                        if is_pagination_key(key) {
+                            format!("{key}={}", text.trim())
+                        } else {
+                            format!("{key}={}", normalize_loop_arg(text))
+                        }
+                    }
+                    other => {
+                        if is_pagination_key(key) {
+                            format!("{key}={}", other.to_string().trim())
+                        } else {
+                            format!("{key}={}", normalize_loop_arg(&other.to_string()))
+                        }
+                    }
                 })
                 .collect();
             parts.sort();

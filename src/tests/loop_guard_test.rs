@@ -503,3 +503,80 @@ fn deepseek_zip_send_tool_queries_are_reworded_not_identical() {
         seen.insert(n);
     }
 }
+
+// ---- pagination arguments (#199) ----
+
+#[test]
+fn pagination_arguments_in_strings_stay_apart() {
+    // String cursors, page tokens, and page numbers must not collapse to
+    // identical signatures during legitimate sequential pagination loops.
+    let cursor_call = |c: &str| {
+        normalized_call_signature(
+            "github_api",
+            &json!({"endpoint": "/repos/org/repo/issues", "cursor": c}),
+        )
+    };
+    assert_ne!(cursor_call("cur-1"), cursor_call("cur-2"));
+    assert_ne!(cursor_call("page_token_abc"), cursor_call("page_token_xyz"));
+    assert_eq!(cursor_call("cur-1"), cursor_call("cur-1"));
+
+    let page_str =
+        |p: &str| normalized_call_signature("api_query", &json!({"page": p, "per_page": "50"}));
+    assert_ne!(page_str("1"), page_str("2"));
+    assert_ne!(page_str("2"), page_str("3"));
+    assert_eq!(page_str("1"), page_str("1"));
+
+    let offset_str = |off: &str| {
+        normalized_call_signature(
+            "db_query",
+            &json!({"query": "SELECT * FROM t", "offset": off}),
+        )
+    };
+    assert_ne!(offset_str("0"), offset_str("50"));
+    assert_ne!(offset_str("50"), offset_str("100"));
+    assert_eq!(offset_str("0"), offset_str("0"));
+
+    let next_page_token =
+        |tok: &str| normalized_call_signature("fetch_data", &json!({"next_page_token": tok}));
+    assert_ne!(next_page_token("tok-1"), next_page_token("tok-2"));
+    assert_eq!(next_page_token("tok-1"), next_page_token("tok-1"));
+
+    let custom_suffix =
+        |val: &str| normalized_call_signature("custom_tool", &json!({"user_cursor": val}));
+    assert_ne!(custom_suffix("c1"), custom_suffix("c2"));
+    assert_eq!(custom_suffix("c1"), custom_suffix("c1"));
+}
+
+#[test]
+fn is_pagination_key_detection() {
+    use crate::brain::agent::service::helpers::is_pagination_key;
+    assert!(is_pagination_key("offset"));
+    assert!(is_pagination_key("OFFSET"));
+    assert!(is_pagination_key("page"));
+    assert!(is_pagination_key("page_token"));
+    assert!(is_pagination_key("next_page_token"));
+    assert!(is_pagination_key("cursor"));
+    assert!(is_pagination_key("next_cursor"));
+    assert!(is_pagination_key("starting_after"));
+    assert!(is_pagination_key("start_line"));
+    assert!(is_pagination_key("token"));
+    assert!(is_pagination_key("pagination_token"));
+    assert!(is_pagination_key("after"));
+    assert!(is_pagination_key("before"));
+    assert!(is_pagination_key("skip"));
+    assert!(is_pagination_key("marker"));
+    assert!(is_pagination_key("continuation_token"));
+    assert!(is_pagination_key("page_number"));
+    assert!(is_pagination_key("page_idx"));
+    assert!(is_pagination_key("page_index"));
+    assert!(is_pagination_key("items_offset"));
+    assert!(is_pagination_key("user_cursor"));
+    assert!(is_pagination_key("feed_page"));
+    assert!(is_pagination_key("continuation_page_token"));
+
+    // Non-pagination keys must NOT match
+    assert!(!is_pagination_key("command"));
+    assert!(!is_pagination_key("query"));
+    assert!(!is_pagination_key("attempt"));
+    assert!(!is_pagination_key("path"));
+}
