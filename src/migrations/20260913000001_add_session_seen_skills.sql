@@ -13,8 +13,9 @@ CREATE TABLE IF NOT EXISTS session_seen_skills (
     slug       TEXT NOT NULL,
     seen_at    INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
     epoch      INTEGER NULL,
+    -- No separate index on session_id: the primary key's implicit index is
+    -- already leftmost-prefixed on it, so every per-session lookup and the
+    -- orphan prune both ride that one. A second index would serve no read
+    -- and cost a write on every mark_seen.
     PRIMARY KEY (session_id, slug)
 );
-
-CREATE INDEX IF NOT EXISTS idx_session_seen_skills_session
-    ON session_seen_skills(session_id);
