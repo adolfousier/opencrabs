@@ -525,6 +525,41 @@ async fn rich_calls_are_paced_once_the_bucket_empties() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn rich_pacing_waits_for_refill_without_failing_open() {
+    let _guard = ts::registry_guard().await;
+    ts::reset(6_000);
+    rl_config!(
+        enabled: true,
+        rich_per_minute: 1, // 1 token every 60 s
+        rich_burst: 1,
+    );
+
+    const CHAT: ChatId = ChatId(-100_556);
+    const TOPIC: i32 = 4243;
+
+    // Burst token consumed immediately at t=0.
+    governor::pace_rich(CHAT, Some(TOPIC)).await;
+    let snap0 = ts::snapshot(CHAT).unwrap();
+    assert_eq!(snap0.admitted_rich, 1);
+    assert_eq!(snap0.throttled_rich_ms, 0);
+
+    // Call pace_rich again: bucket is empty, next token is 60 s away.
+    // Under the old code, at SEND_MAX_HOLD (30 s), waited + need > 30s triggered
+    // FailOpen immediately without holding.
+    // With fail-open eliminated (#176), it waits cleanly for the full 60 s refill,
+    // admits the call, and attributes the full wait time to throttled_rich_ms.
+    governor::pace_rich(CHAT, Some(TOPIC)).await;
+
+    let snap = ts::snapshot(CHAT).unwrap();
+    assert_eq!(snap.admitted_rich, 2, "refilled token must admit cleanly");
+    assert!(
+        snap.throttled_rich_ms >= 50_000,
+        "rich pacer must wait past SEND_MAX_HOLD (30s) without failing open; throttled_rich_ms={}",
+        snap.throttled_rich_ms
+    );
+}
+
+#[tokio::test(start_paused = true)]
 async fn rich_pacing_leaves_dms_and_non_forums_alone() {
     let _guard = ts::registry_guard().await;
     ts::reset(1_000);
