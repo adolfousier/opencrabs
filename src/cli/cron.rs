@@ -84,7 +84,7 @@ async fn cmd_add(
         anyhow::bail!("A cron job named '{name}' already exists");
     }
 
-    let job = CronJob::new(
+    let mut job = CronJob::new(
         name.clone(),
         cron.clone(),
         tz.clone(),
@@ -96,6 +96,7 @@ async fn cmd_add(
         deliver_to.clone(),
         None, // CLI doesn't support deliver_api_key yet
     );
+    job.next_run_at = crate::cron::next_run_utc(&cron, parsed_tz, chrono::Utc::now());
 
     let id = job.id.to_string();
     repo.insert(&job).await?;
@@ -133,6 +134,10 @@ async fn cmd_list(repo: &CronJobRepository) -> Result<()> {
             .last_run_at
             .map(|d| d.format("%Y-%m-%d %H:%M UTC").to_string())
             .unwrap_or_else(|| "never".to_string());
+        let next = job
+            .next_run_at
+            .map(|d| d.format("%Y-%m-%d %H:%M UTC").to_string())
+            .unwrap_or_else(|| "none scheduled".to_string());
         let deliver = job.deliver_to.as_deref().unwrap_or("none");
         let prompt_preview = if job.prompt.len() > 60 {
             format!("{}...", job.prompt.chars().take(60).collect::<String>())
@@ -144,6 +149,7 @@ async fn cmd_list(repo: &CronJobRepository) -> Result<()> {
         println!("   Schedule: {} ({})", job.cron_expr, job.timezone);
         println!("   Deliver: {deliver}");
         println!("   Last run: {last}");
+        println!("   Next run: {next}");
         println!("   Prompt: {prompt_preview}");
         println!();
     }

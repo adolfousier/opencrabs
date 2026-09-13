@@ -2,6 +2,7 @@ use crate::db::Pool;
 use crate::db::database::interact_err;
 use crate::db::models::CronJob;
 use anyhow::{Context, Result};
+use chrono::{DateTime, Utc};
 use rusqlite::params;
 
 /// Extension trait for rusqlite to add `.optional()` to query results
@@ -60,6 +61,8 @@ pub struct CronJobPatch {
     pub deliver_to: Option<Option<String>>,
     pub deliver_api_key: Option<Option<String>>,
     pub enabled: Option<bool>,
+    /// Explicit next_run_at update: Some(Some(dt)) sets it, Some(None) clears to NULL.
+    pub next_run_at: Option<Option<DateTime<Utc>>>,
     /// When true, `next_run_at` is reset to NULL so the scheduler recomputes
     /// the next fire time from the (possibly changed) schedule on the next
     /// tick. Set this whenever `cron_expr` or `timezone` changes.
@@ -80,6 +83,7 @@ impl CronJobPatch {
             && self.deliver_to.is_none()
             && self.deliver_api_key.is_none()
             && self.enabled.is_none()
+            && self.next_run_at.is_none()
             && !self.reset_next_run
     }
 }
@@ -341,8 +345,23 @@ impl CronJobRepository {
                 if let Some(v) = patch.enabled {
                     push(&mut sets, &mut vals, "enabled", SqlVal::Int(i32::from(v)));
                 }
-                if patch.reset_next_run {
-                    push(&mut sets, &mut vals, "next_run_at", SqlVal::Null);
+                match patch.next_run_at {
+                    Some(Some(dt)) => {
+                        push(
+                            &mut sets,
+                            &mut vals,
+                            "next_run_at",
+                            SqlVal::Text(dt.to_rfc3339()),
+                        );
+                    }
+                    Some(None) => {
+                        push(&mut sets, &mut vals, "next_run_at", SqlVal::Null);
+                    }
+                    None => {
+                        if patch.reset_next_run {
+                            push(&mut sets, &mut vals, "next_run_at", SqlVal::Null);
+                        }
+                    }
                 }
 
                 // Bump updated_at the same way every other write on this

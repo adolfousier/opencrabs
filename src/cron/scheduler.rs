@@ -152,7 +152,7 @@ pub(crate) async fn ensure_weekly_dedup_scan_job(repo: &CronJobRepository) -> an
         }
         return Ok(());
     }
-    let job = CronJob::new(
+    let mut job = CronJob::new(
         DEDUP_SCAN_JOB_NAME.to_string(),
         DEDUP_SCAN_CRON.to_string(),
         "UTC".to_string(),
@@ -168,6 +168,7 @@ pub(crate) async fn ensure_weekly_dedup_scan_job(repo: &CronJobRepository) -> an
         Some("telegram:-1002554690655".to_string()),
         None,
     );
+    job.next_run_at = super::next_run_utc(&job.cron_expr, chrono_tz::UTC, chrono::Utc::now());
     repo.insert(&job).await?;
     tracing::info!("Seeded weekly brain dedup scan job ({DEDUP_SCAN_JOB_NAME})");
     Ok(())
@@ -423,6 +424,10 @@ impl CronScheduler {
             tracing::warn!("Failed to seed weekly brain dedup scan job: {e}");
         }
 
+        if let Err(e) = self.backfill_missing_next_run().await {
+            tracing::error!("Failed to backfill missing next_run_at on startup: {e}");
+        }
+
         loop {
             if let Err(e) = self.tick().await {
                 tracing::error!("Cron scheduler tick error: {e}");
@@ -433,8 +438,26 @@ impl CronScheduler {
 
     /// One scheduler tick: check all enabled jobs and execute any that are due.
     async fn tick(&self) -> anyhow::Result<()> {
-        let jobs = self.repo.list_enabled().await?;
+        let mut jobs = self.repo.list_enabled().await?;
         let now = Utc::now();
+
+        // Ensure all enabled jobs have next_run_at populated even if created externally
+        // or through legacy paths (#202).
+        for job in &mut jobs {
+            if job.next_run_at.is_none()
+                && let Some(next) = super::next_run_utc(&job.cron_expr, job_tz(job), now)
+            {
+                let patch = crate::db::repository::CronJobPatch {
+                    next_run_at: Some(Some(next)),
+                    ..Default::default()
+                };
+                if let Err(e) = self.repo.update_fields(&job.id.to_string(), patch).await {
+                    tracing::warn!(error = %e, job_id = %job.id, "Failed to persist next_run_at in tick");
+                } else {
+                    job.next_run_at = Some(next);
+                }
+            }
+        }
 
         for job in &jobs {
             if self.is_due(job, now) {
@@ -536,6 +559,56 @@ impl CronScheduler {
         }
 
         Ok(())
+    }
+
+    /// Backfill any enabled jobs that have `next_run_at: None` (#202).
+    ///
+    /// Leaves `last_run_at` completely untouched and schedules the upcoming run time.
+    pub async fn backfill_missing_next_run(&self) -> anyhow::Result<usize> {
+        let jobs = self.repo.list_enabled().await?;
+        let now = Utc::now();
+        let mut count = 0;
+
+        for job in jobs {
+            if job.next_run_at.is_none() {
+                match super::next_run_utc(&job.cron_expr, job_tz(&job), now) {
+                    Some(next) => {
+                        let patch = crate::db::repository::CronJobPatch {
+                            next_run_at: Some(Some(next)),
+                            ..Default::default()
+                        };
+                        match self.repo.update_fields(&job.id.to_string(), patch).await {
+                            Ok(true) => {
+                                count += 1;
+                                tracing::info!(
+                                    "Backfilled next_run_at for cron job '{}' ({}) -> {}",
+                                    job.name,
+                                    job.id,
+                                    next
+                                );
+                            }
+                            Ok(false) => {}
+                            Err(e) => {
+                                tracing::warn!(
+                                    error = %e,
+                                    job_id = %job.id,
+                                    "Failed to persist backfilled next_run_at"
+                                );
+                            }
+                        }
+                    }
+                    None => {
+                        tracing::warn!(
+                            "Could not compute next run time for job '{}' ({}) with cron '{}'",
+                            job.name,
+                            job.id,
+                            job.cron_expr
+                        );
+                    }
+                }
+            }
+        }
+        Ok(count)
     }
 
     /// Check if a job is due to run.
