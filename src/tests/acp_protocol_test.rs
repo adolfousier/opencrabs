@@ -7,8 +7,8 @@
 //! production module.
 
 use crate::acp::protocol::{
-    ClientMessage, SESSION_SET_MODE, SESSION_SET_MODEL, initialize_result, parse_line,
-    permission_outcome, prompt_text, tool_kind,
+    AcpMode, ClientMessage, SESSION_SET_MODE, SESSION_SET_MODEL, initialize_result, modes_payload,
+    parse_line, permission_outcome, prompt_text, tool_kind,
 };
 use serde_json::json;
 
@@ -120,4 +120,29 @@ fn set_mode_is_accepted_alongside_set_model() {
     // both spellings dispatch to the same handler.
     assert_eq!(SESSION_SET_MODE, "session/set_mode");
     assert_eq!(SESSION_SET_MODEL, "session/set_model");
+}
+
+#[test]
+fn mode_parse_round_trips_advertised_ids() {
+    for id in ["supervised", "auto-accept-edits", "auto", "full-access", "plan"] {
+        let mode = AcpMode::parse(id).expect("advertised id parses");
+        assert_eq!(mode.id(), id);
+    }
+    assert!(AcpMode::parse("yolo").is_none());
+}
+
+#[test]
+fn modes_payload_names_current() {
+    let payload = modes_payload(AcpMode::Plan);
+    assert_eq!(payload["currentModeId"], json!("plan"));
+    let ids: Vec<&str> = payload["availableModes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|m| m["id"].as_str())
+        .collect();
+    assert_eq!(
+        ids,
+        vec!["supervised", "auto-accept-edits", "auto", "full-access", "plan"]
+    );
 }

@@ -21,8 +21,9 @@ pub const SESSION_NEW: &str = "session/new";
 pub const SESSION_LOAD: &str = "session/load";
 pub const SESSION_PROMPT: &str = "session/prompt";
 pub const SESSION_SET_MODEL: &str = "session/set_model";
-/// Alias spelling from the adapter contract: `session/set_mode` is accepted
-/// for `session/set_model`, carrying `modelId` or `modeId`.
+/// Runtime mode selection: `plan` denies mutations, `auto-accept-edits`
+/// pre-approves edit-kind tools, `auto`/`full-access` pre-approve everything,
+/// and `supervised` routes approvals to the client.
 pub const SESSION_SET_MODE: &str = "session/set_mode";
 pub const SESSION_CANCEL: &str = "session/cancel";
 pub const SESSION_STEER: &str = "session/steer";
@@ -238,6 +239,66 @@ pub fn tool_kind(tool_name: &str) -> &'static str {
         "plan" | "bankai_task" | "bankai_prime" | "session_context" => "think",
         _ => "other",
     }
+}
+
+/// Permission modes advertised in `session/new` and accepted by
+/// `session/set_mode`. The ids mirror MonoCode's runtime modes so the client
+/// mapping is identity; `plan` is the read-only intent.
+///
+/// The mode moves the approval policy server-side: the turn's approval
+/// callback consults it before deciding whether a gated tool call is
+/// forwarded to the client, auto-approved, or denied outright.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum AcpMode {
+    /// Every approval-gated tool asks the client (default).
+    #[default]
+    Supervised,
+    /// Edit-kind tools auto-approve; anything else still asks.
+    AutoAcceptEdits,
+    /// Approval-gated tools auto-approve without asking.
+    Auto,
+    /// Same gate as `auto` here — the distinction is client-side UI scope.
+    FullAccess,
+    /// Read-only intent: approval-gated (mutating) tools are denied before
+    /// the client is asked, and the denial tells the agent why.
+    Plan,
+}
+
+impl AcpMode {
+    pub fn parse(id: &str) -> Option<Self> {
+        match id {
+            "supervised" => Some(Self::Supervised),
+            "auto-accept-edits" => Some(Self::AutoAcceptEdits),
+            "auto" => Some(Self::Auto),
+            "full-access" => Some(Self::FullAccess),
+            "plan" => Some(Self::Plan),
+            _ => None,
+        }
+    }
+
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::Supervised => "supervised",
+            Self::AutoAcceptEdits => "auto-accept-edits",
+            Self::Auto => "auto",
+            Self::FullAccess => "full-access",
+            Self::Plan => "plan",
+        }
+    }
+}
+
+/// `modes` payload for `session/new`/`session/load` responses.
+pub fn modes_payload(current: AcpMode) -> Value {
+    json!({
+        "availableModes": [
+            { "id": "supervised", "name": "Supervised" },
+            { "id": "auto-accept-edits", "name": "Auto-accept edits" },
+            { "id": "auto", "name": "Auto" },
+            { "id": "full-access", "name": "Full access" },
+            { "id": "plan", "name": "Plan (read-only)" },
+        ],
+        "currentModeId": current.id(),
+    })
 }
 
 /// The option list sent with every `session/request_permission`. Ids match

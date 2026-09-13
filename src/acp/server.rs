@@ -46,6 +46,8 @@ pub struct SessionState {
     pub id: Uuid,
     /// Model override from `--model` or `session/set_model`/`session/set_mode`.
     pub model: Mutex<Option<String>>,
+    /// Permission policy from `session/set_mode` (default supervised).
+    pub mode: Mutex<protocol::AcpMode>,
     /// Cancel token of the in-flight turn; None when idle.
     pub active_cancel: Mutex<Option<CancellationToken>>,
 }
@@ -134,6 +136,9 @@ impl AcpServer {
             protocol::SESSION_SET_MODEL | protocol::SESSION_SET_MODE => {
                 Self::session_set_model(state, id, params).await;
             }
+            protocol::SESSION_SET_MODE => {
+                Self::session_set_mode(state, id, params).await;
+            }
             protocol::SESSION_PROMPT => {
                 Self::session_prompt(state, id, params).await;
             }
@@ -193,14 +198,17 @@ impl AcpServer {
                 let st = Arc::new(SessionState {
                     id: session.id,
                     model: Mutex::new(state.default_model.clone()),
+                    mode: Mutex::new(protocol::AcpMode::default()),
                     active_cancel: Mutex::new(None),
                 });
                 state.states.lock().await.insert(acp_id.clone(), st.clone());
                 let current = st.model.lock().await.clone();
                 let models = catalog::models_payload(&state.config, current.as_deref());
-                state
-                    .handle
-                    .respond(id, json!({ "sessionId": acp_id, "models": models }));
+                let modes = protocol::modes_payload(*st.mode.lock().await);
+                state.handle.respond(
+                    id,
+                    json!({ "sessionId": acp_id, "models": models, "modes": modes }),
+                );
             }
             Err(e) => {
                 state
@@ -251,6 +259,35 @@ impl AcpServer {
             *st.model.lock().await = Some(model.to_string());
         }
         state.handle.respond(id, json!({}));
+    }
+
+    /// `session/set_mode`: validate the advertised id and store it. Unknown
+    /// modes are a hard error — silently accepting one would leave client and
+    /// server disagreeing about the approval policy.
+    async fn session_set_mode(state: Arc<ServerState>, id: Value, params: Value) {
+        let mode_id = params.get("modeId").and_then(Value::as_str);
+        let (Some(st), Some(mode_id)) = (Self::lookup(&state, &params).await, mode_id) else {
+            let msg = if mode_id.is_none() {
+                "session/set_mode requires modeId"
+            } else {
+                "session/set_mode: unknown session"
+            };
+            state
+                .handle
+                .respond_error(id, protocol::INVALID_PARAMS, msg);
+            return;
+        };
+        match protocol::AcpMode::parse(mode_id) {
+            Some(mode) => {
+                *st.mode.lock().await = mode;
+                state.handle.respond(id, json!({}));
+            }
+            None => state.handle.respond_error(
+                id,
+                protocol::INVALID_PARAMS,
+                format!("session/set_mode: unknown modeId '{mode_id}'"),
+            ),
+        }
     }
 
     /// Spawn the turn task and return immediately — the response travels with
