@@ -167,7 +167,7 @@ impl AcpServer {
                     token.cancel();
                 }
             }
-            protocol::SESSION_STEER => {
+            protocol::SESSION_STEER | protocol::SESSION_STEER_LEGACY => {
                 if let (Some(st), Some(text)) = (
                     Self::lookup(state, &params).await,
                     protocol::prompt_text(&params),

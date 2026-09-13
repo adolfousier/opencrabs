@@ -27,7 +27,9 @@ pub const SESSION_SET_MODEL: &str = "session/set_model";
 pub const SESSION_SET_MODE: &str = "session/set_mode";
 pub const SESSION_CANCEL: &str = "session/cancel";
 pub const SESSION_COMPACT: &str = "session/compact";
-pub const SESSION_STEER: &str = "session/steer";
+pub const SESSION_STEER: &str = "_session/steer";
+/// Pre-ext-prefix spelling, accepted as an alias for older adapters.
+pub const SESSION_STEER_LEGACY: &str = "session/steer";
 
 // Outbound frames (agent -> client).
 pub const SESSION_UPDATE: &str = "session/update";
