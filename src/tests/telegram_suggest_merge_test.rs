@@ -354,7 +354,11 @@ fn test_rows_and_trailer_start_a_fresh_markdown_block() {
             // 2026-09-09, owner order: n>=2 fold = the original PLAIN
             // numbered list — no Go prefix, no bold. Blank-line-separated
             // from the body.
-            assert!(md.contains("1. One"), "numbered fold body line: {md}");
+            // #207: separated by horizontal rule (---) to isolate list counters
+            assert!(
+                md.contains("---\n\n1. One"),
+                "isolated numbered fold body line: {md}"
+            );
             assert!(
                 !md.contains("Go:") && !md.contains("**"),
                 "no Go-tier artifacts: {md}"
