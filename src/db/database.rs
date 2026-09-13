@@ -94,6 +94,11 @@ pub(crate) const MIGRATION_SQL: &[&str] = &[
     // last per the list invariant; the column is NULL by design on existing
     // rows so no heal pass is needed.
     include_str!("../migrations/20260912000001_add_project_repo_remote.sql"),
+    // #138: durable seen-skills store — the post-compaction skill inventory
+    // stamp (#125/#131) survives daemon restarts: every mark_seen writes a row,
+    // boot hydrates the in-memory registry back. Appended last per the list
+    // invariant; the CREATE is idempotent, so no heal pass is needed.
+    include_str!("../migrations/20260913000001_add_session_seen_skills.sql"),
 ];
 
 pub(crate) fn build_migrations() -> Migrations<'static> {

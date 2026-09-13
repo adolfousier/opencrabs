@@ -6,6 +6,8 @@ use crate::brain::tools::Tool;
 use crate::brain::tools::ToolExecutionContext;
 use crate::brain::tools::load_brain_file::*;
 use crate::brain::tools::seen_skills;
+use crate::db::Database;
+use crate::db::repository::SessionSkillsRepository;
 use std::path::Path;
 use uuid::Uuid;
 
@@ -214,4 +216,158 @@ fn seen_list_is_sorted_and_multi() {
         seen_skills::seen_for_session(a),
         vec!["alpha".to_string(), "zeta".to_string()]
     );
+}
+
+// ══ issue #138: the registry survives daemon restarts ══════════════════════
+//
+// Before #138 the registry was in-memory only, so a restart made a
+// skill-consuming session look skill-less to the post-compaction stamp. The
+// row write is best-effort (acceptance 5); the read side is exercised here
+// against a real in-memory DB with the migrations applied.
+
+/// In-memory DB with all migrations applied — including the #138 table.
+async fn test_db() -> Database {
+    let db = Database::connect_in_memory()
+        .await
+        .expect("in-memory DB should connect");
+    db.run_migrations().await.expect("migrations should apply");
+    db
+}
+
+/// Minimal `sessions` row: every later migration's column on that table is
+/// either nullable or defaulted, so (id, created_at, updated_at) suffices.
+async fn insert_session(db: &Database, id: Uuid) {
+    db.pool()
+        .get()
+        .await
+        .expect("pool connection")
+        .interact(move |conn| {
+            conn.execute(
+                "INSERT INTO sessions (id, created_at, updated_at) VALUES (?1, ?2, ?3)",
+                rusqlite::params![id.to_string(), 0i64, 0i64],
+            )
+        })
+        .await
+        .expect("interact")
+        .expect("insert session");
+}
+
+// ── acceptance 2: filename form registers consumption (the live gap) ───────
+
+#[tokio::test]
+async fn filename_form_marks_skill_seen_for_session() {
+    let c = ctx();
+    let session = c.session_id;
+    let result = tool()
+        .execute(serde_json::json!({"name": "cost-estimate.md"}), &c)
+        .await
+        .unwrap();
+    assert!(
+        result.success,
+        "filename form of a built-in skill must succeed"
+    );
+    assert!(
+        seen_skills::was_seen(session, "cost-estimate"),
+        "filename-form load must mark the skill seen"
+    );
+}
+
+#[tokio::test]
+async fn filename_form_with_query_marks_skill_seen_for_session() {
+    // The #138 probe caught this live: a query-filtered filename-form load
+    // resolved nothing and registered nothing, so the skill never reached
+    // the stamp inventory.
+    let c = ctx();
+    let session = c.session_id;
+    let result = tool()
+        .execute(
+            serde_json::json!({"name": "cost-estimate.md", "query": "estimate"}),
+            &c,
+        )
+        .await
+        .unwrap();
+    assert!(result.success);
+    assert!(
+        seen_skills::was_seen(session, "cost-estimate"),
+        "a query-filtered filename-form load must still register consumption"
+    );
+}
+
+// ── acceptance 1: restart does not lose seen-skill state ───────────────────
+
+#[tokio::test]
+async fn record_and_read_round_trip() {
+    let db = test_db().await;
+    let repo = SessionSkillsRepository::new(db.pool().clone());
+    let sid = Uuid::new_v4();
+    repo.record(sid, "opencrabs-dev", 0).await.unwrap();
+    repo.record(sid, "cost-estimate", 2).await.unwrap();
+
+    let mut rows = repo.all().await.unwrap();
+    rows.sort_by(|a, b| a.1.cmp(&b.1));
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0].0, sid);
+    assert_eq!(rows[0].1, "cost-estimate");
+    assert_eq!(rows[0].2, Some(2));
+    assert_eq!(rows[1].1, "opencrabs-dev");
+    assert_eq!(rows[1].2, Some(0));
+}
+
+#[tokio::test]
+async fn record_upserts_epoch_instead_of_duplicating() {
+    let db = test_db().await;
+    let repo = SessionSkillsRepository::new(db.pool().clone());
+    let sid = Uuid::new_v4();
+    repo.record(sid, "sk", 0).await.unwrap();
+    repo.record(sid, "sk", 3).await.unwrap();
+
+    let rows = repo.all().await.unwrap();
+    assert_eq!(rows.len(), 1, "same (session, slug) must upsert");
+    assert_eq!(
+        rows[0].2,
+        Some(3),
+        "the newer epoch must win — a stale row would re-gate the skill (#150)"
+    );
+}
+
+#[tokio::test]
+async fn restart_hydrates_registry_from_persisted_rows() {
+    let db = test_db().await;
+    let repo = SessionSkillsRepository::new(db.pool().clone());
+    let sid = Uuid::new_v4();
+    repo.record(sid, "opencrabs-dev", 1).await.unwrap();
+
+    // Simulate a daemon restart: the row survives, the in-memory registry
+    // does not. Boot rehydrates from what was persisted.
+    let rows = repo.all().await.unwrap();
+    seen_skills::apply_seeds(seen_skills::hydrate_from_rows(rows));
+
+    assert!(seen_skills::was_seen(sid, "opencrabs-dev"));
+    assert_eq!(
+        seen_skills::seen_for_session(sid),
+        vec!["opencrabs-dev".to_string()],
+        "the #125 stamp inventory must list a pre-restart skill"
+    );
+    assert!(
+        seen_skills::seen_since_compaction(sid, "opencrabs-dev"),
+        "the restored epoch counter must keep the skill in context"
+    );
+}
+
+#[tokio::test]
+async fn prune_drops_orphans_and_keeps_live_sessions() {
+    let db = test_db().await;
+    let repo = SessionSkillsRepository::new(db.pool().clone());
+    let live = Uuid::new_v4();
+    let dead = Uuid::new_v4();
+    insert_session(&db, live).await;
+    repo.record(live, "sk", 0).await.unwrap();
+    repo.record(dead, "sk", 0).await.unwrap();
+
+    let pruned = repo.prune_missing_sessions().await.unwrap();
+    assert_eq!(pruned, 1, "only the orphaned row is dropped");
+
+    let rows = repo.all().await.unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].0, live, "a live session's rows must survive");
 }
