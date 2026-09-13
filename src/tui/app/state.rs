@@ -570,6 +570,10 @@ pub struct App {
 
     /// Help/Settings scroll offset
     pub help_scroll_offset: usize,
+    /// Command catalogue for the help screen, collected once on entry (#1530).
+    /// Built here rather than in the renderer because the renderer ran
+    /// `load_all_skills()` and a `commands.toml` parse on every frame.
+    pub help_catalog: Vec<super::help_catalog::HelpRow>,
     /// Scroll offset for the Plan overlay (Editing design .md viewer).
     pub plan_overlay_scroll: usize,
 
@@ -936,6 +940,7 @@ impl App {
             escape_pending_at: None,
             ctrl_c_pending_at: None,
             help_scroll_offset: 0,
+            help_catalog: Vec::new(),
             plan_overlay_scroll: 0,
             approval_auto_session,
             approval_auto_always,
@@ -3837,6 +3842,15 @@ impl App {
             // delete while the picker is open, where moving the cursor would
             // yank it out from under a browsing user (#1465).
             self.focus_current_session();
+        }
+
+        if mode == AppMode::Help {
+            // Collected here rather than in the renderer, which used to walk
+            // the skills directories and re-parse commands.toml on every
+            // frame the help screen was open (#1530). Re-read on each visit
+            // so a skill added mid-session still shows up.
+            self.help_catalog = super::help_catalog::load();
+            self.help_scroll_offset = 0;
         }
 
         Ok(())

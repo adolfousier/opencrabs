@@ -3,6 +3,7 @@
 //! Help screen, plan mode view, plan mode help bar, and settings screen.
 
 use super::super::app::App;
+use super::super::app::help_catalog;
 use super::theme::{self, Role};
 use ratatui::{
     Frame,
@@ -82,47 +83,29 @@ pub(super) fn render_help(f: &mut Frame, app: &App, area: Rect) {
         section_header("SLASH COMMANDS"),
     ];
 
-    // Dynamically append all built-in commands from SLASH_COMMANDS constant
-    for cmd in crate::tui::app::SLASH_COMMANDS {
-        left.push(kv(cmd.name, cmd.description, cyan));
-    }
-
-    // Channel-only commands (Telegram/Discord/Slack). Documented here so they
-    // are discoverable, but kept out of the TUI autocomplete since the TUI
-    // slash dispatcher does not handle them.
-    left.push(Line::from(""));
-    left.push(section_header("CHANNEL COMMANDS (Telegram/Discord/Slack)"));
-    for cmd in crate::tui::app::CHANNEL_COMMANDS {
-        left.push(kv(cmd.name, cmd.description, cyan));
-    }
-
-    // Skills section — collect owned data first so borrows outlive the lines
-    let all_skills = crate::brain::skills::load_all_skills();
-    let skill_data: Vec<(String, String)> = all_skills
-        .iter()
-        .map(|s| (s.slash_name.clone(), s.description.clone()))
-        .collect();
-    let skills_count = skill_data.len();
-    let skills_summary = format!("Browse {} skills", skills_count);
-    if !skill_data.is_empty() {
-        left.push(Line::from(""));
-        left.push(section_header("SKILLS"));
-        left.push(kv("/skills", &skills_summary, cyan));
-        for (name, desc) in &skill_data {
-            left.push(kv(name, desc, cyan));
+    // Commands come from the catalogue collected on entry (#1530) rather than
+    // from a directory walk and a TOML parse per frame. The SLASH COMMANDS
+    // header is already on `left` above; every other section prints its own.
+    // Hoisted: `kv` borrows its arguments into the returned `Line`, so a
+    // summary built inside the loop would be dropped before the frame draws.
+    let skills_summary = format!(
+        "Browse {} skills",
+        help_catalog::section_rows(&app.help_catalog, help_catalog::HelpSection::Skill).len()
+    );
+    for section in help_catalog::HelpSection::all() {
+        let rows = help_catalog::section_rows(&app.help_catalog, section);
+        if rows.is_empty() {
+            continue;
         }
-    }
-
-    // Append user-defined commands from commands.toml
-    let brain_path = crate::brain::BrainLoader::resolve_path();
-    let loader = crate::brain::CommandLoader::from_brain_path(&brain_path);
-    let mut user_cmds = loader.load();
-    if !user_cmds.is_empty() {
-        left.push(Line::from(""));
-        left.push(section_header("CUSTOM COMMANDS"));
-        user_cmds.sort_by(|a, b| a.name.cmp(&b.name));
-        for cmd in &user_cmds {
-            left.push(kv(&cmd.name, &cmd.description, cyan));
+        if section != help_catalog::HelpSection::BuiltIn {
+            left.push(Line::from(""));
+            left.push(section_header(section.title()));
+        }
+        if section == help_catalog::HelpSection::Skill {
+            left.push(kv("/skills", &skills_summary, cyan));
+        }
+        for row in rows {
+            left.push(kv(&row.name, &row.description, cyan));
         }
     }
 
