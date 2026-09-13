@@ -85,15 +85,19 @@ pub(super) fn render_help(f: &mut Frame, app: &mut App, area: Rect) {
 
     // Commands come from the catalogue collected on entry (#1530) rather than
     // from a directory walk and a TOML parse per frame. The SLASH COMMANDS
-    // header is already on `left` above; every other section prints its own.
+    // header is already on `left` above; every other section prints its own,
+    // and only when the filter left something under it — a lone header over
+    // empty space reads as a rendering bug.
+    let needle = app.help_search.clone();
     // Hoisted: `kv` borrows its arguments into the returned `Line`, so a
     // summary built inside the loop would be dropped before the frame draws.
     let skills_summary = format!(
         "Browse {} skills",
-        help_catalog::section_rows(&app.help_catalog, help_catalog::HelpSection::Skill).len()
+        help_catalog::section_matches(&app.help_catalog, help_catalog::HelpSection::Skill, "")
+            .len()
     );
     for section in help_catalog::HelpSection::all() {
-        let rows = help_catalog::section_rows(&app.help_catalog, section);
+        let rows = help_catalog::section_matches(&app.help_catalog, section, &needle);
         if rows.is_empty() {
             continue;
         }
@@ -101,12 +105,23 @@ pub(super) fn render_help(f: &mut Frame, app: &mut App, area: Rect) {
             left.push(Line::from(""));
             left.push(section_header(section.title()));
         }
-        if section == help_catalog::HelpSection::Skill {
+        if section == help_catalog::HelpSection::Skill && needle.is_empty() {
             left.push(kv("/skills", &skills_summary, cyan));
         }
         for row in rows {
             left.push(kv(&row.name, &row.description, cyan));
         }
+    }
+
+    // A filter that matches nothing says so. Falling through would leave the
+    // headers gone and the pane blank, which looks like a crash.
+    let match_count = help_catalog::match_count(&app.help_catalog, &needle);
+    if match_count == 0 {
+        left.push(Line::from(""));
+        left.push(Line::from(Span::styled(
+            format!("  No command matches \"{needle}\""),
+            Style::default().fg(theme::role(Role::Gray)),
+        )));
     }
 
     left.extend([
@@ -120,6 +135,13 @@ pub(super) fn render_help(f: &mut Frame, app: &mut App, area: Rect) {
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(" Scroll  ", Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                "[/]",
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(" Search  ", Style::default().fg(Color::DarkGray)),
             Span::styled(
                 "[Esc]",
                 Style::default()
@@ -246,12 +268,18 @@ pub(super) fn render_help(f: &mut Frame, app: &mut App, area: Rect) {
         app.help_viewport_rows,
     )) as u16;
 
+    let title = if app.help_search_active || !needle.is_empty() {
+        format!(" 🔍 {needle}▏ — {match_count} match(es) ")
+    } else {
+        " 📚 Help & Commands ".to_string()
+    };
+
     let left_para = Paragraph::new(left)
         .block(
             Block::default()
                 .borders(Borders::ALL)
                 .title(Span::styled(
-                    " 📚 Help & Commands ",
+                    title,
                     Style::default()
                         .fg(theme::role(Role::Accent))
                         .add_modifier(Modifier::BOLD),

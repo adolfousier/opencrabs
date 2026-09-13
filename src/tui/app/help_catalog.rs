@@ -52,6 +52,26 @@ pub struct HelpRow {
     pub section: HelpSection,
 }
 
+impl HelpRow {
+    /// Does this row match a search needle?
+    ///
+    /// Name AND description, because the screen exists for the reader who
+    /// does not know the command's name: someone typing "deploy" wants
+    /// `/release` if its description mentions deploying. Matching the name
+    /// alone would only help people who already knew the answer.
+    ///
+    /// An empty needle matches everything, so an un-filtered screen and a
+    /// filter the user cleared render identically without a special case.
+    pub fn matches(&self, needle: &str) -> bool {
+        if needle.is_empty() {
+            return true;
+        }
+        let needle = needle.to_lowercase();
+        self.name.to_lowercase().contains(&needle)
+            || self.description.to_lowercase().contains(&needle)
+    }
+}
+
 /// Collect every command the help screen can show, in render order.
 ///
 /// Hits the disk for skills and `commands.toml`, so call it on entering the
@@ -99,9 +119,21 @@ pub fn load() -> Vec<HelpRow> {
     rows
 }
 
-/// Rows belonging to `section`, in catalogue order.
-pub fn section_rows(rows: &[HelpRow], section: HelpSection) -> Vec<&HelpRow> {
-    rows.iter().filter(|r| r.section == section).collect()
+/// Rows of `section` that survive `needle`, in catalogue order.
+pub fn section_matches<'a>(
+    rows: &'a [HelpRow],
+    section: HelpSection,
+    needle: &str,
+) -> Vec<&'a HelpRow> {
+    rows.iter()
+        .filter(|r| r.section == section && r.matches(needle))
+        .collect()
+}
+
+/// How many rows match, across every section. Shown in the title so an empty
+/// result reads as "nothing matched" rather than as a broken screen.
+pub fn match_count(rows: &[HelpRow], needle: &str) -> usize {
+    rows.iter().filter(|r| r.matches(needle)).count()
 }
 
 /// Largest scroll offset that still leaves content on screen.

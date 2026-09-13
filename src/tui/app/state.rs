@@ -574,6 +574,13 @@ pub struct App {
     /// Built here rather than in the renderer because the renderer ran
     /// `load_all_skills()` and a `commands.toml` parse on every frame.
     pub help_catalog: Vec<super::help_catalog::HelpRow>,
+    /// Active help-screen filter text. Empty means "show everything", so an
+    /// unfiltered screen and a cleared filter take the same path.
+    pub help_search: String,
+    /// Whether keystrokes are going into the help filter rather than
+    /// scrolling. Mirrors `session_search_active` so the two screens behave
+    /// the same way.
+    pub help_search_active: bool,
     /// Rows the help screen last rendered, and the height it had to show them
     /// in. Written by the renderer, read by the key handler to clamp scroll —
     /// without them `help_scroll_offset` had no ceiling and wound off the end
@@ -947,6 +954,8 @@ impl App {
             ctrl_c_pending_at: None,
             help_scroll_offset: 0,
             help_catalog: Vec::new(),
+            help_search: String::new(),
+            help_search_active: false,
             help_content_rows: 0,
             help_viewport_rows: 0,
             plan_overlay_scroll: 0,
@@ -3698,13 +3707,53 @@ impl App {
                 self.handle_onboarding_key(event).await?;
             }
             AppMode::Help | AppMode::Settings => {
+                use crossterm::event::KeyCode;
+                // Typing goes into the filter while it is open (#1527). Only
+                // the help screen has a catalogue to filter; Settings shares
+                // this arm for scrolling and falls through to it.
+                if self.help_search_active && self.mode == AppMode::Help {
+                    match event.code {
+                        // Esc clears the filter and stays, matching the
+                        // sessions screen. Leaving help takes a second Esc,
+                        // so a mistyped filter costs one key, not the screen.
+                        KeyCode::Esc => {
+                            self.help_search_active = false;
+                            self.help_search.clear();
+                            self.help_scroll_offset = 0;
+                        }
+                        // Backspace past the start closes the filter rather
+                        // than leaving an empty prompt the user has to Esc
+                        // out of anyway.
+                        KeyCode::Backspace => {
+                            if self.help_search.is_empty() {
+                                self.help_search_active = false;
+                            } else {
+                                self.help_search.pop();
+                            }
+                            self.help_scroll_offset = 0;
+                        }
+                        KeyCode::Char(c) if !c.is_control() => {
+                            self.help_search.push(c);
+                            // The result set changed under the offset, so an
+                            // old scroll position means nothing now.
+                            self.help_scroll_offset = 0;
+                        }
+                        _ => {}
+                    }
+                    return Ok(());
+                }
+
                 let max = super::help_catalog::max_scroll(
                     self.help_content_rows,
                     self.help_viewport_rows,
                 );
                 if keys::is_cancel(&event) {
                     self.help_scroll_offset = 0;
+                    self.help_search.clear();
                     self.switch_mode(AppMode::Chat).await?;
+                } else if self.mode == AppMode::Help && event.code == KeyCode::Char('/') {
+                    self.help_search_active = true;
+                    self.help_scroll_offset = 0;
                 } else if keys::is_up(&event) {
                     self.help_scroll_offset = self.help_scroll_offset.saturating_sub(1);
                 } else if keys::is_down(&event) {
@@ -3864,6 +3913,8 @@ impl App {
             // frame the help screen was open (#1530). Re-read on each visit
             // so a skill added mid-session still shows up.
             self.help_catalog = super::help_catalog::load();
+            self.help_search.clear();
+            self.help_search_active = false;
             self.help_scroll_offset = 0;
         }
 
