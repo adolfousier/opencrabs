@@ -256,3 +256,70 @@ async fn test_returned_content_includes_section_header() {
         );
     }
 }
+
+// ── #138 filename form vs a real brain file ─────────────────────────────────
+//
+// "<slug>.md" resolves through the skill registry (#138), which is only sound
+// because that form could previously ONLY miss — skills live in
+// skills/<slug>/SKILL.md, never in the home dir's flat namespace. So it may
+// only claim names that still miss. A file the user wrote in their own home
+// outranks a shipped skill, and handing back skill text under the name of a
+// file they can see on disk is a substitution nothing in the output reveals.
+
+#[tokio::test]
+async fn filename_form_yields_to_a_real_brain_file_of_the_same_name() {
+    use crate::config::profile::with_home_override_async;
+    let dir = TempDir::new().unwrap();
+    let home = dir.path().to_path_buf();
+    std::fs::write(
+        home.join("cost-estimate.md"),
+        "# My own notes\n\nHAND_WRITTEN_MARKER\n",
+    )
+    .unwrap();
+
+    let result = with_home_override_async(home, async {
+        tool()
+            .execute(serde_json::json!({"name": "cost-estimate.md"}), &ctx())
+            .await
+            .unwrap()
+    })
+    .await;
+
+    assert!(
+        result.success,
+        "reading the user's own brain file must succeed"
+    );
+    assert!(
+        result.output.contains("HAND_WRITTEN_MARKER"),
+        "the file the user wrote must win, got: {}",
+        &result.output[..result.output.len().min(200)]
+    );
+    assert!(
+        !result.output.contains("--- skill: cost-estimate ---"),
+        "a shipped skill must not be substituted for a home file of the same name"
+    );
+}
+
+#[tokio::test]
+async fn filename_form_still_resolves_the_skill_when_nothing_shadows_it() {
+    use crate::config::profile::with_home_override_async;
+    let dir = TempDir::new().unwrap();
+
+    let result = with_home_override_async(dir.path().to_path_buf(), async {
+        tool()
+            .execute(serde_json::json!({"name": "cost-estimate.md"}), &ctx())
+            .await
+            .unwrap()
+    })
+    .await;
+
+    assert!(
+        result.success,
+        "filename form of a built-in skill must succeed"
+    );
+    assert!(
+        result.output.contains("--- skill: cost-estimate ---"),
+        "with no home file of that name the skill still resolves, got: {}",
+        &result.output[..result.output.len().min(200)]
+    );
+}

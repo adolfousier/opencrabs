@@ -109,18 +109,27 @@ impl Tool for LoadBrainFileTool {
             }));
         }
 
+        let home = crate::config::opencrabs_home();
+
         // Filename form of a skill (issue #138): "<slug>.md" resolves through
         // the skill registry exactly like the bare slug form — same marking,
         // same body framing, query filtering included. Before #138 this form
         // could only miss (skills live in skills/<slug>/SKILL.md, never in the
         // home dir flat namespace), and a query-filtered miss registered
-        // nothing — the exact undercount the #138 probe caught live. A brain
-        // file that shares a skill's name would be shadowed, matching the
-        // user-override precedence skills already have elsewhere.
+        // nothing — the exact undercount the #138 probe caught live.
+        //
+        // A real brain file wins. The whole premise above is that this form
+        // could only ever MISS, so it may only claim names that still miss:
+        // the home file is a user artifact, the skill is shipped, and silently
+        // handing back skill text for a file the user wrote is a lie no log
+        // line makes visible. The existence check mirrors the resolution
+        // below — plain `home.join(name)`, since a kebab-lowercase skill slug
+        // never matches a CONTEXTUAL_BRAIN_FILES entry case-insensitively.
         if let Some(skill) = name
             .strip_suffix(".md")
             .map(str::trim)
             .filter(|s| !s.is_empty() && !s.contains('/') && !s.contains('\\'))
+            .filter(|_| !home.join(name).exists())
             .and_then(crate::brain::skills::resolve_skill)
         {
             super::seen_skills::mark_seen(ctx.session_id, &skill.name);
@@ -145,8 +154,6 @@ impl Tool for LoadBrainFileTool {
                 matches.render(&format!("skill: {}", skill.name), query)
             }));
         }
-
-        let home = crate::config::opencrabs_home();
 
         // Read-time empty-section stripping. Default on; opt out via
         // `[brain] strip_empty_sections = false` in config.toml.
