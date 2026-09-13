@@ -885,7 +885,13 @@ pub(crate) async fn cmd_acp(config: &crate::config::Config, model: Option<String
         .with_message_queue_callback(Some(queue_callback));
 
     let session_service = SessionService::new(service_context);
-    let server = crate::acp::AcpServer::new(Arc::new(agent_service), session_service, model, steer);
+    let server = crate::acp::AcpServer::new(
+        Arc::new(agent_service),
+        session_service,
+        model,
+        steer,
+        Arc::new(config.clone()),
+    );
     server.run().await
 }
 
