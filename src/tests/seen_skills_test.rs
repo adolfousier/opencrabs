@@ -6,6 +6,7 @@ use crate::brain::tools::Tool;
 use crate::brain::tools::ToolExecutionContext;
 use crate::brain::tools::load_brain_file::*;
 use crate::brain::tools::seen_skills;
+use crate::brain::tools::seen_skills::*;
 use crate::db::Database;
 use crate::db::repository::SessionSkillsRepository;
 use std::path::Path;
@@ -376,4 +377,123 @@ async fn prune_drops_orphans_and_keeps_live_sessions() {
     let rows = repo.all().await.unwrap();
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].0, live, "a live session's rows must survive");
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// Registry unit tests, moved out of the inline `#[cfg(test)] mod tests` block
+// at the bottom of `src/brain/tools/seen_skills.rs`. CONTRIBUTING.md: every
+// test lives under `src/tests/` as a dedicated `*_test.rs` file, and an
+// inline block found while working a file moves as part of that change.
+// Bodies are unchanged — `super::*` became the explicit glob at the top.
+// Four of the moved tests (slug extraction, non-skill paths, idempotent
+// mark, sorted list) were already sitting above: an earlier move copied
+// them out and left the originals behind, so the inline block had been a
+// stale duplicate of them since. Only the copies above survive.
+// ───────────────────────────────────────────────────────────────────────────
+
+// --- issue #150: epoch-carrying registry + skill-gate semantics ---
+
+#[test]
+fn fresh_session_reports_not_seen_since_compaction() {
+    let a = Uuid::new_v4();
+    assert!(!seen_since_compaction(a, "anything"));
+}
+
+#[test]
+fn seen_passes_and_compaction_rearms_gate() {
+    let a = Uuid::new_v4();
+    mark_seen(a, "my-skill");
+    assert!(seen_since_compaction(a, "my-skill"));
+    // A compaction bumps the epoch; the stored row keeps the old one.
+    note_compaction(a);
+    assert!(!seen_since_compaction(a, "my-skill"));
+    // Re-reading re-arms at the new epoch.
+    mark_seen(a, "my-skill");
+    assert!(seen_since_compaction(a, "my-skill"));
+}
+
+#[test]
+fn compaction_clears_nothing_stamp_inventory_intact() {
+    let a = Uuid::new_v4();
+    mark_seen(a, "one");
+    mark_seen(a, "two");
+    note_compaction(a);
+    // The #125 stamp's seen-inventory survives.
+    assert_eq!(
+        seen_for_session(a),
+        vec!["one".to_string(), "two".to_string()]
+    );
+    // ...but neither body is "in context" for gate purposes.
+    assert!(!seen_since_compaction(a, "one"));
+    assert!(!seen_since_compaction(a, "two"));
+}
+
+#[test]
+fn sessions_are_independent() {
+    let a = Uuid::new_v4();
+    let b = Uuid::new_v4();
+    mark_seen(a, "sk");
+    note_compaction(a);
+    // b never compacted: its row stays current.
+    mark_seen(b, "sk");
+    assert!(seen_since_compaction(b, "sk"));
+    assert!(!seen_since_compaction(a, "sk"));
+}
+
+// --- issue #138: boot hydration (registry survives restarts) ---
+
+#[test]
+fn hydration_takes_max_epoch_per_session() {
+    let a = Uuid::new_v4();
+    let b = Uuid::new_v4();
+    let seeds = hydrate_from_rows(vec![
+        (a, "one".to_string(), Some(1)),
+        (a, "two".to_string(), Some(3)),
+        (b, "one".to_string(), Some(1)),
+    ]);
+    assert_eq!(seeds.seen.len(), 3);
+    // The counter floors at the HIGHEST epoch this session reached.
+    assert_eq!(seeds.epochs.get(&a), Some(&3));
+    assert_eq!(seeds.epochs.get(&b), Some(&1));
+}
+
+#[test]
+fn hydration_restores_epoch_counter_so_next_compaction_gates() {
+    let a = Uuid::new_v4();
+    apply_seeds(hydrate_from_rows(vec![(a, "sk".to_string(), Some(2))]));
+    assert!(was_seen(a, "sk"));
+    assert!(seen_since_compaction(a, "sk"));
+    // The counter came back at 2, so the NEXT compaction is epoch 3 and
+    // the epoch-2 row is correctly stale. Without epoch seeding the
+    // counter would restart at 0, this bump would land on 1, and the
+    // 2 >= 1 compare would wrongly keep the skill "in context".
+    note_compaction(a);
+    assert!(!seen_since_compaction(a, "sk"));
+}
+
+#[test]
+fn hydration_null_epoch_reads_as_zero_and_stays_permissive() {
+    let a = Uuid::new_v4();
+    apply_seeds(hydrate_from_rows(vec![(a, "legacy".to_string(), None)]));
+    assert!(was_seen(a, "legacy"));
+    assert!(seen_since_compaction(a, "legacy"));
+    // A negative epoch (never written by us, but possible in a
+    // hand-edited row) clamps to 0 rather than wrapping to u64::MAX.
+    let b = Uuid::new_v4();
+    apply_seeds(hydrate_from_rows(vec![(b, "odd".to_string(), Some(-5))]));
+    assert!(seen_since_compaction(b, "odd"));
+}
+
+#[test]
+fn hydration_preserves_stamp_inventory_across_restart() {
+    let a = Uuid::new_v4();
+    apply_seeds(hydrate_from_rows(vec![
+        (a, "zeta".to_string(), Some(0)),
+        (a, "alpha".to_string(), Some(1)),
+    ]));
+    // The #125 stamp reads this list — sorted, both rows present.
+    assert_eq!(
+        seen_for_session(a),
+        vec!["alpha".to_string(), "zeta".to_string()]
+    );
 }
