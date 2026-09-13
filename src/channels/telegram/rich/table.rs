@@ -215,6 +215,69 @@ fn parse_alignment(sep: &str, cols: usize) -> Vec<Align> {
 /// agree on the same text and a new send path inherits both fixes (#690,
 /// #980, #1085 whack-a-mole retired). Both passes are idempotent and
 /// fence-safe; pipe-free input returns unchanged.
+///
+/// Also shields bare leading hashes (e.g. `#174`) so Telegram's rich parser
+/// doesn't promote them into headings without CommonMark's required trailing space (#193).
 pub(crate) fn normalize_tables(text: &str) -> String {
-    ensure_blank_line_before_tables(&reflow_collapsed_tables(text))
+    let shielded = shield_bare_leading_hashes(text);
+    ensure_blank_line_before_tables(&reflow_collapsed_tables(&shielded))
+}
+
+/// Escape bare leading `#` (not followed by space, or not a valid ATX heading)
+/// with a backslash (`\#`) so Telegram's native rich parser does not promote
+/// lines like `#174` into `<h1>` headers (#193, adolfousier/opencrabs#1257).
+///
+/// Leaves code fences (``` and ~~~) and valid ATX headings untouched.
+pub(crate) fn shield_bare_leading_hashes(text: &str) -> String {
+    if !text.contains('#') {
+        return text.to_string();
+    }
+
+    let mut out = String::with_capacity(text.len() + 16);
+    let mut in_fence = false;
+    let mut fence_char = ' ';
+    let mut fence_len = 0;
+
+    for (i, line) in text.split('\n').enumerate() {
+        if i > 0 {
+            out.push('\n');
+        }
+
+        let trimmed = line.trim_start();
+
+        // Check for code fence start/end
+        if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
+            let ch = trimmed.chars().next().unwrap();
+            let count = trimmed.chars().take_while(|&c| c == ch).count();
+            if !in_fence {
+                in_fence = true;
+                fence_char = ch;
+                fence_len = count;
+                out.push_str(line);
+                continue;
+            } else if ch == fence_char && count >= fence_len {
+                in_fence = false;
+                out.push_str(line);
+                continue;
+            }
+        }
+
+        if in_fence {
+            out.push_str(line);
+            continue;
+        }
+
+        // Outside fence: check if line starts with bare # that is NOT an ATX heading
+        // and not already escaped.
+        if trimmed.starts_with('#') && !super::is_atx_heading(trimmed) {
+            let indent_len = line.len() - trimmed.len();
+            out.push_str(&line[..indent_len]);
+            out.push('\\');
+            out.push_str(trimmed);
+        } else {
+            out.push_str(line);
+        }
+    }
+
+    out
 }
