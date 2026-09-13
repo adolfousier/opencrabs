@@ -377,9 +377,15 @@ pub(crate) async fn cmd_migrate(source: MigrationSource, dry_run: bool) -> Resul
     println!("\n  Spawning agent to handle migration...\n");
 
     let config = super::commands::load_config(None).await?;
-    let result =
-        super::commands::cmd_run(&config, prompt, true, super::args::OutputFormat::Text, None)
-            .await;
+    let result = super::commands::cmd_run(
+        &config,
+        prompt,
+        true,
+        super::args::OutputFormat::Text,
+        None,
+        false,
+    )
+    .await;
 
     // 7. Verify what actually changed (runs even if agent had errors)
     verify_migration(&before, &brain_path);

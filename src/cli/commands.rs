@@ -686,6 +686,7 @@ pub(crate) async fn cmd_run(
     auto_approve: bool,
     format: OutputFormat,
     session_id: Option<String>,
+    quiet: bool,
 ) -> Result<()> {
     use crate::{
         brain::{agent::AgentService, tools::registry::ToolRegistry},
@@ -766,18 +767,21 @@ pub(crate) async fn cmd_run(
     // Send through the full tool loop so headless runs actually execute tools
     // (#492). Plain send_message() is a single completion with no tool
     // execution — run/agent must invoke tools like every other surface.
-    println!("🤔 Processing...\n");
+    // --quiet: stdout is the payload — no processing line, no progress
+    // narration, no stats footer (machine callers parse stdout directly).
+    if !quiet {
+        println!("🤔 Processing...\n");
+    }
+    let progress = if quiet {
+        None
+    } else {
+        Some(crate::cli::headless_callbacks::cli_progress_callback())
+    };
     let response = agent_service
         .send_message_with_tools_and_callback(
-            session.id,
-            prompt,
-            None,
-            None,
+            session.id, prompt, None, None,
             None, // no stdin prompt for single-shot run; auto_approve_tools gates it
-            Some(crate::cli::headless_callbacks::cli_progress_callback()),
-            "cli",
-            None,
-            None,
+            progress, "cli", None, None,
         )
         .await?;
 
@@ -785,13 +789,15 @@ pub(crate) async fn cmd_run(
     match format {
         OutputFormat::Text => {
             println!("{}", response.content);
-            println!();
-            println!(
-                "📊 Tokens: {}",
-                response.usage.input_tokens + response.usage.output_tokens
-            );
-            println!("💰 Cost: ${:.6}", response.cost);
-            println!("🆔 Session: {short_id} (resume: opencrabs agent --session {short_id})");
+            if !quiet {
+                println!();
+                println!(
+                    "📊 Tokens: {}",
+                    response.usage.input_tokens + response.usage.output_tokens
+                );
+                println!("💰 Cost: ${:.6}", response.cost);
+                println!("🆔 Session: {short_id} (resume: opencrabs agent --session {short_id})");
+            }
         }
         OutputFormat::Json => {
             let output = serde_json::json!({
@@ -809,13 +815,15 @@ pub(crate) async fn cmd_run(
         OutputFormat::Markdown => {
             println!("# Response\n");
             println!("{}\n", response.content);
-            println!("---");
-            println!(
-                "**Tokens:** {}",
-                response.usage.input_tokens + response.usage.output_tokens
-            );
-            println!("**Cost:** ${:.6}", response.cost);
-            println!("**Session:** {short_id}");
+            if !quiet {
+                println!("---");
+                println!(
+                    "**Tokens:** {}",
+                    response.usage.input_tokens + response.usage.output_tokens
+                );
+                println!("**Cost:** ${:.6}", response.cost);
+                println!("**Session:** {short_id}");
+            }
         }
     }
 

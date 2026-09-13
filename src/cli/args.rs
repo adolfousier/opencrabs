@@ -56,6 +56,11 @@ pub enum Commands {
         /// Output format
         #[arg(short, long, default_value = "text")]
         format: OutputFormat,
+
+        /// Suppress progress and stats: stdout carries only the answer
+        /// (payload-only output for scripting and one-shot callers)
+        #[arg(long)]
+        quiet: bool,
     },
 
     /// Show system status: version, provider, channels, database, brain
@@ -613,7 +618,8 @@ pub async fn run() -> Result<()> {
             prompt,
             auto_approve,
             format,
-        }) => commands::cmd_run(&config, prompt, auto_approve, format, None).await,
+            quiet,
+        }) => commands::cmd_run(&config, prompt, auto_approve, format, None, quiet).await,
         Some(Commands::Agent {
             message,
             session,
@@ -623,7 +629,9 @@ pub async fn run() -> Result<()> {
             if let Some(msg) = message {
                 // Single message mode — same as `run`, plus #1368 resume:
                 // `agent --session <prefix|uuid>` continues that session.
-                commands::cmd_run(&config, msg, auto_approve, format, session).await
+                // The interactive surface keeps its progress output: quiet
+                // is a `run`-only flag for machine callers.
+                commands::cmd_run(&config, msg, auto_approve, format, session, false).await
             } else {
                 // Interactive CLI agent (no TUI), resumable the same way.
                 commands::cmd_agent_interactive(&config, auto_approve, session).await
