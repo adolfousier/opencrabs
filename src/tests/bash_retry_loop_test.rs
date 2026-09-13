@@ -17,7 +17,11 @@
 // fresh `Uuid::new_v4()` is naturally isolated from siblings even
 // though the underlying state map is process-wide. No explicit reset
 // needed — and trying to reset wipes parallel tests' buffers.
-use crate::brain::tools::bash::{RECENT_BASH_WINDOW, check_recent_failure, record_bash_outcome};
+use crate::brain::tools::bash::{
+    RECENT_BASH_MAX_BLOCKS, RECENT_BASH_TTL, RECENT_BASH_WINDOW, check_recent_failure,
+    record_bash_block, record_bash_outcome, record_bash_outcome_at, recorded_at_of,
+};
+use std::time::{Duration, Instant};
 use uuid::Uuid;
 
 #[test]
@@ -171,4 +175,122 @@ fn rejection_message_carries_the_shared_variation_directive() {
     // The frame and the quoted error survive the rewording.
     assert!(msg.contains("already ran this exact command"), "{msg}");
     assert!(msg.contains("Previous error:"), "{msg}");
+}
+
+#[test]
+fn stale_failure_stops_blocking() {
+    // #195: A failure older than RECENT_BASH_TTL should age out and no longer block.
+    let sid = Uuid::new_v4();
+    let past = Instant::now()
+        .checked_sub(RECENT_BASH_TTL + Duration::from_secs(1))
+        .expect("monotonic clock underflow");
+    record_bash_outcome_at(
+        sid,
+        "failing-cmd".to_string(),
+        true,
+        Some("transient error".to_string()),
+        past,
+    );
+    assert!(
+        check_recent_failure(sid, "failing-cmd").is_none(),
+        "stale failure older than TTL should yield execution"
+    );
+}
+
+#[test]
+fn block_does_not_refresh_the_clock() {
+    // #195: record_bash_block must NOT update recorded_at. Updating recorded_at
+    // on each block would permanently refresh the TTL and resurrect the latch.
+    let sid = Uuid::new_v4();
+    let initial_t = Instant::now()
+        .checked_sub(Duration::from_secs(60))
+        .expect("monotonic clock underflow");
+    record_bash_outcome_at(
+        sid,
+        "failing-cmd".to_string(),
+        true,
+        Some("transient error".to_string()),
+        initial_t,
+    );
+
+    let t_before = recorded_at_of(sid, "failing-cmd").expect("entry must exist");
+    assert_eq!(t_before, initial_t);
+
+    record_bash_block(sid, "failing-cmd");
+
+    let t_after = recorded_at_of(sid, "failing-cmd").expect("entry must exist");
+    assert_eq!(
+        t_after, initial_t,
+        "record_bash_block must NOT refresh recorded_at"
+    );
+}
+
+#[test]
+fn repeated_blocks_eventually_yield() {
+    // #195: Consecutive short-circuits up to RECENT_BASH_MAX_BLOCKS must block,
+    // and the attempt after RECENT_BASH_MAX_BLOCKS blocks must yield one real execution.
+    let sid = Uuid::new_v4();
+    record_bash_outcome(
+        sid,
+        "failing-cmd".to_string(),
+        true,
+        Some("transient error".to_string()),
+    );
+
+    for i in 0..RECENT_BASH_MAX_BLOCKS {
+        assert!(
+            check_recent_failure(sid, "failing-cmd").is_some(),
+            "attempt {i} should be blocked within budget"
+        );
+        record_bash_block(sid, "failing-cmd");
+    }
+
+    assert!(
+        check_recent_failure(sid, "failing-cmd").is_none(),
+        "after budget exhausted, check_recent_failure must yield one real execution"
+    );
+}
+
+#[test]
+fn real_outcome_resets_the_block_budget() {
+    // #195: Once budget is exhausted and execution yields, if that run fails again,
+    // record_bash_outcome resets blocks to 0 and arms a fresh budget.
+    let sid = Uuid::new_v4();
+    record_bash_outcome(
+        sid,
+        "failing-cmd".to_string(),
+        true,
+        Some("transient error".to_string()),
+    );
+
+    for _ in 0..RECENT_BASH_MAX_BLOCKS {
+        record_bash_block(sid, "failing-cmd");
+    }
+    assert!(check_recent_failure(sid, "failing-cmd").is_none());
+
+    // Next real execution fails again
+    record_bash_outcome(
+        sid,
+        "failing-cmd".to_string(),
+        true,
+        Some("persisting error".to_string()),
+    );
+
+    assert!(
+        check_recent_failure(sid, "failing-cmd").is_some(),
+        "new real failure outcome must re-arm block budget"
+    );
+}
+
+#[test]
+fn stale_entry_does_not_block_a_different_command() {
+    // #195: Isolation check — TTL and blocks check apply specifically to the matching entry.
+    let sid = Uuid::new_v4();
+    record_bash_outcome(
+        sid,
+        "first-cmd".to_string(),
+        true,
+        Some("error 1".to_string()),
+    );
+    assert!(check_recent_failure(sid, "different-cmd").is_none());
 }

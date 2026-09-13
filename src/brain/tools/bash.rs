@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{HashMap, VecDeque};
 use std::sync::{OnceLock, RwLock};
+use std::time::Instant;
 use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 use tokio::time::{Duration, timeout};
@@ -406,6 +407,7 @@ impl Tool for BashTool {
         // dead with a strong "stop retrying" message instead of
         // letting the underlying error fire a second time.
         if let Some(msg) = check_recent_failure(context.session_id, &input.command) {
+            record_bash_block(context.session_id, &input.command);
             return Ok(ToolResult::error(msg));
         }
 
@@ -1194,11 +1196,25 @@ fn check_blocked_inner(command: &str, depth: usize) -> Option<&'static str> {
 /// that a legitimate retry after enough other work won't false-fire.
 pub(crate) const RECENT_BASH_WINDOW: usize = 5;
 
+/// Maximum duration a failed outcome blocks identical retries (#195).
+/// Tight loops happen seconds apart. Hours later, the environment may
+/// have recovered, so old failures age out.
+pub(crate) const RECENT_BASH_TTL: Duration = Duration::from_secs(600);
+
+/// Maximum consecutive times a failed command can be short-circuited
+/// before yielding one real execution (#195).
+pub(crate) const RECENT_BASH_MAX_BLOCKS: u32 = 3;
+
 #[derive(Debug, Clone)]
 pub(crate) struct RecentBashOutcome {
     pub command: String,
     pub failed: bool,
     pub error_snippet: Option<String>,
+    /// When this outcome was recorded (#195). A block does NOT refresh this —
+    /// refreshing it on every block would re-create the latch the TTL exists to break.
+    pub recorded_at: Instant,
+    /// Number of times this failure entry has short-circuited a retry (#195).
+    pub blocks: u32,
 }
 
 /// Per-session ring buffer of the most recent bash commands and their
@@ -1220,7 +1236,11 @@ pub(crate) fn check_recent_failure(session_id: Uuid, cmd: &str) -> Option<String
     let state = recent_bash_state().read().ok()?;
     let buf = state.get(&session_id)?;
     for prev in buf.iter() {
-        if prev.failed && prev.command.trim() == normalized {
+        if prev.failed
+            && prev.command.trim() == normalized
+            && prev.recorded_at.elapsed() < RECENT_BASH_TTL
+            && prev.blocks < RECENT_BASH_MAX_BLOCKS
+        {
             let snippet = prev
                 .error_snippet
                 .as_deref()
@@ -1248,6 +1268,19 @@ pub(crate) fn record_bash_outcome(
     failed: bool,
     error_snippet: Option<String>,
 ) {
+    record_bash_outcome_at(session_id, command, failed, error_snippet, Instant::now());
+}
+
+/// Variant of `record_bash_outcome` that accepts an explicit timestamp (#195).
+/// Used in production with `Instant::now()`, and in unit tests to inject
+/// stale entries without sleeping.
+pub(crate) fn record_bash_outcome_at(
+    session_id: Uuid,
+    command: String,
+    failed: bool,
+    error_snippet: Option<String>,
+    recorded_at: Instant,
+) {
     let Ok(mut state) = recent_bash_state().write() else {
         return;
     };
@@ -1258,10 +1291,40 @@ pub(crate) fn record_bash_outcome(
         command,
         failed,
         error_snippet,
+        recorded_at,
+        blocks: 0,
     });
     while buf.len() > RECENT_BASH_WINDOW {
         buf.pop_front();
     }
+}
+
+/// Increment the block counter for a failed command after it is short-circuited (#195).
+/// Deliberately does NOT update `recorded_at` — doing so would refresh the TTL and
+/// resurrect the infinite latch defect.
+pub(crate) fn record_bash_block(session_id: Uuid, cmd: &str) {
+    let Ok(mut state) = recent_bash_state().write() else {
+        return;
+    };
+    let Some(buf) = state.get_mut(&session_id) else {
+        return;
+    };
+    let normalized = cmd.trim();
+    for o in buf.iter_mut() {
+        if o.command.trim() == normalized {
+            o.blocks = o.blocks.saturating_add(1);
+        }
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn recorded_at_of(session_id: Uuid, cmd: &str) -> Option<Instant> {
+    let state = recent_bash_state().read().ok()?;
+    let buf = state.get(&session_id)?;
+    let normalized = cmd.trim();
+    buf.iter()
+        .find(|o| o.command.trim() == normalized)
+        .map(|o| o.recorded_at)
 }
 
 /// Detect commands that require an interactive TTY and return a useful
