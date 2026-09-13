@@ -295,3 +295,42 @@ mod normal_commands {
         }
     }
 }
+
+mod quote_awareness {
+    use super::*;
+
+    #[test]
+    fn allows_pipes_and_alternation_inside_double_quotes() {
+        // Issue #205: pipe or semicolon inside double-quoted string or grep regex
+        // should not be treated as a pipeline or command separator.
+        assert!(check_interactive_command("git log --grep=\"feat: add | fix: remove\"").is_none());
+        assert!(check_interactive_command("echo \"git push | git commit\"").is_none());
+        assert!(check_interactive_command("git commit -m \"fix: foo; bar | baz & qux\"").is_none());
+    }
+
+    #[test]
+    fn allows_pipes_and_semicolons_inside_single_quotes() {
+        assert!(check_interactive_command("git log --grep='feat: add | fix: remove'").is_none());
+        assert!(check_interactive_command("echo 'git commit'").is_none());
+        assert!(check_interactive_command("echo 'foo | git commit'").is_none());
+    }
+
+    #[test]
+    fn allows_escaped_pipes_and_semicolons() {
+        assert!(check_interactive_command("echo foo \\| git commit").is_none());
+        assert!(check_interactive_command("echo foo \\; vim").is_none());
+    }
+
+    #[test]
+    fn still_detects_real_interactive_after_quoted_arg() {
+        // Pipeline outside quotes must still be split and checked
+        let cmd = "echo \"hello world\" | vim -";
+        assert!(check_interactive_command(cmd).is_some());
+
+        let cmd2 = "echo 'my commit message' | git commit";
+        assert!(check_interactive_command(cmd2).is_some());
+
+        let cmd3 = "git commit -m \"foo\"; nano bar.txt";
+        assert!(check_interactive_command(cmd3).is_some());
+    }
+}

@@ -1270,25 +1270,110 @@ pub(crate) fn record_bash_outcome(
 ///
 /// The Apr 23 stdin-detach fix made the bash tool well-behaved (no more
 /// keystroke theft from the TUI), but it also made interactive commands
+/// Split a shell command string into executable segments (`a && b`, `a; b`, `a | b`,
+/// multi-line commands), respecting POSIX single quotes (`'...'`), double quotes (`"..."`),
+/// and backslash escapes (`\`).
+///
+/// Within quotes or behind backslashes, `;`, `|`, `&`, and newlines do not delimit segments.
+/// This prevents false-positive interactive rejections when patterns or messages contain
+/// pipeline or alternation characters, e.g.:
+/// `git log --grep="feat: add | fix: remove"` or `echo "git push|git commit"`.
+pub(crate) fn split_command_segments(command: &str) -> Vec<String> {
+    let mut segments = Vec::new();
+    let mut cur = String::new();
+    let mut in_single = false;
+    let mut in_double = false;
+    let mut escaped = false;
+
+    for ch in command.chars() {
+        if escaped {
+            cur.push(ch);
+            escaped = false;
+            continue;
+        }
+
+        if in_single {
+            if ch == '\'' {
+                in_single = false;
+            }
+            cur.push(ch);
+            continue;
+        }
+
+        if in_double {
+            if ch == '\\' {
+                escaped = true;
+                cur.push(ch);
+            } else if ch == '"' {
+                in_double = false;
+                cur.push(ch);
+            } else {
+                cur.push(ch);
+            }
+            continue;
+        }
+
+        match ch {
+            '\\' => {
+                escaped = true;
+                cur.push(ch);
+            }
+            '\'' => {
+                in_single = true;
+                cur.push(ch);
+            }
+            '"' => {
+                in_double = true;
+                cur.push(ch);
+            }
+            ';' | '|' | '&' | '\n' => {
+                let trimmed = cur.trim();
+                if !trimmed.is_empty() {
+                    segments.push(trimmed.to_string());
+                }
+                cur.clear();
+            }
+            _ => {
+                cur.push(ch);
+            }
+        }
+    }
+
+    let trimmed = cur.trim();
+    if !trimmed.is_empty() {
+        segments.push(trimmed.to_string());
+    }
+
+    segments
+}
+
+/// Strip any single- or double-quotes from `s`.
+/// Used when checking command prefix matches so that e.g. `"git" add -p` or
+/// `'git'` commit is still matched.
+fn strip_quotes(s: &str) -> String {
+    s.chars().filter(|&c| c != '\'' && c != '"').collect()
+}
+
 /// fail *silently*: stdin=/dev/null returns EOF, the program exits with
 /// code 0, output looks plausible, and the agent retries the same
 /// command thinking it just needs another shot. Cut the loop on attempt
 /// 1 with a clear message that names the alternative.
 pub(crate) fn check_interactive_command(command: &str) -> Option<&'static str> {
-    let normalized: String = command
-        .split_whitespace()
-        .collect::<Vec<&str>>()
-        .join(" ")
-        .to_lowercase();
-
     // Walk each segment of a chain (`a && b`, `a; b`, `a || b`) and
     // check the first token of each — protects against e.g. `cd foo && vim bar`.
-    let segments = normalized
-        .split([';', '|', '&'])
-        .map(str::trim)
-        .filter(|s| !s.is_empty());
+    // We use quote-aware segmentation so `;`, `|`, `&` inside quotes or escaped
+    // do not split segments (#205).
+    let raw_segments = split_command_segments(command);
 
-    for seg in segments {
+    for raw_seg in raw_segments {
+        let normalized: String = raw_seg
+            .split_whitespace()
+            .collect::<Vec<&str>>()
+            .join(" ")
+            .to_lowercase();
+
+        let seg = normalized.as_str();
+
         // Skip leading env-var assignments (e.g. `EDITOR=vim git commit`)
         let cmd_start = seg
             .split_whitespace()
@@ -1296,12 +1381,15 @@ pub(crate) fn check_interactive_command(command: &str) -> Option<&'static str> {
             .unwrap_or(seg);
         let cmd_seg = &seg[seg.find(cmd_start).unwrap_or(0)..];
 
+        // Strip quotes for command token checks
+        let unquoted_seg = strip_quotes(cmd_seg);
+
         // `git add -p` / `--patch` / `-i` / `--interactive`
-        if cmd_seg.starts_with("git add ")
-            && (cmd_seg.contains(" -p")
-                || cmd_seg.contains(" --patch")
-                || cmd_seg.contains(" -i")
-                || cmd_seg.contains(" --interactive"))
+        if unquoted_seg.starts_with("git add ")
+            && (unquoted_seg.contains(" -p")
+                || unquoted_seg.contains(" --patch")
+                || unquoted_seg.contains(" -i")
+                || unquoted_seg.contains(" --interactive"))
         {
             return Some(
                 "`git add -p` / `git add -i` is interactive and won't work — stdin is /dev/null so it exits silently after printing the first hunk. \
@@ -1311,8 +1399,8 @@ pub(crate) fn check_interactive_command(command: &str) -> Option<&'static str> {
         }
 
         // `git rebase -i` / `--interactive`
-        if cmd_seg.starts_with("git rebase ")
-            && (cmd_seg.contains(" -i") || cmd_seg.contains(" --interactive"))
+        if unquoted_seg.starts_with("git rebase ")
+            && (unquoted_seg.contains(" -i") || unquoted_seg.contains(" --interactive"))
         {
             return Some(
                 "`git rebase -i` is interactive and won't work — stdin is /dev/null. \
@@ -1324,19 +1412,19 @@ pub(crate) fn check_interactive_command(command: &str) -> Option<&'static str> {
         // `git commit` with no message source — opens an editor.
         // Short-flag combos like `-am` / `-ma` count as a message
         // source; long form `--message=...` too.
-        if cmd_seg.starts_with("git commit")
-            && !cmd_seg.contains(" -m")
-            && !cmd_seg.contains(" -am")
-            && !cmd_seg.contains(" -ma")
-            && !cmd_seg.contains(" --message")
-            && !cmd_seg.contains(" -f ")
-            && !cmd_seg.contains(" --file")
-            && !cmd_seg.contains(" --no-edit")
-            && !cmd_seg.contains(" -c ")
-            && !cmd_seg.contains(" --reuse-message")
-            && !cmd_seg.contains(" -c=")
-            && !cmd_seg.contains(" --fixup")
-            && !cmd_seg.contains(" --squash")
+        if unquoted_seg.starts_with("git commit")
+            && !unquoted_seg.contains(" -m")
+            && !unquoted_seg.contains(" -am")
+            && !unquoted_seg.contains(" -ma")
+            && !unquoted_seg.contains(" --message")
+            && !unquoted_seg.contains(" -f ")
+            && !unquoted_seg.contains(" --file")
+            && !unquoted_seg.contains(" --no-edit")
+            && !unquoted_seg.contains(" -c ")
+            && !unquoted_seg.contains(" --reuse-message")
+            && !unquoted_seg.contains(" -c=")
+            && !unquoted_seg.contains(" --fixup")
+            && !unquoted_seg.contains(" --squash")
         {
             return Some(
                 "`git commit` without a message opens an editor (interactive) — stdin is /dev/null. \
@@ -1346,7 +1434,7 @@ pub(crate) fn check_interactive_command(command: &str) -> Option<&'static str> {
 
         // Standalone editors / pagers / TUI viewers — reject when they're
         // the actual command (not in the middle of a longer pipeline).
-        let first_word = cmd_seg.split_whitespace().next().unwrap_or("");
+        let first_word = unquoted_seg.split_whitespace().next().unwrap_or("");
         if matches!(
             first_word,
             "vim" | "vi" | "nvim" | "nano" | "emacs" | "pico" | "ed" | "joe" | "micro"
