@@ -21,6 +21,7 @@
 use std::collections::{BTreeSet, HashMap};
 use std::path::Path;
 use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, Ordering};
 use uuid::Uuid;
 
 /// In-memory registry: (session, slug) → the compaction epoch at which the
@@ -67,6 +68,34 @@ pub fn mark_seen(session_id: Uuid, slug: &str) {
         .lock()
         .expect("seen_skills registry poisoned")
         .insert((session_id, slug.to_string()), epoch);
+    // #138: best-effort durability. One row per (session, slug) so the
+    // registry can be rebuilt at boot. Detached so the hot path never
+    // blocks, and WARN-only on failure — the in-memory registry is the
+    // source of truth for this run, durability is a bonus (acceptance 5).
+    if let Ok(handle) = tokio::runtime::Handle::try_current() {
+        let slug = slug.to_string();
+        handle.spawn(async move {
+            match persist_seen(session_id, &slug, epoch).await {
+                Ok(()) => {}
+                Err(e) => tracing::warn!(
+                    "seen_skills: DB persist of ({session_id}, {slug}) failed (in-memory \
+                     registry unaffected): {e:#}"
+                ),
+            }
+        });
+    }
+}
+
+/// Persist one (session, slug, epoch) row. Soft no-op when no DB pool is
+/// installed yet (unit tests, pre-`Database::connect` boot) — that is not
+/// an error, the caller has no durability target.
+async fn persist_seen(session_id: Uuid, slug: &str, epoch: u64) -> anyhow::Result<()> {
+    let Some(pool) = crate::db::global_pool() else {
+        return Ok(());
+    };
+    crate::db::repository::SessionSkillsRepository::new(pool.clone())
+        .record(session_id, slug, epoch)
+        .await
 }
 
 /// The session's current compaction epoch (0 before any compaction).
@@ -125,6 +154,124 @@ pub fn seen_for_session(session_id: Uuid) -> Vec<String> {
         .map(|((_, slug), _)| slug.clone())
         .collect();
     all.into_iter().collect()
+}
+
+// ---------------------------------------------------------------------------
+// #138: boot hydration — the registry survives daemon restarts
+// ---------------------------------------------------------------------------
+
+/// Rows loaded from `session_seen_skills`, shaped for the pure fold below.
+/// Deliberately separate from the DB row type so the restart semantics stay
+/// unit-testable without a pool.
+pub struct HydrationSeeds {
+    /// `(session, slug)` → epoch — exactly the in-memory registry's shape.
+    pub seen: HashMap<(Uuid, String), u64>,
+    /// Per-session epoch floor, seeded from the MAX persisted row epoch.
+    pub epochs: HashMap<Uuid, u64>,
+}
+
+/// Fold persisted rows into registry seeds. PURE — no I/O, no globals — so
+/// the restart semantics are testable directly.
+///
+/// `epoch` is NULL for rows written before the column existed (#150); NULL
+/// reads as 0 == "loaded before any compaction", the permissive end, so a
+/// pre-feature row can never wrongly gate a skill.
+///
+/// The session's epoch counter is seeded from the MAX row epoch: a restart
+/// must not leave the counter BELOW an epoch the session already reached,
+/// or every skill loaded after that compaction would falsely re-gate.
+pub fn hydrate_from_rows(rows: Vec<(Uuid, String, Option<i64>)>) -> HydrationSeeds {
+    let mut seeds = HydrationSeeds {
+        seen: HashMap::new(),
+        epochs: HashMap::new(),
+    };
+    for (session_id, slug, epoch) in rows {
+        let epoch = epoch.unwrap_or(0).max(0) as u64;
+        seeds
+            .seen
+            .entry((session_id, slug))
+            .and_modify(|e| *e = (*e).max(epoch))
+            .or_insert(epoch);
+        seeds
+            .epochs
+            .entry(session_id)
+            .and_modify(|e| *e = (*e).max(epoch))
+            .or_insert(epoch);
+    }
+    seeds
+}
+
+/// Install seeds into the in-memory registries. Synchronous on purpose — a
+/// `MutexGuard` is not `Send`, so this must never be held across an await.
+/// Returns the number of seen rows installed (the log line's count).
+///
+/// Merge is MAX-wins: a skill marked seen earlier in THIS run keeps its
+/// epoch rather than being rewound to the persisted one.
+pub fn apply_seeds(seeds: HydrationSeeds) -> usize {
+    let n = seeds.seen.len();
+    {
+        let mut registry = registry().lock().expect("seen_skills registry poisoned");
+        for (key, epoch) in seeds.seen {
+            registry
+                .entry(key)
+                .and_modify(|e| *e = (*e).max(epoch))
+                .or_insert(epoch);
+        }
+    }
+    {
+        let mut epochs = epochs().lock().expect("seen_skills epochs poisoned");
+        for (session_id, epoch) in seeds.epochs {
+            epochs
+                .entry(session_id)
+                .and_modify(|e| *e = (*e).max(epoch))
+                .or_insert(epoch);
+        }
+    }
+    n
+}
+
+/// Once-per-process boot hydrate (issue #138): read every persisted
+/// `(session, slug, epoch)` row into the in-memory registry, then drop rows
+/// whose session no longer exists.
+///
+/// Detached, because the caller (`AgentService::new`) must never block on
+/// I/O. A missing pool is not an error — unit tests and any construction
+/// before `Database::connect` simply have no durability target (acceptance
+/// 5: no panic paths, the in-memory registry keeps working regardless).
+pub fn hydrate_from_db() {
+    static HYDRATED: AtomicBool = AtomicBool::new(false);
+    if HYDRATED.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    let Some(pool) = crate::db::global_pool().cloned() else {
+        tracing::debug!(
+            "seen_skills: no DB pool at boot — registry stays in-memory only (restart \
+             durability unavailable this run)"
+        );
+        return;
+    };
+    let Ok(handle) = tokio::runtime::Handle::try_current() else {
+        tracing::debug!("seen_skills: no tokio runtime at boot — skipping DB hydration");
+        return;
+    };
+    handle.spawn(async move {
+        let repo = crate::db::repository::SessionSkillsRepository::new(pool);
+        match repo.all().await {
+            Ok(rows) => {
+                let n = apply_seeds(hydrate_from_rows(rows));
+                tracing::debug!("seen_skills: hydrated registry from DB ({n} seen rows)");
+            }
+            Err(e) => tracing::warn!(
+                "seen_skills: DB hydration failed (registry starts empty, restart durability \
+                 lost this run): {e:#}"
+            ),
+        }
+        match repo.prune_missing_sessions().await {
+            Ok(0) => {}
+            Ok(n) => tracing::debug!("seen_skills: pruned {n} rows for deleted sessions"),
+            Err(e) => tracing::warn!("seen_skills: prune of orphaned rows failed: {e:#}"),
+        }
+    });
 }
 
 #[cfg(test)]
@@ -229,5 +376,63 @@ mod tests {
         mark_seen(b, "sk");
         assert!(seen_since_compaction(b, "sk"));
         assert!(!seen_since_compaction(a, "sk"));
+    }
+
+    // --- issue #138: boot hydration (registry survives restarts) ---
+
+    #[test]
+    fn hydration_takes_max_epoch_per_session() {
+        let a = Uuid::new_v4();
+        let b = Uuid::new_v4();
+        let seeds = hydrate_from_rows(vec![
+            (a, "one".to_string(), Some(1)),
+            (a, "two".to_string(), Some(3)),
+            (b, "one".to_string(), Some(1)),
+        ]);
+        assert_eq!(seeds.seen.len(), 3);
+        // The counter floors at the HIGHEST epoch this session reached.
+        assert_eq!(seeds.epochs.get(&a), Some(&3));
+        assert_eq!(seeds.epochs.get(&b), Some(&1));
+    }
+
+    #[test]
+    fn hydration_restores_epoch_counter_so_next_compaction_gates() {
+        let a = Uuid::new_v4();
+        apply_seeds(hydrate_from_rows(vec![(a, "sk".to_string(), Some(2))]));
+        assert!(was_seen(a, "sk"));
+        assert!(seen_since_compaction(a, "sk"));
+        // The counter came back at 2, so the NEXT compaction is epoch 3 and
+        // the epoch-2 row is correctly stale. Without epoch seeding the
+        // counter would restart at 0, this bump would land on 1, and the
+        // 2 >= 1 compare would wrongly keep the skill "in context".
+        note_compaction(a);
+        assert!(!seen_since_compaction(a, "sk"));
+    }
+
+    #[test]
+    fn hydration_null_epoch_reads_as_zero_and_stays_permissive() {
+        let a = Uuid::new_v4();
+        apply_seeds(hydrate_from_rows(vec![(a, "legacy".to_string(), None)]));
+        assert!(was_seen(a, "legacy"));
+        assert!(seen_since_compaction(a, "legacy"));
+        // A negative epoch (never written by us, but possible in a
+        // hand-edited row) clamps to 0 rather than wrapping to u64::MAX.
+        let b = Uuid::new_v4();
+        apply_seeds(hydrate_from_rows(vec![(b, "odd".to_string(), Some(-5))]));
+        assert!(seen_since_compaction(b, "odd"));
+    }
+
+    #[test]
+    fn hydration_preserves_stamp_inventory_across_restart() {
+        let a = Uuid::new_v4();
+        apply_seeds(hydrate_from_rows(vec![
+            (a, "zeta".to_string(), Some(0)),
+            (a, "alpha".to_string(), Some(1)),
+        ]));
+        // The #125 stamp reads this list — sorted, both rows present.
+        assert_eq!(
+            seen_for_session(a),
+            vec!["alpha".to_string(), "zeta".to_string()]
+        );
     }
 }
