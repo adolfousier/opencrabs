@@ -73,11 +73,75 @@ pub async fn handle_key(app: &mut App, key: KeyEvent) {
 /// effect. `panel_item_count` is the number of items in the currently
 /// focused panel, used to clamp selection movement.
 pub fn decide(state: &mut McState, panel_item_count: usize, key: KeyEvent) -> KeyOutcome {
+    // The log viewer is full-screen, so it takes every key while open (#1528).
+    // Ahead of the popup check because the two are never open together.
+    if state.log_viewer.is_some() {
+        return decide_in_log_viewer(state, key);
+    }
     if state.detail_open {
         decide_with_popup(state, panel_item_count, key)
     } else {
         decide_without_popup(state, panel_item_count, key)
     }
+}
+
+/// Keys inside the log viewer (#1528).
+///
+/// Returns `Consumed` for everything, including keys with no binding: a
+/// stray keystroke must not fall through to the panels underneath and move a
+/// selection the user cannot see.
+fn decide_in_log_viewer(state: &mut McState, key: KeyEvent) -> KeyOutcome {
+    let Some(viewer) = state.log_viewer.as_mut() else {
+        return KeyOutcome::NotConsumed;
+    };
+
+    // While the search box is open, printable keys are search text rather
+    // than commands — otherwise typing "debug" would trip the `d` level
+    // filter and the `e` one on the way past.
+    if viewer.search_active {
+        match key.code {
+            KeyCode::Esc => viewer.clear_search(),
+            KeyCode::Enter => viewer.search_active = false,
+            KeyCode::Backspace => viewer.pop_search(),
+            KeyCode::Char(c) if !c.is_control() => viewer.push_search(c),
+            _ => {}
+        }
+        return KeyOutcome::Consumed;
+    }
+
+    // Esc clears a filter first and closes second, so a search that matched
+    // nothing costs one key rather than the whole screen. Decided here and
+    // acted on after the borrow ends, since closing means dropping the state
+    // this borrow points into.
+    let mut close = false;
+    match key.code {
+        KeyCode::Esc => {
+            if viewer.search.is_empty() {
+                close = true;
+            } else {
+                viewer.clear_search();
+            }
+        }
+        KeyCode::Char('/') => viewer.search_active = true,
+        KeyCode::Up | KeyCode::Char('k') => viewer.scroll_up(1),
+        KeyCode::Down | KeyCode::Char('j') => viewer.scroll_down(1),
+        KeyCode::PageUp => viewer.page_up(),
+        KeyCode::PageDown => viewer.page_down(),
+        KeyCode::Home | KeyCode::Char('g') => viewer.scroll = 0,
+        KeyCode::End | KeyCode::Char('G') => viewer.scroll_to_end(),
+        KeyCode::Char('[') => viewer.step_file(-1),
+        KeyCode::Char(']') => viewer.step_file(1),
+        KeyCode::Char(c) => {
+            if let Some(level) = super::log_viewer::level_for_key(c) {
+                viewer.set_level(level);
+            }
+        }
+        _ => {}
+    }
+    if close {
+        state.log_viewer = None;
+    }
+    KeyOutcome::Consumed
 }
 
 fn decide_with_popup(state: &mut McState, panel_item_count: usize, key: KeyEvent) -> KeyOutcome {
@@ -115,6 +179,16 @@ fn decide_with_popup(state: &mut McState, panel_item_count: usize, key: KeyEvent
 fn decide_without_popup(state: &mut McState, panel_item_count: usize, key: KeyEvent) -> KeyOutcome {
     match key.code {
         KeyCode::Esc => KeyOutcome::Close,
+        // Uppercase, because lowercase `l` is the vim-right panel cycle
+        // below and taking it would break panel navigation (#1528).
+        KeyCode::Char('L') => {
+            let mut viewer = super::log_viewer::LogViewerState::open();
+            // Land on the newest entries: the thing you just reproduced is at
+            // the end of the file, not the start of the window.
+            viewer.scroll_to_end();
+            state.log_viewer = Some(viewer);
+            KeyOutcome::Consumed
+        }
         KeyCode::Tab | KeyCode::Char('l') => {
             state.focus_next();
             KeyOutcome::Consumed

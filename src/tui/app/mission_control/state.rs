@@ -47,6 +47,10 @@ pub struct McState {
     /// the snapshot through this window so every panel respects it. Defaults
     /// to Month so first-open matches the prior 30d flakiest behavior.
     pub analytics_window: TimeWindow,
+    /// Open log viewer, or `None` when MC is showing its panels (#1528).
+    /// Held here rather than on `AppState` so closing it restores the panel
+    /// focus that was never disturbed.
+    pub log_viewer: Option<super::log_viewer::LogViewerState>,
 }
 
 impl Default for McState {
@@ -60,6 +64,7 @@ impl Default for McState {
             schedule: Vec::new(),
             analytics: crate::brain::mission_control::McAnalytics::default(),
             analytics_window: TimeWindow::Month,
+            log_viewer: None,
         }
     }
 }

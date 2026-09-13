@@ -12,6 +12,7 @@ mod detail_popup;
 mod dispatch;
 mod inbox_panel;
 mod layout;
+mod log_viewer;
 mod schedule_panel;
 mod theme;
 

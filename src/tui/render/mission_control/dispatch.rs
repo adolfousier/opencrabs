@@ -18,7 +18,13 @@ use ratatui::widgets::Paragraph;
 /// Render Mission Control over the full content area `area`. Inherits
 /// the terminal background — no dark wash — to match the `Sessions`
 /// and `Help` screens.
-pub fn draw(frame: &mut Frame, app: &App, area: Rect) {
+pub fn draw(frame: &mut Frame, app: &mut App, area: Rect) {
+    // The log viewer is full-screen: it replaces the panels rather than
+    // overlaying them, so nothing below it is drawn or laid out (#1528).
+    if app.mc.log_viewer.is_some() {
+        super::log_viewer::draw(frame, app, area);
+        return;
+    }
     let McLayout {
         inbox,
         analytics,

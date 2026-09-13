@@ -7,6 +7,7 @@
 
 pub mod actions;
 pub mod input;
+pub mod log_viewer;
 pub mod state;
 
 pub use state::{McPanel, McState};

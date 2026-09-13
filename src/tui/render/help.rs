@@ -209,6 +209,13 @@ pub(super) fn render_help(f: &mut Frame, app: &mut App, area: Rect) {
         kv("Tab", "Cycle pane focus", cyan),
         kv("Ctrl+X", "Close pane", cyan),
         Line::from(""),
+        section_header("MISSION CONTROL"),
+        kv("h/l or Tab", "Cycle panel focus", cyan),
+        kv("L", "Open the log viewer", cyan),
+        kv("e/w/i/d (in logs)", "Filter by minimum level", cyan),
+        kv("/ (in logs)", "Filter by text", cyan),
+        kv("[ ] (in logs)", "Previous / next day's file", cyan),
+        Line::from(""),
         section_header("FEATURES"),
         Line::from(vec![
             Span::styled(" ✓ ", Style::default().fg(Color::Cyan)),

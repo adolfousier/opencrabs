@@ -277,6 +277,8 @@ pub mod help_catalog_test;
 pub mod install_homebrew_test;
 pub mod instance_lock_test;
 pub mod intermediate_text_strip_guard_test;
+pub mod log_reader_test;
+pub mod log_viewer_test;
 pub mod logger_lock_recovery_test;
 pub mod logger_mutex_contention_test;
 pub mod logging_log_files_test;
