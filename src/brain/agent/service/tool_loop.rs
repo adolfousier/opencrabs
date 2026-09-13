@@ -7642,6 +7642,14 @@ impl AgentService {
         // a truthful message instead of telling the user it was done.
         if tool_calls_completed_this_turn == 0
             && !final_text.trim().is_empty()
+            // #1541: a structured report ships untouched, the same owner
+            // directive the #1506 in-loop kill enforces ("a report with tables
+            // and structured data is NEVER discarded"). Without this the report
+            // is exempted in-loop, then stripped here and swapped for the prose
+            // note; zero tools means no retry fired (the exemption spent no
+            // budget), so the deliverable is lost. The note is for genuine
+            // prose narration only.
+            && !super::phantom::is_structured_report(&final_text)
             && (super::phantom::has_phantom_tool_intent_no_tools(&final_text)
                 || super::phantom::claims_unbacked_side_effects(&final_text)
                 || super::phantom::claims_unbacked_media_result(&final_text)
