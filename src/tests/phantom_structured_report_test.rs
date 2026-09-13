@@ -255,3 +255,39 @@ fn the_turn_end_verdict_honors_the_structured_exemption() {
         "the #752 turn-end verdict strips structured reports (the #1541 bug)"
     );
 }
+
+#[test]
+fn the_turn_end_verdict_still_fires_for_genuine_prose_narration() {
+    // #1541 test spec 2: the exemption is scoped to structured reports only.
+    // A turn with zero tools that merely NARRATES work (phantom intent,
+    // unbacked side-effect/media claims, unrun shell blocks) must still get
+    // stripped and replaced with the truthful note, so the note remains the
+    // last-resort backstop for prose phantoms and never quietly disappears.
+    let verdict = TOOL_LOOP_SRC
+        .split("Turn-end phantom verdict (#752)")
+        .nth(1)
+        .expect("#752 turn-end verdict not found in tool_loop");
+    let verdict = verdict
+        .split("final_text = \"I described actions")
+        .next()
+        .expect("#752 note assignment not found");
+    for detector in [
+        "has_phantom_tool_intent_no_tools(&final_text)",
+        "claims_unbacked_side_effects(&final_text)",
+        "claims_unbacked_media_result(&final_text)",
+        "narrates_unrun_shell_block(&final_text)",
+    ] {
+        assert!(
+            verdict.contains(detector),
+            "the #752 verdict lost its prose detector `{detector}` — the note must still fire for narration (#1541 spec 2)"
+        );
+    }
+    assert!(
+        verdict.contains("tool_calls_completed_this_turn == 0"),
+        "the #752 verdict must keep the zero-tools gate"
+    );
+    assert!(
+        TOOL_LOOP_SRC.contains("final_text = \"I described actions"),
+        "the #752 truthful note assignment is gone — prose phantoms would ship unchallenged"
+    );
+}
