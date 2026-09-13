@@ -105,3 +105,22 @@ fn the_delta_cannot_underflow_past_zero() {
     c.token_count = 0;
     assert_eq!(c.effective_token_count(), 0);
 }
+
+#[test]
+fn compaction_clears_provider_anchor() {
+    let mut c = ctx(200_000);
+    c.token_count = 125_000;
+    // Provider reported 138k against 125k local estimate (+13k delta).
+    c.record_provider_reported_tokens(138_000);
+    assert_eq!(c.effective_token_count(), 138_000);
+
+    // Context compacts with a summary down to ~67k tokens.
+    c.compact_with_summary("Summary of conversation".to_string(), 0);
+
+    // Stale provider anchor must be dropped so post-compaction budget
+    // matches local token count exactly (#211).
+    assert_eq!(c.provider_anchor, None);
+    assert_eq!(c.effective_token_count(), c.token_count);
+    assert!(c.token_count < 100); // 0 budget + short summary
+    assert_eq!(c.effective_token_count(), c.token_count);
+}

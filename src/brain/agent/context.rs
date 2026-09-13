@@ -365,5 +365,10 @@ impl AgentContext {
         for msg in &self.messages {
             self.token_count += self.estimate_message_tokens(msg);
         }
+
+        // Drop the pre-compaction provider anchor: the anchor was taken against
+        // the uncompacted prompt and would inflate the post-compaction budget
+        // with a stale delta (#211).
+        self.provider_anchor = None;
     }
 }

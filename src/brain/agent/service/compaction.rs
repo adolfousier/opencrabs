@@ -468,7 +468,7 @@ impl AgentService {
         }
         if let Some(cb) = progress_callback {
             let after_pct = if context.max_tokens > 0 {
-                (context.effective_token_count() as f64 / context.max_tokens as f64) * 100.0
+                (context.token_count as f64 / context.max_tokens as f64) * 100.0
             } else {
                 100.0
             };
