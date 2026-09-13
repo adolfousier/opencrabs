@@ -1761,6 +1761,14 @@ fn configure_openai_compatible(
         provider = provider.with_cache_ttl(ttl);
         tracing::info!("OpenRouter cache TTL: {}s", ttl);
     }
+    if let Some(secs) = config.timeout_secs.filter(|&s| s > 0) {
+        provider = provider.with_timeout(std::time::Duration::from_secs(secs));
+        tracing::info!("Configured request timeout: {}s", secs);
+    }
+    if let Some(secs) = config.stream_idle_timeout_secs.filter(|&s| s > 0) {
+        provider = provider.with_stream_idle_timeout(std::time::Duration::from_secs(secs));
+        tracing::info!("Configured stream idle timeout: {}s", secs);
+    }
     provider
 }
 
