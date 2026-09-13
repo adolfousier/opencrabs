@@ -2339,7 +2339,7 @@ impl ProviderConfigs {
     /// Priority order matches what `factory::create_provider` would pick:
     /// CLI providers first (free, no key), then API providers, with custom
     /// providers handled separately by the caller via `active_custom()`.
-    fn provider_registry(
+    pub(crate) fn provider_registry(
         &self,
     ) -> [(&'static str, &'static str, bool, Option<&ProviderConfig>); 19] {
         [

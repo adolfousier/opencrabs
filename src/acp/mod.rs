@@ -13,8 +13,10 @@
 //! - [`protocol`]: JSON-RPC framing types and the ACP method/vocabulary.
 //! - [`transport`]: the NDJSON stdio pump with outbound request correlation.
 //! - [`server`]: method dispatch and the ACP-session state map.
+//! - [`catalog`]: the live model catalog advertised in `session/new`.
 //! - [`turn`]: the prompt bridge — tool-loop events/approvals -> ACP frames.
 
+pub mod catalog;
 pub mod protocol;
 pub mod server;
 pub mod transport;

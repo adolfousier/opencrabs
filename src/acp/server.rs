@@ -21,9 +21,12 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use crate::brain::agent::{AgentService, QueuedUserMessage};
+use crate::brain::provider::create_provider_by_name;
 use crate::cli::session_resolve::resolve_or_create_session;
 use crate::services::SessionService;
+use crate::utils::provider_pair::parse_pair;
 
+use super::catalog;
 use super::protocol::{self, ClientMessage};
 use super::transport::{Transport, TransportHandle};
 use super::turn;
@@ -55,6 +58,7 @@ pub struct ServerState {
     pub states: Mutex<HashMap<String, Arc<SessionState>>>,
     pub steer: SteerMap,
     pub default_model: Option<String>,
+    pub config: Arc<crate::config::Config>,
 }
 
 /// The server: owns the transport, dispatches to shared state.
@@ -69,6 +73,7 @@ impl AcpServer {
         sessions: SessionService,
         default_model: Option<String>,
         steer: SteerMap,
+        config: Arc<crate::config::Config>,
     ) -> Self {
         let transport = Transport::spawn();
         let state = Arc::new(ServerState {
@@ -78,6 +83,7 @@ impl AcpServer {
             states: Mutex::new(HashMap::new()),
             steer,
             default_model,
+            config,
         });
         Self { state, transport }
     }
@@ -189,8 +195,12 @@ impl AcpServer {
                     model: Mutex::new(state.default_model.clone()),
                     active_cancel: Mutex::new(None),
                 });
-                state.states.lock().await.insert(acp_id.clone(), st);
-                state.handle.respond(id, json!({ "sessionId": acp_id }));
+                state.states.lock().await.insert(acp_id.clone(), st.clone());
+                let current = st.model.lock().await.clone();
+                let models = catalog::models_payload(&state.config, current.as_deref());
+                state
+                    .handle
+                    .respond(id, json!({ "sessionId": acp_id, "models": models }));
             }
             Err(e) => {
                 state
@@ -205,22 +215,42 @@ impl AcpServer {
             .get("modelId")
             .or_else(|| params.get("modeId"))
             .and_then(Value::as_str);
-        match (Self::lookup(&state, &params).await, model) {
-            (Some(st), Some(model)) => {
-                *st.model.lock().await = Some(model.to_string());
-                state.handle.respond(id, json!({}));
+        let (Some(st), Some(model)) = (Self::lookup(&state, &params).await, model) else {
+            let msg = if model.is_none() {
+                "session/set_model requires modelId (modeId accepted)"
+            } else {
+                "session/set_model: unknown session"
+            };
+            state
+                .handle
+                .respond_error(id, protocol::INVALID_PARAMS, msg);
+            return;
+        };
+        // A `provider/model` pair switches the session's provider too; a bare
+        // model name re-serves through the session's current provider.
+        if let Ok((provider_name, bare_model)) = parse_pair(model) {
+            match create_provider_by_name(&state.config, &provider_name).await {
+                Ok(provider) => {
+                    state
+                        .agent
+                        .swap_provider_for_session(st.id, provider, bare_model.clone());
+                    state.agent.mark_manual_switch(st.id, bare_model.clone());
+                    *st.model.lock().await = Some(bare_model);
+                }
+                Err(e) => {
+                    state.handle.respond_error(
+                        id,
+                        protocol::INVALID_PARAMS,
+                        format!("session/set_model: {e}"),
+                    );
+                    return;
+                }
             }
-            (None, _) => state.handle.respond_error(
-                id,
-                protocol::INVALID_PARAMS,
-                "session/set_model: unknown session",
-            ),
-            (_, None) => state.handle.respond_error(
-                id,
-                protocol::INVALID_PARAMS,
-                "session/set_model requires modelId (modeId accepted)",
-            ),
+        } else {
+            state.agent.set_session_model(st.id, model.to_string());
+            *st.model.lock().await = Some(model.to_string());
         }
+        state.handle.respond(id, json!({}));
     }
 
     /// Spawn the turn task and return immediately — the response travels with
