@@ -40,7 +40,8 @@ pub async fn run_turn(
     let acp_session_id = session.id.to_string();
 
     let progress = progress_callback(state.handle.clone(), acp_session_id.clone());
-    let approval = approval_callback(state.handle.clone(), acp_session_id, cancel.clone());
+    let mode = *session.mode.lock().await;
+    let approval = approval_callback(state.handle.clone(), acp_session_id, mode, cancel.clone());
 
     let model = session.model.lock().await.clone();
     let result = state
@@ -179,13 +180,17 @@ fn progress_callback(handle: TransportHandle, acp_session_id: String) -> Progres
 /// that a wedged client cannot stall the agent forever.
 const PERMISSION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
 
-/// Route approval-gated tools to the client as `session/request_permission`.
-/// Any transport failure denies — a client that cannot answer must never
-/// become an approval. The round-trip also races `session/cancel` and the
-/// permission timeout, both resolving to a deny.
+/// Route approval-gated tools according to the session's mode. Only
+/// `supervised` (and non-edit kinds under `auto-accept-edits`) reach the
+/// client as `session/request_permission`; `plan` denies mutations outright
+/// so the agent learns the boundary from the denial instead of a silent
+/// client-side veto. Any transport failure denies — a client that cannot
+/// answer must never become an approval. The round-trip also races
+/// `session/cancel` and the permission timeout, both resolving to a deny.
 fn approval_callback(
     handle: TransportHandle,
     acp_session_id: String,
+    mode: protocol::AcpMode,
     cancel: CancellationToken,
 ) -> ApprovalCallback {
     Arc::new(move |info: ToolApprovalInfo| {
@@ -193,12 +198,26 @@ fn approval_callback(
         let acp_session_id = acp_session_id.clone();
         let cancel = cancel.clone();
         Box::pin(async move {
+            let kind = protocol::tool_kind(&info.tool_name);
+            match mode {
+                protocol::AcpMode::Plan => {
+                    tracing::info!("acp plan mode: denied {} without asking", info.tool_name);
+                    return Ok((false, false));
+                }
+                protocol::AcpMode::Auto | protocol::AcpMode::FullAccess => {
+                    return Ok((true, false));
+                }
+                protocol::AcpMode::AutoAcceptEdits if kind == "edit" => {
+                    return Ok((true, false));
+                }
+                _ => {}
+            }
             let params = json!({
                 "sessionId": acp_session_id,
                 "toolCall": {
                     "toolCallId": Uuid::new_v4().to_string(),
                     "title": info.tool_name,
-                    "kind": protocol::tool_kind(&info.tool_name),
+                    "kind": kind,
                     "rawInput": info.tool_input,
                 },
                 "options": permission_options(),
