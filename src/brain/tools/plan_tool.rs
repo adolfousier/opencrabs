@@ -402,6 +402,7 @@ fn resolve_insertion_index(
 
 /// Insert a task into `plan` at 0-based vector `target_idx`, resolving dependencies and
 /// renumbering downstream tasks. Returns the newly inserted task's order (1-based).
+#[allow(clippy::too_many_arguments)]
 fn insert_task_to_plan(
     plan: &mut PlanDocument,
     target_idx: usize,
