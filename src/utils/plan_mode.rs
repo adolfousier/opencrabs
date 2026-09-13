@@ -254,6 +254,10 @@ const PLAN_PROSE_CAP: usize = 3000;
 /// or buried chat and for send-failure recovery — chrome never teaches it as
 /// the way to read the plan. The TUI overlay keeps using it as before.
 pub async fn show_plan(session_id: Uuid) -> String {
+    show_plan_opt(session_id, false).await
+}
+
+pub async fn show_plan_opt(session_id: Uuid, full: bool) -> String {
     match plan_files::plan_mode_state(session_id).await {
         PlanModeState::NoPlan => "No active plan for this session.".to_string(),
         PlanModeState::PreInitEditing => {
@@ -296,7 +300,7 @@ pub async fn show_plan(session_id: Uuid) -> String {
             let Some(plan) = plan_files::load_plan(session_id).await else {
                 return "Plan JSON is unreadable.".to_string();
             };
-            format_active_checklist(&plan)
+            format_active_checklist_windowed(&plan, full)
         }
     }
 }
@@ -305,7 +309,17 @@ pub async fn show_plan(session_id: Uuid) -> String {
 /// overlay: the seed-incomplete notice when tasks are empty, otherwise the
 /// checklist with progress. Pure (takes the already-loaded plan), so the
 /// sync render path can reuse it without touching the async store.
+/// When `full` is false and plan has >10 tasks, focal accordion windowing
+/// is applied to avoid overflowing LLM context.
 pub fn format_active_checklist(plan: &crate::tui::plan::PlanDocument) -> String {
+    format_active_checklist_windowed(plan, false)
+}
+
+/// Variant of `format_active_checklist` with optional full uncollapsed rendering.
+pub fn format_active_checklist_windowed(
+    plan: &crate::tui::plan::PlanDocument,
+    full: bool,
+) -> String {
     if plan.tasks.is_empty() {
         return format!(
             "📋 {} is Active but the checklist is still empty (seed did not \
@@ -323,23 +337,84 @@ pub fn format_active_checklist(plan: &crate::tui::plan::PlanDocument) -> String 
             )
         })
         .count();
-    let lines = plan
+
+    let total = plan.tasks.len();
+    if full || total <= 10 {
+        let lines = plan
+            .tasks
+            .iter()
+            .map(|t| {
+                format!(
+                    "{} {}. {}",
+                    crate::tui::plan::status_mark(&t.status),
+                    t.order,
+                    t.title
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        return format!("📋 {} (Active, {done}/{total} done)\n{lines}", plan.title);
+    }
+
+    // Focal accordion windowing for > 10 tasks:
+    // 1. Find active index (first InProgress or first Pending)
+    let active_idx = plan
         .tasks
         .iter()
-        .map(|t| {
-            format!(
-                "{} {}. {}",
-                crate::tui::plan::status_mark(&t.status),
-                t.order,
-                t.title
-            )
+        .position(|t| matches!(t.status, crate::tui::plan::TaskStatus::InProgress))
+        .or_else(|| {
+            plan.tasks
+                .iter()
+                .position(|t| matches!(t.status, crate::tui::plan::TaskStatus::Pending))
         })
-        .collect::<Vec<_>>()
-        .join("\n");
+        .unwrap_or(total.saturating_sub(1));
+
+    // Visible window around active: [active_idx - 1 ..= active_idx + 2]
+    let win_start = active_idx.saturating_sub(1);
+    let win_end = (active_idx + 3).min(total.saturating_sub(2)); // leave room for terminal 2
+
+    let mut lines = Vec::new();
+
+    // Completed collapsed prefix
+    if win_start > 0 {
+        lines.push(format!("✓ [Tasks #1–#{win_start} completed]"));
+    }
+
+    // Active horizon
+    for t in &plan.tasks[win_start..win_end] {
+        lines.push(format!(
+            "{} {}. {}",
+            crate::tui::plan::status_mark(&t.status),
+            t.order,
+            t.title
+        ));
+    }
+
+    // Distant pending collapsed
+    let terminal_start = total.saturating_sub(2).max(win_end);
+    if terminal_start > win_end {
+        let count = terminal_start - win_end;
+        let start_order = win_end + 1;
+        let end_order = terminal_start;
+        lines.push(format!(
+            "… [{count} pending tasks (#{start_order}–#{end_order}) collapsed]"
+        ));
+    }
+
+    // Terminal bracket (final 1-2 tasks, e.g. gates / smoke / PR)
+    for t in &plan.tasks[terminal_start..total] {
+        lines.push(format!(
+            "{} {}. {}",
+            crate::tui::plan::status_mark(&t.status),
+            t.order,
+            t.title
+        ));
+    }
+
     format!(
-        "📋 {} (Active, {done}/{} done)\n{lines}",
+        "📋 {} (Active, {done}/{total} done)\n{}",
         plan.title,
-        plan.tasks.len()
+        lines.join("\n")
     )
 }
 

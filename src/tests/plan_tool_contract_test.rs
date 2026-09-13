@@ -874,3 +874,170 @@ async fn import_auto_assigns_order_and_defaults_complexity() {
     })
     .await;
 }
+
+#[tokio::test]
+async fn midlist_insertion_insert_after_and_insert_before() {
+    in_temp_home(async {
+        let tool = PlanTool;
+        let ctx = ToolExecutionContext::new(uuid::Uuid::new_v4());
+
+        // Initialize 3 tasks: t1, t2, t3
+        run(
+            &tool,
+            &ctx,
+            json!({
+                "operation": "init",
+                "title": "Checklist",
+                "mode": "checklist",
+                "tasks": [
+                    { "title": "t1", "description": "d1" },
+                    { "title": "t2", "description": "d2" },
+                    { "title": "t3", "description": "d3" }
+                ]
+            }),
+        )
+        .await;
+        approve_plan(&ctx).await;
+
+        // Insert after task 1
+        let (ok, out) = run(
+            &tool,
+            &ctx,
+            json!({
+                "operation": "add_task",
+                "title": "t1.5",
+                "description": "d1.5",
+                "insert_after": 1
+            }),
+        )
+        .await;
+        assert!(ok, "insert_after 1 must succeed: {out}");
+
+        let plan = load_plan(ctx.session_id).await.unwrap();
+        let titles: Vec<&str> = plan.tasks.iter().map(|t| t.title.as_str()).collect();
+        assert_eq!(titles, vec!["t1", "t1.5", "t2", "t3"]);
+        let orders: Vec<usize> = plan.tasks.iter().map(|t| t.order).collect();
+        assert_eq!(orders, vec![1, 2, 3, 4]);
+
+        // Insert before 'final'
+        let (ok, out) = run(
+            &tool,
+            &ctx,
+            json!({
+                "operation": "add_tasks",
+                "tasks": [
+                    { "title": "t2.5", "description": "d2.5" }
+                ],
+                "insert_before": "final"
+            }),
+        )
+        .await;
+        assert!(ok, "insert_before 'final' must succeed: {out}");
+
+        let plan = load_plan(ctx.session_id).await.unwrap();
+        let titles: Vec<&str> = plan.tasks.iter().map(|t| t.title.as_str()).collect();
+        assert_eq!(titles, vec!["t1", "t1.5", "t2", "t2.5", "t3"]);
+        let orders: Vec<usize> = plan.tasks.iter().map(|t| t.order).collect();
+        assert_eq!(orders, vec![1, 2, 3, 4, 5]);
+
+        // Start and complete task 1 & 2
+        run(&tool, &ctx, json!({ "operation": "start" })).await;
+        run(
+            &tool,
+            &ctx,
+            json!({ "operation": "complete", "task_order": 1, "action": "success" }),
+        )
+        .await;
+        run(&tool, &ctx, json!({ "operation": "start" })).await;
+        run(
+            &tool,
+            &ctx,
+            json!({ "operation": "complete", "task_order": 2, "action": "success" }),
+        )
+        .await;
+
+        // Inserting before task 1 (completed) must fail
+        let (ok, err) = run(
+            &tool,
+            &ctx,
+            json!({
+                "operation": "add_task",
+                "title": "invalid",
+                "description": "d",
+                "insert_before": 1
+            }),
+        )
+        .await;
+        assert!(!ok, "inserting before completed task 1 must fail");
+        assert!(err.contains("already completed/skipped"), "got: {err}");
+
+        // Specifying both insert_before and insert_after must fail
+        let (ok, err) = run(
+            &tool,
+            &ctx,
+            json!({
+                "operation": "add_task",
+                "title": "invalid",
+                "description": "d",
+                "insert_before": 3,
+                "insert_after": 2
+            }),
+        )
+        .await;
+        assert!(!ok, "specifying both must fail");
+        assert!(err.contains("both"), "got: {err}");
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn show_plan_windowing_and_full_flag() {
+    in_temp_home(async {
+        let tool = PlanTool;
+        let ctx = ToolExecutionContext::new(uuid::Uuid::new_v4());
+
+        // Create 15 tasks
+        let mut tasks = Vec::new();
+        for i in 1..=15 {
+            tasks.push(json!({ "title": format!("task {i}"), "description": format!("desc {i}") }));
+        }
+
+        run(
+            &tool,
+            &ctx,
+            json!({
+                "operation": "init",
+                "title": "Long Plan",
+                "mode": "checklist",
+                "tasks": tasks
+            }),
+        )
+        .await;
+        approve_plan(&ctx).await;
+
+        // Default show_plan applies accordion windowing
+        let (ok, out) = run(&tool, &ctx, json!({ "operation": "show_plan" })).await;
+        assert!(ok);
+        assert!(
+            out.contains("collapsed"),
+            "output must be windowed/collapsed: {out}"
+        );
+
+        // show_plan with full: true renders everything
+        let (ok, out_full) = run(
+            &tool,
+            &ctx,
+            json!({ "operation": "show_plan", "full": true }),
+        )
+        .await;
+        assert!(ok);
+        assert!(
+            !out_full.contains("collapsed"),
+            "full output must not contain collapsed summary: {out_full}"
+        );
+        for i in 1..=15 {
+            assert!(out_full.contains(&format!("task {i}")));
+        }
+    })
+    .await;
+}

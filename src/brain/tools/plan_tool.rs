@@ -49,9 +49,17 @@ enum PlanOperation {
     },
     /// Append one or more tasks in a single call (primary append op).
     /// Active only: checklist operations are blocked while Editing.
-    AddTasks { tasks: Vec<InlineTask> },
+    /// Can optionally specify `insert_before` or `insert_after` to insert at a specific position.
+    AddTasks {
+        tasks: Vec<InlineTask>,
+        #[serde(default)]
+        insert_before: Option<serde_json::Value>,
+        #[serde(default)]
+        insert_after: Option<serde_json::Value>,
+    },
     /// Append a single task. Backward-compatible alias that behaves like
     /// `add_tasks` with one task.
+    /// Can optionally specify `insert_before` or `insert_after` to insert at a specific position.
     AddTask {
         title: String,
         #[serde(default)]
@@ -64,6 +72,10 @@ enum PlanOperation {
         complexity: u8,
         #[serde(default)]
         acceptance_criteria: Vec<String>,
+        #[serde(default)]
+        insert_before: Option<serde_json::Value>,
+        #[serde(default)]
+        insert_after: Option<serde_json::Value>,
     },
     /// Find and start the next task, or a specific one via `task_order`.
     /// Active only. Returns full task details. Idempotent on an in-progress
@@ -115,7 +127,11 @@ enum PlanOperation {
     /// Return the current plan state (title, status, checklist progress) with no
     /// side effects. Use to answer "what's the plan / where are we"; unlike
     /// `start` it never mutates the plan (#585).
-    ShowPlan,
+    /// Pass `full: true` to bypass windowing/accordion folding when the plan is long.
+    ShowPlan {
+        #[serde(default)]
+        full: Option<bool>,
+    },
 }
 
 /// Inline task definition accepted by `init` so a plan and its tasks can be
@@ -271,11 +287,124 @@ fn validate_task_criteria_at_creation(
     Ok(())
 }
 
-/// Append a task to `plan`, resolving 1-based dependency order numbers to the
-/// referenced tasks' UUIDs. Returns the new task's order. Shared by `add_task`
-/// and `init`'s inline tasks.
-fn add_task_to_plan(
+/// Resolve insertion target index (0-based) in `plan.tasks` from `insert_before` or `insert_after`.
+/// Rejects when both are specified, or when the insertion point would precede or displace completed tasks.
+fn resolve_insertion_index(
+    plan: &PlanDocument,
+    insert_before: Option<&serde_json::Value>,
+    insert_after: Option<&serde_json::Value>,
+) -> Result<usize> {
+    if insert_before.is_some() && insert_after.is_some() {
+        return Err(ToolError::InvalidInput(
+            "Cannot specify both 'insert_before' and 'insert_after'. Choose one.".to_string(),
+        ));
+    }
+
+    let total = plan.tasks.len();
+    if total == 0 {
+        return Ok(0);
+    }
+
+    // Find highest completed or skipped task order (1-based)
+    let max_completed_order = plan
+        .tasks
+        .iter()
+        .filter(|t| matches!(t.status, TaskStatus::Completed | TaskStatus::Skipped))
+        .map(|t| t.order)
+        .max()
+        .unwrap_or(0);
+
+    let target_idx = if let Some(val) = insert_before {
+        let order = if let Some(n) = val.as_u64() {
+            n as usize
+        } else if let Some(s) = val.as_str() {
+            match s.to_lowercase().trim() {
+                "final" | "last" => total,
+                other => {
+                    return Err(ToolError::InvalidInput(format!(
+                        "Invalid 'insert_before' token '{other}'. Use a 1-based task number, 'final', or 'last'."
+                    )));
+                }
+            }
+        } else {
+            return Err(ToolError::InvalidInput(
+                "'insert_before' must be an integer (1-based task number) or string ('final' / 'last').".to_string(),
+            ));
+        };
+
+        if order == 0 {
+            return Err(ToolError::InvalidInput(
+                "Task numbers start at 1, not 0.".to_string(),
+            ));
+        }
+
+        if order > total {
+            total
+        } else {
+            if order <= max_completed_order {
+                return Err(ToolError::InvalidInput(format!(
+                    "Cannot insert before task #{order}: task #{order} is already completed/skipped. Earliest valid insertion slot is after task #{max_completed_order}."
+                )));
+            }
+            order - 1
+        }
+    } else if let Some(val) = insert_after {
+        let order = if let Some(n) = val.as_u64() {
+            n as usize
+        } else if let Some(s) = val.as_str() {
+            match s.to_lowercase().trim() {
+                "current" => {
+                    // Find InProgress task, or first Pending task
+                    plan.tasks
+                        .iter()
+                        .find(|t| matches!(t.status, TaskStatus::InProgress))
+                        .map(|t| t.order)
+                        .or_else(|| {
+                            plan.tasks
+                                .iter()
+                                .find(|t| matches!(t.status, TaskStatus::Pending))
+                                .map(|t| t.order)
+                        })
+                        .unwrap_or(max_completed_order)
+                }
+                other => {
+                    return Err(ToolError::InvalidInput(format!(
+                        "Invalid 'insert_after' token '{other}'. Use a 1-based task number or 'current'."
+                    )));
+                }
+            }
+        } else {
+            return Err(ToolError::InvalidInput(
+                "'insert_after' must be an integer (1-based task number) or string ('current')."
+                    .to_string(),
+            ));
+        };
+
+        if order == 0 {
+            return Err(ToolError::InvalidInput(
+                "Task numbers start at 1, not 0.".to_string(),
+            ));
+        }
+
+        if order < max_completed_order {
+            return Err(ToolError::InvalidInput(format!(
+                "Cannot insert after task #{order}: tasks through #{max_completed_order} are already completed/skipped. Earliest valid insertion slot is after task #{max_completed_order}."
+            )));
+        }
+
+        order.min(total)
+    } else {
+        total
+    };
+
+    Ok(target_idx)
+}
+
+/// Insert a task into `plan` at 0-based vector `target_idx`, resolving dependencies and
+/// renumbering downstream tasks. Returns the newly inserted task's order (1-based).
+fn insert_task_to_plan(
     plan: &mut PlanDocument,
+    target_idx: usize,
     title: String,
     description: String,
     task_type: &str,
@@ -284,13 +413,14 @@ fn add_task_to_plan(
     acceptance_criteria: Vec<String>,
 ) -> Result<usize> {
     validate_string(&title, MAX_TITLE_LENGTH, "Task title")?;
-    // Title and description are both required on each task (ADR 0003
-    // checklist contract), so an empty description is refused, not skipped.
     validate_string(&description, MAX_DESCRIPTION_LENGTH, "Task description")?;
-    let order = plan.tasks.len() + 1;
+
+    let insert_idx = target_idx.min(plan.tasks.len());
+    let order = insert_idx + 1;
     let mut task = PlanTask::new(order, title, description, parse_task_type(task_type));
     task.complexity = complexity.clamp(1, 5);
     task.acceptance_criteria = acceptance_criteria;
+
     for dep_order in dependencies {
         if *dep_order == 0 {
             return Err(ToolError::InvalidInput(
@@ -304,8 +434,33 @@ fn add_task_to_plan(
         })?;
         task.dependencies.push(TaskDep::Id(dep_task.id));
     }
-    plan.tasks.push(task);
+
+    plan.insert_task(insert_idx, task);
     Ok(order)
+}
+
+/// Append a task to `plan`, resolving 1-based dependency order numbers to the
+/// referenced tasks' UUIDs. Returns the new task's order. Shared by `add_task`
+/// and `init`'s inline tasks.
+fn add_task_to_plan(
+    plan: &mut PlanDocument,
+    title: String,
+    description: String,
+    task_type: &str,
+    dependencies: &[usize],
+    complexity: u8,
+    acceptance_criteria: Vec<String>,
+) -> Result<usize> {
+    insert_task_to_plan(
+        plan,
+        plan.tasks.len(),
+        title,
+        description,
+        task_type,
+        dependencies,
+        complexity,
+        acceptance_criteria,
+    )
 }
 
 /// Deterministic refusal for checklist operations (`add_tasks`, `add_task`,
@@ -1405,6 +1560,24 @@ impl Tool for PlanTool {
                 "output": {
                     "type": "string",
                     "description": "Task result / output, stored on the task (complete)"
+                },
+                "insert_before": {
+                    "description": "Insert task(s) before a specific position. Can be a 1-based order number, or semantic tokens 'final' / 'last' (targets before the final acceptance/gate task). Rejects positions at or before completed tasks.",
+                    "oneOf": [
+                        { "type": "integer", "minimum": 1 },
+                        { "type": "string" }
+                    ]
+                },
+                "insert_after": {
+                    "description": "Insert task(s) after a specific position. Can be a 1-based order number, or semantic token 'current' (targets after the in-progress or next task). Rejects positions before the latest completed task.",
+                    "oneOf": [
+                        { "type": "integer", "minimum": 1 },
+                        { "type": "string" }
+                    ]
+                },
+                "full": {
+                    "type": "boolean",
+                    "description": "show_plan only: when true, returns the entire uncollapsed checklist without accordion folding."
                 }
             },
             "required": ["operation"]
@@ -1930,7 +2103,11 @@ impl Tool for PlanTool {
                 }
             }
 
-            PlanOperation::AddTasks { tasks } => {
+            PlanOperation::AddTasks {
+                tasks,
+                insert_before,
+                insert_after,
+            } => {
                 if let Some(reason) = checklist_blocked_reason(state) {
                     return Ok(ToolResult::error(reason));
                 }
@@ -1944,6 +2121,12 @@ impl Tool for PlanTool {
                         "add_tasks needs at least one task in `tasks`.".to_string(),
                     ));
                 }
+
+                let target_idx = resolve_insertion_index(
+                    current_plan,
+                    insert_before.as_ref(),
+                    insert_after.as_ref(),
+                )?;
 
                 // Get criteria_policy for validation (#1133)
                 let policy = ralph_loop_config(&context.working_dir())
@@ -1972,10 +2155,11 @@ impl Tool for PlanTool {
                 }
 
                 let mut added: Vec<String> = Vec::new();
-                for it in tasks {
+                for (offset, it) in tasks.into_iter().enumerate() {
                     let task_title = it.title.clone();
                     let parsed_type = parse_task_type(&it.task_type);
-                    let order = current_plan.tasks.len() + 1;
+                    let insertion_idx = target_idx + offset;
+                    let order = insertion_idx + 1;
 
                     // Validate criteria at creation (#1133)
                     validate_task_criteria_at_creation(
@@ -1986,8 +2170,9 @@ impl Tool for PlanTool {
                         policy,
                     )?;
 
-                    let order = add_task_to_plan(
+                    let order = insert_task_to_plan(
                         current_plan,
+                        insertion_idx,
                         it.title,
                         it.description,
                         &it.task_type,
@@ -1998,11 +2183,13 @@ impl Tool for PlanTool {
                     added.push(format!("  {order}. {task_title}"));
                 }
                 let total = current_plan.tasks.len();
-                format!(
+                let summary = format!(
                     "✓ Added {} task(s):\n{}\n  Plan now has {total} tasks.",
                     added.len(),
                     added.join("\n")
-                )
+                );
+                let checklist = crate::utils::plan_mode::format_active_checklist(current_plan);
+                format!("{summary}\n\n{checklist}")
             }
 
             PlanOperation::AddTask {
@@ -2012,6 +2199,8 @@ impl Tool for PlanTool {
                 dependencies,
                 complexity,
                 acceptance_criteria,
+                insert_before,
+                insert_after,
             } => {
                 if let Some(reason) = checklist_blocked_reason(state) {
                     return Ok(ToolResult::error(reason));
@@ -2021,6 +2210,12 @@ impl Tool for PlanTool {
                         "No active plan. Create one with 'init' first.".to_string(),
                     )
                 })?;
+
+                let target_idx = resolve_insertion_index(
+                    current_plan,
+                    insert_before.as_ref(),
+                    insert_after.as_ref(),
+                )?;
 
                 // Get criteria_policy for validation (#1133)
                 let policy = ralph_loop_config(&context.working_dir())
@@ -2045,7 +2240,7 @@ impl Tool for PlanTool {
                 }
 
                 let parsed_type = parse_task_type(&task_type);
-                let order = current_plan.tasks.len() + 1;
+                let order = target_idx + 1;
 
                 // Validate criteria at creation (#1133)
                 validate_task_criteria_at_creation(
@@ -2056,8 +2251,9 @@ impl Tool for PlanTool {
                     policy,
                 )?;
 
-                let order = add_task_to_plan(
+                let order = insert_task_to_plan(
                     current_plan,
+                    target_idx,
                     title.clone(),
                     description,
                     &task_type,
@@ -2071,10 +2267,12 @@ impl Tool for PlanTool {
                     .unwrap()
                     .task_type
                     .clone();
-                format!(
+                let summary = format!(
                     "✓ Added task #{order}: {title}\n  Type: {ttype} | Complexity: {}★\n  Position: {order} of {total}",
                     complexity.clamp(1, 5)
-                )
+                );
+                let checklist = crate::utils::plan_mode::format_active_checklist(current_plan);
+                format!("{summary}\n\n{checklist}")
             }
 
             PlanOperation::Start {
@@ -2641,9 +2839,10 @@ impl Tool for PlanTool {
                 };
                 return Ok(ToolResult::success(reply));
             }
-            PlanOperation::ShowPlan => {
+            PlanOperation::ShowPlan { full } => {
+                let show_full = full.unwrap_or(false);
                 return Ok(ToolResult::success(
-                    crate::utils::plan_mode::show_plan(plan_sid).await,
+                    crate::utils::plan_mode::show_plan_opt(plan_sid, show_full).await,
                 ));
             }
         };
