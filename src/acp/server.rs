@@ -139,6 +139,9 @@ impl AcpServer {
             protocol::SESSION_SET_MODE => {
                 Self::session_set_mode(state, id, params).await;
             }
+            protocol::SESSION_COMPACT => {
+                Self::session_compact(state, id, params).await;
+            }
             protocol::SESSION_PROMPT => {
                 Self::session_prompt(state, id, params).await;
             }
@@ -209,6 +212,18 @@ impl AcpServer {
                     id,
                     json!({ "sessionId": acp_id, "models": models, "modes": modes }),
                 );
+                // Slash-command discovery pushes after the response so the
+                // client's picker fills in as soon as the session exists.
+                let commands = catalog::commands_payload();
+                if !commands.is_empty() {
+                    state.handle.send(protocol::session_update(
+                        &acp_id,
+                        json!({
+                            "sessionUpdate": "available_commands_update",
+                            "availableCommands": commands,
+                        }),
+                    ));
+                }
             }
             Err(e) => {
                 state
@@ -327,5 +342,41 @@ impl AcpServer {
         *guard = Some(cancel.clone());
         drop(guard);
         tokio::spawn(turn::run_turn(state, st, id, text, cancel));
+    }
+    /// `session/compact`: drive the loop's own manual-compaction path — the
+    /// `[SYSTEM: Compact context now.]` marker the TUI and channels use. The
+    /// turn streams and answers like any other; the marker keeps the magic
+    /// string out of the client's chat because prompts are never echoed.
+    /// Claims the in-flight slot exactly like `session/prompt` so a compact
+    /// cannot race a live turn on the same session.
+    async fn session_compact(state: Arc<ServerState>, id: Value, params: Value) {
+        let Some(st) = Self::lookup(&state, &params).await else {
+            state.handle.respond_error(
+                id,
+                protocol::INVALID_PARAMS,
+                "session/compact: unknown session — call session/new first",
+            );
+            return;
+        };
+        let cancel = CancellationToken::new();
+        let mut guard = st.active_cancel.lock().await;
+        if guard.is_some() {
+            state.handle.respond_error(
+                id,
+                protocol::INVALID_REQUEST,
+                "turn already in progress for this session",
+            );
+            return;
+        }
+        *guard = Some(cancel.clone());
+        drop(guard);
+        tokio::spawn(turn::run_turn(
+            state,
+            st,
+            id,
+            "[SYSTEM: Compact context now. Summarize this conversation for continuity.]"
+                .to_string(),
+            cancel,
+        ));
     }
 }

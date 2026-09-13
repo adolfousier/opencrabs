@@ -14,6 +14,34 @@ use serde_json::{Value, json};
 
 use crate::config::{Config, types::ProviderConfig};
 
+/// Slash commands for the ACP `available_commands_update` push: the built-in
+/// table the TUI autocompletes from, the installed skills, and the user's
+/// commands.toml entries. Names are normalised to ACP shape (no leading
+/// slash), deduped in declaration order. Channel-only commands are excluded:
+/// they dispatch on chat surfaces, not on an editor harness.
+pub fn commands_payload() -> Vec<Value> {
+    let mut out: Vec<Value> = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    let mut push = |name: &str, description: &str| {
+        let name = name.trim().trim_start_matches('/');
+        if name.is_empty() || name.contains([' ', '/', '\\']) || !seen.insert(name.to_string()) {
+            return;
+        }
+        out.push(json!({ "name": name, "description": description }));
+    };
+    for cmd in crate::tui::app::state::SLASH_COMMANDS {
+        push(cmd.name, cmd.description);
+    }
+    for skill in crate::brain::skills::load_all_skills() {
+        push(&skill.slash_name, &skill.description);
+    }
+    let brain_path = crate::brain::BrainLoader::resolve_path();
+    for cmd in crate::brain::CommandLoader::from_brain_path(&brain_path).load() {
+        push(&cmd.name, &cmd.description);
+    }
+    out
+}
+
 /// Build the ACP `models` payload: `{ availableModels, currentModelId }`.
 ///
 /// `current_override` is the ACP session's pinned pair (`--model` or a prior
@@ -85,6 +113,26 @@ mod tests {
 
     fn config_with(toml: &str) -> Config {
         toml::from_str(toml).expect("test config parses")
+    }
+
+    #[test]
+    fn commands_payload_normalises_and_dedupes() {
+        let commands = commands_payload();
+        // Built-ins land whatever the host's skills/commands.toml hold.
+        assert!(commands.iter().any(|c| c["name"] == "help"));
+        for cmd in &commands {
+            let name = cmd["name"].as_str().unwrap();
+            assert!(!name.is_empty());
+            assert!(!name.contains(['/', '\\', ' ']), "bad name: {name}");
+        }
+        let mut names: Vec<&str> = commands
+            .iter()
+            .map(|c| c["name"].as_str().unwrap())
+            .collect();
+        let before = names.len();
+        names.sort_unstable();
+        names.dedup();
+        assert_eq!(before, names.len(), "duplicate command names");
     }
 
     #[test]

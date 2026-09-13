@@ -26,6 +26,7 @@ pub const SESSION_SET_MODEL: &str = "session/set_model";
 /// and `supervised` routes approvals to the client.
 pub const SESSION_SET_MODE: &str = "session/set_mode";
 pub const SESSION_CANCEL: &str = "session/cancel";
+pub const SESSION_COMPACT: &str = "session/compact";
 pub const SESSION_STEER: &str = "session/steer";
 
 // Outbound frames (agent -> client).
