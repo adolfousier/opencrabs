@@ -691,8 +691,22 @@ pub(crate) async fn handle_message(
         // allowlist is unconfigured/deny, not "everyone is owner"). A non-owner
         // reply is dropped, not resolved.
         if let Some(c) = choice {
+            // Either identity is accepted, matching the gate further down this
+            // function. A LID-addressed owner replying "yes" arrives as digits
+            // that are not their phone number, so checking `phone` alone
+            // refused the owner's own approval and the tool call then timed out
+            // after five minutes (#1533). This needs no canonical value: the
+            // question is "is this person the owner", not "which of their two
+            // names do we file them under".
             let is_owner =
-                crate::config::owner::is_owner(&wa_cfg.allowed_phones, &wa_cfg.bot_owner, &phone);
+                crate::config::owner::is_owner(&wa_cfg.allowed_phones, &wa_cfg.bot_owner, &phone)
+                    || sender_alt_user.as_deref().is_some_and(|alt| {
+                        crate::config::owner::is_owner(
+                            &wa_cfg.allowed_phones,
+                            &wa_cfg.bot_owner,
+                            alt,
+                        )
+                    });
             if !is_owner {
                 tracing::warn!(
                     "WhatsApp: non-owner {} replied approval {:?} — refused (OC-01)",
