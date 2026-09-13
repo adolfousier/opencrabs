@@ -2,7 +2,7 @@
 
 use crate::brain::tools::whatsapp_send::{
     build_vcard, delivered_prefix, get_f64, get_str, mime_from_extension, partial_failure_report,
-    tag_with_header,
+    resolve_jid, tag_with_header,
 };
 use serde_json::json;
 
@@ -379,4 +379,66 @@ fn reply_arm_chunks_with_quote_only_on_lead() {
         arm.contains("persist_outgoing(&jid, &tagged)"),
         "reply success must persist the tagged form"
     );
+}
+
+// ── resolve_jid: session origin vs owner fallback ───────────────────
+
+#[tokio::test]
+async fn resolve_jid_targets_session_chat_when_phone_omitted() {
+    let state = crate::channels::whatsapp::WhatsAppState::new();
+    let session_id = uuid::Uuid::new_v4();
+    state
+        .register_session_jid(session_id, "6285270679623@s.whatsapp.net".to_string())
+        .await;
+    state
+        .set_owner_jid("6282361295343@s.whatsapp.net".to_string())
+        .await;
+
+    let (_tx, rx) = tokio::sync::watch::channel(crate::config::Config::default());
+    let input = json!({});
+
+    let res = resolve_jid(&input, &state, &rx, session_id).await;
+    assert!(res.is_ok(), "resolve_jid failed: {:?}", res);
+    let (jid, jid_str) = res.unwrap();
+    assert_eq!(jid_str, "6285270679623@s.whatsapp.net");
+    assert_eq!(jid.to_string(), "6285270679623@s.whatsapp.net");
+}
+
+#[tokio::test]
+async fn resolve_jid_falls_back_to_owner_when_no_session_chat() {
+    let state = crate::channels::whatsapp::WhatsAppState::new();
+    let unmapped_session = uuid::Uuid::new_v4();
+    state
+        .set_owner_jid("6282361295343@s.whatsapp.net".to_string())
+        .await;
+
+    let (_tx, rx) = tokio::sync::watch::channel(crate::config::Config::default());
+    let input = json!({});
+
+    let res = resolve_jid(&input, &state, &rx, unmapped_session).await;
+    assert!(res.is_ok(), "resolve_jid failed: {:?}", res);
+    let (jid, jid_str) = res.unwrap();
+    assert_eq!(jid_str, "6282361295343@s.whatsapp.net");
+    assert_eq!(jid.to_string(), "6282361295343@s.whatsapp.net");
+}
+
+#[tokio::test]
+async fn resolve_jid_normalizes_raw_target_number() {
+    let state = crate::channels::whatsapp::WhatsAppState::new();
+    let session_id = uuid::Uuid::new_v4();
+    let mut cfg = crate::config::Config::default();
+    cfg.channels.whatsapp.allowed_phones = vec!["6285270679623".to_string()];
+    let (_tx, rx) = tokio::sync::watch::channel(cfg);
+
+    // Test with plus prefix
+    let input_plus = json!({"phone": "+6285270679623"});
+    let res = resolve_jid(&input_plus, &state, &rx, session_id).await;
+    assert!(res.is_ok(), "resolve_jid plus failed: {:?}", res);
+    assert_eq!(res.unwrap().1, "6285270679623@s.whatsapp.net");
+
+    // Test with JID format directly
+    let input_jid = json!({"phone": "6285270679623@s.whatsapp.net"});
+    let res_jid = resolve_jid(&input_jid, &state, &rx, session_id).await;
+    assert!(res_jid.is_ok(), "resolve_jid JID failed: {:?}", res_jid);
+    assert_eq!(res_jid.unwrap().1, "6285270679623@s.whatsapp.net");
 }
