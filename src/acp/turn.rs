@@ -39,7 +39,11 @@ pub async fn run_turn(
 ) {
     let acp_session_id = session.id.to_string();
 
-    let progress = progress_callback(state.handle.clone(), acp_session_id.clone());
+    let progress = progress_callback(
+        state.handle.clone(),
+        acp_session_id.clone(),
+        state.agent.clone(),
+    );
     let mode = *session.mode.lock().await;
     let approval = approval_callback(state.handle.clone(), acp_session_id, mode, cancel.clone());
 
@@ -108,11 +112,15 @@ pub(crate) fn stop_reason(reason: Option<StopReason>) -> &'static str {
 /// no call ids, so each `ToolStarted` mints a UUID and the matching
 /// `ToolCompleted` pops it FIFO per tool name. Parallel same-name tools pair
 /// in start order, which is the only honest pairing the events support.
-fn progress_callback(handle: TransportHandle, acp_session_id: String) -> ProgressCallback {
+fn progress_callback(
+    handle: TransportHandle,
+    acp_session_id: String,
+    agent: Arc<crate::brain::agent::AgentService>,
+) -> ProgressCallback {
     let open_calls: Arc<StdMutex<HashMap<String, VecDeque<String>>>> =
         Arc::new(StdMutex::new(HashMap::new()));
 
-    Arc::new(move |_session_id, event| {
+    Arc::new(move |session_id, event| {
         let update = match event {
             ProgressEvent::StreamingChunk { text }
             | ProgressEvent::IntermediateText { text, .. } => {
@@ -161,7 +169,10 @@ fn progress_callback(handle: TransportHandle, acp_session_id: String) -> Progres
             }
             ProgressEvent::TokenCount(used) => Some(json!({
                 "sessionUpdate": "usage",
-                "usage": { "used": used },
+                "usage": {
+                    "used": used,
+                    "size": agent.context_limit_for_session(session_id),
+                },
             })),
             // Everything else (compaction notices, retry ticker, provider
             // switches, suggestions, stream strips) has no ACP vocabulary —
