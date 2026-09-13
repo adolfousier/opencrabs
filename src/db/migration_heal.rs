@@ -128,3 +128,17 @@ pub(crate) fn heal_pending_requests_origin(conn: &rusqlite::Connection) -> rusql
     );
     Ok(true)
 }
+
+/// Add `session_seen_skills.loaded_mtime` when migration was skipped or partially applied (#210).
+pub(crate) fn heal_session_seen_skills_loaded_mtime(
+    conn: &rusqlite::Connection,
+) -> rusqlite::Result<bool> {
+    if !has_table(conn, "session_seen_skills")?
+        || has_column(conn, "session_seen_skills", "loaded_mtime")?
+    {
+        return Ok(false);
+    }
+    conn.execute_batch("ALTER TABLE session_seen_skills ADD COLUMN loaded_mtime INTEGER;")?;
+    tracing::warn!("Healed session_seen_skills: added missing loaded_mtime column (#210).");
+    Ok(true)
+}

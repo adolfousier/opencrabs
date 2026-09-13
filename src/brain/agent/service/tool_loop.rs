@@ -1155,6 +1155,7 @@ impl AgentService {
         // get compacted away; this ensures the full instructions are always
         // present in the system prompt for the current session.
         let active_skills = self.active_skills_for_session(session_id);
+        let mut skill_update_hints = Vec::new();
         if !active_skills.is_empty() {
             let skills = crate::brain::skills::load_all_skills();
             let mut skill_section = String::new();
@@ -1174,6 +1175,27 @@ impl AgentService {
             {
                 brain.push_str(&skill_section);
                 context.token_count += AgentContext::estimate_tokens(&skill_section);
+            }
+
+            // Detect modified active skills on disk at turn start (#210).
+            // Replaces fleet-wide fanout notifications with JIT turn-start hints.
+            for slug in &active_skills {
+                if let Some(mtime) = crate::brain::skills::skill_file_mtime(slug) {
+                    let recorded = crate::brain::tools::seen_skills::get_skill_loaded_mtime(session_id, slug);
+                    match recorded {
+                        Some(prev_mtime) if mtime > prev_mtime => {
+                            skill_update_hints.push(format!(
+                                "[SYSTEM HINT: Active skill '{slug}' was updated on disk since your last turn. Review changed directives before executing work.]"
+                            ));
+                            crate::brain::tools::seen_skills::record_skill_loaded_mtime(session_id, slug, mtime);
+                        }
+                        None => {
+                            // First time seeing this active skill file mtime: record baseline
+                            crate::brain::tools::seen_skills::record_skill_loaded_mtime(session_id, slug, mtime);
+                        }
+                        _ => {}
+                    }
+                }
             }
         }
 
@@ -1222,8 +1244,12 @@ impl AgentService {
         // directly), so the reminder is context-only and never piles up (#571
         // follow-up).
         let brain_dir = self.brain_workspace_path();
-        let context_user_message =
+        let mut context_user_message =
             Self::augment_user_message(session_id, &user_message, brain_dir.as_deref()).await;
+        if !skill_update_hints.is_empty() {
+            let hints_joined = skill_update_hints.join("\n");
+            context_user_message = format!("{hints_joined}\n\n{context_user_message}");
+        }
         let user_msg = Self::build_user_message(&context_user_message);
         context.add_message(user_msg);
 

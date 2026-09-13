@@ -102,6 +102,7 @@ pub(crate) const MIGRATION_SQL: &[&str] = &[
     // #1529: per-newsletter poll cursors. Idempotent CREATE, so no heal
     // pass; appended last per the list invariant above.
     include_str!("../migrations/20260914000001_add_whatsapp_newsletter_cursors.sql"),
+    include_str!("../migrations/20260914000002_add_session_seen_skills_loaded_mtime.sql"),
 ];
 
 pub(crate) fn build_migrations() -> Migrations<'static> {
@@ -376,6 +377,7 @@ impl Database {
                     // the schema itself can say so.
                     crate::db::migration_heal::heal_pending_requests_origin(conn)?;
                     crate::db::migration_heal::heal_notify_queue(conn)?;
+                    crate::db::migration_heal::heal_session_seen_skills_loaded_mtime(conn)?;
                     Ok(())
                 },
             )

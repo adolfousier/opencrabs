@@ -39,6 +39,41 @@ fn epochs() -> &'static std::sync::Mutex<HashMap<Uuid, u64>> {
     EPOCHS.get_or_init(|| std::sync::Mutex::new(HashMap::new()))
 }
 
+/// Process-wide loaded mtime registry (#210): (session, slug) -> mtime of the skill file
+/// when it was last loaded/checked for that session.
+fn loaded_mtimes() -> &'static std::sync::Mutex<HashMap<(Uuid, String), u64>> {
+    static LOADED_MTIMES: OnceLock<std::sync::Mutex<HashMap<(Uuid, String), u64>>> = OnceLock::new();
+    LOADED_MTIMES.get_or_init(|| std::sync::Mutex::new(HashMap::new()))
+}
+
+/// Retrieve the recorded `loaded_mtime` for an active skill in a session (#210).
+pub fn get_skill_loaded_mtime(session_id: Uuid, slug: &str) -> Option<u64> {
+    loaded_mtimes()
+        .lock()
+        .expect("seen_skills loaded_mtimes poisoned")
+        .get(&(session_id, slug.to_string()))
+        .copied()
+}
+
+/// Record or update the `loaded_mtime` for an active skill in a session (#210).
+pub fn record_skill_loaded_mtime(session_id: Uuid, slug: &str, mtime: u64) {
+    loaded_mtimes()
+        .lock()
+        .expect("seen_skills loaded_mtimes poisoned")
+        .insert((session_id, slug.to_string()), mtime);
+
+    // Best-effort persistence to DB so loaded_mtimes survive restarts (#210).
+    if let Ok(handle) = tokio::runtime::Handle::try_current() {
+        let slug = slug.to_string();
+        handle.spawn(async move {
+            if let Some(pool) = crate::db::global_pool() {
+                let repo = crate::db::repository::SessionSkillsRepository::new(pool.clone());
+                let _ = repo.set_loaded_mtime(session_id, &slug, mtime).await;
+            }
+        });
+    }
+}
+
 /// Extract the skill slug from a path that points at a skill definition
 /// file: any path whose second-to-last component is `skills` and whose
 /// file name is `SKILL.md` yields `Some(slug)`. Returns `None` for
@@ -164,10 +199,12 @@ pub fn seen_for_session(session_id: Uuid) -> Vec<String> {
 /// Deliberately separate from the DB row type so the restart semantics stay
 /// unit-testable without a pool.
 pub struct HydrationSeeds {
-    /// `(session, slug)` → epoch — exactly the in-memory registry's shape.
+    /// `(session, slug)` -> epoch - exactly the in-memory registry's shape.
     pub seen: HashMap<(Uuid, String), u64>,
     /// Per-session epoch floor, seeded from the MAX persisted row epoch.
     pub epochs: HashMap<Uuid, u64>,
+    /// `(session, slug)` -> loaded mtime (#210).
+    pub loaded_mtimes: HashMap<(Uuid, String), u64>,
 }
 
 /// Fold persisted rows into registry seeds. PURE — no I/O, no globals — so
@@ -180,16 +217,19 @@ pub struct HydrationSeeds {
 /// The session's epoch counter is seeded from the MAX row epoch: a restart
 /// must not leave the counter BELOW an epoch the session already reached,
 /// or every skill loaded after that compaction would falsely re-gate.
-pub fn hydrate_from_rows(rows: Vec<(Uuid, String, Option<i64>)>) -> HydrationSeeds {
+pub fn hydrate_from_rows(
+    rows: Vec<(Uuid, String, Option<i64>, Option<i64>)>,
+) -> HydrationSeeds {
     let mut seeds = HydrationSeeds {
         seen: HashMap::new(),
         epochs: HashMap::new(),
+        loaded_mtimes: HashMap::new(),
     };
-    for (session_id, slug, epoch) in rows {
+    for (session_id, slug, epoch, loaded_mtime) in rows {
         let epoch = epoch.unwrap_or(0).max(0) as u64;
         seeds
             .seen
-            .entry((session_id, slug))
+            .entry((session_id, slug.clone()))
             .and_modify(|e| *e = (*e).max(epoch))
             .or_insert(epoch);
         seeds
@@ -197,6 +237,9 @@ pub fn hydrate_from_rows(rows: Vec<(Uuid, String, Option<i64>)>) -> HydrationSee
             .entry(session_id)
             .and_modify(|e| *e = (*e).max(epoch))
             .or_insert(epoch);
+        if let Some(mtime) = loaded_mtime.filter(|&m| m > 0) {
+            seeds.loaded_mtimes.insert((session_id, slug), mtime as u64);
+        }
     }
     seeds
 }
@@ -225,6 +268,12 @@ pub fn apply_seeds(seeds: HydrationSeeds) -> usize {
                 .entry(session_id)
                 .and_modify(|e| *e = (*e).max(epoch))
                 .or_insert(epoch);
+        }
+    }
+    {
+        let mut mtimes = loaded_mtimes().lock().expect("seen_skills loaded_mtimes poisoned");
+        for (key, mtime) in seeds.loaded_mtimes {
+            mtimes.insert(key, mtime);
         }
     }
     n

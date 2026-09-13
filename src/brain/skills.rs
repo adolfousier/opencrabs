@@ -446,3 +446,50 @@ pub fn skills_with_globs() -> Vec<Skill> {
     *guard = Some((std::time::Instant::now(), current_home, fresh.clone()));
     fresh
 }
+
+/// Locate the on-disk file path for a skill (#210).
+/// User skills overlay takes precedence over project skills.
+/// Built-in skills return `None` (they are compiled into the binary).
+pub fn resolve_skill_path(slug: &str) -> Option<PathBuf> {
+    let slug = slug.trim().strip_prefix("/").unwrap_or(slug);
+
+    // 1. User profile overlay: ~/.opencrabs/skills/<name>/SKILL.md
+    let user_path = user_skills_dir().join(slug).join("SKILL.md");
+    if user_path.is_file() {
+        return Some(user_path);
+    }
+
+    // 2. Project-specific skills: ~/.opencrabs/projects/*/skills/<name>/SKILL.md
+    let projects_dir = crate::services::ProjectService::projects_dir();
+    if let Ok(projects) = std::fs::read_dir(&projects_dir) {
+        for project_entry in projects.flatten() {
+            let skill_path = project_entry.path().join("skills").join(slug).join("SKILL.md");
+            if skill_path.is_file() {
+                return Some(skill_path);
+            }
+        }
+    }
+
+    None
+}
+
+/// Retrieve the filesystem modification timestamp (`mtime` as unix epoch seconds)
+/// for a skill's on-disk `SKILL.md` file (#210). Returns `None` for built-in or missing skills.
+pub fn skill_file_mtime(slug: &str) -> Option<u64> {
+    let path = resolve_skill_path(slug)?;
+    let metadata = std::fs::metadata(&path).ok()?;
+    let modified = metadata.modified().ok()?;
+    let duration = modified.duration_since(std::time::UNIX_EPOCH).ok()?;
+    Some(duration.as_secs())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn resolve_skill_path_and_mtime_nonexistent() {
+        assert_eq!(resolve_skill_path("definitely-nonexistent-skill-slug-xyz"), None);
+        assert_eq!(skill_file_mtime("definitely-nonexistent-skill-slug-xyz"), None);
+    }
+}

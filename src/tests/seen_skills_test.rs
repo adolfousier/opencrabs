@@ -447,9 +447,9 @@ fn hydration_takes_max_epoch_per_session() {
     let a = Uuid::new_v4();
     let b = Uuid::new_v4();
     let seeds = hydrate_from_rows(vec![
-        (a, "one".to_string(), Some(1)),
-        (a, "two".to_string(), Some(3)),
-        (b, "one".to_string(), Some(1)),
+        (a, "one".to_string(), Some(1), None),
+        (a, "two".to_string(), Some(3), None),
+        (b, "one".to_string(), Some(1), None),
     ]);
     assert_eq!(seeds.seen.len(), 3);
     // The counter floors at the HIGHEST epoch this session reached.
@@ -460,7 +460,7 @@ fn hydration_takes_max_epoch_per_session() {
 #[test]
 fn hydration_restores_epoch_counter_so_next_compaction_gates() {
     let a = Uuid::new_v4();
-    apply_seeds(hydrate_from_rows(vec![(a, "sk".to_string(), Some(2))]));
+    apply_seeds(hydrate_from_rows(vec![(a, "sk".to_string(), Some(2), None)]));
     assert!(was_seen(a, "sk"));
     assert!(seen_since_compaction(a, "sk"));
     // The counter came back at 2, so the NEXT compaction is epoch 3 and
@@ -474,13 +474,13 @@ fn hydration_restores_epoch_counter_so_next_compaction_gates() {
 #[test]
 fn hydration_null_epoch_reads_as_zero_and_stays_permissive() {
     let a = Uuid::new_v4();
-    apply_seeds(hydrate_from_rows(vec![(a, "legacy".to_string(), None)]));
+    apply_seeds(hydrate_from_rows(vec![(a, "legacy".to_string(), None, None)]));
     assert!(was_seen(a, "legacy"));
     assert!(seen_since_compaction(a, "legacy"));
     // A negative epoch (never written by us, but possible in a
     // hand-edited row) clamps to 0 rather than wrapping to u64::MAX.
     let b = Uuid::new_v4();
-    apply_seeds(hydrate_from_rows(vec![(b, "odd".to_string(), Some(-5))]));
+    apply_seeds(hydrate_from_rows(vec![(b, "odd".to_string(), Some(-5), None)]));
     assert!(seen_since_compaction(b, "odd"));
 }
 
@@ -488,14 +488,26 @@ fn hydration_null_epoch_reads_as_zero_and_stays_permissive() {
 fn hydration_preserves_stamp_inventory_across_restart() {
     let a = Uuid::new_v4();
     apply_seeds(hydrate_from_rows(vec![
-        (a, "zeta".to_string(), Some(0)),
-        (a, "alpha".to_string(), Some(1)),
+        (a, "zeta".to_string(), Some(0), None),
+        (a, "alpha".to_string(), Some(1), None),
     ]));
     // The #125 stamp reads this list — sorted, both rows present.
     assert_eq!(
         seen_for_session(a),
         vec!["alpha".to_string(), "zeta".to_string()]
     );
+}
+
+
+#[test]
+fn hydration_restores_loaded_mtimes() {
+    let a = Uuid::new_v4();
+    let seeds = hydrate_from_rows(vec![
+        (a, "alpha".to_string(), Some(1), Some(1726000000)),
+        (a, "beta".to_string(), Some(1), None),
+    ]);
+    assert_eq!(seeds.loaded_mtimes.get(&(a, "alpha".to_string())), Some(&1726000000));
+    assert_eq!(seeds.loaded_mtimes.get(&(a, "beta".to_string())), None);
 }
 
 // ══ the boot-hydration once-flag is claimed AFTER the readiness guards ═════

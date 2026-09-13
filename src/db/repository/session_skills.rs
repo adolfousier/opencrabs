@@ -57,35 +57,57 @@ impl SessionSkillsRepository {
     /// All (session_id, slug, epoch) rows — the boot-hydrate feed. Bounded by
     /// the stamp's own cleanup: rows for sessions deleted by normal session
     /// pruning are removed by [`Self::prune_missing_sessions`].
-    pub async fn all(&self) -> Result<Vec<(Uuid, String, Option<i64>)>> {
+    /// All (session_id, slug, epoch, loaded_mtime) rows — the boot-hydrate feed (#210).
+    pub async fn all(&self) -> Result<Vec<(Uuid, String, Option<i64>, Option<i64>)>> {
         let rows = self
             .pool
             .get()
             .await
             .context("Failed to get connection")?
             .interact(move |conn| {
-                let mut stmt =
-                    conn.prepare("SELECT session_id, slug, epoch FROM session_seen_skills")?;
+                let mut stmt = conn
+                    .prepare("SELECT session_id, slug, epoch, loaded_mtime FROM session_seen_skills")?;
                 let mapped = stmt.query_map([], |r| {
                     Ok((
                         r.get::<_, String>(0)?,
                         r.get::<_, String>(1)?,
                         r.get::<_, Option<i64>>(2)?,
+                        r.get::<_, Option<i64>>(3)?,
                     ))
                 })?;
-                // Pin the error parameter explicitly: `anyhow::Result` is in
-                // scope and rusqlite::Error has several `From` impls
-                // (rusqlite_migration, HookError), so a bare `Ok(vec)` leaves
-                // E uninferable (E0282/E0283).
-                mapped.collect::<rusqlite::Result<Vec<(String, String, Option<i64>)>>>()
+                mapped.collect::<rusqlite::Result<Vec<(String, String, Option<i64>, Option<i64>)>>>()
             })
             .await
             .map_err(interact_err)?
             .context("Failed to read seen skills")?;
         Ok(rows
             .into_iter()
-            .filter_map(|(sid, slug, epoch)| Uuid::parse_str(&sid).ok().map(|id| (id, slug, epoch)))
+            .filter_map(|(sid, slug, epoch, mtime)| {
+                Uuid::parse_str(&sid).ok().map(|id| (id, slug, epoch, mtime))
+            })
             .collect())
+    }
+
+    /// Update `loaded_mtime` for one (session_id, slug) pair (#210).
+    /// Upserts so that active or seen skills can store loaded_mtime even if not previously recorded.
+    pub async fn set_loaded_mtime(&self, session_id: Uuid, slug: &str, mtime: u64) -> Result<()> {
+        let sid = session_id.to_string();
+        let slug = slug.to_string();
+        let mtime = mtime as i64;
+        self.pool
+            .get()
+            .await
+            .context("Failed to get connection")?
+            .interact(move |conn| {
+                conn.execute(
+                    "INSERT INTO session_seen_skills (session_id, slug, loaded_mtime) VALUES (?1, ?2, ?3)                      ON CONFLICT(session_id, slug) DO UPDATE SET loaded_mtime = excluded.loaded_mtime",
+                    params![sid, slug, mtime],
+                )
+            })
+            .await
+            .map_err(interact_err)?
+            .context("Failed to set loaded_mtime")?;
+        Ok(())
     }
 
     /// Drop rows whose session no longer exists (normal session pruning).
