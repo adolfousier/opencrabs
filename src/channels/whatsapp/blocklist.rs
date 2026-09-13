@@ -54,6 +54,24 @@ impl Blocklist {
         self.users.read().await.contains(user_part(jid))
     }
 
+    /// Is this sender blocked, given both addresses one stanza can carry?
+    ///
+    /// A modern 1:1 DM is addressed by the opaque LID, while this mirror holds
+    /// phone numbers: the server blocklist and `block_contact` both key on the
+    /// PN. Checking only the address the stanza was sent to therefore let a
+    /// blocked contact messaging from a LID walk straight past the guard whose
+    /// whole job is stopping them. Either address matching is a block, since
+    /// they are two names for one account (surfaced by #1531).
+    pub async fn blocks_either(&self, sender: &str, alt: Option<&str>) -> bool {
+        if self.contains(sender).await {
+            return true;
+        }
+        match alt {
+            Some(alt) => self.contains(alt).await,
+            None => false,
+        }
+    }
+
     /// How many accounts are mirrored. Exists for the tests that assert
     /// `replace` swaps the set rather than merging into it.
     #[cfg(test)]

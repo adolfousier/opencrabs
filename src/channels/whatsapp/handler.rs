@@ -469,12 +469,21 @@ pub(crate) async fn handle_message(
     // a block and the server acting on it, and it costs a set lookup instead
     // of the server round trip `Blocking::is_blocked` would need per message.
     // Never applies to our own echoes, which carry the paired account's JID.
-    if !info.source.is_from_me
-        && wa_state
+    //
+    // Both identities are checked, because a modern 1:1 DM arrives addressed
+    // by LID while the blocklist holds phone numbers - the server list and
+    // `block_contact` both key on the PN. Checking `sender` alone let a
+    // blocked contact messaging from a LID walk straight past this guard
+    // (surfaced by the LID routing work in #1531).
+    let blocked = !info.source.is_from_me && {
+        let sender = info.source.sender.to_string();
+        let alt = info.source.sender_alt.as_ref().map(|j| j.to_string());
+        wa_state
             .blocklist
-            .contains(&info.source.sender.to_string())
+            .blocks_either(&sender, alt.as_deref())
             .await
-    {
+    };
+    if blocked {
         tracing::info!(
             target: "whatsapp",
             "dropping inbound message from a blocked contact (#1487)"
