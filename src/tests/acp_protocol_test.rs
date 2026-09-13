@@ -108,9 +108,10 @@ fn tool_kind_covers_loop_tools() {
 #[test]
 fn initialize_result_is_honest_about_load_replay() {
     let caps = initialize_result()["agentCapabilities"].clone();
-    // session/load binds an existing session but does not replay history;
-    // the advertised capability must not claim otherwise.
-    assert_eq!(caps["loadSession"], json!(false));
+    // session/load binds an existing session AND replays the stored
+    // transcript before answering; the advertised capability must not claim
+    // otherwise.
+    assert_eq!(caps["loadSession"], json!(true));
     assert_eq!(caps["promptCapabilities"]["text"], json!(true));
 }
 
