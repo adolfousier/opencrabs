@@ -66,17 +66,18 @@ impl SessionSkillsRepository {
             .interact(move |conn| {
                 let mut stmt =
                     conn.prepare("SELECT session_id, slug, epoch FROM session_seen_skills")?;
-                let mapped = stmt
-                    .query_map([], |r| {
-                        Ok((
-                            r.get::<_, String>(0)?,
-                            r.get::<_, String>(1)?,
-                            r.get::<_, Option<i64>>(2)?,
-                        ))
-                    })?
-                    .filter_map(Result::ok)
-                    .collect::<Vec<(String, String, Option<i64>)>>();
-                Ok(mapped)
+                let mapped = stmt.query_map([], |r| {
+                    Ok((
+                        r.get::<_, String>(0)?,
+                        r.get::<_, String>(1)?,
+                        r.get::<_, Option<i64>>(2)?,
+                    ))
+                })?;
+                // Pin the error parameter explicitly: `anyhow::Result` is in
+                // scope and rusqlite::Error has several `From` impls
+                // (rusqlite_migration, HookError), so a bare `Ok(vec)` leaves
+                // E uninferable (E0282/E0283).
+                mapped.collect::<rusqlite::Result<Vec<(String, String, Option<i64>)>>>()
             })
             .await
             .map_err(interact_err)?

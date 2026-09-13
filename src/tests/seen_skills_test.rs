@@ -303,14 +303,20 @@ async fn record_and_read_round_trip() {
     repo.record(sid, "opencrabs-dev", 0).await.unwrap();
     repo.record(sid, "cost-estimate", 2).await.unwrap();
 
-    let mut rows = repo.all().await.unwrap();
-    rows.sort_by(|a, b| a.1.cmp(&b.1));
+    let rows = repo.all().await.unwrap();
     assert_eq!(rows.len(), 2);
-    assert_eq!(rows[0].0, sid);
-    assert_eq!(rows[0].1, "cost-estimate");
-    assert_eq!(rows[0].2, Some(2));
-    assert_eq!(rows[1].1, "opencrabs-dev");
-    assert_eq!(rows[1].2, Some(0));
+    let ce = rows
+        .iter()
+        .find(|r| r.1 == "cost-estimate")
+        .expect("cost-estimate row must round-trip");
+    let od = rows
+        .iter()
+        .find(|r| r.1 == "opencrabs-dev")
+        .expect("opencrabs-dev row must round-trip");
+    assert_eq!(ce.0, sid);
+    assert_eq!(ce.2, Some(2));
+    assert_eq!(od.0, sid);
+    assert_eq!(od.2, Some(0));
 }
 
 #[tokio::test]
