@@ -822,6 +822,73 @@ pub(crate) async fn cmd_run(
     Ok(())
 }
 
+/// Serve ACP (Agent Client Protocol) over stdio for agent-aware editors
+/// (MonoCode, Zed). Same bootstrap as `run` — db, provider, tools, brain —
+/// but stdout is reserved for JSON-RPC frames, so nothing here may print.
+/// Approvals are NOT auto-approved: they round-trip to the client as
+/// `session/request_permission`, which the editor's runtime mode answers.
+pub(crate) async fn cmd_acp(config: &crate::config::Config, model: Option<String>) -> Result<()> {
+    use crate::{
+        brain::{agent::AgentService, tools::registry::ToolRegistry},
+        db::Database,
+        services::{ServiceContext, SessionService},
+    };
+
+    tracing::info!("Starting ACP server (stdio)");
+
+    let db = Database::connect(&config.database.path).await?;
+    db.run_migrations().await?;
+
+    let provider = crate::brain::provider::create_provider(config).await?;
+
+    let tool_registry = Arc::new(ToolRegistry::new());
+    let subagent_manager =
+        crate::cli::tool_setup::register_core_agent_tools(&tool_registry, &db, config, true);
+
+    let brain_path = BrainLoader::resolve_path();
+    let brain_loader = BrainLoader::new(brain_path.clone());
+    let runtime_info = RuntimeInfo {
+        model: Some(provider.default_model().to_string()),
+        provider: Some(provider.name().to_string()),
+        working_directory: Some(crate::brain::tools::error::collapse_home(
+            &std::env::current_dir().unwrap_or_default(),
+        )),
+    };
+    let mut system_brain = brain_loader.build_system_brain(Some(&runtime_info));
+    if config.agent.lazy_tools {
+        system_brain.push_str(&crate::brain::tools::catalog::tool_access_prompt(true));
+    }
+
+    crate::cli::tool_setup::register_runtime_tools(&tool_registry, config);
+
+    // `session/steer` lands in this map; the tool loop drains it between
+    // iterations via the message-queue callback.
+    let steer = crate::acp::new_steer_map();
+    let steer_for_queue = steer.clone();
+    let queue_callback: crate::brain::agent::MessageQueueCallback = Arc::new(move |session_id| {
+        let steer = steer_for_queue.clone();
+        Box::pin(async move {
+            steer
+                .lock()
+                .await
+                .get_mut(&session_id)
+                .and_then(std::collections::VecDeque::pop_front)
+        })
+    });
+
+    let service_context = ServiceContext::new(db.pool().clone());
+    let agent_service = AgentService::new(provider.clone(), service_context.clone(), config)
+        .await
+        .with_tool_registry(tool_registry.clone())
+        .with_system_brain(system_brain)
+        .with_subagent_manager(subagent_manager)
+        .with_message_queue_callback(Some(queue_callback));
+
+    let session_service = SessionService::new(service_context);
+    let server = crate::acp::AcpServer::new(Arc::new(agent_service), session_service, model, steer);
+    server.run().await
+}
+
 /// Log management commands
 pub(crate) async fn cmd_logs(operation: LogCommands) -> Result<()> {
     use crate::logging;

@@ -114,6 +114,15 @@ pub enum Commands {
         format: OutputFormat,
     },
 
+    /// Serve ACP (Agent Client Protocol) over stdio for agent-aware editors
+    /// (MonoCode, Zed). stdout carries JSON-RPC frames only — one process
+    /// per editor thread, sessions persist in the normal store.
+    Acp {
+        /// Default model override for sessions on this server
+        #[arg(long)]
+        model: Option<String>,
+    },
+
     /// Channel operations
     Channel {
         #[command(subcommand)]
@@ -593,6 +602,7 @@ pub async fn run() -> Result<()> {
                 commands::cmd_agent_interactive(&config, auto_approve, session).await
             }
         }
+        Some(Commands::Acp { model }) => commands::cmd_acp(&config, model).await,
         Some(Commands::Channel { operation }) => commands::cmd_channel(&config, operation).await,
         Some(Commands::Memory { operation }) => commands::cmd_memory(operation).await,
         Some(Commands::Session { operation }) => commands::cmd_session(&config, operation).await,

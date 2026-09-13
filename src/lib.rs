@@ -83,6 +83,7 @@ pub mod tui;
 pub mod utils;
 
 pub mod a2a;
+pub mod acp;
 pub mod channels;
 pub mod cron;
 pub mod rtk;
