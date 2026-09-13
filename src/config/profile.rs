@@ -948,6 +948,27 @@ pub fn acquire_instance_lock(profile: &str) -> InstanceGuard {
     )
 }
 
+/// Read-only probe: does `profile` have a live daemon/TUI instance?
+///
+/// Reads the instance lock stamp (`locks/instance/{profile}.lock`) and
+/// checks the PID's liveness. No lock acquisition, no writes, no SIGTERM
+/// — never the preempt path. Used by the multi-profile daemon (#194) to
+/// decide whether to adopt another profile's cron scheduler.
+pub fn instance_running(profile: &str) -> bool {
+    instance_running_in(
+        &base_opencrabs_dir().join("locks").join("instance"),
+        profile,
+    )
+}
+
+pub(crate) fn instance_running_in(lock_dir: &Path, profile: &str) -> bool {
+    let path = lock_dir.join(format!("{profile}.lock"));
+    match fs::read_to_string(&path) {
+        Ok(contents) => contents.trim().parse::<u32>().is_ok_and(is_pid_alive),
+        Err(_) => false, // missing lock file => no live instance => adoptable
+    }
+}
+
 /// Dir-injectable core of [`acquire_instance_lock`], so tests point at a
 /// TempDir rather than the real `~/.opencrabs/locks/`.
 ///
@@ -1263,7 +1284,9 @@ pub(crate) fn is_pid_alive(pid: u32) -> bool {
     // file whose PID parsed to 0 (corruption) would look alive forever and wedge
     // the channel that owns that credential (issue #192). Guard it on every
     // platform.
-    if pid == 0 {
+    // Similarly, pid > i32::MAX as u32 would wrap to a negative i32, where
+    // `kill(-1, 0)` broadcasts to every process we can signal.
+    if pid == 0 || pid > i32::MAX as u32 {
         return false;
     }
     #[cfg(unix)]

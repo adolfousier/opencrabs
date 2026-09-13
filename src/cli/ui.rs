@@ -111,12 +111,28 @@ pub(crate) async fn cmd_daemon(config: &crate::config::Config) -> Result<()> {
     let active = crate::config::profile::active_profile()
         .unwrap_or("default")
         .to_string();
+
+    // Pre-acquire active profile's scheduler lock first (#194).
+    // This ensures this daemon owns its own scheduler before attempting to adopt
+    // secondary profile schedulers, preventing cross-profile lock theft.
+    // The guard is passed into cmd_chat_inner so it is not re-acquired (flock self-denial).
+    let active_lock = crate::config::profile::acquire_scheduler_lock(&active);
+
     match crate::config::profile::list_profiles() {
         Ok(entries) => {
             for entry in entries {
                 // The active profile is already covered by cmd_chat_inner's
                 // scheduler. Skipping it here avoids running its jobs twice.
                 if entry.name == active {
+                    continue;
+                }
+                // #194: Don't adopt a profile's scheduler if that profile already has a
+                // live daemon or TUI instance running.
+                if crate::config::profile::instance_running(&entry.name) {
+                    tracing::info!(
+                        "Multi-profile daemon: '{}' has a live instance — not adopting its scheduler",
+                        entry.name
+                    );
                     continue;
                 }
                 tokio::spawn(spawn_cron_scheduler_for_profile(entry.name));
@@ -126,7 +142,7 @@ pub(crate) async fn cmd_daemon(config: &crate::config::Config) -> Result<()> {
             tracing::warn!("daemon: list_profiles failed, running active profile only: {e}");
         }
     }
-    cmd_chat_inner(config, None, false, true).await
+    cmd_chat_inner(config, None, false, true, active_lock).await
 }
 
 /// Spawn a cron-only scheduler for one profile, pinned to that profile's home.
@@ -229,7 +245,7 @@ pub(crate) async fn cmd_chat(
     session_id: Option<String>,
     force_onboard: bool,
 ) -> Result<()> {
-    cmd_chat_inner(config, session_id, force_onboard, false).await
+    cmd_chat_inner(config, session_id, force_onboard, false, None).await
 }
 
 /// Claim this profile, or refuse to boot (#1072).
@@ -320,6 +336,7 @@ async fn cmd_chat_inner(
     session_id: Option<String>,
     force_onboard: bool,
     headless: bool,
+    scheduler_lock: Option<crate::config::profile::SchedulerLock>,
 ) -> Result<()> {
     // Single-instance guard (#1072), before the database, the provider, the
     // tool registry or the memory reindex. A second instance of the same
@@ -1931,6 +1948,41 @@ async fn cmd_chat_inner(
         }
     }
 
+    // Spawn A2A gateway if configured
+    let a2a_ready = if config.a2a.enabled {
+        let a2a_agent = channel_factory.create_agent_service().await;
+        let a2a_ctx = service_context.clone();
+        let a2a_config = config.a2a.clone();
+        let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
+        tokio::spawn(async move {
+            if let Err(e) =
+                crate::a2a::server::start_server(&a2a_config, a2a_agent, a2a_ctx, Some(ready_tx))
+                    .await
+            {
+                tracing::error!("A2A gateway error: {}", e);
+            }
+        });
+        // #196: block the cron scheduler until the listener is bound, so a
+        // job due on its first tick finds the gateway listening.
+        match tokio::time::timeout(std::time::Duration::from_secs(30), ready_rx).await {
+            Ok(Ok(Ok(()))) => true,
+            Ok(Ok(Err(e))) => {
+                tracing::error!("A2A gateway refused to start: {e}");
+                false
+            }
+            Ok(Err(_)) => {
+                tracing::error!("A2A gateway task exited without signalling readiness");
+                false
+            }
+            Err(_) => {
+                tracing::error!("Timed out waiting for A2A gateway readiness after 30s (#196)");
+                false
+            }
+        }
+    } else {
+        false
+    };
+
     // Spawn cron scheduler — polls every 60s, executes jobs in the user's active session.
     // One scheduler per profile machine-wide (#444): if another process (e.g. a
     // multi-profile `daemon` that also covers this profile) already owns the
@@ -1940,50 +1992,42 @@ async fn cmd_chat_inner(
     let active_profile = crate::config::profile::active_profile()
         .unwrap_or("default")
         .to_string();
-    let _scheduler_lock = crate::config::profile::acquire_scheduler_lock(&active_profile);
+    let _scheduler_lock =
+        scheduler_lock.or_else(|| crate::config::profile::acquire_scheduler_lock(&active_profile));
     if _scheduler_lock.is_some() {
-        let cron_repo = crate::db::CronJobRepository::new(db.pool().clone());
-        let cron_run_repo = crate::db::CronJobRunRepository::new(db.pool().clone());
-        // Rebuild outcomes must reach the session that asked (#304): a
-        // failed background build used to be log-only while the TUI waited
-        // for a reload that never came.
-        let rebuild_notify_tx = app.event_sender();
-        let session_notifier: crate::cron::SessionNotifier =
-            std::sync::Arc::new(move |session_id, text| {
-                if rebuild_notify_tx
-                    .send(crate::tui::events::TuiEvent::SystemMessage { session_id, text })
-                    .is_err()
-                {
-                    tracing::warn!("rebuild notifier: TUI event channel closed");
-                }
-            });
-        let cron_scheduler = crate::cron::CronScheduler::new(
-            cron_repo,
-            cron_run_repo,
-            channel_factory.clone(),
-            service_context.clone(),
-        )
-        .with_session_notifier(session_notifier);
-        // Detached task; the JoinHandle isn't awaited or aborted anywhere.
-        cron_scheduler.spawn();
-        tracing::info!("Cron scheduler spawned");
+        if config.a2a.enabled && !a2a_ready {
+            tracing::error!("Cron scheduler not spawned: A2A gateway did not become ready (#196)");
+        } else {
+            let cron_repo = crate::db::CronJobRepository::new(db.pool().clone());
+            let cron_run_repo = crate::db::CronJobRunRepository::new(db.pool().clone());
+            // Rebuild outcomes must reach the session that asked (#304): a
+            // failed background build used to be log-only while the TUI waited
+            // for a reload that never came.
+            let rebuild_notify_tx = app.event_sender();
+            let session_notifier: crate::cron::SessionNotifier =
+                std::sync::Arc::new(move |session_id, text| {
+                    if rebuild_notify_tx
+                        .send(crate::tui::events::TuiEvent::SystemMessage { session_id, text })
+                        .is_err()
+                    {
+                        tracing::warn!("rebuild notifier: TUI event channel closed");
+                    }
+                });
+            let cron_scheduler = crate::cron::CronScheduler::new(
+                cron_repo,
+                cron_run_repo,
+                channel_factory.clone(),
+                service_context.clone(),
+            )
+            .with_session_notifier(session_notifier);
+            // Detached task; the JoinHandle isn't awaited or aborted anywhere.
+            cron_scheduler.spawn();
+            tracing::info!("Cron scheduler spawned");
+        }
     } else {
         tracing::info!(
             "Cron scheduler for '{active_profile}' already running elsewhere — not spawning a second"
         );
-    }
-
-    // Spawn A2A gateway if configured
-    if config.a2a.enabled {
-        let a2a_agent = channel_factory.create_agent_service().await;
-        let a2a_ctx = service_context.clone();
-        let a2a_config = config.a2a.clone();
-        tokio::spawn(async move {
-            if let Err(e) = crate::a2a::server::start_server(&a2a_config, a2a_agent, a2a_ctx).await
-            {
-                tracing::error!("A2A gateway error: {}", e);
-            }
-        });
     }
 
     // Channel spawning is handled by channel_manager.reconcile() above (line ~669).
