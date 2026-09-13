@@ -44,6 +44,7 @@ fn test_cli_parse_run_command() {
             prompt,
             auto_approve,
             format,
+            ..
         }) => {
             assert_eq!(prompt, "Hello, how are you?");
             assert!(!auto_approve);
@@ -61,6 +62,7 @@ fn test_cli_parse_run_with_json_format() {
             prompt,
             auto_approve,
             format,
+            ..
         }) => {
             assert_eq!(prompt, "Test prompt");
             assert!(!auto_approve);
@@ -79,6 +81,7 @@ fn test_cli_parse_run_with_markdown_format() {
             prompt,
             auto_approve,
             format,
+            ..
         }) => {
             assert_eq!(prompt, "Test prompt");
             assert!(!auto_approve);
@@ -96,6 +99,7 @@ fn test_cli_parse_run_with_auto_approve() {
             prompt,
             auto_approve,
             format: _,
+            ..
         }) => {
             assert_eq!(prompt, "Test prompt");
             assert!(auto_approve);
@@ -112,6 +116,7 @@ fn test_cli_parse_run_with_yolo_alias() {
             prompt,
             auto_approve,
             format: _,
+            ..
         }) => {
             assert_eq!(prompt, "Test prompt");
             assert!(auto_approve);
@@ -233,6 +238,7 @@ fn test_cli_parse_combined_flags() {
             prompt,
             auto_approve,
             format,
+            ..
         }) => {
             assert_eq!(prompt, "Test prompt");
             assert!(auto_approve);
