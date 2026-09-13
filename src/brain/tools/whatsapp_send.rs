@@ -9,6 +9,7 @@ use super::error::Result;
 use super::r#trait::{Tool, ToolCapability, ToolExecutionContext, ToolHints, ToolResult};
 use crate::channels::whatsapp::WhatsAppState;
 use crate::channels::whatsapp::broadcast;
+use crate::channels::whatsapp::interactive;
 use crate::channels::whatsapp::rate_limit::GateOutcome;
 use crate::config::Config;
 use async_trait::async_trait;
@@ -337,6 +338,7 @@ impl Tool for WhatsAppSendTool {
                         "react", "send_poll",
                         "typing", "mark_read",
                         "block_contact", "unblock_contact", "list_blocked",
+                        "send_buttons",
                         "status_update", "list_newsletters",
                         "create_label", "assign_label"
                     ],
@@ -369,6 +371,15 @@ impl Tool for WhatsAppSendTool {
                 "voice_note": {
                     "type": "boolean",
                     "description": "For send_audio: true (default) renders a native WhatsApp voice note (tap-to-play bubble) and shows a recording indicator while uploading. false sends a plain audio file attachment."
+                },
+                "buttons": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "For send_buttons: up to 3 button labels. WhatsApp draws at most 3; extras are dropped rather than silently ignored on the wire."
+                },
+                "footer": {
+                    "type": "string",
+                    "description": "For send_buttons: small text under the buttons."
                 },
                 "targets": {
                     "type": "array",
@@ -1245,6 +1256,73 @@ impl Tool for WhatsAppSendTool {
                 }
             }
 
+            // ── send_buttons ─────────────────────────────────────────────────
+            // #1411. Exists so the native-flow card can be tried against a
+            // real phone WITHOUT handing the approval flow over to it first:
+            // that flow is safety-critical, and a prompt that does not render
+            // is a prompt the owner cannot answer. Send one of these, look at
+            // the screen, and only then decide about `interactive_buttons`.
+            "send_buttons" => {
+                let (jid, jid_str) =
+                    pget!(resolve_jid(&input, &self.whatsapp_state, &self.config_rx).await);
+                gate_send!(self, jid_str, "the button message");
+                let body = pget!(get_str(&input, "message")).to_string();
+                let labels: Vec<String> = match input.get("buttons").and_then(|v| v.as_array()) {
+                    Some(arr) => arr
+                        .iter()
+                        .filter_map(|v| v.as_str().map(str::to_string))
+                        .filter(|l| !l.trim().is_empty())
+                        .collect(),
+                    None => Vec::new(),
+                };
+                if labels.is_empty() {
+                    return Ok(ToolResult::error(
+                        "send_buttons needs a non-empty 'buttons' array of labels.".to_string(),
+                    ));
+                }
+                let too_many = labels.len() > interactive::MAX_BUTTONS;
+                // Ids are derived from the labels so a tap is legible in the
+                // logs without the caller having to invent a parallel id
+                // scheme for a one-off test message.
+                let buttons: Vec<interactive::Button> = labels
+                    .iter()
+                    .take(interactive::MAX_BUTTONS)
+                    .map(|l| {
+                        interactive::Button::new(
+                            format!("btn_{}", l.trim().to_lowercase().replace(' ', "_")),
+                            l.trim(),
+                        )
+                    })
+                    .collect();
+                let wa_msg = interactive::build(
+                    &body,
+                    input.get("footer").and_then(|v| v.as_str()),
+                    &buttons,
+                );
+                match client.send_message(jid, wa_msg).await {
+                    Ok(_) => Ok(ToolResult::success(format!(
+                        "Button message sent to {} with {} button(s){}. If the card does not \
+                         render on the recipient's phone, that is the #1411 answer: WhatsApp \
+                         drops it silently rather than erroring, so a successful send here is \
+                         NOT proof it was seen.",
+                        jid_str,
+                        buttons.len(),
+                        if too_many {
+                            format!(
+                                " ({} dropped; WhatsApp draws at most {})",
+                                labels.len() - interactive::MAX_BUTTONS,
+                                interactive::MAX_BUTTONS
+                            )
+                        } else {
+                            String::new()
+                        }
+                    ))),
+                    Err(e) => Ok(ToolResult::error(format!(
+                        "Failed to send the button message: {e}"
+                    ))),
+                }
+            }
+
             // ── status_update ────────────────────────────────────────────────
             // #1485. A status goes to a LIST of recipients, so it is the one
             // action here that can reach many people from one call. Both rails
@@ -1479,7 +1557,7 @@ impl Tool for WhatsAppSendTool {
                  send_contact, react, send_poll, typing, mark_read, block_contact, \
                  unblock_contact, list_blocked, pin, unpin, forward, set_profile_name, \
                  set_profile_status, status_update, list_newsletters, create_label, \
-                 assign_label",
+                 assign_label, send_buttons",
                 unknown
             ))),
         }

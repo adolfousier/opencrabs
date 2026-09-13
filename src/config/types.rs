@@ -898,6 +898,16 @@ pub struct WhatsAppConfig {
     /// messaging arbitrary numbers.
     #[serde(default)]
     pub broadcast: WaBroadcastConfig,
+    /// Send tool-approval prompts as native-flow interactive buttons (#1411)
+    /// instead of plain text. Default false, and deliberately so: this
+    /// channel already shipped buttons once (`ButtonsMessage`) and removed
+    /// them in 2f15f1d1 because modern clients silently never rendered them.
+    /// `NativeFlowMessage` is a different path that may well work, but an
+    /// approval prompt that does not render is a safety-critical message the
+    /// owner cannot answer, so it is opt-in until a real phone has shown the
+    /// card. Test it first with `whatsapp_send` action `send_buttons`.
+    #[serde(default)]
+    pub interactive_buttons: bool,
     /// Channel-wide disappearing-message TTL in seconds (#1487). Unset or
     /// `0` means messages do not expire, which is the WhatsApp default.
     /// Common values: 86400 (24h), 604800 (7d), 7776000 (90d, the maximum).

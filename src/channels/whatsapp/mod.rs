@@ -21,6 +21,7 @@ pub(crate) mod ephemeral;
 mod followups;
 pub(crate) mod handler;
 pub(crate) mod inbound;
+pub(crate) mod interactive;
 pub(crate) mod media_retry;
 mod onboarding_events;
 pub(crate) mod outbox;

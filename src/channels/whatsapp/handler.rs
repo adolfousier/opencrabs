@@ -642,16 +642,16 @@ pub(crate) async fn handle_message(
 
     // Pending approval check: if a tool approval is waiting for this phone,
     // interpret this message as Yes / Always / No instead of routing to the agent.
-    // Handles both button taps (ButtonsResponseMessage) and plain text replies.
+    // Handles both button taps and plain text replies. #1411: a native-flow
+    // tap answers as an InteractiveResponseMessage, not the ButtonsResponse
+    // shape this used to read, so a tap on a card sent with
+    // `interactive_buttons` on would have been parsed as nothing at all.
     {
         use crate::channels::whatsapp::WaApproval;
 
-        let btn_id = unwrap_message(&msg)
-            .buttons_response_message
-            .as_ref()
-            .and_then(|b| b.selected_button_id.as_deref());
+        let btn_id = super::interactive::parse_tap(unwrap_message(&msg));
 
-        let choice: Option<WaApproval> = if let Some(id) = btn_id {
+        let choice: Option<WaApproval> = if let Some(id) = btn_id.as_deref() {
             match id {
                 "wa_approve_yes" => Some(WaApproval::Yes),
                 "wa_approve_always" => Some(WaApproval::Always),
@@ -1479,6 +1479,9 @@ pub(crate) async fn handle_message(
     // Build per-call approval callback.
     // If the user previously chose "Always (session)", auto-approve without asking.
     // Otherwise send a 3-button message (Yes / Always / No) and wait up to 5 min.
+    // Copied, not borrowed: the callback is 'static and `wa_cfg` is a
+    // reference into this turn's config snapshot.
+    let interactive_buttons = wa_cfg.interactive_buttons;
     let approval_cb: ApprovalCallback = {
         use crate::channels::whatsapp::WaApproval;
         use crate::utils::check_approval_policy;
@@ -1507,14 +1510,32 @@ pub(crate) async fn handle_message(
                     truncate_str(&input_preview, 600),
                 );
 
-                // Send plain text approval request (ButtonsMessage is deprecated
-                // by WhatsApp and silently never renders — use text only)
-                let text_msg = waproto::whatsapp::Message {
-                    conversation: Some(format!(
-                        "{}\n\n{}\n\nReply *yes*, *always* (session), *yolo* (permanent), or *no* (5 min timeout).",
-                        MSG_HEADER, body
-                    )),
-                    ..Default::default()
+                // #1411: `ButtonsMessage` is deprecated and silently never
+                // renders, which is why 2f15f1d1 removed it. NativeFlow is a
+                // different path and may render, but an approval prompt that
+                // does not is a message the owner cannot answer, so it stays
+                // opt-in behind `interactive_buttons`. Either way the SAME
+                // instructions ride in the text: a card that renders without
+                // its buttons still tells the reader what to type.
+                let prompt = format!(
+                    "{}\n\n{}\n\nReply *yes*, *always* (session), *yolo* (permanent), or *no* (5 min timeout).",
+                    MSG_HEADER, body
+                );
+                let text_msg = if interactive_buttons {
+                    super::interactive::build(
+                        &prompt,
+                        Some("Tap a button, or reply with the word."),
+                        &[
+                            super::interactive::Button::new("wa_approve_yes", "Yes"),
+                            super::interactive::Button::new("wa_approve_always", "Always"),
+                            super::interactive::Button::new("wa_approve_no", "No"),
+                        ],
+                    )
+                } else {
+                    waproto::whatsapp::Message {
+                        conversation: Some(prompt),
+                        ..Default::default()
+                    }
                 };
                 tracing::info!(
                     "WhatsApp approval: sending request for tool '{}' to {}",

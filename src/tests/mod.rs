@@ -917,6 +917,7 @@ pub mod whatsapp_broadcast_test;
 pub mod whatsapp_ephemeral_test;
 pub mod whatsapp_handler_test;
 pub mod whatsapp_inbound_test;
+pub mod whatsapp_interactive_test;
 pub mod whatsapp_outbox_test;
 pub mod whatsapp_owner_filter_test;
 pub mod whatsapp_photo_batching_test;
