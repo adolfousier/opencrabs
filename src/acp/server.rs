@@ -23,7 +23,7 @@ use uuid::Uuid;
 use crate::brain::agent::{AgentService, QueuedUserMessage};
 use crate::brain::provider::create_provider_by_name;
 use crate::cli::session_resolve::resolve_or_create_session;
-use crate::services::SessionService;
+use crate::services::{MessageService, SessionService};
 use crate::utils::provider_pair::parse_pair;
 
 use super::catalog;
@@ -57,6 +57,7 @@ pub struct ServerState {
     pub handle: TransportHandle,
     pub agent: Arc<AgentService>,
     pub sessions: SessionService,
+    pub messages: MessageService,
     pub states: Mutex<HashMap<String, Arc<SessionState>>>,
     pub steer: SteerMap,
     pub default_model: Option<String>,
@@ -73,6 +74,7 @@ impl AcpServer {
     pub fn new(
         agent: Arc<AgentService>,
         sessions: SessionService,
+        messages: MessageService,
         default_model: Option<String>,
         steer: SteerMap,
         config: Arc<crate::config::Config>,
@@ -82,6 +84,7 @@ impl AcpServer {
             handle: transport.handle(),
             agent,
             sessions,
+            messages,
             states: Mutex::new(HashMap::new()),
             steer,
             default_model,
@@ -205,6 +208,25 @@ impl AcpServer {
                     active_cancel: Mutex::new(None),
                 });
                 state.states.lock().await.insert(acp_id.clone(), st.clone());
+                // The agent service's per-session model maps are in-memory,
+                // so a fresh acp process starts blank while the session row
+                // still knows the user's pick — rehydrate from the row.
+                if resume.is_some() {
+                    Self::restore_session_model(&state, &session, &st).await;
+                }
+                // ACP: an agent advertising loadSession replays the stored
+                // transcript as session/update notifications BEFORE answering
+                // the load, so clients without their own transcript store
+                // (Zed et al.) render history. MonoCode mutes these — it
+                // restores its own persisted blocks — but the replay is the
+                // protocol contract, not a client favor.
+                if resume.is_some()
+                    && let Ok(history) = state.messages.list_messages_for_session(session.id).await
+                {
+                    for update in protocol::replay_updates(&history) {
+                        state.handle.send(protocol::session_update(&acp_id, update));
+                    }
+                }
                 let current = st.model.lock().await.clone();
                 let models = catalog::models_payload(&state.config, current.as_deref());
                 let modes = protocol::modes_payload(*st.mode.lock().await);
@@ -257,8 +279,10 @@ impl AcpServer {
                     state
                         .agent
                         .swap_provider_for_session(st.id, provider, bare_model.clone());
-                    state.agent.mark_manual_switch(st.id, bare_model.clone());
-                    *st.model.lock().await = Some(bare_model);
+                    state.agent.mark_manual_switch(st.id, bare_model);
+                    // st.model holds the pair form — models_payload matches
+                    // currentModelId against available pair ids.
+                    *st.model.lock().await = Some(model.to_string());
                 }
                 Err(e) => {
                     state.handle.respond_error(
@@ -302,6 +326,41 @@ impl AcpServer {
                 protocol::INVALID_PARAMS,
                 format!("session/set_mode: unknown modeId '{mode_id}'"),
             ),
+        }
+    }
+
+    /// Rehydrate the per-session model/provider override from the session row
+    /// on `session/load`. Failure degrades down the chain: a provider that no
+    /// longer exists in config falls back to a bare model pin, and a session
+    /// with no stored pick keeps the default.
+    async fn restore_session_model(
+        state: &Arc<ServerState>,
+        session: &crate::db::models::Session,
+        st: &Arc<SessionState>,
+    ) {
+        let model = session.model.clone().filter(|m| !m.trim().is_empty());
+        let provider_name = session
+            .provider_name
+            .clone()
+            .filter(|p| !p.trim().is_empty());
+        if let (Some(provider_name), Some(model)) = (provider_name, model.clone()) {
+            match create_provider_by_name(&state.config, &provider_name).await {
+                Ok(provider) => {
+                    state
+                        .agent
+                        .swap_provider_for_session(session.id, provider, model.clone());
+                    state.agent.mark_manual_switch(session.id, model.clone());
+                    *st.model.lock().await = Some(format!("{provider_name}/{model}"));
+                    return;
+                }
+                Err(e) => {
+                    tracing::debug!("acp: provider restore skipped ({provider_name}): {e}");
+                }
+            }
+        }
+        if let Some(model) = model {
+            state.agent.set_session_model(session.id, model.clone());
+            *st.model.lock().await = Some(model);
         }
     }
 

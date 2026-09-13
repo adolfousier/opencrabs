@@ -168,6 +168,42 @@ pub fn text_chunk(kind: &str, text: &str) -> Value {
     })
 }
 
+/// Transcript replay for `session/load`: an agent advertising `loadSession`
+/// re-sends the stored conversation as session/update notifications before
+/// answering the load. Rows map to live-turn chunk shapes: user →
+/// user_message_chunk; assistant → thought chunks (persisted `thinking` and
+/// inline reasoning segments via the TUI splitter) plus message chunks.
+pub fn replay_updates(messages: &[crate::db::models::Message]) -> Vec<Value> {
+    use crate::tui::app::reasoning_split::{Segment, split_segments};
+    let mut out = Vec::new();
+    for m in messages {
+        match m.role.as_str() {
+            "user" => {
+                if !m.content.trim().is_empty() {
+                    out.push(text_chunk("user_message_chunk", &m.content));
+                }
+            }
+            "assistant" => {
+                if let Some(thinking) = &m.thinking
+                    && !thinking.trim().is_empty()
+                {
+                    out.push(text_chunk("agent_thought_chunk", thinking));
+                }
+                for segment in split_segments(&m.content) {
+                    match segment {
+                        Segment::Reasoning(t) => {
+                            out.push(text_chunk("agent_thought_chunk", &t));
+                        }
+                        Segment::Text(t) => out.push(text_chunk("agent_message_chunk", &t)),
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
 /// `initialize` result: protocol version plus the capabilities we honor.
 /// fs/terminal are false — MonoCode's adapter declares them false too, so
 /// file ops stay on the agent side where the tool loop already has them.
@@ -175,10 +211,11 @@ pub fn initialize_result() -> Value {
     json!({
         "protocolVersion": 1,
         "agentCapabilities": {
-            // Honest capability: session/load binds an existing session but
-            // does not replay history, so replay is not advertised. Adapters
-            // may still call session/load; it works as an extension.
-            "loadSession": false,
+            // Honest capability: session/load binds an existing session AND
+            // replays the stored transcript as session/update notifications
+            // before answering, so clients without their own transcript
+            // store (Zed et al.) render history on resume.
+            "loadSession": true,
             "promptCapabilities": { "text": true, "image": false, "embeddedContext": false },
         },
         "agentInfo": {
