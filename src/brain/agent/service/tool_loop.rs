@@ -6052,6 +6052,14 @@ impl AgentService {
                         }
                         crate::brain::goal::GoalDecision::Paused { ref reason } => {
                             tracing::warn!("Goal paused: {}", reason);
+                            if let Some(ref cb) = progress_callback {
+                                cb(
+                                    session_id,
+                                    ProgressEvent::SelfHealingAlert {
+                                        message: format!("⚠️ {reason}"),
+                                    },
+                                );
+                            }
                         }
                     }
                 }

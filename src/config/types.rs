@@ -1480,6 +1480,16 @@ pub struct AgentConfig {
     /// tool execution loops (#153). Default: 900 (15 min). Set to 0 to disable.
     #[serde(default = "default_time_marker_interval_secs")]
     pub time_marker_interval_secs: u64,
+
+    /// Maximum turns allowed for a session goal before auto-pausing (#190).
+    /// Default None (resolving to DEFAULT_MAX_TURNS=20).
+    /// Can be set in config.toml:
+    /// ```toml
+    /// [agent]
+    /// goal_max_turns = 30
+    /// ```
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub goal_max_turns: Option<u32>,
 }
 
 impl AgentConfig {
@@ -1612,6 +1622,7 @@ impl Default for AgentConfig {
             debug_logs: default_debug_logs(),
             thinking_loop_timeout_secs: default_thinking_loop_timeout_secs(),
             time_marker_interval_secs: default_time_marker_interval_secs(),
+            goal_max_turns: None,
         }
     }
 }

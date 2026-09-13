@@ -50,6 +50,10 @@ impl Tool for GoalManageTool {
                 "goal": {
                     "type": "string",
                     "description": "The objective to work toward. Required for 'set'. Make it concrete and checkable, e.g. 'all tests pass and changes committed', not a vague direction."
+                },
+                "max_turns": {
+                    "type": "integer",
+                    "description": "Optional maximum number of turns for this goal before auto-pausing. If omitted, uses agent.goal_max_turns from config, or 20 by default."
                 }
             },
             "required": ["action"]
@@ -97,8 +101,12 @@ impl Tool for GoalManageTool {
                             .into(),
                     ));
                 }
+                let max_turns = input
+                    .get("max_turns")
+                    .and_then(|v| v.as_u64())
+                    .map(|v| v as u32);
                 match goal_mgr
-                    .set_goal(session_id, goal_text.to_string(), None, None)
+                    .set_goal(session_id, goal_text.to_string(), None, None, max_turns)
                     .await
                 {
                     Ok(goal) => Ok(ToolResult::success(format!(

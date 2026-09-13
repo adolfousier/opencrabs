@@ -287,7 +287,13 @@ async fn discard_clears_the_plan_goal() {
         // acceptance criteria would leave behind.
         make_post_init(sid, GOLDEN_MD).await;
         crate::brain::goal::GoalManager::new(ctx.clone())
-            .set_goal(sid, "Task 1: t1. Done when: x".to_string(), None, None)
+            .set_goal(
+                sid,
+                "Task 1: t1. Done when: x".to_string(),
+                None,
+                None,
+                None,
+            )
             .await
             .unwrap();
         assert!(
