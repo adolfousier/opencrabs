@@ -142,13 +142,23 @@ pub(crate) fn check_gate_authenticated(bind: &str, api_key: Option<&str>) -> Res
 /// Start the A2A gateway server.
 ///
 /// Runs as a background task — call from `tokio::spawn`.
+///
+/// If `ready` is provided, signals `Ok(())` once the socket is bound and
+/// listening (or immediately if A2A is disabled), or signals `Err` if gate
+/// validation, address parsing, or socket binding fails.
+/// The socket is bound and listening when `ready` resolves `Ok(())`, so any
+/// incoming connection is queued by the kernel accept queue and reaches the gateway.
 pub async fn start_server(
     config: &A2aConfig,
     agent_service: Arc<AgentService>,
     service_context: ServiceContext,
+    ready: Option<tokio::sync::oneshot::Sender<anyhow::Result<()>>>,
 ) -> anyhow::Result<()> {
     if !config.enabled {
         tracing::info!("A2A gateway disabled in config");
+        if let Some(tx) = ready {
+            let _ = tx.send(Ok(()));
+        }
         return Ok(());
     }
 
@@ -162,7 +172,11 @@ pub async fn start_server(
     // parsed into the SocketAddr below either, so treating a parse miss as
     // "not loopback" only ever fails safe.
     if let Err(reason) = check_gate_authenticated(&config.bind, config.api_key.as_deref()) {
-        anyhow::bail!("A2A gateway refuses to start: {reason}");
+        let msg = anyhow::anyhow!("A2A gateway refuses to start: {reason}");
+        if let Some(tx) = ready {
+            let _ = tx.send(Err(anyhow::anyhow!("{msg}")));
+        }
+        anyhow::bail!(msg);
     }
 
     // Restore any in-flight tasks from the database
@@ -191,15 +205,36 @@ pub async fn start_server(
     };
 
     let app = build_router(state, &config.allowed_origins);
-    let addr: SocketAddr = format!("{}:{}", config.bind, config.port)
-        .parse()
-        .map_err(|e| anyhow::anyhow!("Invalid A2A gateway address: {}", e))?;
+    let addr: SocketAddr = match format!("{}:{}", config.bind, config.port).parse() {
+        Ok(addr) => addr,
+        Err(e) => {
+            let err = anyhow::anyhow!("Invalid A2A gateway address: {}", e);
+            if let Some(tx) = ready {
+                let _ = tx.send(Err(anyhow::anyhow!("{err}")));
+            }
+            return Err(err);
+        }
+    };
 
     tracing::info!("A2A Gateway starting on http://{}", addr);
     tracing::info!("   Agent Card: http://{}/.well-known/agent.json", addr);
     tracing::info!("   JSON-RPC:   http://{}/a2a/v1", addr);
 
-    let listener = tokio::net::TcpListener::bind(addr).await?;
+    let listener = match tokio::net::TcpListener::bind(addr).await {
+        Ok(l) => l,
+        Err(e) => {
+            let err = anyhow::anyhow!("A2A bind failed: {e}");
+            if let Some(tx) = ready {
+                let _ = tx.send(Err(anyhow::anyhow!("{err}")));
+            }
+            return Err(err);
+        }
+    };
+
+    if let Some(tx) = ready {
+        let _ = tx.send(Ok(()));
+    }
+
     axum::serve(listener, app).await?;
 
     Ok(())
