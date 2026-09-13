@@ -84,9 +84,7 @@ impl SessionSkillsRepository {
             .context("Failed to read seen skills")?;
         Ok(rows
             .into_iter()
-            .filter_map(|(sid, slug, epoch)| {
-                Uuid::parse_str(&sid).ok().map(|id| (id, slug, epoch))
-            })
+            .filter_map(|(sid, slug, epoch)| Uuid::parse_str(&sid).ok().map(|id| (id, slug, epoch)))
             .collect())
     }
 
