@@ -653,7 +653,11 @@ pub(crate) async fn handle_message(
     };
     let session_phone = match (is_owner_self_chat, &owner_number) {
         (true, Some(num)) => num.clone(),
-        _ => phone.clone(),
+        _ => sender_alt_user
+            .as_deref()
+            .filter(|alt| !alt.is_empty())
+            .unwrap_or(&phone)
+            .to_string(),
     };
 
     // Where ALL agent output for this turn is sent. For the owner self-chat the
@@ -706,7 +710,13 @@ pub(crate) async fn handle_message(
     // resolver over allowed_phones + bot_owner.
     let is_owner = is_owner_self_chat
         || owner_number.as_deref() == Some(phone.as_str())
-        || crate::config::owner::is_owner(&wa_cfg.allowed_phones, &wa_cfg.bot_owner, &phone);
+        || sender_alt_user
+            .as_deref()
+            .is_some_and(|alt| owner_number.as_deref() == Some(alt))
+        || crate::config::owner::is_owner(&wa_cfg.allowed_phones, &wa_cfg.bot_owner, &phone)
+        || sender_alt_user.as_deref().is_some_and(|alt| {
+            crate::config::owner::is_owner(&wa_cfg.allowed_phones, &wa_cfg.bot_owner, alt)
+        });
 
     // Sessions are keyed by a stable `[chat:wa-<phone>]` suffix so auto-rename
     // of the visible label still resolves to the same row (issue #121).
@@ -1056,7 +1066,7 @@ pub(crate) async fn handle_message(
     // so photo requests fell back to generic tools or bare paths).
     // Surface the chat JID so the agent can target THIS chat for cron reports
     // without guessing (#533, mirror of upstream #510).
-    let chat_id = info.source.chat.to_string();
+    let chat_id = reply_target.to_string();
     let agent_input = format!(
         "[Channel: WhatsApp (chat_id: {chat_id}) — your text response is automatically sent to this chat. \
          Do NOT call whatsapp_send to deliver your answer. Only use whatsapp_send for: \

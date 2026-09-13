@@ -77,29 +77,42 @@ async fn get_client(
     })
 }
 
-/// Resolve target JID from `phone` param or owner, with allowlist check.
+/// Resolve target JID from `phone` param, originating session, or owner fallback,
+/// with allowlist check.
 #[allow(clippy::result_large_err)]
-async fn resolve_jid(
+pub(crate) async fn resolve_jid(
     input: &Value,
     whatsapp_state: &WhatsAppState,
     config_rx: &tokio::sync::watch::Receiver<Config>,
+    session_id: uuid::Uuid,
 ) -> std::result::Result<(Jid, String), ToolResult> {
-    if let Some(phone) = input.get("phone").and_then(|v| v.as_str()) {
+    if let Some(raw_target) = input.get("phone").and_then(|v| v.as_str()) {
         let allowed = &config_rx.borrow().channels.whatsapp.allowed_phones;
-        let normalized = phone.trim_start_matches('+');
+        let target_clean = raw_target.trim().trim_start_matches('+');
+        let user_part = target_clean
+            .split('@')
+            .next()
+            .unwrap_or(target_clean)
+            .split(':')
+            .next()
+            .unwrap_or(target_clean);
+
         let phone_allowed = allowed.is_empty()
             || allowed
                 .iter()
-                .any(|p| p.trim_start_matches('+') == normalized);
+                .any(|p| p.trim_start_matches('+') == user_part);
         if !phone_allowed {
             return Err(ToolResult::error(format!(
                 "Sending to {} is not permitted. This number is not in the \
                  allowed_users config.",
-                phone
+                raw_target
             )));
         }
-        let digits = phone.trim_start_matches('+');
-        let jid_str = format!("{}@s.whatsapp.net", digits);
+        let jid_str = if target_clean.contains('@') {
+            target_clean.to_string()
+        } else {
+            format!("{}@s.whatsapp.net", user_part)
+        };
         let jid: Jid = jid_str
             .parse()
             .map_err(|e| ToolResult::error(format!("Invalid phone number format: {}", e)))?;
@@ -109,6 +122,16 @@ async fn resolve_jid(
             return Err(ToolResult::error(reason));
         }
         Ok((jid, jid_str))
+    } else if let Some(session_jid_str) = whatsapp_state.session_jid(session_id).await {
+        let jid: Jid = session_jid_str
+            .parse()
+            .map_err(|e| ToolResult::error(format!("Invalid session chat JID: {}", e)))?;
+        if !crate::cron::send_scope::may_send("whatsapp", &session_jid_str) {
+            let reason = crate::cron::send_scope::refusal_for("whatsapp", &session_jid_str);
+            tracing::warn!("whatsapp_send: {reason}");
+            return Err(ToolResult::error(reason));
+        }
+        Ok((jid, session_jid_str))
     } else {
         let jid_str = whatsapp_state.owner_jid().await.ok_or_else(|| {
             ToolResult::error(
@@ -383,7 +406,7 @@ impl Tool for WhatsAppSendTool {
         }
     }
 
-    async fn execute(&self, input: Value, _context: &ToolExecutionContext) -> Result<ToolResult> {
+    async fn execute(&self, input: Value, context: &ToolExecutionContext) -> Result<ToolResult> {
         let action = match input.get("action").and_then(|v| v.as_str()) {
             Some(a) if !a.is_empty() => a.to_string(),
             _ => {
@@ -407,7 +430,7 @@ impl Tool for WhatsAppSendTool {
                     }
                 };
                 let (jid, jid_str) =
-                    pget!(resolve_jid(&input, &self.whatsapp_state, &self.config_rx).await);
+                    pget!(resolve_jid(&input, &self.whatsapp_state, &self.config_rx, context.session_id).await);
 
                 // Convert markdown to WhatsApp format and prepend agent header
                 let message = crate::utils::slack_fmt::markdown_to_mrkdwn(&message);
@@ -485,7 +508,7 @@ impl Tool for WhatsAppSendTool {
             "reply" => {
                 let message = pget!(get_str(&input, "message")).to_string();
                 let (jid, jid_str) =
-                    pget!(resolve_jid(&input, &self.whatsapp_state, &self.config_rx).await);
+                    pget!(resolve_jid(&input, &self.whatsapp_state, &self.config_rx, context.session_id).await);
                 let msg_id = pget!(get_str(&input, "message_id")).to_string();
 
                 let formatted = crate::utils::slack_fmt::markdown_to_mrkdwn(&message);
@@ -582,7 +605,7 @@ impl Tool for WhatsAppSendTool {
             // ── delete ───────────────────────────────────────────────────────
             "delete" => {
                 let (jid, jid_str) =
-                    pget!(resolve_jid(&input, &self.whatsapp_state, &self.config_rx).await);
+                    pget!(resolve_jid(&input, &self.whatsapp_state, &self.config_rx, context.session_id).await);
                 let msg_id = pget!(get_str(&input, "message_id")).to_string();
 
                 match client
@@ -603,7 +626,7 @@ impl Tool for WhatsAppSendTool {
             // ── send_photo ───────────────────────────────────────────────────
             "send_photo" => {
                 let (jid, jid_str) =
-                    pget!(resolve_jid(&input, &self.whatsapp_state, &self.config_rx).await);
+                    pget!(resolve_jid(&input, &self.whatsapp_state, &self.config_rx, context.session_id).await);
                 let path = pget!(get_str(&input, "media_path")).to_string();
                 let caption = input
                     .get("caption")
@@ -640,7 +663,7 @@ impl Tool for WhatsAppSendTool {
             // ── send_document ────────────────────────────────────────────────
             "send_document" => {
                 let (jid, jid_str) =
-                    pget!(resolve_jid(&input, &self.whatsapp_state, &self.config_rx).await);
+                    pget!(resolve_jid(&input, &self.whatsapp_state, &self.config_rx, context.session_id).await);
                 let path = pget!(get_str(&input, "media_path")).to_string();
                 let caption = input
                     .get("caption")
@@ -680,7 +703,7 @@ impl Tool for WhatsAppSendTool {
             // ── send_audio ───────────────────────────────────────────────────
             "send_audio" => {
                 let (jid, jid_str) =
-                    pget!(resolve_jid(&input, &self.whatsapp_state, &self.config_rx).await);
+                    pget!(resolve_jid(&input, &self.whatsapp_state, &self.config_rx, context.session_id).await);
                 let path = pget!(get_str(&input, "media_path")).to_string();
 
                 let (bytes, mime, _filename) = pget!(read_local_media(&path, "audio/ogg").await);
@@ -712,7 +735,7 @@ impl Tool for WhatsAppSendTool {
             // ── send_video ───────────────────────────────────────────────────
             "send_video" => {
                 let (jid, jid_str) =
-                    pget!(resolve_jid(&input, &self.whatsapp_state, &self.config_rx).await);
+                    pget!(resolve_jid(&input, &self.whatsapp_state, &self.config_rx, context.session_id).await);
                 let path = pget!(get_str(&input, "media_path")).to_string();
                 let caption = input
                     .get("caption")
@@ -749,7 +772,7 @@ impl Tool for WhatsAppSendTool {
             // ── send_sticker ─────────────────────────────────────────────────
             "send_sticker" => {
                 let (jid, jid_str) =
-                    pget!(resolve_jid(&input, &self.whatsapp_state, &self.config_rx).await);
+                    pget!(resolve_jid(&input, &self.whatsapp_state, &self.config_rx, context.session_id).await);
                 let path = pget!(get_str(&input, "media_path")).to_string();
 
                 let (bytes, mime, _filename) = pget!(read_local_media(&path, "image/webp").await);
@@ -781,7 +804,7 @@ impl Tool for WhatsAppSendTool {
             // ── send_location ────────────────────────────────────────────────
             "send_location" => {
                 let (jid, jid_str) =
-                    pget!(resolve_jid(&input, &self.whatsapp_state, &self.config_rx).await);
+                    pget!(resolve_jid(&input, &self.whatsapp_state, &self.config_rx, context.session_id).await);
                 let lat = match get_f64(&input, "latitude") {
                     Some(v) => v,
                     None => {
@@ -829,7 +852,7 @@ impl Tool for WhatsAppSendTool {
             // ── send_contact ─────────────────────────────────────────────────
             "send_contact" => {
                 let (jid, jid_str) =
-                    pget!(resolve_jid(&input, &self.whatsapp_state, &self.config_rx).await);
+                    pget!(resolve_jid(&input, &self.whatsapp_state, &self.config_rx, context.session_id).await);
                 let contact_name = pget!(get_str(&input, "contact_name")).to_string();
                 let contact_phone = pget!(get_str(&input, "contact_phone")).to_string();
 
@@ -854,7 +877,7 @@ impl Tool for WhatsAppSendTool {
             // ── react ────────────────────────────────────────────────────────
             "react" => {
                 let (jid, jid_str) =
-                    pget!(resolve_jid(&input, &self.whatsapp_state, &self.config_rx).await);
+                    pget!(resolve_jid(&input, &self.whatsapp_state, &self.config_rx, context.session_id).await);
                 let msg_id = pget!(get_str(&input, "message_id")).to_string();
                 let emoji = input
                     .get("emoji")
@@ -921,7 +944,7 @@ impl Tool for WhatsAppSendTool {
             // ── send_poll ────────────────────────────────────────────────────
             "send_poll" => {
                 let (jid, jid_str) =
-                    pget!(resolve_jid(&input, &self.whatsapp_state, &self.config_rx).await);
+                    pget!(resolve_jid(&input, &self.whatsapp_state, &self.config_rx, context.session_id).await);
                 let question = pget!(get_str(&input, "poll_question")).to_string();
                 let opts: Vec<String> = match input.get("poll_options").and_then(|v| v.as_array()) {
                     Some(arr) => arr
@@ -983,7 +1006,7 @@ impl Tool for WhatsAppSendTool {
             // ── typing ───────────────────────────────────────────────────────
             "typing" => {
                 let (jid, jid_str) =
-                    pget!(resolve_jid(&input, &self.whatsapp_state, &self.config_rx).await);
+                    pget!(resolve_jid(&input, &self.whatsapp_state, &self.config_rx, context.session_id).await);
                 let active = input
                     .get("typing_active")
                     .and_then(|v| v.as_bool())
@@ -1010,7 +1033,7 @@ impl Tool for WhatsAppSendTool {
             // ── mark_read ────────────────────────────────────────────────────
             "mark_read" => {
                 let (jid, jid_str) =
-                    pget!(resolve_jid(&input, &self.whatsapp_state, &self.config_rx).await);
+                    pget!(resolve_jid(&input, &self.whatsapp_state, &self.config_rx, context.session_id).await);
                 let msg_id = pget!(get_str(&input, "message_id")).to_string();
 
                 // Build read receipt node manually (send_protocol_receipt is pub(crate))
