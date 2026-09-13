@@ -629,6 +629,17 @@ pub(crate) async fn handle_message(
     // `sender_pn`) — the gate matches the allow/operator lists against both.
     let sender_user = phone.trim_start_matches('+').to_string();
     let sender_alt_user = info.source.sender_alt.as_ref().map(|j| j.user.to_string());
+    // One of the pair, chosen the same way every time, for anything used as a
+    // MAP KEY (#1533). `phone` is whichever address this stanza happened to
+    // arrive on, so keying on it gives a contact two entries the moment the
+    // addressing mode changes: two sessions, an approval that can never be
+    // resolved, a photo album that never batches. See `identity.rs` for why
+    // "prefer sender_alt" is the wrong rule rather than the obvious one.
+    //
+    // Deliberately NOT used for the allow/owner checks: those accept either
+    // identity, which is a different question from picking one.
+    let canonical_phone =
+        super::identity::canonical_user(&info.source.sender, info.source.sender_alt.as_ref());
     let chat_user_part = chat_user(&info);
     if !wa_should_respond(
         wa_cfg.response_policy,
@@ -715,7 +726,11 @@ pub(crate) async fn handle_message(
                 );
                 return;
             }
-            if wa_state.resolve_pending_approval(&phone, c).await.is_some() {
+            if wa_state
+                .resolve_pending_approval(&canonical_phone, c)
+                .await
+                .is_some()
+            {
                 tracing::info!("WhatsApp: approval from {}: {:?}", phone, c);
                 if c == WaApproval::Always {
                     crate::utils::persist_auto_session_policy();
@@ -776,10 +791,12 @@ pub(crate) async fn handle_message(
             if !injected.is_empty() {
                 // Buffer the image marker for batching
                 let caption = extract_text(&msg);
-                wa_state.buffer_photo(&phone, injected, caption).await;
+                wa_state
+                    .buffer_photo(&canonical_phone, injected, caption)
+                    .await;
 
                 // Reset debounce timer
-                let token = wa_state.reset_photo_debounce(&phone).await;
+                let token = wa_state.reset_photo_debounce(&canonical_phone).await;
 
                 // Wait for debounce to expire
                 if !wa_state.wait_photo_debounce(&token).await {
@@ -788,8 +805,8 @@ pub(crate) async fn handle_message(
                 }
 
                 // Debounce expired, drain all buffered photos
-                let (markers, first_caption) = wa_state.drain_photo_buffer(&phone).await;
-                wa_state.cleanup_photo_debounce(&phone).await;
+                let (markers, first_caption) = wa_state.drain_photo_buffer(&canonical_phone).await;
+                wa_state.cleanup_photo_debounce(&canonical_phone).await;
 
                 if markers.is_empty() {
                     return;
@@ -915,11 +932,11 @@ pub(crate) async fn handle_message(
     };
     let session_phone = match (is_owner_self_chat, &owner_number) {
         (true, Some(num)) => num.clone(),
-        _ => sender_alt_user
-            .as_deref()
-            .filter(|alt| !alt.is_empty())
-            .unwrap_or(&phone)
-            .to_string(),
+        // Preferring `sender_alt` outright reads as "prefer the phone number"
+        // and is only that for a LID-addressed sender; for a PN-addressed one
+        // it prefers the LID, so the session was keyed by an opaque id and its
+        // label read "WhatsApp: 83911178752119" (#1533).
+        _ => canonical_phone.clone(),
     };
 
     // Where ALL agent output for this turn is sent. For the owner self-chat the
@@ -1521,7 +1538,9 @@ pub(crate) async fn handle_message(
 
         let client = client.clone();
         let chat_jid = reply_target.clone();
-        let phone_key = phone.clone();
+        // Must match what `resolve_pending_approval` is called with, or the
+        // reply looks up a key that was never registered (#1533).
+        let phone_key = canonical_phone.clone();
         let wa_state = wa_state.clone();
         Arc::new(move |tool_info| {
             let client = client.clone();

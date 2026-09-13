@@ -920,6 +920,7 @@ pub mod whatsapp_blocklist_test;
 pub mod whatsapp_broadcast_test;
 pub mod whatsapp_ephemeral_test;
 pub mod whatsapp_handler_test;
+pub mod whatsapp_identity_test;
 pub mod whatsapp_inbound_test;
 pub mod whatsapp_interactive_test;
 pub mod whatsapp_outbox_test;
