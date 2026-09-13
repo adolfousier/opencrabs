@@ -297,6 +297,23 @@ impl AcpServer {
             state.agent.set_session_model(st.id, model.to_string());
             *st.model.lock().await = Some(model.to_string());
         }
+        // Persist the pick on the session row so session/load in a future
+        // process can rehydrate it — the agent service maps are in-memory.
+        match state.sessions.get_session_required(st.id).await {
+            Ok(mut row) => {
+                match parse_pair(model) {
+                    Ok((provider_name, bare_model)) => {
+                        row.provider_name = Some(provider_name);
+                        row.model = Some(bare_model);
+                    }
+                    Err(_) => row.model = Some(model.to_string()),
+                }
+                if let Err(e) = state.sessions.update_session(&row).await {
+                    tracing::warn!("acp: model pick not persisted for {}: {e}", st.id);
+                }
+            }
+            Err(e) => tracing::warn!("acp: model pick not persisted for {}: {e}", st.id),
+        }
         state.handle.respond(id, json!({}));
     }
 
