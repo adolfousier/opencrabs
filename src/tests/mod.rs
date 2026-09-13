@@ -402,6 +402,8 @@ pub mod telegram_details_fallback_render_test;
 #[cfg(feature = "telegram")]
 pub mod telegram_general_topic_delivery_test;
 #[cfg(feature = "telegram")]
+pub mod telegram_intermediate_status_report_test;
+#[cfg(feature = "telegram")]
 pub mod telegram_mentions_other_bot_test;
 #[cfg(feature = "telegram")]
 pub mod telegram_menu_scope_test;
