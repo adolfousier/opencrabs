@@ -293,11 +293,11 @@ fn resolve_insertion_index(
     plan: &PlanDocument,
     insert_before: Option<&serde_json::Value>,
     insert_after: Option<&serde_json::Value>,
-) -> Result<usize> {
+) -> std::result::Result<usize, String> {
     if insert_before.is_some() && insert_after.is_some() {
-        return Err(ToolError::InvalidInput(
+        return Err(
             "Cannot specify both 'insert_before' and 'insert_after'. Choose one.".to_string(),
-        ));
+        );
     }
 
     let total = plan.tasks.len();
@@ -321,30 +321,28 @@ fn resolve_insertion_index(
             match s.to_lowercase().trim() {
                 "final" | "last" => total,
                 other => {
-                    return Err(ToolError::InvalidInput(format!(
+                    return Err(format!(
                         "Invalid 'insert_before' token '{other}'. Use a 1-based task number, 'final', or 'last'."
-                    )));
+                    ));
                 }
             }
         } else {
-            return Err(ToolError::InvalidInput(
+            return Err(
                 "'insert_before' must be an integer (1-based task number) or string ('final' / 'last').".to_string(),
-            ));
+            );
         };
 
         if order == 0 {
-            return Err(ToolError::InvalidInput(
-                "Task numbers start at 1, not 0.".to_string(),
-            ));
+            return Err("Task numbers start at 1, not 0.".to_string());
         }
 
         if order > total {
             total
         } else {
             if order <= max_completed_order {
-                return Err(ToolError::InvalidInput(format!(
+                return Err(format!(
                     "Cannot insert before task #{order}: task #{order} is already completed/skipped. Earliest valid insertion slot is after task #{max_completed_order}."
-                )));
+                ));
             }
             order - 1
         }
@@ -368,28 +366,26 @@ fn resolve_insertion_index(
                         .unwrap_or(max_completed_order)
                 }
                 other => {
-                    return Err(ToolError::InvalidInput(format!(
+                    return Err(format!(
                         "Invalid 'insert_after' token '{other}'. Use a 1-based task number or 'current'."
-                    )));
+                    ));
                 }
             }
         } else {
-            return Err(ToolError::InvalidInput(
+            return Err(
                 "'insert_after' must be an integer (1-based task number) or string ('current')."
                     .to_string(),
-            ));
+            );
         };
 
         if order == 0 {
-            return Err(ToolError::InvalidInput(
-                "Task numbers start at 1, not 0.".to_string(),
-            ));
+            return Err("Task numbers start at 1, not 0.".to_string());
         }
 
         if order < max_completed_order {
-            return Err(ToolError::InvalidInput(format!(
+            return Err(format!(
                 "Cannot insert after task #{order}: tasks through #{max_completed_order} are already completed/skipped. Earliest valid insertion slot is after task #{max_completed_order}."
-            )));
+            ));
         }
 
         order.min(total)
@@ -2123,11 +2119,14 @@ impl Tool for PlanTool {
                     ));
                 }
 
-                let target_idx = resolve_insertion_index(
+                let target_idx = match resolve_insertion_index(
                     current_plan,
                     insert_before.as_ref(),
                     insert_after.as_ref(),
-                )?;
+                ) {
+                    Ok(idx) => idx,
+                    Err(reason) => return Ok(ToolResult::error(reason)),
+                };
 
                 // Get criteria_policy for validation (#1133)
                 let policy = ralph_loop_config(&context.working_dir())
@@ -2212,11 +2211,14 @@ impl Tool for PlanTool {
                     )
                 })?;
 
-                let target_idx = resolve_insertion_index(
+                let target_idx = match resolve_insertion_index(
                     current_plan,
                     insert_before.as_ref(),
                     insert_after.as_ref(),
-                )?;
+                ) {
+                    Ok(idx) => idx,
+                    Err(reason) => return Ok(ToolResult::error(reason)),
+                };
 
                 // Get criteria_policy for validation (#1133)
                 let policy = ralph_loop_config(&context.working_dir())
