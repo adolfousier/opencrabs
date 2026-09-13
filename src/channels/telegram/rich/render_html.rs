@@ -87,9 +87,14 @@ fn render_block(block: &Block, wrap_p: bool) -> String {
                 "diagram rendered locally but could not be embedded in HTML",
                 source,
             ),
-            MermaidResult::Failed(err) | MermaidResult::ParseError(err) => {
-                super::mermaid::failure_html(err, source)
+            // #189: same split as the markdown path — a transient failure
+            // offers the svg hatch (the response had already passed the
+            // image check, so the render may exist server-side), while a
+            // deterministic parse rejection does not.
+            MermaidResult::Failed(err) => {
+                super::mermaid::failure_html(err, source) + &super::mermaid::svg_link_html(source)
             }
+            MermaidResult::ParseError(err) => super::mermaid::failure_html(err, source),
         },
         Block::Quote(inner) => format!(
             "<blockquote>{}</blockquote>",

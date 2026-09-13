@@ -14,9 +14,10 @@ use crate::channels::telegram::rich::api::{
 use crate::channels::telegram::rich::ast::{Block, Inline, MermaidResult};
 use crate::channels::telegram::rich::markdown_to_html_mermaid;
 use crate::channels::telegram::rich::mermaid::{
-    MediaEntry, base64url, cache_get, cache_put, classify_render_failure, error_note, failure_html,
-    find_mermaid_fences, has_mermaid_fence, image_html, ink_url, is_image_response,
-    looks_like_mermaid_source, markdown_failure_block, replacement_for, resolve_blocks,
+    MediaEntry, PREVALIDATE_CONNECT_TIMEOUT_SECS, PREVALIDATE_TIMEOUT_SECS, base64url, cache_get,
+    cache_put, classify_render_failure, error_note, failure_html, find_mermaid_fences,
+    has_mermaid_fence, image_html, ink_url, is_image_response, looks_like_mermaid_source,
+    markdown_failure_block, markdown_failure_block_with_link, replacement_for, resolve_blocks,
     resolve_markdown_media,
 };
 
@@ -398,6 +399,70 @@ fn markdown_failure_block_contains_warning_error_and_source() {
     assert!(md.contains("Parse error on line 2"));
     assert!(md.contains("graph TD; A-->B"));
     assert!(md.contains("Source:"));
+    assert!(
+        !md.contains("[svg]"),
+        "the plain block carries no escape hatch. Got:\n{md}"
+    );
+}
+
+#[test]
+fn markdown_failure_block_with_link_appends_a_tappable_svg_hatch() {
+    // #189 Leg 4: the transient-failure variant offers the vector render as a
+    // markdown link, which `inline.rs` parses and `render_html.rs` emits as a
+    // real <a href> anchor — tappable rather than raw text.
+    let md = markdown_failure_block_with_link("diagram renderer dropped the image", "flowchart TD");
+    assert!(md.contains("> ⚠️ **Mermaid diagram could not be rendered**"));
+    assert!(md.contains("diagram renderer dropped the image"));
+    assert!(md.contains("flowchart TD"));
+    assert!(
+        md.contains("[svg](https://mermaid.ink/svg/"),
+        "the hatch must be a markdown link to the vector endpoint. Got:\n{md}"
+    );
+}
+
+#[test]
+fn replacement_for_failed_offers_the_hatch_but_parse_error_does_not() {
+    // #189: the split is load-bearing. A Failed outcome lost its body AFTER
+    // the `2xx + image/*` check, so the render likely exists server-side and
+    // the link is worth offering. A ParseError is a deterministic rejection —
+    // the renderer produced no diagram, so a link would be dead.
+    let (failed_md, _) = replacement_for(
+        &MermaidResult::Failed("diagram renderer dropped the image".into()),
+        0,
+        "flowchart TD",
+    );
+    assert!(
+        failed_md.contains("[svg](https://mermaid.ink/svg/"),
+        "a transient failure must carry the hatch. Got:\n{failed_md}"
+    );
+
+    let (parse_md, _) = replacement_for(
+        &MermaidResult::ParseError("Parse error on line 2".into()),
+        0,
+        "flowchart TD",
+    );
+    assert!(
+        !parse_md.contains("[svg]"),
+        "a parse rejection must NOT carry the hatch. Got:\n{parse_md}"
+    );
+}
+
+#[test]
+fn prevalidate_budgets_split_connect_from_total() {
+    // #189 Leg 3: the old single 10s budget covered connect + headers + the
+    // full body, so a slow ~55-140KB stream could exhaust it and land on the
+    // dropped-body branch indistinguishable from an unreachable host. The
+    // connect budget must now be strictly smaller than the total, or the
+    // split has no effect.
+    //
+    // Evaluated at compile time: these are consts, so a runtime assert both
+    // trips `assertions_on_constants` and defers to run-time a contradiction
+    // the compiler can already see (same idiom as question_common_test.rs).
+    const {
+        assert!(PREVALIDATE_CONNECT_TIMEOUT_SECS < PREVALIDATE_TIMEOUT_SECS);
+        // The total must cover a slow body download, not just a handshake.
+        assert!(PREVALIDATE_TIMEOUT_SECS >= 30);
+    }
 }
 
 // ---------------------------------------------------------------------------

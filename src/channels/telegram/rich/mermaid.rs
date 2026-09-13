@@ -27,6 +27,12 @@ use std::time::{Duration, Instant};
 /// base64url-appended. NOTE: this sends the diagram text to a third party.
 const MERMAID_INK_BASE: &str = "https://mermaid.ink/img/";
 
+/// Dedicated vector endpoint for a diagram source (#189 Leg 4). Same base64url
+/// payload as [`ink_url`], over `https://mermaid.ink/svg/` — the endpoint
+/// serves a real `image/svg+xml`. Build-only URL: the browser does the fetch,
+/// this host never touches mermaid.ink for it.
+pub(crate) const MERMAID_INK_SVG_BASE: &str = "https://mermaid.ink/svg/";
+
 /// Query parameters appended to every mermaid.ink render request.
 ///
 /// Natural-size PNG request: no width/scale overrides, so mermaid.ink
@@ -47,8 +53,23 @@ const MERMAID_INK_CLAMP_PARAMS: &str = "?type=png&width=1200";
 /// (measured live, #1238: 3200×7404 refused, 1611×3727 accepted).
 const PHOTO_MAX_TOTAL_DIMS: f32 = 9_600.0;
 
-/// stall message delivery; on timeout we degrade to a legible failure block.
-const PREVALIDATE_TIMEOUT_SECS: u64 = 10;
+/// Total budget for one renderer fetch — connect, headers AND body (#189).
+/// The body is the expensive leg: live renders measured 12 KB–140 KB
+/// (2026-09-12), so this must cover a slow stream rather than only a slow
+/// handshake. A stalled download degrades to a legible failure block.
+pub(crate) const PREVALIDATE_TIMEOUT_SECS: u64 = 30;
+
+/// Connect-phase budget, split out of the total (#189). A renderer that will
+/// not accept a connection within this window is down, and spending the whole
+/// body budget waiting for a handshake wastes the ladder. Before the split a
+/// single 10s total let a slow body masquerade as an unreachable host.
+pub(crate) const PREVALIDATE_CONNECT_TIMEOUT_SECS: u64 = 5;
+
+/// One bounded re-fetch after a transient body failure (#189). By then the
+/// response has already passed the `2xx + image/*` check, so the render
+/// exists server-side and the retry is a cheap re-read of bytes we know are
+/// there — one network wobble should not cost the picture.
+const BODY_RETRY_DELAY_MS: u64 = 300;
 
 /// Cap on how much of the renderer's error body we surface, so a huge HTML
 /// error page can't blow up the message.
@@ -224,6 +245,14 @@ pub(crate) fn ink_url(source: &str) -> String {
     ink_url_params(source, MERMAID_INK_PARAMS)
 }
 
+/// The dedicated vector endpoint for a diagram source (#189 Leg 4).
+/// Same base64url payload as [`ink_url`], over `https://mermaid.ink/svg/` —
+/// the endpoint serves a real `image/svg+xml`. Build-only URL: the browser
+/// does the fetch, the server never touches mermaid.ink for this.
+pub(crate) fn ink_url_svg(source: &str) -> String {
+    format!("{}{}", MERMAID_INK_SVG_BASE, base64url(source))
+}
+
 /// Same URL at an explicit parameter set — the ladder's clamp rung.
 fn ink_url_params(source: &str, params: &str) -> String {
     format!("{}{}{}", MERMAID_INK_BASE, base64url(source), params)
@@ -324,6 +353,96 @@ fn finish(source: &str, outcome: MermaidResult) -> MermaidResult {
     outcome
 }
 
+/// Record a render failure and return it (#189). Before this helper every
+/// non-image exit returned [`MermaidResult::Failed`] with ZERO log output, so
+/// a dropped body left no trace in the daemon log and incidents were argued
+/// from absence — the same defect class #64 fixed for non-200 responses, where
+/// the body leg was simply missed. `stage` names the ladder rung, and the
+/// `timed_out` split is what distinguishes a stalled download from a refused
+/// connection; both used to print the identical user-facing string.
+fn fail(
+    stage: &str,
+    source: &str,
+    note: impl Into<String>,
+    err: Option<&reqwest::Error>,
+) -> MermaidResult {
+    let note = note.into();
+    let detail = err.map(|e| e.to_string()).unwrap_or_default();
+    tracing::warn!(
+        stage,
+        source_len = source.len(),
+        timed_out = err.map(|e| e.is_timeout()).unwrap_or(false),
+        error = %detail,
+        note = %note,
+        "mermaid render failed"
+    );
+    MermaidResult::Failed(note)
+}
+
+/// Read a render body in full, retrying ONCE on a transient failure (#189).
+/// The caller only reaches this with a response that already passed the
+/// `2xx + image/*` check, so the render exists server-side: one mid-stream
+/// drop is worth exactly one cheap re-fetch before we degrade to a failure
+/// block. `stage` labels the rung (`body` / `body-clamp`) so the retry rung is
+/// distinguishable in the log while the user-facing note stays clean.
+async fn read_body_with_retry(
+    client: &reqwest::Client,
+    url: &str,
+    first: reqwest::Response,
+    source: &str,
+    stage: &str,
+) -> Result<Vec<u8>, MermaidResult> {
+    match first.bytes().await {
+        Ok(b) => return Ok(b.to_vec()),
+        Err(e) => {
+            tracing::warn!(
+                stage,
+                source_len = source.len(),
+                timed_out = e.is_timeout(),
+                error = %e,
+                "mermaid render body read failed; retrying once"
+            );
+        }
+    }
+    tokio::time::sleep(Duration::from_millis(BODY_RETRY_DELAY_MS)).await;
+    let retry = match client.get(url).send().await {
+        Ok(r) => r,
+        Err(e) => {
+            return Err(fail(
+                &format!("{stage}-retry"),
+                source,
+                "diagram renderer unreachable",
+                Some(&e),
+            ));
+        }
+    };
+    let status = retry.status().as_u16();
+    let content_type = retry
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .to_string();
+    if !is_image_response(status, &content_type) {
+        let body = retry.text().await.unwrap_or_default();
+        return Err(fail(
+            &format!("{stage}-retry"),
+            source,
+            error_note(status, &body),
+            None,
+        ));
+    }
+    match retry.bytes().await {
+        Ok(b) => Ok(b.to_vec()),
+        Err(e) => Err(fail(
+            &format!("{stage}-retry"),
+            source,
+            "diagram renderer dropped the image",
+            Some(&e),
+        )),
+    }
+}
+
 /// Pre-validate a single mermaid diagram against the renderer. On HTTP 200
 /// with an `image/*` content type it DOWNLOADS the rendered PNG and returns
 /// [`MermaidResult::ImageBytes`] — Telegram never fetches a URL from us
@@ -350,22 +469,25 @@ pub(crate) async fn resolve(source: &str) -> MermaidResult {
     let url = ink_url(source);
 
     let client = match reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(
+            PREVALIDATE_CONNECT_TIMEOUT_SECS,
+        ))
         .timeout(std::time::Duration::from_secs(PREVALIDATE_TIMEOUT_SECS))
         .build()
     {
         Ok(c) => c,
-        Err(_) => return MermaidResult::Failed("diagram renderer unavailable".into()),
+        Err(e) => return fail("client", source, "diagram renderer unavailable", Some(&e)),
     };
 
     let resp = match client.get(&url).send().await {
         Ok(r) => r,
         Err(e) => {
             let note = if e.is_timeout() {
-                "diagram renderer timed out".to_string()
+                "diagram renderer timed out"
             } else {
-                "diagram renderer unreachable".to_string()
+                "diagram renderer unreachable"
             };
-            return MermaidResult::Failed(note);
+            return fail("connect", source, note, Some(&e));
         }
     };
 
@@ -383,11 +505,9 @@ pub(crate) async fn resolve(source: &str) -> MermaidResult {
         // server-side URL fetcher is the unreliable hop — it 400s with
         // "failed to get HTTP URL content" on URLs this host fetches fine —
         // so Telegram never sees a URL at all.
-        let body = match resp.bytes().await {
+        let body = match read_body_with_retry(&client, &url, resp, source, "body").await {
             Ok(b) => b,
-            Err(_) => {
-                return MermaidResult::Failed("diagram renderer dropped the image".into());
-            }
+            Err(outcome) => return outcome,
         };
         // Dimension ladder (#1238): natural size first; if it busts
         // Telegram's photo box, re-request the SAME diagram with a
@@ -403,10 +523,15 @@ pub(crate) async fn resolve(source: &str) -> MermaidResult {
                 let clamp_url = ink_url_params(source, MERMAID_INK_CLAMP_PARAMS);
                 let cresp = match client.get(&clamp_url).send().await {
                     Ok(r) => r,
-                    Err(_) => {
-                        return MermaidResult::Failed(format!(
-                            "rendered diagram {w}x{h} exceeds the photo box and the width-clamp retry failed"
-                        ));
+                    Err(e) => {
+                        return fail(
+                            "clamp-connect",
+                            source,
+                            format!(
+                                "rendered diagram {w}x{h} exceeds the photo box and the width-clamp retry failed"
+                            ),
+                            Some(&e),
+                        );
                     }
                 };
                 let cstatus = cresp.status().as_u16();
@@ -418,18 +543,24 @@ pub(crate) async fn resolve(source: &str) -> MermaidResult {
                     .to_string();
                 if !is_image_response(cstatus, &ctype) {
                     let cbody = cresp.text().await.unwrap_or_default();
-                    return MermaidResult::Failed(error_note(cstatus, &cbody));
+                    return fail("clamp-response", source, error_note(cstatus, &cbody), None);
                 }
-                let cbytes = match cresp.bytes().await {
-                    Ok(b) => b,
-                    Err(_) => {
-                        return MermaidResult::Failed("width-clamp retry dropped the image".into());
-                    }
-                };
+                let cbytes =
+                    match read_body_with_retry(&client, &clamp_url, cresp, source, "body-clamp")
+                        .await
+                    {
+                        Ok(b) => b,
+                        Err(outcome) => return outcome,
+                    };
                 if let Some((cw, ch)) = png_dims(&cbytes).filter(|&(cw, ch)| !photo_fits(cw, ch)) {
-                    return MermaidResult::Failed(format!(
-                        "rendered diagram exceeds the photo box even at the width clamp: {cw}x{ch} px"
-                    ));
+                    return fail(
+                        "clamp-dims",
+                        source,
+                        format!(
+                            "rendered diagram exceeds the photo box even at the width clamp: {cw}x{ch} px"
+                        ),
+                        None,
+                    );
                 }
                 tracing::info!(
                     bytes = cbytes.len(),
@@ -540,9 +671,11 @@ pub(crate) fn replacement_for(
                 }),
             )
         }
-        MermaidResult::Failed(err) | MermaidResult::ParseError(err) => {
-            (markdown_failure_block(err, source), None)
-        }
+        // #189: a transient failure keeps the svg hatch — the render may well
+        // exist server-side; a deterministic parse rejection does not, because
+        // the renderer produced no diagram to link to.
+        MermaidResult::Failed(err) => (markdown_failure_block_with_link(err, source), None),
+        MermaidResult::ParseError(err) => (markdown_failure_block(err, source), None),
     }
 }
 
@@ -651,6 +784,22 @@ pub(crate) fn markdown_failure_block(err: &str, source: &str) -> String {
     )
 }
 
+/// #189: the markdown failure block plus a `[svg]` escape hatch, for a
+/// TRANSIENT failure ([`MermaidResult::Failed`]) only. In that case the
+/// response had already passed the `2xx + image/*` check before the body was
+/// lost, so the render very likely exists server-side and the link is worth
+/// offering. A [`MermaidResult::ParseError`] is a deterministic rejection of
+/// this exact source — the renderer produced no diagram, so the link would be
+/// dead and the plain block stays. The URL is build-only: the browser does the
+/// fetching, this host never touches mermaid.ink for it.
+pub(crate) fn markdown_failure_block_with_link(err: &str, source: &str) -> String {
+    format!(
+        "{}\n\n[svg]({})",
+        markdown_failure_block(err, source),
+        ink_url_svg(source)
+    )
+}
+
 /// HTML for a successfully rendered diagram: a bare `<img>` in a `<figure>`,
 /// which the Telegram rich-HTML parser turns into a native photo block.
 pub(crate) fn image_html(url: &str) -> String {
@@ -660,6 +809,12 @@ pub(crate) fn image_html(url: &str) -> String {
 /// HTML for a diagram that could not be rendered: a bold warning line, the
 /// renderer's error note in a blockquote, and the original source in a code
 /// block so the reader can see (and fix) what failed.
+/// #189 Leg 4: generic svg escape-hatch link fragment for HTML-fallback
+/// contexts — a small `[svg]` anchor to the vector render.
+pub(crate) fn svg_link_html(source: &str) -> String {
+    format!("\n<a href=\"{}\">[svg]</a>", escape(&ink_url_svg(source)))
+}
+
 pub(crate) fn failure_html(err: &str, source: &str) -> String {
     format!(
         "<b>⚠️ Mermaid diagram could not be rendered</b>\n<blockquote>{}</blockquote>\n<pre><code>{}</code></pre>",
