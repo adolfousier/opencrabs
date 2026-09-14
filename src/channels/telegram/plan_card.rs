@@ -383,14 +383,19 @@ pub(crate) async fn refresh_plan_card(
             // latest-wins and the governor's drainer lands it on refill; the
             // tracked signature is saved now so identical later refreshes skip
             // (a permanently failed queue drain self-heals on the next
-            // differing-content plan change).
-            let admitted = super::governor::edit_admission(
+            // differing-content plan change). Media and keyboard ride the
+            // queued final via edit_admission_media_kb (owner law: extend,
+            // never bypass the governor, #155, #229).
+            let admitted = super::governor::edit_admission_media_kb(
                 bot,
                 chat,
                 mid,
                 super::governor::EditClass::Final,
                 rich_html.clone(),
                 true,
+                Vec::new(),
+                kb_val.clone(),
+                super::governor::FinalDialect::Html,
             )
             .await;
             if !admitted {

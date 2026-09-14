@@ -8,7 +8,8 @@
 use std::time::{Duration, Instant};
 
 use crate::channels::telegram::governor::{
-    Bucket, Counters, EditClass, ensure_bucket, format_summary, is_permanent_edit_error,
+    Bucket, Counters, EditClass, FinalDialect, ensure_bucket, format_summary,
+    is_permanent_edit_error,
 };
 
 #[test]
@@ -117,4 +118,11 @@ fn rate_limiter_defaults_sized_below_group_limit() {
     assert_eq!(cfg.edits_per_minute, 18);
     assert_eq!(cfg.rich_per_minute, 18);
     assert_eq!(cfg.sends_ceiling_per_minute, 18);
+}
+
+/// #229: FinalDialect defaults to Html and supports Markdown variant.
+#[test]
+fn final_dialect_defaults_to_html() {
+    assert_eq!(FinalDialect::default(), FinalDialect::Html);
+    assert_ne!(FinalDialect::Html, FinalDialect::Markdown);
 }
