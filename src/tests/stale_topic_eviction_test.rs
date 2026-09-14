@@ -195,9 +195,127 @@ async fn outbox_retries_unthreaded_after_thread_not_found() {
     .await
     .expect("the send must be healed by the unthreaded retry, not dropped");
 
-    assert_eq!(sent.len(), 1);
-    assert_eq!(sent[0].0, 77);
+    assert_eq!(sent.sent.len(), 1);
+    assert_eq!(sent.sent[0].0, 77);
+    assert_eq!(sent.effective_thread_id, None);
 
     dead.assert_async().await;
     healed.assert_async().await;
+}
+
+/// Regression test for #169: after stale-topic eviction and unthreaded retry,
+/// persisting the outgoing message via `OutboxSent::record_outgoing` must NOT
+/// re-insert the dead topic ID into `channel_messages` and re-poison
+/// `latest_thread_id_for_chat`.
+#[tokio::test]
+async fn outbox_eviction_persists_without_repoisoning_latest_thread() {
+    use crate::channels::telegram::send::{latest_thread_id_for_chat, send_markdown_outbox};
+
+    let _guard = crate::channels::telegram::governor::test_support::registry_guard().await;
+    let mut pinned: crate::config::Config =
+        toml::from_str(include_str!("../../config.toml.example"))
+            .expect("embedded config.toml.example must parse");
+    pinned.channels.telegram.rich_messages = true;
+    crate::config::Config::set_current(pinned);
+
+    let db = Database::connect_in_memory().await.unwrap();
+    db.run_migrations().await.unwrap();
+    let pool = db.pool().clone();
+    let repo = ChannelMessageRepository::new(pool.clone());
+
+    let mk = |chat: i64, mid: &str, thread: Option<i32>| {
+        let cm = ChannelMessage::new(
+            "telegram".into(),
+            chat.to_string(),
+            None,
+            "u1".into(),
+            "alice".into(),
+            format!("msg {mid}"),
+            "text".into(),
+            Some(mid.into()),
+        );
+        match thread {
+            Some(t) => cm.with_thread(Some(t.to_string()), None),
+            None => cm,
+        }
+    };
+    repo.insert(&mk(CHAT, "m-1", Some(DEAD_TOPIC)))
+        .await
+        .unwrap();
+    repo.insert(&mk(CHAT, "m-2", Some(DEAD_TOPIC)))
+        .await
+        .unwrap();
+
+    let mut server = mockito::Server::new_async().await;
+    let _dead = server
+        .mock("POST", "/botTESTTOKEN/sendRichMessage")
+        .match_body(mockito::Matcher::PartialJson(
+            serde_json::json!({"message_thread_id": DEAD_TOPIC}),
+        ))
+        .with_status(400)
+        .with_header("content-type", "application/json")
+        .with_body(
+            r#"{"ok":false,"error_code":400,"description":"Bad Request: message thread not found"}"#,
+        )
+        .expect(1)
+        .create_async()
+        .await;
+
+    let _healed = server
+        .mock("POST", "/botTESTTOKEN/sendRichMessage")
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(
+            r#"{"ok":true,"result":{"message_id":99,"date":1757166400,"chat":{"id":133526395,"type":"private"},"text":"| a | b |\n|---|---|\n| 1 | 2 |"}}"#,
+        )
+        .expect(1)
+        .create_async()
+        .await;
+
+    let bot = teloxide::Bot::with_client(
+        "TESTTOKEN",
+        reqwest_teloxide::Client::builder().build().unwrap(),
+    )
+    .set_api_url(server.url().parse().unwrap());
+
+    let md = "| a | b |\n|---|---|\n| 1 | 2 |";
+    let outbox = send_markdown_outbox(
+        &bot,
+        ChatId(CHAT),
+        Some(ThreadId(teloxide::types::MessageId(DEAD_TOPIC))),
+        md,
+        "tool",
+        "send",
+        None,
+    )
+    .await
+    .expect("the send must succeed on unthreaded fallback");
+
+    assert_eq!(outbox.effective_thread_id, None);
+    assert_eq!(outbox.sent.len(), 1);
+    assert_eq!(outbox.sent[0].0, 99);
+
+    // Call record_outgoing on outbox with the pool
+    outbox.record_outgoing(Some(pool.clone()), CHAT).await;
+
+    // Verify latest_thread_id_for_chat no longer returns DEAD_TOPIC
+    let latest_thread = latest_thread_id_for_chat(CHAT).await;
+    assert_eq!(
+        latest_thread, None,
+        "latest_thread_id_for_chat must be None (General/DM) and not re-poisoned with DEAD_TOPIC"
+    );
+
+    // Query recent messages to ensure newly recorded message carries thread_id == None
+    let rows = repo
+        .recent(Some("telegram"), &CHAT.to_string(), 10, None, None)
+        .await
+        .unwrap();
+    let sent_row = rows
+        .iter()
+        .find(|r| r.platform_message_id.as_deref() == Some("99"))
+        .expect("persisted outgoing message must exist");
+    assert_eq!(
+        sent_row.thread_id, None,
+        "persisted message after eviction must have thread_id None"
+    );
 }

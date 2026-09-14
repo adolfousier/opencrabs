@@ -336,6 +336,25 @@ pub async fn best_effort_note<C>(
     }
 }
 
+/// Result of an outbox send, pairing the delivered message IDs and chunk texts
+/// with the *effective* thread ID after any stale-topic fallback (#116, #169).
+/// When a dead topic (HTTP 400 `message thread not found`) causes an unthreaded
+/// retry, `effective_thread_id` becomes `None` (General/DM) so callers and
+/// persistence cannot accidentally re-poison the database with the evicted topic.
+#[derive(Debug, Clone)]
+pub(crate) struct OutboxSent {
+    pub(crate) sent: Vec<(i32, String)>,
+    pub(crate) effective_thread_id: Option<teloxide::types::ThreadId>,
+}
+
+impl OutboxSent {
+    /// Persist delivered outbox messages for reply recovery using the effective
+    /// thread ID resolved during transmission (#169).
+    pub(crate) async fn record_outgoing(&self, pool: Option<crate::db::Pool>, chat_id: i64) {
+        record_outgoing(pool, chat_id, self.effective_thread_id, &self.sent).await;
+    }
+}
+
 /// One send ladder for every proactive Telegram writer (#1085 P1b R2).
 ///
 /// Owns the wire path end to end: rich-gate (whole message, never chunked —
@@ -349,9 +368,9 @@ pub async fn best_effort_note<C>(
 /// on markup Telegram rejects — now they inherit it.
 ///
 /// `origin`/`origin_detail` feed the correlation telemetry (cron → job
-/// name, tool → arm name). Returns `(message_id, content)` pairs for
-/// reply-recovery persistence. Errors describe the failing attempt and
-/// name any chunks already delivered.
+/// name, tool → arm name). Returns [`OutboxSent`] containing message ID
+/// pairs and the effective thread ID for reply-recovery persistence.
+/// Errors describe the failing attempt and name any chunks already delivered.
 pub(crate) async fn send_markdown_outbox(
     bot: &Bot,
     chat_id: ChatId,
@@ -360,7 +379,7 @@ pub(crate) async fn send_markdown_outbox(
     origin: &str,
     origin_detail: &str,
     reply_to: Option<i32>,
-) -> std::result::Result<Vec<(i32, String)>, String> {
+) -> std::result::Result<OutboxSent, String> {
     // 1. Native rich, as a whole message. `post_rich` owns the telemetry
     // line for this send (with origin + detail threaded through), so the
     // outbox does not double-log the rich success (review F3/F8).
@@ -377,7 +396,12 @@ pub(crate) async fn send_markdown_outbox(
         )
         .await
         {
-            Ok(id) => return Ok(vec![(id, markdown.to_string())]),
+            Ok(id) => {
+                return Ok(OutboxSent {
+                    sent: vec![(id, markdown.to_string())],
+                    effective_thread_id: thread_id,
+                });
+            }
             Err(e) => {
                 // Stale-topic auto-route (#116): a remembered topic that was
                 // deleted on Telegram's side makes EVERY thread-carrying send
@@ -409,7 +433,12 @@ pub(crate) async fn send_markdown_outbox(
                     )
                     .await
                     {
-                        Ok(id) => return Ok(vec![(id, markdown.to_string())]),
+                        Ok(id) => {
+                            return Ok(OutboxSent {
+                                sent: vec![(id, markdown.to_string())],
+                                effective_thread_id: None,
+                            });
+                        }
                         Err(e2) => {
                             tracing::warn!(
                                 "{origin}/{origin_detail}: native rich send failed after \
@@ -522,7 +551,10 @@ pub(crate) async fn send_markdown_outbox(
             }
         }
     }
-    Ok(sent)
+    Ok(OutboxSent {
+        sent,
+        effective_thread_id: thread_id,
+    })
 }
 
 /// Evict a dead forum-topic address chat-scoped (#116): clear the
