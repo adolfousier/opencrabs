@@ -210,14 +210,12 @@ pub enum ShrinkCheck {
 ///
 /// Allows shrinking when:
 /// - `cleanup_intent=true`: User-initiated cleanup with approval gate (only for write_opencrabs_file)
-/// - `dedup_intent=true` AND every byte that disappeared can still be found in the result
 ///
 /// Otherwise any byte loss on a protected file is a hard reject.
 pub fn check_no_shrink(
     path: &Path,
     existing: &str,
     updated: &str,
-    dedup_intent: bool,
     cleanup_intent: bool,
     consolidation: bool,
 ) -> ShrinkCheck {
@@ -249,23 +247,12 @@ pub fn check_no_shrink(
         .and_then(|n| n.to_str())
         .unwrap_or("brain file");
 
-    if dedup_intent && shrink_only_drops_duplicates(existing, updated) {
-        return ShrinkCheck::Allowed;
-    }
-
-    let hint = if dedup_intent {
-        " (dedup_intent was set, but the bytes removed do not all reappear in the result \
-          — that's not deduplication, that's deletion)"
-    } else {
-        ""
-    };
     ShrinkCheck::Rejected {
         message: format!(
             "Refusing to shrink protected brain file {label} by {removed_bytes} bytes. \
              Brain files are append-only — use action='apply' / operation='append' to \
-             add new content. Removals are only allowed for genuine deduplication, and \
-             must opt in via dedup_intent=true with a result that still contains every \
-             unique line of the original.{hint}"
+             add new content. To intentionally shrink or clean up, set cleanup_intent=true \
+             (requires user approval)."
         ),
     }
 }
@@ -463,23 +450,4 @@ pub fn is_duplicate_append(existing: &str, new_content: &str) -> bool {
         filter_duplicate_append(existing, new_content),
         AppendDedup::AllDuplicate
     )
-}
-
-/// Verifies the shrink really is a dedup: every line that was in
-/// `existing` must still be present in `updated` (it's allowed to
-/// appear once instead of multiple times). If any line disappears
-/// completely, this isn't dedup — it's deletion.
-fn shrink_only_drops_duplicates(existing: &str, updated: &str) -> bool {
-    let updated_lines: std::collections::HashSet<&str> =
-        updated.lines().map(str::trim_end).collect();
-    for line in existing.lines() {
-        let trimmed = line.trim_end();
-        if trimmed.is_empty() {
-            continue;
-        }
-        if !updated_lines.contains(trimmed) {
-            return false;
-        }
-    }
-    true
 }

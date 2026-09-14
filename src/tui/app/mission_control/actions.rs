@@ -74,9 +74,6 @@ pub async fn apply_selected(app: &mut App) {
         crate::brain::mission_control::McInboxKind::ProposedTool => tool.apply_tool(&item.id),
         crate::brain::mission_control::McInboxKind::ProposedCommand => tool.apply_command(&item.id),
         crate::brain::mission_control::McInboxKind::ProposedSkill => tool.apply_skill(&item.id),
-        crate::brain::mission_control::McInboxKind::ProposedBrainDedup => {
-            tool.apply_brain_dedup(&item.id)
-        }
     };
 
     let msg = match result {

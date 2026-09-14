@@ -10,17 +10,7 @@ use chrono::{DateTime, Utc};
 /// Optional rich detail for an inbox item, used by the detail popup
 /// to render type-specific content beyond the generic summary line.
 #[derive(Debug, Clone)]
-pub enum McInboxDetail {
-    /// Brain-file dedup proposal — carries the actual duplicate text,
-    /// rationale, what it duplicates, and any stub-risk warnings so
-    /// the user can make an informed apply/reject decision.
-    BrainDedup {
-        duplicate_text: String,
-        rationale: String,
-        duplicate_of: String,
-        warnings: Vec<String>,
-    },
-}
+pub enum McInboxDetail {}
 
 /// One actionable item in the inbox panel — typically an RSI proposal.
 #[derive(Debug, Clone)]
@@ -54,9 +44,6 @@ pub enum McInboxKind {
     /// RSI-proposed skill (lands at `~/.opencrabs/skills/<name>/SKILL.md`
     /// on apply, with YAML frontmatter wrapping the proposed body).
     ProposedSkill,
-    /// RSI-proposed brain file dedup (applied via `write_opencrabs_file`
-    /// with `dedup_intent=true` to shrink a brain file).
-    ProposedBrainDedup,
 }
 
 impl McInboxKind {
@@ -65,7 +52,6 @@ impl McInboxKind {
             Self::ProposedTool => "tool",
             Self::ProposedCommand => "command",
             Self::ProposedSkill => "skill",
-            Self::ProposedBrainDedup => "dedup",
         }
     }
 }

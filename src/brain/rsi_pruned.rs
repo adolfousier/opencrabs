@@ -18,7 +18,7 @@
 //! ```
 //!
 //! Hook points:
-//! - `write_opencrabs_file` tool: when cleanup_intent or dedup_intent
+//! - `write_opencrabs_file` tool: when cleanup_intent
 //!   shrinks a protected brain file, diff old vs new to find removed
 //!   sections and record them.
 //! - `sync_templates()`: before appending a new upstream section,

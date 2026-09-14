@@ -87,7 +87,7 @@ fn a_bounded_consolidation_is_allowed_through_the_gate() {
     let existing = format!("intro\n\n{LONG_RULE}\n\ntail");
     let updated = format!("intro\n\n{TIGHT_RULE}\n\ntail");
     assert_eq!(
-        check_no_shrink(&protected(), &existing, &updated, false, false, true),
+        check_no_shrink(&protected(), &existing, &updated, false, true),
         ShrinkCheck::Allowed
     );
 }
@@ -137,7 +137,7 @@ fn the_byte_cap_stops_a_consolidation_claim_from_deleting_a_section() {
         "fixture must exceed the cap to be meaningful"
     );
     assert!(matches!(
-        check_no_shrink(&protected(), &existing, &updated, false, false, true),
+        check_no_shrink(&protected(), &existing, &updated, false, true),
         ShrinkCheck::Rejected { .. }
     ));
 }
@@ -147,7 +147,7 @@ fn without_the_consolidation_flag_append_only_still_governs() {
     let existing = format!("intro\n\n{LONG_RULE}\n\ntail");
     let updated = format!("intro\n\n{TIGHT_RULE}\n\ntail");
     assert!(matches!(
-        check_no_shrink(&protected(), &existing, &updated, false, false, false),
+        check_no_shrink(&protected(), &existing, &updated, false, false),
         ShrinkCheck::Rejected { .. }
     ));
 }
@@ -163,7 +163,6 @@ fn growth_is_unaffected_by_any_of_this() {
                 &existing,
                 &updated,
                 false,
-                false,
                 consolidation
             ),
             ShrinkCheck::Allowed
@@ -176,7 +175,7 @@ fn unprotected_files_are_untouched() {
     let mut p = crate::config::opencrabs_home();
     p.push("scratch.txt");
     assert_eq!(
-        check_no_shrink(&p, LONG_RULE, "x", false, false, false),
+        check_no_shrink(&p, LONG_RULE, "x", false, false),
         ShrinkCheck::Allowed
     );
 }
