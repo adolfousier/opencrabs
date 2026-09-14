@@ -295,13 +295,6 @@ impl TelegramAgent {
                                 let parsed = rest.rsplit_once(':').and_then(|(tok, i)| {
                                     Some((tok.to_string(), i.parse::<usize>().ok()?))
                                 });
-                                // The tapped token, for the mid-turn re-arm below
-                                // (#1226 G): the busy guard fires after the stash
-                                // was consumed, so the token must be re-registered
-                                // under its original value for a retry tap to work.
-                                let tapped_token = parsed
-                                    .as_ref()
-                                    .map(|(tok, _)| tok.clone());
                                 let taken = match parsed {
                                     Some((cb_token, idx)) => {
                                         let t = state.take_pending_followup(&cb_token, idx).await;
@@ -465,7 +458,6 @@ impl TelegramAgent {
                                     let agent_clone = agent.clone();
                                     let bot_clone = bot.clone();
                                     let state_clone = state.clone();
-                                    let rearm_token = tapped_token.clone();
                                     let query_id = query.id.clone();
                                     tokio::spawn(async move {
                                         // Record the pick ON the suggestion block
@@ -703,42 +695,22 @@ impl TelegramAgent {
                                             match state_clone.try_begin_turn(sid) {
                                                 Some(g) => g,
                                                 None => {
-                                                    // #1226 G: the stash was already
-                                                    // consumed above, so a silent drop
-                                                    // would eat the choice while the
-                                                    // keyboard stays rendered with a
-                                                    // dead token. Re-arm the SAME token
-                                                    // (buttons keep working, the retry
-                                                    // tap resolves normally) and tell
-                                                    // the tapper what happened. The
-                                                    // keyboard is NOT stripped: the
-                                                    // choice stays valid once idle.
-                                                    tracing::warn!(
+                                                    // #136: the session is already mid-turn.
+                                                    // The host bubble was redrawn above with the pick and
+                                                    // buttons stripped, so enqueue the choice into the reaction queue.
+                                                    // It will be drained either at the next tool round boundary
+                                                    // via reaction_queue_callback or on turn end via flush_queued_after_turn.
+                                                    tracing::info!(
                                                         "Telegram followup tap: session {sid} \
-                                                         mid-turn — re-arming token, choice \
-                                                         not delivered (#1226 G)"
+                                                         mid-turn — enqueuing choice for delivery (#136)"
                                                     );
-                                                    if let Some(tok) = rearm_token.as_ref() {
-                                                        state_clone
-                                                            .restore_pending_followup(
-                                                                tok, entry,
-                                                            )
-                                                            .await;
-                                                    }
-                                                    use teloxide::prelude::Requester;
-                                                    if let Err(e) = bot_clone
-                                                        .answer_callback_query(query_id)
-                                                        .text(
-                                                            "Still working on the previous \
-                                                             answer — pick again in a moment",
-                                                        )
-                                                        .await
-                                                    {
-                                                        tracing::warn!(
-                                                            "Telegram followup tap: busy-toast \
-                                                             ack failed: {e}"
+                                                    let queued =
+                                                        crate::channels::telegram::handler::build_midturn_queued_message(
+                                                            None,
+                                                            &text,
+                                                            &text,
                                                         );
-                                                    }
+                                                    state_clone.enqueue_reaction(sid, queued);
                                                     return;
                                                 }
                                             };
