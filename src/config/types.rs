@@ -439,7 +439,7 @@ pub struct TelegramUserbotConfig {
 }
 
 /// Telegram channel configuration
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TelegramConfig {
     #[serde(default)]
     pub userbot: TelegramUserbotConfig,
@@ -518,6 +518,27 @@ pub struct TelegramConfig {
     /// locked).
     #[serde(default)]
     pub groups: std::collections::HashMap<String, TelegramGroupConfig>,
+}
+
+impl Default for TelegramConfig {
+    fn default() -> Self {
+        Self {
+            userbot: TelegramUserbotConfig::default(),
+            enabled: false,
+            token: None,
+            allowed_users: Vec::new(),
+            allowed_channels: Vec::new(),
+            respond_to: RespondTo::default(),
+            session_idle_hours: None,
+            rich_messages: true,
+            mermaid_render: true,
+            silence_group_start: true,
+            bot_owner: Vec::new(),
+            draft_streaming: true,
+            rate_limiter: RateLimiterConfig::default(),
+            groups: std::collections::HashMap::new(),
+        }
+    }
 }
 
 /// Per-group access control + behaviour override for one Telegram group.
