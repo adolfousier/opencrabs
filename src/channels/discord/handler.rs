@@ -1020,9 +1020,14 @@ pub(crate) async fn handle_message(
                 ProgressEvent::SuggestedOptions(options) => {
                     let http = http.clone();
                     let state = group_state_cb.clone();
+                    let raw_options: Vec<String> =
+                        options.into_iter().map(|item| item.label).collect();
                     tokio::spawn(async move {
                         super::suggest_options::render_suggestions(
-                            &http, &state, session_id, options,
+                            &http,
+                            &state,
+                            session_id,
+                            raw_options,
                         )
                         .await;
                     });

@@ -4,40 +4,58 @@
 //! an error, because the suggestions are optional).
 
 use crate::brain::agent::ProgressEvent;
-use crate::brain::tools::suggest_options::{MAX_OPTIONS, SuggestOptionsTool, sanitize_options};
+use crate::brain::tools::suggest_options::{
+    MAX_OPTIONS, RawSuggestionItem, SuggestOptionsTool, SuggestionItem, SuggestionStyle,
+    sanitize_options,
+};
 use crate::brain::tools::{Tool, ToolExecutionContext};
 use serde_json::json;
 use std::sync::Arc;
 use std::sync::Mutex;
 
-fn strs(v: &[&str]) -> Vec<String> {
-    v.iter().map(|s| s.to_string()).collect()
+fn raw_strs(v: &[&str]) -> Vec<RawSuggestionItem> {
+    v.iter()
+        .map(|s| RawSuggestionItem::Bare(s.to_string()))
+        .collect()
 }
 
 #[test]
 fn accepts_one_to_max_distinct() {
-    assert_eq!(sanitize_options(strs(&["do the thing"])).unwrap().len(), 1);
+    assert_eq!(
+        sanitize_options(raw_strs(&["do the thing"])).unwrap().len(),
+        1
+    );
     // Contract-relative fixture: exactly MAX_OPTIONS distinct options are accepted.
-    let max: Vec<String> = (1..=MAX_OPTIONS).map(|i| format!("option {i}")).collect();
+    let max: Vec<RawSuggestionItem> = (1..=MAX_OPTIONS)
+        .map(|i| RawSuggestionItem::Bare(format!("option {i}")))
+        .collect();
     assert_eq!(sanitize_options(max).unwrap().len(), MAX_OPTIONS);
 }
 
 #[test]
 fn trims_and_drops_empties() {
-    let out = sanitize_options(strs(&["  keep  ", "   ", "also"])).unwrap();
-    assert_eq!(out, vec!["keep".to_string(), "also".to_string()]);
+    let out = sanitize_options(raw_strs(&["  keep  ", "   ", "also"])).unwrap();
+    assert_eq!(
+        out,
+        vec![
+            SuggestionItem::default_styled("keep"),
+            SuggestionItem::default_styled("also")
+        ]
+    );
 }
 
 #[test]
 fn rejects_empty_after_trim() {
-    assert!(sanitize_options(strs(&["   ", ""])).is_err());
+    assert!(sanitize_options(raw_strs(&["   ", ""])).is_err());
     assert!(sanitize_options(vec![]).is_err());
 }
 
 #[test]
 fn rejects_over_cap() {
     // Contract-relative fixture: MAX_OPTIONS + 1 must be rejected.
-    let over: Vec<String> = (0..=MAX_OPTIONS).map(|i| format!("option {i}")).collect();
+    let over: Vec<RawSuggestionItem> = (0..=MAX_OPTIONS)
+        .map(|i| RawSuggestionItem::Bare(format!("option {i}")))
+        .collect();
     assert_eq!(over.len(), MAX_OPTIONS + 1);
     let err = sanitize_options(over).unwrap_err();
     assert!(err.contains("Too many"), "got: {err}");
@@ -45,13 +63,62 @@ fn rejects_over_cap() {
 
 #[test]
 fn rejects_duplicates() {
-    let err = sanitize_options(strs(&["same", "same"])).unwrap_err();
+    let err = sanitize_options(raw_strs(&["same", "same"])).unwrap_err();
     assert!(err.contains("Duplicate"), "got: {err}");
+}
+
+#[test]
+fn single_unmarked_option_promoted_to_primary() {
+    let out = sanitize_options(raw_strs(&["single option"])).unwrap();
+    assert_eq!(out.len(), 1);
+    assert_eq!(out[0].label, "single option");
+    assert_eq!(out[0].style, SuggestionStyle::Primary);
+}
+
+#[test]
+fn single_danger_option_stays_danger() {
+    let items = vec![RawSuggestionItem::Styled {
+        label: "Abort operation".to_string(),
+        style: Some(SuggestionStyle::Danger),
+    }];
+    let out = sanitize_options(items).unwrap();
+    assert_eq!(out.len(), 1);
+    assert_eq!(out[0].label, "Abort operation");
+    assert_eq!(out[0].style, SuggestionStyle::Danger);
+}
+
+#[test]
+fn multiple_unmarked_options_stay_default() {
+    let out = sanitize_options(raw_strs(&["option A", "option B"])).unwrap();
+    assert_eq!(out.len(), 2);
+    assert_eq!(out[0].style, SuggestionStyle::Default);
+    assert_eq!(out[1].style, SuggestionStyle::Default);
+}
+
+#[test]
+fn polymorphic_mixed_styles() {
+    let items = vec![
+        RawSuggestionItem::Bare("Normal".to_string()),
+        RawSuggestionItem::Styled {
+            label: "Recommended".to_string(),
+            style: Some(SuggestionStyle::Primary),
+        },
+        RawSuggestionItem::Styled {
+            label: "Delete".to_string(),
+            style: Some(SuggestionStyle::Danger),
+        },
+    ];
+    let out = sanitize_options(items).unwrap();
+    assert_eq!(out.len(), 3);
+    assert_eq!(out[0].style, SuggestionStyle::Default);
+    assert_eq!(out[1].style, SuggestionStyle::Primary);
+    assert_eq!(out[2].style, SuggestionStyle::Danger);
 }
 
 #[tokio::test]
 async fn execute_fires_progress_event() {
-    let captured: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+    let captured: Arc<Mutex<Vec<crate::brain::tools::suggest_options::SuggestionItem>>> =
+        Arc::new(Mutex::new(Vec::new()));
     let sink = captured.clone();
     let cb: crate::brain::agent::ProgressCallback = Arc::new(move |_sid, event| {
         if let ProgressEvent::SuggestedOptions(opts) = event {
@@ -72,7 +139,10 @@ async fn execute_fires_progress_event() {
     assert!(result.success, "error: {:?}", result.error);
     assert_eq!(
         *captured.lock().unwrap(),
-        vec!["run the tests".to_string(), "show the diff".to_string()]
+        vec![
+            crate::brain::tools::suggest_options::SuggestionItem::default_styled("run the tests"),
+            crate::brain::tools::suggest_options::SuggestionItem::default_styled("show the diff")
+        ]
     );
 }
 

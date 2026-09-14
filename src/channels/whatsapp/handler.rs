@@ -1502,8 +1502,9 @@ pub(crate) async fn handle_message(
                 let client = client_cb.clone();
                 let jid = jid_cb.clone();
                 let wa = wa_state_cb.clone();
+                let raw_options: Vec<String> = options.into_iter().map(|item| item.label).collect();
                 tokio::spawn(async move {
-                    let numbered: String = options
+                    let numbered: String = raw_options
                         .iter()
                         .enumerate()
                         .map(|(i, o)| format!("{}. {}", i + 1, o))
@@ -1512,7 +1513,7 @@ pub(crate) async fn handle_message(
                     let body = format!(
                         "\u{1f4a1} Suggested next:\n\n{numbered}\n\nReply with a number, or type your own."
                     );
-                    wa.set_pending_followups(session_id, options).await;
+                    wa.set_pending_followups(session_id, raw_options).await;
                     let msg = waproto::whatsapp::Message {
                         conversation: Some(body),
                         ..Default::default()

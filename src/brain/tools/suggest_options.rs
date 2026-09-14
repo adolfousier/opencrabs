@@ -17,18 +17,79 @@ use super::error::{Result, ToolError};
 use super::r#trait::{Tool, ToolCapability, ToolExecutionContext, ToolResult};
 use crate::brain::agent::ProgressEvent;
 use async_trait::async_trait;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 /// Hard cap on options. More than a handful is noise the user won't read;
 /// 8 accommodates branchy decisions without truncation (#1178).
 pub const MAX_OPTIONS: usize = 8;
 
+/// Visual button style hint for platforms supporting rich button styling (e.g. Telegram Bot API 10.3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum SuggestionStyle {
+    #[default]
+    Default,
+    Primary,
+    Danger,
+}
+
+/// Raw suggestion item deserialized from polymorphic input:
+/// either a bare string or an object `{ "label": "...", "style": "..." }`.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(untagged)]
+pub enum RawSuggestionItem {
+    Bare(String),
+    Styled {
+        label: String,
+        #[serde(default)]
+        style: Option<SuggestionStyle>,
+    },
+}
+
+impl RawSuggestionItem {
+    pub fn into_suggestion_item(self) -> SuggestionItem {
+        match self {
+            RawSuggestionItem::Bare(label) => SuggestionItem {
+                label,
+                style: SuggestionStyle::Default,
+            },
+            RawSuggestionItem::Styled { label, style } => SuggestionItem {
+                label,
+                style: style.unwrap_or_default(),
+            },
+        }
+    }
+}
+
+/// A parsed, validated suggestion item with a message label and button style hint.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SuggestionItem {
+    pub label: String,
+    pub style: SuggestionStyle,
+}
+
+impl SuggestionItem {
+    pub fn new(label: impl Into<String>, style: SuggestionStyle) -> Self {
+        Self {
+            label: label.into(),
+            style,
+        }
+    }
+
+    pub fn default_styled(label: impl Into<String>) -> Self {
+        Self {
+            label: label.into(),
+            style: SuggestionStyle::Default,
+        }
+    }
+}
+
 pub struct SuggestOptionsTool;
 
 #[derive(Debug, Deserialize)]
 struct SuggestInput {
-    options: Vec<String>,
+    options: Vec<RawSuggestionItem>,
 }
 
 #[async_trait]
@@ -47,10 +108,32 @@ impl Tool for SuggestOptionsTool {
             "properties": {
                 "options": {
                     "type": "array",
-                    "items": { "type": "string" },
+                    "items": {
+                        "anyOf": [
+                            {
+                                "type": "string",
+                                "description": "Option label string (default neutral button style)"
+                            },
+                            {
+                                "type": "object",
+                                "properties": {
+                                    "label": {
+                                        "type": "string",
+                                        "description": "Ready-to-send option message in the user's voice"
+                                    },
+                                    "style": {
+                                        "type": "string",
+                                        "enum": ["default", "primary", "danger"],
+                                        "description": "Button visual style: 'primary' (recommended/action), 'danger' (destructive/cancel), or 'default' (neutral). Omit for default."
+                                    }
+                                },
+                                "required": ["label"]
+                            }
+                        ]
+                    },
                     "minItems": 1,
                     "maxItems": MAX_OPTIONS,
-                    "description": "1 to 8 distinct, ready-to-send option messages in the user's voice. Prefer concise labels (<=20 chars for multi-option sets, <=30 chars for a solo option) so they render as interactive buttons. Rendered on Telegram/Discord/Slack and pick-list in the TUI — never as plain text."
+                    "description": "1 to 8 distinct, ready-to-send option messages in the user's voice. Each item can be a plain string or an object {label, style}. Prefer concise labels (<=20 chars for multi-option sets, <=30 chars for a solo option) so they render as interactive buttons. Rendered on Telegram/Discord/Slack and pick-list in the TUI — never as plain text."
                 }
             },
             "required": ["options"]
@@ -104,23 +187,61 @@ impl Tool for SuggestOptionsTool {
     }
 }
 
-/// Trim, drop empties, enforce the 1..=MAX distinct contract. Extracted so the
-/// validation is unit-testable without a live progress callback. The mechanics
-/// live in `question_common::check_options` (#764 R1); this wrapper keeps the
-/// tool's own error wording (pinned by tests).
-pub(crate) fn sanitize_options(raw: Vec<String>) -> std::result::Result<Vec<String>, String> {
+/// Trim, drop empties, enforce the 1..=MAX distinct contract, and apply
+/// single-option promotion rules:
+/// - A single unmarked option (`SuggestionStyle::Default`) is promoted to `SuggestionStyle::Primary`.
+/// - A single option explicitly marked `SuggestionStyle::Danger` stays `Danger`.
+pub(crate) fn sanitize_options(
+    raw: Vec<RawSuggestionItem>,
+) -> std::result::Result<Vec<SuggestionItem>, String> {
     use crate::channels::question_common::{OptionsError, check_options};
-    match check_options(raw, 1, MAX_OPTIONS) {
-        Ok(options) => Ok(options),
+
+    let converted: Vec<SuggestionItem> = raw
+        .into_iter()
+        .map(RawSuggestionItem::into_suggestion_item)
+        .collect();
+
+    let raw_labels: Vec<String> = converted.iter().map(|item| item.label.clone()).collect();
+
+    let valid_labels = match check_options(raw_labels, 1, MAX_OPTIONS) {
+        Ok(labels) => labels,
         Err(OptionsError::TooFew { .. }) => {
-            Err("suggest_options needs at least 1 non-empty option.".into())
+            return Err("suggest_options needs at least 1 non-empty option.".into());
         }
-        Err(OptionsError::TooMany(n)) => Err(format!(
-            "Too many suggestions ({}). Cap is {}.",
-            n, MAX_OPTIONS
-        )),
-        Err(OptionsError::Duplicate(opt)) => Err(format!(
-            "Duplicate suggestion '{opt}'. Suggestions must be distinct."
-        )),
+        Err(OptionsError::TooMany(n)) => {
+            return Err(format!(
+                "Too many suggestions ({}). Cap is {}.",
+                n, MAX_OPTIONS
+            ));
+        }
+        Err(OptionsError::Duplicate(opt)) => {
+            return Err(format!(
+                "Duplicate suggestion '{opt}'. Suggestions must be distinct."
+            ));
+        }
+    };
+
+    // Filter and align trimmed labels with their styles
+    let mut items: Vec<SuggestionItem> = Vec::with_capacity(valid_labels.len());
+    let mut converted_iter = converted.into_iter();
+    for label in valid_labels {
+        for item in converted_iter.by_ref() {
+            if item.label.trim() == label {
+                items.push(SuggestionItem {
+                    label,
+                    style: item.style,
+                });
+                break;
+            }
+        }
     }
+
+    // Single unmarked option promotion:
+    // If there is only 1 option and its style is Default, promote to Primary.
+    // If it is single and Danger, it remains Danger.
+    if items.len() == 1 && items[0].style == SuggestionStyle::Default {
+        items[0].style = SuggestionStyle::Primary;
+    }
+
+    Ok(items)
 }
