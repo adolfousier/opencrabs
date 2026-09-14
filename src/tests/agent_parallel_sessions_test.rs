@@ -102,8 +102,28 @@ async fn test_concurrent_sessions_different_providers() {
     );
 }
 
-#[tokio::test]
-async fn test_cancel_one_session_other_continues() {
+#[test]
+fn test_cancel_one_session_other_continues() {
+    // The cancelled tool-loop future recurses deeper than the 2 MiB libtest
+    // thread default on macOS debug builds, aborting the whole binary. CI
+    // exports RUST_MIN_STACK; local harnesses and gate commands don't. Run the
+    // body on an explicit big-stack thread so the test never depends on the
+    // caller's environment.
+    std::thread::Builder::new()
+        .stack_size(64 * 1024 * 1024)
+        .spawn(|| {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("tokio runtime");
+            rt.block_on(run_cancel_one_session_other_continues());
+        })
+        .expect("spawn big-stack test thread")
+        .join()
+        .expect("cancel test thread panicked");
+}
+
+async fn run_cancel_one_session_other_continues() {
     // Cancel token on session A, session B completes normally
     use tokio_util::sync::CancellationToken;
 
