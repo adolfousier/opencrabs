@@ -37,7 +37,8 @@ async fn windowed_read_then_overwrite_requires_confirm() {
     let write = WriteTool;
     let read = ReadTool;
 
-    assert!(write_raw(&write, &ctx, "f.txt", "l1\nl2\nl3\nl4\n").await);
+    // Simulate an external/pre-existing file on disk (not created by this session).
+    std::fs::write(dir.join("f.txt"), "l1\nl2\nl3\nl4\n").unwrap();
 
     // Windowed read: sees only lines 1-2.
     let r = read
@@ -144,6 +145,57 @@ async fn manual_mark_counts_as_fully_read() {
         .await
         .unwrap();
     assert!(w.success, "marked path writes freely: {:?}", w.error);
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[tokio::test]
+async fn session_write_unlocks_subsequent_overwrite_without_confirm() {
+    // Regression test for #159: write_file overwrite guard refuses a second write
+    // to a file the session itself created.
+    let dir = std::env::temp_dir().join(format!("wguard_{}", Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let ctx = ctx_in(&dir);
+    let write = WriteTool;
+
+    // Session creates the file via write_file.
+    assert!(write_raw(&write, &ctx, "self_created.txt", "initial content").await);
+    assert_eq!(
+        std::fs::read_to_string(dir.join("self_created.txt")).unwrap(),
+        "initial content"
+    );
+
+    // Second write by the SAME session without read or confirm should succeed (#159).
+    let w = write
+        .execute(
+            json!({"path": "self_created.txt", "content": "updated content"}),
+            &ctx,
+        )
+        .await
+        .unwrap();
+    assert!(
+        w.success,
+        "session-created file should be overwritable without confirm: {:?}",
+        w.error
+    );
+    assert_eq!(
+        std::fs::read_to_string(dir.join("self_created.txt")).unwrap(),
+        "updated content"
+    );
+
+    // Another session that did NOT write the file still cannot overwrite without reading.
+    let other_ctx = ctx_in(&dir);
+    let w_other = write
+        .execute(
+            json!({"path": "self_created.txt", "content": "clobbered by other"}),
+            &other_ctx,
+        )
+        .await
+        .unwrap();
+    assert!(
+        !w_other.success,
+        "different session must still be guarded from overwriting without read"
+    );
 
     std::fs::remove_dir_all(&dir).ok();
 }

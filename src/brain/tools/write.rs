@@ -221,6 +221,11 @@ impl Tool for WriteTool {
         // write is not mistaken for a stale one.
         super::file_versions::record(context.session_id, &path, &input.content);
 
+        // A file written by this session is known to it in full (#159), so a
+        // subsequent write in the same session does not trigger the partial-view
+        // overwrite guard (#1168) as if the file were pre-existing and unread.
+        super::read_state::mark_fully_read(context.session_id, &path);
+
         // Track file in session (fire and forget, path-only)
         if let Some(ref sc) = context.service_context {
             let fs = crate::services::FileService::new(sc.clone());
