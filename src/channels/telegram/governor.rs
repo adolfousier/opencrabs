@@ -924,8 +924,9 @@ pub(crate) async fn pace_send(chat: ChatId) {
 ///
 /// Holds rather than drops, like [`pace_send`]: a rich call is content, and
 /// the reactive `wait_out` backstop still owns anything that gets through.
-/// Fails open past [`SEND_MAX_HOLD`] so a pathological configuration degrades
-/// to today's behavior instead of stalling turns.
+/// Unlike [`pace_send`], `pace_rich` never fails open past [`SEND_MAX_HOLD`]:
+/// rich calls wait until a token is refilled so they never fire unadmitted into
+/// Telegram to trigger server-level 429 lockouts across the chat.
 pub(crate) async fn pace_rich(chat: ChatId, thread_id: Option<i32>) {
     let chat_id = chat.0;
     // DMs (positive ids) untouched, cheap exit first.
@@ -939,7 +940,7 @@ pub(crate) async fn pace_rich(chat: ChatId, thread_id: Option<i32>) {
     ensure_summary_task();
     let mut waited = Duration::ZERO;
     loop {
-        let verdict = {
+        let delay = {
             let mut map = peers().lock().unwrap_or_else(|e| e.into_inner());
             let peer = map.entry(chat_id).or_default();
             // The rich path carries the topic itself, so it can establish
@@ -957,29 +958,17 @@ pub(crate) async fn pace_rich(chat: ChatId, thread_id: Option<i32>) {
             if need.is_zero() {
                 let _ = bucket.take(now);
                 peer.counters.admitted_rich += 1;
-                PaceVerdict::Go
-            } else if waited + need > SEND_MAX_HOLD {
-                peer.counters.admitted_rich += 1;
-                PaceVerdict::FailOpen(need)
+                None
             } else {
-                PaceVerdict::Wait(need)
+                Some(need)
             }
         };
-        match verdict {
-            PaceVerdict::Go => {
+        match delay {
+            None => {
                 fold_rich_ms(chat_id, waited);
                 return;
             }
-            PaceVerdict::FailOpen(next) => {
-                tracing::warn!(
-                    "Telegram rate-limiter: rich pacing held {waited:?} for chat={chat_id}, \
-                     still {} from a token — failing open to the reactive backstop",
-                    next.as_secs_f64()
-                );
-                fold_rich_ms(chat_id, waited);
-                return;
-            }
-            PaceVerdict::Wait(delay) => {
+            Some(delay) => {
                 let start = gate_now();
                 tokio::time::sleep(delay).await;
                 // Under tokio's paused runtime the sleep above returns
