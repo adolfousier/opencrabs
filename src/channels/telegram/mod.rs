@@ -43,6 +43,47 @@ pub(crate) mod telemetry;
 pub(crate) mod titles;
 pub(crate) mod typing;
 
+/// Record a created or renamed forum topic in the message store so `list_topics`
+/// and session isolation immediately see it.
+pub(crate) async fn record_topic_created(
+    pool: Option<crate::db::Pool>,
+    chat_id: i64,
+    thread_id: i32,
+    topic_name: &str,
+    is_rename: bool,
+) {
+    let Some(pool) = pool.or_else(|| crate::db::global_pool().cloned()) else {
+        tracing::warn!("record_topic_created: no DB pool — topic not recorded");
+        return;
+    };
+    let repo = crate::db::ChannelMessageRepository::new(pool);
+    let msg_type = if is_rename {
+        "topic_edited"
+    } else {
+        "topic_created"
+    };
+    let content = if is_rename {
+        format!("topic renamed to \"{topic_name}\"")
+    } else {
+        format!("topic created \"{topic_name}\"")
+    };
+    let row = crate::db::models::ChannelMessage::new(
+        "telegram".into(),
+        chat_id.to_string(),
+        None,
+        "bot".into(),
+        "bot".into(),
+        content,
+        msg_type.into(),
+        Some(thread_id.to_string()),
+    )
+    .with_thread(Some(thread_id.to_string()), Some(topic_name.to_string()));
+
+    if let Err(e) = repo.insert(&row).await {
+        tracing::warn!("Failed to persist topic record: {e}");
+    }
+}
+
 pub use agent::TelegramAgent;
 pub(crate) use agent::register_bot_commands;
 #[cfg(test)]

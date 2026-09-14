@@ -82,6 +82,17 @@ fn every_whatsapp_action_is_reachable() {
 }
 
 #[test]
+fn every_telegram_action_is_reachable() {
+    let src = read("src/brain/tools/telegram_send.rs");
+    for action in declared_actions(&src) {
+        assert!(
+            src.contains(&format!("\"{action}\" =>")) || src.contains(&format!("\"{action}\" |")),
+            "action '{action}' is in the schema with no match arm"
+        );
+    }
+}
+
+#[test]
 fn every_whatsapp_config_key_is_documented() {
     // `interactive_buttons` shipped undocumented, and it is the key that gates
     // whether a safety-critical approval prompt takes an unproven render path.
