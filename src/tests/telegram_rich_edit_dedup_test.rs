@@ -20,8 +20,7 @@ fn edit_body(chat_id: i64, message_id: i32, markdown: &str) -> serde_json::Value
 
 #[test]
 fn an_identical_edit_is_recognised_as_redundant() {
-    edit_dedup::clear_for_test();
-    let body = edit_body(-100, 7, "same text");
+    let body = edit_body(-10099, 7001, "same text unique to this test");
     let (chat, msg, fp) = edit_dedup::fingerprint(&body).expect("an addressed edit");
 
     assert!(
@@ -39,8 +38,7 @@ fn an_identical_edit_is_recognised_as_redundant() {
 
 #[test]
 fn changing_only_the_keyboard_is_still_a_real_edit() {
-    edit_dedup::clear_for_test();
-    let mut body = edit_body(-100, 7, "same text");
+    let mut body = edit_body(-10099, 7002, "same text unique to this test");
     let (chat, msg, before) = edit_dedup::fingerprint(&body).expect("an addressed edit");
     edit_dedup::remember(chat, msg, before);
 
@@ -60,9 +58,8 @@ fn changing_only_the_keyboard_is_still_a_real_edit() {
 
 #[test]
 fn each_message_is_tracked_separately() {
-    edit_dedup::clear_for_test();
-    let first = edit_body(-100, 7, "shared text");
-    let second = edit_body(-100, 8, "shared text");
+    let first = edit_body(-10099, 7003, "shared text");
+    let second = edit_body(-10099, 7004, "shared text");
     let (chat, msg_a, fp_a) = edit_dedup::fingerprint(&first).expect("addressed");
     let (_, msg_b, fp_b) = edit_dedup::fingerprint(&second).expect("addressed");
 
