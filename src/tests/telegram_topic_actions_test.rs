@@ -1,8 +1,8 @@
 //! Unit tests for create_topic and rename_topic actions in telegram_send (#161).
 
+use crate::brain::tools::telegram_send::TelegramSendTool;
 use crate::brain::tools::Tool;
 use crate::brain::tools::ToolExecutionContext;
-use crate::brain::tools::telegram_send::TelegramSendTool;
 use crate::channels::telegram::TelegramState;
 use crate::db::ChannelMessageRepository;
 use crate::db::Database;
@@ -46,10 +46,14 @@ fn telegram_send_schema_declares_topic_actions_and_params() {
         enum_strs.contains(&"rename_topic"),
         "action enum missing rename_topic"
     );
+    assert!(
+        enum_strs.contains(&"bind_topic"),
+        "action enum missing bind_topic"
+    );
     assert_eq!(
         enum_strs.len(),
-        22,
-        "action enum should contain exactly 22 actions"
+        23,
+        "action enum should contain exactly 23 actions"
     );
 
     let name = props.get("name").expect("schema has name property");
@@ -74,11 +78,10 @@ async fn telegram_send_rejects_empty_or_too_long_topic_name() {
         .await
         .expect("tool execution returns Ok(ToolResult)");
     assert!(!res.success, "empty topic name should fail validation");
-    assert!(
-        res.error
-            .unwrap_or_default()
-            .contains("between 1 and 128 characters")
-    );
+    assert!(res
+        .error
+        .unwrap_or_default()
+        .contains("between 1 and 128 characters"));
 
     // Name exceeding 128 chars
     let long_name = "a".repeat(129);
@@ -94,11 +97,10 @@ async fn telegram_send_rejects_empty_or_too_long_topic_name() {
         .await
         .expect("tool execution returns Ok(ToolResult)");
     assert!(!res2.success, "overlong topic name should fail validation");
-    assert!(
-        res2.error
-            .unwrap_or_default()
-            .contains("between 1 and 128 characters")
-    );
+    assert!(res2
+        .error
+        .unwrap_or_default()
+        .contains("between 1 and 128 characters"));
 
     // Rename without thread_id
     let res3 = tool
@@ -158,4 +160,58 @@ async fn record_topic_created_and_edited_persists_to_repository() {
     assert_eq!(topics_after.len(), 1);
     assert_eq!(topics_after[0].thread_id, "42");
     assert_eq!(topics_after[0].topic_name.as_deref(), Some("Announcements"));
+}
+
+#[tokio::test]
+async fn telegram_send_bind_topic_persists_binding_and_records_thread_evidence() {
+    let db = Database::connect_in_memory().await.expect("in-memory db");
+    db.run_migrations().await.expect("migrations");
+    let pool = db.pool().clone();
+
+    let session_repo = crate::db::SessionRepository::new(pool.clone());
+    let session = crate::db::Session::new(None, None, None);
+    session_repo.create(&session).await.expect("create session");
+    let session_id = session.id;
+
+    let state = Arc::new(TelegramState::new());
+    state.set_bot(Bot::new("TESTTOKEN")).await;
+    let binding_repo = crate::db::SessionBindingRepository::new(pool.clone());
+    state.set_binding_store(binding_repo.clone()).await;
+
+    let tool = TelegramSendTool::new(state.clone());
+    let ctx = ToolExecutionContext::new(session_id);
+
+    let res = tool
+        .execute(
+            json!({
+                "action": "bind_topic",
+                "chat_id": -1001234567890i64,
+                "thread_id": 42
+            }),
+            &ctx,
+        )
+        .await
+        .expect("tool execution returns Ok(ToolResult)");
+
+    assert!(res.success, "bind_topic should succeed: {:?}", res.error);
+    let output: serde_json::Value = serde_json::from_str(&res.output).expect("valid json output");
+    assert_eq!(
+        output.get("status").and_then(|v| v.as_str()),
+        Some("success")
+    );
+    assert_eq!(output.get("thread_id").and_then(|v| v.as_i64()), Some(42));
+
+    // Verify session mapping in state
+    let target = state.session_binding(session_id).await;
+    assert_eq!(target, Some((-1001234567890i64, Some(42))));
+
+    // Verify persistent binding in DB
+    let bound = binding_repo
+        .all_for_channel("telegram")
+        .await
+        .expect("query bindings");
+    assert_eq!(bound.len(), 1);
+    assert_eq!(bound[0].session_id, session_id.to_string());
+    assert_eq!(bound[0].chat_id, "-1001234567890");
+    assert_eq!(bound[0].thread_id, Some(42));
 }
