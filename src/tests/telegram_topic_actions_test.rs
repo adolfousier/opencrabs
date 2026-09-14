@@ -1,8 +1,8 @@
 //! Unit tests for create_topic and rename_topic actions in telegram_send (#161).
 
-use crate::brain::tools::telegram_send::TelegramSendTool;
 use crate::brain::tools::Tool;
 use crate::brain::tools::ToolExecutionContext;
+use crate::brain::tools::telegram_send::TelegramSendTool;
 use crate::channels::telegram::TelegramState;
 use crate::db::ChannelMessageRepository;
 use crate::db::Database;
@@ -78,10 +78,11 @@ async fn telegram_send_rejects_empty_or_too_long_topic_name() {
         .await
         .expect("tool execution returns Ok(ToolResult)");
     assert!(!res.success, "empty topic name should fail validation");
-    assert!(res
-        .error
-        .unwrap_or_default()
-        .contains("between 1 and 128 characters"));
+    assert!(
+        res.error
+            .unwrap_or_default()
+            .contains("between 1 and 128 characters")
+    );
 
     // Name exceeding 128 chars
     let long_name = "a".repeat(129);
@@ -97,10 +98,11 @@ async fn telegram_send_rejects_empty_or_too_long_topic_name() {
         .await
         .expect("tool execution returns Ok(ToolResult)");
     assert!(!res2.success, "overlong topic name should fail validation");
-    assert!(res2
-        .error
-        .unwrap_or_default()
-        .contains("between 1 and 128 characters"));
+    assert!(
+        res2.error
+            .unwrap_or_default()
+            .contains("between 1 and 128 characters")
+    );
 
     // Rename without thread_id
     let res3 = tool
@@ -204,6 +206,25 @@ async fn telegram_send_bind_topic_persists_binding_and_records_thread_evidence()
     // Verify session mapping in state
     let target = state.session_binding(session_id).await;
     assert_eq!(target, Some((-1001234567890i64, Some(42))));
+
+    // Direct SQLite table checks to pinpoint any issue
+    let (s_cnt, b_cnt): (i64, i64) = pool
+        .get()
+        .await
+        .unwrap()
+        .interact(|conn| {
+            let s: i64 = conn
+                .query_row("SELECT count(*) FROM sessions", [], |r| r.get(0))
+                .unwrap();
+            let b: i64 = conn
+                .query_row("SELECT count(*) FROM session_bindings", [], |r| r.get(0))
+                .unwrap();
+            (s, b)
+        })
+        .await
+        .unwrap();
+    assert_eq!(s_cnt, 1, "sessions table must have 1 row");
+    assert_eq!(b_cnt, 1, "session_bindings table must have 1 row");
 
     // Verify persistent binding in DB
     let bound = binding_repo

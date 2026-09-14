@@ -1195,10 +1195,7 @@ impl TelegramState {
     }
 
     /// Give the session binding map durable backing. Called at startup (#170).
-    pub(crate) async fn set_binding_store(
-        &self,
-        repo: crate::db::SessionBindingRepository,
-    ) {
+    pub(crate) async fn set_binding_store(&self, repo: crate::db::SessionBindingRepository) {
         *self.binding_store.lock().await = Some(repo);
     }
 
@@ -1220,31 +1217,25 @@ impl TelegramState {
         topic_id: Option<i32>,
     ) -> Result<(), String> {
         // 1. In-memory mappings + sync ownership mirror
-        self.register_session_chat(session_id, chat_id, topic_id).await;
+        self.register_session_chat(session_id, chat_id, topic_id)
+            .await;
 
         // 2. Persistent storage
         let store = self.binding_store.lock().await.clone();
-        #[allow(clippy::collapsible_if)]
         if let Some(repo) = store {
-            if let Err(e) = repo
-                .upsert(
-                    session_id.to_string(),
-                    "telegram",
-                    &chat_id.to_string(),
-                    topic_id,
-                )
-                .await
-            {
-                tracing::warn!("bind_session_topic: could not persist session binding for {session_id}: {e}");
-            }
+            repo.upsert(
+                session_id.to_string(),
+                "telegram",
+                &chat_id.to_string(),
+                topic_id,
+            )
+            .await
+            .map_err(|e| format!("could not persist session binding for {session_id}: {e}"))?;
         }
 
         // 3. Session routing
         let enqueue = self.enqueue_callback.lock().await.clone();
-        crate::brain::agent::service::session_routes::claim_for_channel(
-            session_id,
-            enqueue,
-        );
+        crate::brain::agent::service::session_routes::claim_for_channel(session_id, enqueue);
 
         // 4. Probes
         {
