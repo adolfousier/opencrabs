@@ -375,6 +375,104 @@ mod manager {
         assert_eq!(rx.try_recv().unwrap(), "hello");
         assert_eq!(rx.try_recv().unwrap(), "world");
     }
+
+    // ─── #191 parent scoping ───────────────────────────────────────────────
+
+    /// Build a child owned by a specific parent session.
+    fn make_agent_for(id: &str, label: &str, parent: Uuid) -> SubAgent {
+        let (tx, _rx) = mpsc::unbounded_channel::<String>();
+        SubAgent {
+            input_tx: Some(tx),
+            ..SubAgent::new(id.to_string(), label.to_string(), Uuid::new_v4(), parent)
+        }
+    }
+
+    /// #191: the manager is process-global (one instance per channel factory),
+    /// so a per-session surface must be able to ask for its OWN children.
+    /// Pre-fix no such query existed and every caller iterated `list()`.
+    #[test]
+    fn list_for_parent_returns_only_that_sessions_children() {
+        let mgr = SubAgentManager::new();
+        let a = Uuid::from_u128(0xa);
+        let b = Uuid::from_u128(0xb);
+        mgr.insert(make_agent_for("a1", "mine", a));
+        mgr.insert(make_agent_for("a2", "mine-too", a));
+        mgr.insert(make_agent_for("b1", "theirs", b));
+
+        // HashMap order is not deterministic — compare as a sorted set.
+        let mut mine: Vec<String> = mgr
+            .list_for_parent(a)
+            .into_iter()
+            .map(|(id, _, _)| id)
+            .collect();
+        mine.sort();
+        assert_eq!(mine, vec!["a1".to_string(), "a2".to_string()]);
+
+        let theirs: Vec<String> = mgr
+            .list_for_parent(b)
+            .into_iter()
+            .map(|(id, _, _)| id)
+            .collect();
+        assert_eq!(
+            theirs,
+            vec!["b1".to_string()],
+            "symmetric for the other session"
+        );
+    }
+
+    /// Negative control: a session that spawned nothing gets nothing back —
+    /// not "everything", and not an error.
+    #[test]
+    fn list_for_parent_is_empty_for_a_session_with_no_children() {
+        let mgr = SubAgentManager::new();
+        let a = Uuid::from_u128(0xa);
+        let b = Uuid::from_u128(0xb);
+        mgr.insert(make_agent_for("b1", "theirs", b));
+
+        assert!(mgr.list_for_parent(a).is_empty());
+        assert_eq!(mgr.list_for_parent(b).len(), 1);
+    }
+
+    /// `list()` is public API of the lib target and must keep its global
+    /// meaning — the fix is a NEW scoped query, not a narrowed old one.
+    #[test]
+    fn list_still_returns_the_global_view() {
+        let mgr = SubAgentManager::new();
+        mgr.insert(make_agent_for("a1", "mine", Uuid::from_u128(0xa)));
+        mgr.insert(make_agent_for("b1", "theirs", Uuid::from_u128(0xb)));
+
+        assert_eq!(mgr.list().len(), 2, "scoping must not change list()");
+    }
+
+    /// Labels and states survive the filter — the roster renders them.
+    #[test]
+    fn list_for_parent_carries_label_and_state() {
+        let mgr = SubAgentManager::new();
+        let a = Uuid::from_u128(0xa);
+        mgr.insert(make_agent_for("a1", "researcher", a));
+
+        let rows = mgr.list_for_parent(a);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].1, "researcher");
+        assert_eq!(rows[0].2, SubAgentState::Running);
+    }
+
+    /// Unlike `alive_counts_for`, a finished child still appears: a caller
+    /// asking what it spawned wants its completed children too.
+    #[test]
+    fn list_for_parent_includes_finished_children() {
+        let mgr = SubAgentManager::new();
+        let a = Uuid::from_u128(0xa);
+        mgr.insert(make_agent_for("a1", "done", a));
+        mgr.mark_completed("a1", "out".to_string());
+
+        assert_eq!(mgr.list_for_parent(a).len(), 1);
+        assert_eq!(
+            mgr.alive_counts_for(a),
+            (0, 0),
+            "terminal agents are not alive"
+        );
+    }
 }
 
 // ─── SendInputTool Tests ───────────────────────────────────────────────────
@@ -651,8 +749,17 @@ mod wait_agent_tool {
     use tokio::sync::mpsc;
     use uuid::Uuid;
 
+    /// The session these tests act as (#191). Fixed rather than random: the
+    /// resolver is scoped to the caller's session now, so every fixture child
+    /// must be parented to the SAME session the context carries — with two
+    /// independent `Uuid::new_v4()`s the children are foreign and the scoped
+    /// resolver correctly refuses to see them.
+    fn parent_session() -> Uuid {
+        Uuid::from_u128(0x191)
+    }
+
     fn test_context() -> ToolExecutionContext {
-        let mut ctx = ToolExecutionContext::new(Uuid::new_v4())
+        let mut ctx = ToolExecutionContext::new(parent_session())
             .with_working_directory(std::path::PathBuf::from("/tmp"))
             .with_auto_approve(true);
         ctx.timeout_secs = 30;
@@ -667,7 +774,7 @@ mod wait_agent_tool {
                 id.to_string(),
                 "test".to_string(),
                 Uuid::new_v4(),
-                Uuid::new_v4(),
+                parent_session(),
             )
         }
     }
