@@ -95,6 +95,103 @@ pub(crate) async fn try_send_intermediate_rich(
     }
 }
 
+/// True when an intermediate message contains a substantial markdown status report
+/// (e.g. status/progress/pipeline heading or substantial section) worth delivering
+/// as its own message rather than burying in collapsible flow (#215).
+pub(crate) fn is_deliverable_status_report(text: &str) -> bool {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+
+    let total_chars = trimmed.chars().count();
+    let line_count = text.lines().filter(|l| !l.trim().is_empty()).count();
+
+    let mut in_fence = false;
+    let mut fence_char = ' ';
+    let mut fence_len = 0;
+    let mut has_keyword_heading = false;
+    let mut has_atx_heading = false;
+    let mut has_status_callout = false;
+
+    const STATUS_KEYWORDS: &[&str] = &[
+        "status",
+        "update",
+        "progress",
+        "pipeline",
+        "summary",
+        "verification",
+        "verdict",
+        "phase",
+        "findings",
+        "plan",
+        "results",
+    ];
+
+    for line in text.lines() {
+        let t = line.trim_start();
+        let leading_spaces = line.len() - t.len();
+        if leading_spaces < 4 {
+            let fence_run: String = t.chars().take_while(|&c| c == '`' || c == '~').collect();
+            if fence_run.len() >= 3 {
+                let f_char = fence_run.chars().next().unwrap();
+                if !in_fence {
+                    in_fence = true;
+                    fence_char = f_char;
+                    fence_len = fence_run.len();
+                    continue;
+                } else if f_char == fence_char && fence_run.len() >= fence_len {
+                    in_fence = false;
+                    continue;
+                }
+            }
+        }
+        if in_fence {
+            continue;
+        }
+
+        if super::rich::is_atx_heading(t) {
+            has_atx_heading = true;
+            let lower = t.to_lowercase();
+            if STATUS_KEYWORDS.iter().any(|kw| lower.contains(kw)) {
+                has_keyword_heading = true;
+            }
+        }
+
+        // Rule C — structured callout: non-empty line starting with `>` and `**` followed by status/update/progress
+        let trimmed_line = line.trim();
+        if let Some(after_gt) = trimmed_line.strip_prefix('>') {
+            let after_gt = after_gt.trim_start();
+            if let Some(after_stars) = after_gt.strip_prefix("**") {
+                let lower_callout = after_stars.to_lowercase();
+                if lower_callout.starts_with("status")
+                    || lower_callout.starts_with("update")
+                    || lower_callout.starts_with("progress")
+                {
+                    has_status_callout = true;
+                }
+            }
+        }
+    }
+
+    // Rule A — keyword heading: line_count >= 2 and total_chars >= 50
+    if has_keyword_heading && line_count >= 2 && total_chars >= 50 {
+        return true;
+    }
+
+    // Rule B — substantial section: any ATX heading, line_count >= 3 and total_chars >= 150
+    if has_atx_heading && line_count >= 3 && total_chars >= 150 {
+        return true;
+    }
+
+    // Rule C — structured callout: line_count >= 2 and total_chars >= 60
+    if has_status_callout && line_count >= 2 && total_chars >= 60 {
+        return true;
+    }
+
+    false
+}
+
 /// True when a folded intermediate is a substantial rich report worth
 /// delivering as its OWN message rather than burying in the collapsed
 /// processing log (#582). Keyed on a real markdown table plus some length, so
@@ -116,7 +213,10 @@ pub(crate) fn is_deliverable_rich_report(text: &str) -> bool {
     if super::rich::mermaid::has_mermaid_fence(&reflowed) {
         return true;
     }
-    super::rich::contains_table(&reflowed) && text.trim().chars().count() >= 200
+    if super::rich::contains_table(&reflowed) && text.trim().chars().count() >= 200 {
+        return true;
+    }
+    is_deliverable_status_report(text)
 }
 
 /// Deliver `text` as its own message (rich-first, HTML fallback) and record it
