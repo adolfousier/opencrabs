@@ -1242,45 +1242,7 @@ impl App {
         } else if event.code == KeyCode::Tab || event.code == KeyCode::Char(' ') {
             // Tab/Space selects the current directory as working dir
             let selected_dir = self.file_picker_current_dir.clone();
-            let canonical = selected_dir
-                .canonicalize()
-                .unwrap_or_else(|_| selected_dir.clone());
-
-            // Update App working directory
-            self.working_directory = canonical.clone();
-
-            // Update AgentService working directory (runtime). Per-session (#703)
-            // so `/cd` in this pane never moves another session's cwd.
-            if let Some(ref session) = self.current_session {
-                self.agent_service
-                    .set_working_directory_for_session(session.id, canonical.clone());
-            } else {
-                self.agent_service.set_working_directory(canonical.clone());
-            }
-
-            // Persist to session DB — that's the source of truth for per-session WD.
-            if let Some(ref session) = self.current_session
-                && let Err(e) = self
-                    .session_service
-                    .update_session_working_directory(
-                        session.id,
-                        Some(canonical.to_string_lossy().to_string()),
-                    )
-                    .await
-            {
-                tracing::warn!("failed to persist session working directory: {e}");
-            }
-
-            self.push_system_message(format!(
-                "Working directory changed to: {}",
-                canonical.display()
-            ));
-
-            // Queue context hint so the next message to the LLM knows about the cd
-            self.pending_context.push(format!(
-                "[User changed working directory to: {}]",
-                canonical.display()
-            ));
+            self.apply_working_directory_change(&selected_dir).await;
 
             self.switch_mode(AppMode::Chat).await?;
         }

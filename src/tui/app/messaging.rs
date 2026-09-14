@@ -21,6 +21,24 @@ fn utf8_char_len(b: u8) -> usize {
     }
 }
 
+/// Extract the path argument of a `/cd` slash input (#1574).
+///
+/// The dispatcher matched only the first token, and the `/cd` arm ignored
+/// the rest, so `/cd /path` silently opened the picker. This reads the
+/// argument back: `Some(path)` when one was typed, `None` for a bare `/cd`
+/// (which keeps the picker). Pure, so the extraction contract is testable
+/// without an `App`.
+pub(crate) fn cd_args_from_input(input: &str) -> Option<&str> {
+    let rest = input.strip_prefix("/cd")?;
+    // "/cdutils" is not "/cd" plus an argument — require a whitespace
+    // boundary (or end of input) between the command and what follows.
+    if !rest.is_empty() && !rest.starts_with(char::is_whitespace) {
+        return None;
+    }
+    let rest = rest.trim();
+    (!rest.is_empty()).then_some(rest)
+}
+
 /// A file pulled across the drop tunnel and written locally (#1311).
 pub(crate) struct PulledDrop {
     /// The client's filename, for display.
@@ -53,6 +71,62 @@ impl App {
             },
             Err(_) => (false, false),
         }
+    }
+
+    /// Apply a `/cd <path>` typed into the TUI (#1574). Validation mirrors
+    /// the agent-tool dispatcher (`slash_command::handle_cd`): tilde
+    /// expansion, then an is_dir check whose failure is reported, never
+    /// silently swallowed.
+    pub(crate) async fn apply_cd_target(&mut self, path_arg: &str) {
+        let expanded = crate::brain::tools::error::expand_tilde(path_arg);
+        if !expanded.is_dir() {
+            self.push_system_message(format!("❌ Not a directory: {path_arg}"));
+            return;
+        }
+        self.apply_working_directory_change(&expanded).await;
+    }
+
+    /// The single applier for a confirmed working-directory change: used by
+    /// the `/cd` picker's Tab/Space confirmation and by typed `/cd <path>`
+    /// (#1574), so the two paths cannot drift.
+    pub(crate) async fn apply_working_directory_change(&mut self, dir: &std::path::Path) {
+        let canonical = dir.canonicalize().unwrap_or_else(|_| dir.to_path_buf());
+
+        // Update App working directory
+        self.working_directory = canonical.clone();
+
+        // Update AgentService working directory (runtime). Per-session (#703)
+        // so `/cd` in this pane never moves another session's cwd.
+        if let Some(ref session) = self.current_session {
+            self.agent_service
+                .set_working_directory_for_session(session.id, canonical.clone());
+        } else {
+            self.agent_service.set_working_directory(canonical.clone());
+        }
+
+        // Persist to session DB — that's the source of truth for per-session WD.
+        if let Some(ref session) = self.current_session
+            && let Err(e) = self
+                .session_service
+                .update_session_working_directory(
+                    session.id,
+                    Some(canonical.to_string_lossy().to_string()),
+                )
+                .await
+        {
+            tracing::warn!("failed to persist session working directory: {e}");
+        }
+
+        self.push_system_message(format!(
+            "Working directory changed to: {}",
+            canonical.display()
+        ));
+
+        // Queue context hint so the next message to the LLM knows about the cd
+        self.pending_context.push(format!(
+            "[User changed working directory to: {}]",
+            canonical.display()
+        ));
     }
 
     /// Create a new session
@@ -1232,7 +1306,12 @@ impl App {
                 true
             }
             "/cd" => {
-                if let Err(e) = self.open_directory_picker().await {
+                // #1574: a bare `/cd` opens the picker; `/cd <path>` must
+                // behave like the channel and agent-tool dispatchers, which
+                // both honor the argument. Only the TUI used to drop it.
+                if let Some(arg) = cd_args_from_input(input) {
+                    self.apply_cd_target(arg).await;
+                } else if let Err(e) = self.open_directory_picker().await {
                     tracing::warn!(error = %e, "failed to open directory picker");
                 }
                 true
