@@ -419,6 +419,7 @@ pub mod telegram_token_redaction_test;
 pub mod telegram_topic_routing_test;
 #[cfg(feature = "telegram-userbot")]
 pub mod telegram_userbot_boundary_test;
+pub mod telegram_draft_streaming_compat_test;
 pub mod telegram_userbot_config_test;
 #[cfg(feature = "telegram-userbot")]
 pub mod telegram_userbot_reconcile_test;
