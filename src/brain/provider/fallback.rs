@@ -372,6 +372,14 @@ impl Provider for FallbackProvider {
         self.primary.configured_context_window()
     }
 
+    fn request_timeout(&self) -> Option<std::time::Duration> {
+        self.active_provider().request_timeout()
+    }
+
+    fn stream_idle_timeout(&self) -> Option<std::time::Duration> {
+        self.active_provider().stream_idle_timeout()
+    }
+
     fn calculate_cost(&self, model: &str, input_tokens: u32, output_tokens: u32) -> f64 {
         self.primary
             .calculate_cost(model, input_tokens, output_tokens)

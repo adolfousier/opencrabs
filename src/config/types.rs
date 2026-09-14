@@ -2708,6 +2708,16 @@ pub struct ProviderConfig {
     /// Default: 300 (5 minutes). Only used when cache_enabled is true.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cache_ttl: Option<u32>,
+
+    /// Request timeout in seconds for HTTP client requests to this provider.
+    /// Overrides the default 60s client timeout.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout_secs: Option<u64>,
+
+    /// Inter-chunk streaming inactivity timeout in seconds.
+    /// Overrides the default 20s idle timeout for remote streams (or 3600s for local/CLI).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stream_idle_timeout_secs: Option<u64>,
 }
 
 fn default_enabled() -> bool {

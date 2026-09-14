@@ -466,18 +466,20 @@ impl AgentService {
         //   and just working — don't cut it off on a guess. The user can
         //   always Esc if a turn truly runs away.
         //
-        //   Remote HTTP: 90s. Cross-continent latency plus LLM warmup.
-        //   OpenAI/OpenRouter/etc. emit stream events faster than a local
-        //   prefill, so 90s of silence really does mean the connection
-        //   dropped.
+        //   Remote HTTP: 20s default (or custom stream_idle_timeout_secs).
+        //   Cross-continent latency plus LLM warmup is covered during handshake;
+        //   once streaming, inter-chunk silence exceeding 20s indicates a frozen
+        //   stream proxy or dropped TCP connection.
         let is_local = provider
             .base_url()
             .map(crate::brain::provider::factory::is_local_base_url)
             .unwrap_or(false);
-        let stream_idle_timeout = if is_cli || is_local {
+        let stream_idle_timeout = if let Some(dur) = provider.stream_idle_timeout() {
+            dur
+        } else if is_cli || is_local {
             std::time::Duration::from_secs(3600)
         } else {
-            std::time::Duration::from_secs(90)
+            std::time::Duration::from_secs(20)
         };
 
         // --- Thinking-loop timeout (#890) ---

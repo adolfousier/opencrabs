@@ -103,6 +103,18 @@ pub trait Provider: Send + Sync {
         None
     }
 
+    /// User-configured or provider-specific HTTP request timeout.
+    /// Returns `None` when default client timeouts apply.
+    fn request_timeout(&self) -> Option<std::time::Duration> {
+        None
+    }
+
+    /// User-configured or provider-specific inter-chunk streaming inactivity timeout.
+    /// Returns `None` when standard default idle timeouts apply (20s remote, 3600s local/CLI).
+    fn stream_idle_timeout(&self) -> Option<std::time::Duration> {
+        None
+    }
+
     /// Force the fallback wrapper to advance to the next provider.
     /// Used by the tool loop when stream drops exhaust retries — the
     /// stream started OK so `FallbackProvider::stream()` never saw an error,

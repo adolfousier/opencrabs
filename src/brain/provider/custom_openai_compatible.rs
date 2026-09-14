@@ -19,12 +19,23 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::Duration;
 const DEFAULT_OPENAI_API_URL: &str = "https://api.openai.com/v1/chat/completions";
-const DEFAULT_TIMEOUT: Duration = Duration::from_secs(300);
+const DEFAULT_TIMEOUT: Duration = Duration::from_secs(60);
 const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const DEFAULT_POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(90);
 // TCP keepalive: OS-level probes detect silent connection drops without
-// waiting for the 300s request timeout. Critical for streaming.
+// waiting for the request timeout. Critical for streaming.
 const DEFAULT_TCP_KEEPALIVE: Duration = Duration::from_secs(15);
+
+fn build_http_client(timeout: Duration) -> Client {
+    Client::builder()
+        .timeout(timeout)
+        .connect_timeout(DEFAULT_CONNECT_TIMEOUT)
+        .pool_idle_timeout(DEFAULT_POOL_IDLE_TIMEOUT)
+        .pool_max_idle_per_host(2)
+        .tcp_keepalive(DEFAULT_TCP_KEEPALIVE)
+        .build()
+        .expect("Failed to create HTTP client")
+}
 
 /// Open/close tag pairs to strip from streaming/non-streaming content.
 /// Covers DeepSeek-style `<think>` and Kimi-style `<!-- reasoning -->` blocks.
@@ -2211,6 +2222,10 @@ pub struct OpenAIProvider {
     /// via Arc so clones of this provider (and the FallbackProvider that
     /// wraps it) read the same buffer.
     retry_notices: Arc<std::sync::Mutex<Vec<(u32, u32, String)>>>,
+    /// Configured HTTP client request timeout.
+    request_timeout: Option<Duration>,
+    /// Configured inter-chunk streaming inactivity timeout.
+    stream_idle_timeout: Option<Duration>,
 }
 
 impl OpenAIProvider {
@@ -2251,14 +2266,7 @@ impl OpenAIProvider {
 
     /// Create a new OpenAI provider with official API
     pub fn new(api_key: String) -> Self {
-        let client = Client::builder()
-            .timeout(DEFAULT_TIMEOUT)
-            .connect_timeout(DEFAULT_CONNECT_TIMEOUT)
-            .pool_idle_timeout(DEFAULT_POOL_IDLE_TIMEOUT)
-            .pool_max_idle_per_host(2)
-            .tcp_keepalive(DEFAULT_TCP_KEEPALIVE)
-            .build()
-            .expect("Failed to create HTTP client");
+        let client = build_http_client(DEFAULT_TIMEOUT);
 
         Self {
             api_key,
@@ -2282,19 +2290,14 @@ impl OpenAIProvider {
             reasoning_setting: None,
             enable_thinking_setting: None,
             retry_notices: Arc::new(std::sync::Mutex::new(Vec::new())),
+            request_timeout: None,
+            stream_idle_timeout: None,
         }
     }
 
     /// Create provider for local LLM (LM Studio, Ollama, etc.)
     pub fn local(base_url: String) -> Self {
-        let client = Client::builder()
-            .timeout(DEFAULT_TIMEOUT)
-            .connect_timeout(DEFAULT_CONNECT_TIMEOUT)
-            .pool_idle_timeout(DEFAULT_POOL_IDLE_TIMEOUT)
-            .pool_max_idle_per_host(2)
-            .tcp_keepalive(DEFAULT_TCP_KEEPALIVE)
-            .build()
-            .expect("Failed to create HTTP client");
+        let client = build_http_client(DEFAULT_TIMEOUT);
 
         Self {
             api_key: "not-needed".to_string(),
@@ -2318,19 +2321,14 @@ impl OpenAIProvider {
             reasoning_setting: None,
             enable_thinking_setting: None,
             retry_notices: Arc::new(std::sync::Mutex::new(Vec::new())),
+            request_timeout: None,
+            stream_idle_timeout: None,
         }
     }
 
     /// Create with custom base URL
     pub fn with_base_url(api_key: String, base_url: String) -> Self {
-        let client = Client::builder()
-            .timeout(DEFAULT_TIMEOUT)
-            .connect_timeout(DEFAULT_CONNECT_TIMEOUT)
-            .pool_idle_timeout(DEFAULT_POOL_IDLE_TIMEOUT)
-            .pool_max_idle_per_host(2)
-            .tcp_keepalive(DEFAULT_TCP_KEEPALIVE)
-            .build()
-            .expect("Failed to create HTTP client");
+        let client = build_http_client(DEFAULT_TIMEOUT);
 
         Self {
             api_key,
@@ -2354,6 +2352,8 @@ impl OpenAIProvider {
             reasoning_setting: None,
             enable_thinking_setting: None,
             retry_notices: Arc::new(std::sync::Mutex::new(Vec::new())),
+            request_timeout: None,
+            stream_idle_timeout: None,
         }
     }
 
@@ -2476,6 +2476,19 @@ impl OpenAIProvider {
     /// Set OpenRouter cache TTL in seconds (1-86400, default 300).
     pub fn with_cache_ttl(mut self, ttl: u32) -> Self {
         self.cache_ttl = Some(ttl);
+        self
+    }
+
+    /// Set HTTP client request timeout. Rebuilds the underlying HTTP client.
+    pub fn with_timeout(mut self, timeout: Duration) -> Self {
+        self.client = build_http_client(timeout);
+        self.request_timeout = Some(timeout);
+        self
+    }
+
+    /// Set inter-chunk streaming inactivity timeout.
+    pub fn with_stream_idle_timeout(mut self, timeout: Duration) -> Self {
+        self.stream_idle_timeout = Some(timeout);
         self
     }
 
@@ -4958,6 +4971,14 @@ impl Provider for OpenAIProvider {
 
     fn configured_context_window(&self) -> Option<u32> {
         self.configured_context_window
+    }
+
+    fn request_timeout(&self) -> Option<Duration> {
+        self.request_timeout
+    }
+
+    fn stream_idle_timeout(&self) -> Option<Duration> {
+        self.stream_idle_timeout
     }
 
     fn context_window(&self, model: &str) -> Option<u32> {
