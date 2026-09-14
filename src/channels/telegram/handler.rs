@@ -7,9 +7,9 @@ use super::TelegramState;
 use super::session_resolve;
 use crate::brain::agent::{AgentService, ProgressCallback};
 use crate::config::{Config, RespondTo};
-use crate::db::ChannelMessageRepository;
 use crate::db::SessionBindingRepository;
 use crate::db::models::ChannelMessage as DbChannelMessage;
+use crate::db::{ChannelMessageRepository, MessageRepository};
 use crate::services::SessionService;
 use crate::utils::sanitize::redact_secrets;
 use crate::utils::truncate_str;
@@ -2175,11 +2175,31 @@ pub(crate) async fn handle_message(
         // Strip ctx footer from quoted text so metadata never leaks into agent context
         let full_clean = crate::utils::strip_ctx_footer(&full_text);
         let quote_clean = crate::utils::strip_ctx_footer(quote_text);
-        let ctx = resolve_reply_context(
+
+        // Check if the replied-to full message is already present in active live session context.
+        // If so, we prune redundant full-message tails (#133).
+        let full_in_context = if !full_clean.is_empty() {
+            let msg_repo = MessageRepository::new(session_svc.pool());
+            let all_msgs = msg_repo
+                .find_by_session(session_id)
+                .await
+                .unwrap_or_default();
+            let live_msgs = AgentService::messages_from_last_compaction(all_msgs);
+            let live_haystacks: Vec<String> = live_msgs
+                .iter()
+                .map(|m| normalize_for_dedup(&m.content))
+                .collect();
+            is_content_in_live_context(&full_clean, &live_haystacks)
+        } else {
+            false
+        };
+
+        let ctx = resolve_reply_context_pruned(
             &reply_sender,
             &full_clean,
             &quote_clean,
             unrecoverable_bot_reply,
+            full_in_context,
         );
         tracing::info!(
             "Telegram reply context: chat_id={}, has_reply_to=true, \
@@ -2332,19 +2352,49 @@ pub(crate) async fn handle_message(
             .await
         {
             Ok(messages) if !messages.is_empty() => {
-                let history: Vec<String> = messages
+                // Issue #133: Skip re-injecting group history already present in the active
+                // live session context (post-compaction).
+                let msg_repo = MessageRepository::new(session_svc.pool());
+                let all_msgs = msg_repo
+                    .find_by_session(session_id)
+                    .await
+                    .unwrap_or_default();
+                let live_msgs = AgentService::messages_from_last_compaction(all_msgs);
+                let live_haystacks: Vec<String> = live_msgs
                     .iter()
-                    .rev() // oldest first
-                    .map(|m| {
-                        let ts = m.created_at.format("%H:%M");
-                        format!("[{}] {}: {}", ts, m.sender_name, m.content)
-                    })
+                    .map(|m| normalize_for_dedup(&m.content))
                     .collect();
-                format!(
-                    "{}\n{}",
-                    frame_group_history(&history.join("\n"), history.len()),
+
+                let total_fetched = messages.len();
+                let filtered: Vec<_> = messages
+                    .into_iter()
+                    .filter(|m| !is_content_in_live_context(&m.content, &live_haystacks))
+                    .collect();
+
+                if filtered.is_empty() {
+                    tracing::info!(
+                        "Telegram: all {total_fetched} recent group history messages are already in live session context — skipping injection (#133)"
+                    );
                     agent_input
-                )
+                } else {
+                    tracing::info!(
+                        "Telegram: injecting {} uncompacted group history messages (filtered from {total_fetched})",
+                        filtered.len()
+                    );
+                    let history: Vec<String> = filtered
+                        .iter()
+                        .rev() // oldest first
+                        .map(|m| {
+                            let ts = m.created_at.format("%H:%M");
+                            format!("[{}] {}: {}", ts, m.sender_name, m.content)
+                        })
+                        .collect();
+                    format!(
+                        "{}\n{}",
+                        frame_group_history(&history.join("\n"), history.len()),
+                        agent_input
+                    )
+                }
             }
             _ => agent_input,
         }
@@ -3220,13 +3270,30 @@ pub(crate) fn format_reply_sender(
 /// "content unavailable" marker instead of `None`. Returning `None` there let
 /// the model invent a reply target; an explicit marker tells it to say it
 /// cannot see the content rather than fabricate one.
+#[cfg_attr(not(test), expect(dead_code))]
 pub(crate) fn resolve_reply_context(
     sender: &str,
     full_clean: &str,
     quote_clean: &str,
     unrecoverable_bot_reply: bool,
 ) -> Option<String> {
-    match format_reply_context(sender, full_clean, quote_clean) {
+    resolve_reply_context_pruned(
+        sender,
+        full_clean,
+        quote_clean,
+        unrecoverable_bot_reply,
+        false,
+    )
+}
+
+pub(crate) fn resolve_reply_context_pruned(
+    sender: &str,
+    full_clean: &str,
+    quote_clean: &str,
+    unrecoverable_bot_reply: bool,
+    full_in_context: bool,
+) -> Option<String> {
+    match format_reply_context_pruned(sender, full_clean, quote_clean, full_in_context) {
         Some(c) => Some(c),
         None if unrecoverable_bot_reply => Some(format!(
             "[Replying to {sender}, but the exact content of that message could not be retrieved \
@@ -3237,17 +3304,42 @@ pub(crate) fn resolve_reply_context(
     }
 }
 
+#[cfg_attr(not(test), expect(dead_code))]
 pub(crate) fn format_reply_context(
     sender: &str,
     reply_full_text: &str,
     quote_text: &str,
+) -> Option<String> {
+    format_reply_context_pruned(sender, reply_full_text, quote_text, false)
+}
+
+/// Format reply context with optional pruning if `full_in_context` is true.
+///
+/// If the replied-to message is already present in the active compaction window:
+/// - If a specific user highlight/quote was provided: prune the redundant `Full message:` tail,
+///   emitting only `[Replying to {sender}, user highlighted: "{quote}"]`.
+/// - If no highlight was provided: emit a lightweight reference
+///   `[Replying to {sender}'s message above]` instead of re-injecting thousands of characters.
+pub(crate) fn format_reply_context_pruned(
+    sender: &str,
+    reply_full_text: &str,
+    quote_text: &str,
+    full_in_context: bool,
 ) -> Option<String> {
     let full = reply_full_text.trim();
     let quote = quote_text.trim();
     if full.is_empty() && quote.is_empty() {
         return None;
     }
-    if !quote.is_empty() && quote != full && !full.is_empty() {
+    if full_in_context {
+        if !quote.is_empty() {
+            Some(format!(
+                "[Replying to {sender}, user highlighted: \"{quote}\"]"
+            ))
+        } else {
+            Some(format!("[Replying to {sender}'s message above]"))
+        }
+    } else if !quote.is_empty() && quote != full && !full.is_empty() {
         Some(format!(
             "[Replying to {sender}, user highlighted: \"{quote}\"\nFull message: \"{full}\"]"
         ))
@@ -3256,6 +3348,28 @@ pub(crate) fn format_reply_context(
     } else {
         Some(format!("[Replying to {sender}: \"{full}\"]"))
     }
+}
+
+/// Helper function to normalize text for deduplication comparison.
+/// Collapses all whitespace sequences and converts to lowercase.
+pub(crate) fn normalize_for_dedup(s: &str) -> String {
+    s.split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase()
+}
+
+/// Check whether `candidate` is present in `live_context_haystacks`.
+/// Each haystack in `live_context_haystacks` is assumed to already be normalized with `normalize_for_dedup`.
+pub(crate) fn is_content_in_live_context(
+    candidate: &str,
+    live_context_haystacks: &[String],
+) -> bool {
+    let norm = normalize_for_dedup(candidate);
+    if norm.is_empty() {
+        return false;
+    }
+    live_context_haystacks.iter().any(|h| h.contains(&norm))
 }
 
 /// Extract a short, status-line-friendly excerpt from the agent's
