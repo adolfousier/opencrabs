@@ -9,7 +9,6 @@ fn test_telegram_config_default_struct_booleans() {
         cfg.silence_group_start,
         "silence_group_start must default to true"
     );
-    assert!(cfg.draft_streaming, "draft_streaming must default to true");
     assert!(!cfg.enabled, "enabled must default to false");
     assert!(cfg.token.is_none(), "token must default to None");
     assert!(
@@ -49,10 +48,6 @@ fn test_config_missing_channels_table_toml() {
         tg.silence_group_start,
         "silence_group_start must be true when [channels] is omitted"
     );
-    assert!(
-        tg.draft_streaming,
-        "draft_streaming must be true when [channels] is omitted"
-    );
 }
 
 #[test]
@@ -74,10 +69,6 @@ fn test_config_missing_channels_telegram_table_toml() {
     assert!(
         tg.silence_group_start,
         "silence_group_start must be true when [channels.telegram] is omitted"
-    );
-    assert!(
-        tg.draft_streaming,
-        "draft_streaming must be true when [channels.telegram] is omitted"
     );
 }
 
@@ -102,10 +93,6 @@ fn test_config_empty_channels_telegram_table_toml() {
         tg.silence_group_start,
         "silence_group_start must be true when [channels.telegram] is empty"
     );
-    assert!(
-        tg.draft_streaming,
-        "draft_streaming must be true when [channels.telegram] is empty"
-    );
 }
 
 #[test]
@@ -115,7 +102,6 @@ fn test_config_explicit_false_overrides_respected() {
         rich_messages = false
         mermaid_render = false
         silence_group_start = false
-        draft_streaming = false
     "#;
     let cfg: Config =
         toml::from_str(toml_str).expect("config must parse with explicit false overrides");
@@ -132,10 +118,6 @@ fn test_config_explicit_false_overrides_respected() {
         !tg.silence_group_start,
         "explicit silence_group_start = false must be respected"
     );
-    assert!(
-        !tg.draft_streaming,
-        "explicit draft_streaming = false must be respected"
-    );
 }
 
 #[test]
@@ -151,9 +133,5 @@ fn test_config_partial_override_preserves_other_defaults() {
     assert!(
         tg.silence_group_start,
         "silence_group_start must remain true default"
-    );
-    assert!(
-        tg.draft_streaming,
-        "draft_streaming must remain true default"
     );
 }

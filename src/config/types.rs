@@ -527,7 +527,6 @@ impl Default for TelegramConfig {
             mermaid_render: true,
             silence_group_start: true,
             bot_owner: Vec::new(),
-            draft_streaming: true,
             rate_limiter: RateLimiterConfig::default(),
             groups: std::collections::HashMap::new(),
         }
