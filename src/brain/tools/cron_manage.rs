@@ -240,7 +240,7 @@ impl CronManageTool {
             },
             None => None,
         };
-        let job = CronJob::new(
+        let mut job = CronJob::new(
             name.to_string(),
             cron_expr.to_string(),
             tz,
@@ -252,6 +252,7 @@ impl CronManageTool {
             deliver_to.clone(),
             deliver_api_key,
         );
+        job.next_run_at = crate::cron::next_run_utc(cron_expr, parsed_tz, chrono::Utc::now());
 
         let job_id = job.id.to_string();
 
@@ -481,8 +482,25 @@ impl CronManageTool {
         }
 
         // A changed schedule or timezone must recompute the next fire time:
-        // NULL it and let the scheduler recalculate on the next tick.
-        patch.reset_next_run = schedule_changed || tz_changed;
+        // store the newly computed next_run_at directly. Also, if a previously disabled
+        // job is re-enabled and its next_run_at is expired or missing, recompute it.
+        if schedule_changed || tz_changed {
+            let effective_cron = input
+                .get("cron")
+                .and_then(|v| v.as_str())
+                .unwrap_or(&job.cron_expr);
+            if let Some(tz) = crate::cron::parse_timezone(&effective_tz) {
+                let next = crate::cron::next_run_utc(effective_cron, tz, chrono::Utc::now());
+                patch.next_run_at = Some(next);
+            }
+        } else if patch.enabled == Some(true)
+            && !job.enabled
+            && job.next_run_at.is_none_or(|t| t <= chrono::Utc::now())
+            && let Some(tz) = crate::cron::parse_timezone(&effective_tz)
+        {
+            let next = crate::cron::next_run_utc(&job.cron_expr, tz, chrono::Utc::now());
+            patch.next_run_at = Some(next);
+        }
 
         let updated = self
             .repo
@@ -540,8 +558,12 @@ impl CronManageTool {
                     .last_run_at
                     .map(|d| d.format("%Y-%m-%d %H:%M UTC").to_string())
                     .unwrap_or_else(|| "never".to_string());
+                let next = j
+                    .next_run_at
+                    .map(|d| d.format("%Y-%m-%d %H:%M UTC").to_string())
+                    .unwrap_or_else(|| "none scheduled".to_string());
                 format!(
-                    "- [{}] {} (id={})\n    Schedule: {} ({})\n    Deliver: {}\n    Last run: {}\n    Prompt: {}",
+                    "- [{}] {} (id={})\n    Schedule: {} ({})\n    Deliver: {}\n    Last run: {}\n    Next run: {}\n    Prompt: {}",
                     status,
                     j.name,
                     j.id,
@@ -549,6 +571,7 @@ impl CronManageTool {
                     j.timezone,
                     deliver,
                     last,
+                    next,
                     truncate(&j.prompt, 80),
                 )
             })
