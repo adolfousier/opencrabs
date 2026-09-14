@@ -570,7 +570,7 @@ impl TelegramSendTool {
         // plain-text fallback it never implemented (comment at :504 vs
         // HTML-only chunks) — now the claim is true and telemetry carries
         // origin=tool on every landing.
-        let sent = match crate::channels::telegram::send::send_markdown_outbox(
+        let outbox = match crate::channels::telegram::send::send_markdown_outbox(
             bot,
             ChatId(chat_id),
             thread_id,
@@ -581,15 +581,17 @@ impl TelegramSendTool {
         )
         .await
         {
-            Ok(sent) => sent,
+            Ok(outbox) => outbox,
             Err(e) => return Ok(ToolResult::error(format!("Failed to send: {e}"))),
         };
         // Persist so a later reply to this message can be read back by id
         // (a report/cron post replied-to would otherwise be unrecoverable).
-        crate::channels::telegram::send::record_outgoing(None, chat_id, thread_id, &sent).await;
+        // Uses outbox.effective_thread_id so stale-topic evictions are never
+        // re-poisoned into the database (#169).
+        outbox.record_outgoing(None, chat_id).await;
         Ok(ToolResult::success(format!(
             "Message sent to chat {chat_id}.{}",
-            landing_echo(chat_id, thread_id).await
+            landing_echo(chat_id, outbox.effective_thread_id).await
         )))
     }
 
@@ -610,7 +612,7 @@ impl TelegramSendTool {
         // markdown_to_telegram_html+ParseMode::Html path which degraded
         // tables to a monospace `<pre>` grid. The outbox owns the reply
         // target via `reply_to`, retry, chunking and plain-text fallback.
-        let sent = match crate::channels::telegram::send::send_markdown_outbox(
+        let outbox = match crate::channels::telegram::send::send_markdown_outbox(
             bot,
             ChatId(chat_id),
             thread_id,
@@ -621,14 +623,16 @@ impl TelegramSendTool {
         )
         .await
         {
-            Ok(sent) => sent,
+            Ok(outbox) => outbox,
             Err(e) => return Ok(ToolResult::error(format!("Failed to reply: {e}"))),
         };
         // Persist for reply-recovery (a user can reply to this bot reply).
-        crate::channels::telegram::send::record_outgoing(None, chat_id, thread_id, &sent).await;
+        // Uses outbox.effective_thread_id so stale-topic evictions are never
+        // re-poisoned into the database (#169).
+        outbox.record_outgoing(None, chat_id).await;
         Ok(ToolResult::success(format!(
             "Reply sent to message {message_id}.{}",
-            landing_echo(chat_id, thread_id).await
+            landing_echo(chat_id, outbox.effective_thread_id).await
         )))
     }
 

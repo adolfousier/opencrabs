@@ -1361,18 +1361,18 @@ async fn deliver_telegram(
         )
         .await
         {
-            Ok(sent) => {
+            Ok(outbox) => {
                 tracing::info!(
                     "Cron result for '{job_name}' delivered to Telegram chat {chat_id}{} ({} part(s))",
-                    thread_id
-                        .map(|t| format!(" thread {t}"))
+                    outbox
+                        .effective_thread_id
+                        .map(|t| format!(" thread {}", t.0.0))
                         .unwrap_or_default(),
-                    sent.len()
+                    outbox.sent.len()
                 );
                 // Persist keyed by message id so a reply to the cron post
-                // resolves to this exact content (#234).
-                crate::channels::telegram::send::record_outgoing(pool, chat_id, thread, &sent)
-                    .await;
+                // resolves to this exact content (#234, #169).
+                outbox.record_outgoing(pool, chat_id).await;
             }
             Err(e) => {
                 if let Some(t) = thread_id {
