@@ -355,54 +355,7 @@ async fn drainer_wire_round(label: &str) {
     // drainer's verdict wakes the loop. The drainer's own DRAIN_TICK timer
     // keeps auto-advance ticking until the wire call is in flight, then
     // real time takes over. No real sleeping anywhere in the test itself.
-    //
-    // Watchdog: one real-clock thread per round. If the drainer is genuinely
-    // wedged (no verdict, no notify), the thread fires after 30s and the
-    // self-reporting panic below trips — the backstop the deleted 120s
-    // virtual timeout used to be (with the sleep pump gone that timeout
-    // would be the ONLY pending virtual timer and auto-advance to zero,
-    // panicking every run).
-    let watchdog = std::sync::Arc::new(tokio::sync::Notify::new());
-    let armed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
-    {
-        let watchdog = std::sync::Arc::clone(&watchdog);
-        let armed = std::sync::Arc::clone(&armed);
-        std::thread::spawn(move || {
-            std::thread::sleep(Duration::from_secs(30));
-            if armed.load(std::sync::atomic::Ordering::SeqCst) {
-                watchdog.notify_one();
-            }
-        });
-    }
-    let wedged = loop {
-        let settled = ts::snapshot(CHAT)
-            .map(|s| s.finals_pending == 0 && (s.delivered_finals + s.failed_finals) >= 1)
-            .unwrap_or(false);
-        if settled {
-            break false;
-        }
-        tokio::select! {
-            _ = ts::settle_notifier().notified() => {
-                // A drainer exit happened; re-read the counters next pass.
-                // Keep advancing virtual time for refill / 429-wait
-                // bookkeeping while drainer timers are still pending.
-                ts::advance(600); // > 1/s refill AND > DRAIN_TICK (400ms)
-            }
-            _ = watchdog.notified() => break true,
-        }
-    };
-    armed.store(false, std::sync::atomic::Ordering::SeqCst); // disarm
-    if wedged {
-        // Self-reporting failure (#28): the counters say WHICH half of
-        // the drainer stalled — wire verdict vs bookkeeping.
-        match ts::snapshot(CHAT) {
-            Some(s) => panic!(
-                "queued final never drained ({label}): delivered={} failed={} pending={}",
-                s.delivered_finals, s.failed_finals, s.finals_pending
-            ),
-            None => panic!("queued final never drained: peer snapshot vanished"),
-        }
-    }
+    wait_for_finals_drain(CHAT, label).await;
 
     delivered.assert(); // wire hits within the retry budget, body matched above
     let snap = ts::snapshot(CHAT).unwrap();
@@ -425,6 +378,52 @@ async fn drainer_wire_round(label: &str) {
     assert_eq!(snap.finals_pending, 0);
 }
 
+/// Helper that waits for queued finals on `chat` to settle via the event-driven
+/// settle notifier with a 30s real-clock watchdog.
+async fn wait_for_finals_drain(chat: ChatId, label: &str) {
+    let watchdog = std::sync::Arc::new(tokio::sync::Notify::new());
+    let armed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+    {
+        let watchdog = std::sync::Arc::clone(&watchdog);
+        let armed = std::sync::Arc::clone(&armed);
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_secs(30));
+            if armed.load(std::sync::atomic::Ordering::SeqCst) {
+                watchdog.notify_one();
+            }
+        });
+    }
+    let wedged = loop {
+        let settled = ts::snapshot(chat)
+            .map(|s| s.finals_pending == 0 && (s.delivered_finals + s.failed_finals) >= 1)
+            .unwrap_or(false);
+        if settled {
+            break false;
+        }
+        tokio::select! {
+            _ = ts::settle_notifier().notified() => {
+                // A drainer exit happened; re-read the counters next pass.
+                // Keep advancing virtual time for refill / 429-wait
+                // bookkeeping while drainer timers are still pending.
+                ts::advance(600); // > 1/s refill AND > DRAIN_TICK (400ms)
+            }
+            _ = watchdog.notified() => break true,
+        }
+    };
+    armed.store(false, std::sync::atomic::Ordering::SeqCst); // disarm
+    if wedged {
+        // Self-reporting failure (#28): the counters say WHICH half of
+        // the drainer stalled — wire verdict vs bookkeeping.
+        match ts::snapshot(chat) {
+            Some(s) => panic!(
+                "queued final never drained ({label}): delivered={} failed={} pending={}",
+                s.delivered_finals, s.failed_finals, s.finals_pending
+            ),
+            None => panic!("queued final never drained ({label}): peer snapshot vanished"),
+        }
+    }
+}
+
 #[tokio::test(start_paused = true)]
 async fn queued_final_drains_over_the_wire_through_mock_bot_api() {
     ensure_tracing_capture();
@@ -437,6 +436,138 @@ async fn queued_final_drains_over_the_wire_through_mock_bot_api_stress_6x() {
     for round in 0..6 {
         drainer_wire_round(&format!("stress-{round}")).await;
     }
+}
+
+/// #229: When a rich plan card with no mermaid diagram (empty media array) has
+/// its final edit queued in the flood governor, the drainer must preserve the
+/// Markdown dialect on the wire rather than flipping to HTML and fusing newlines.
+#[tokio::test(start_paused = true)]
+async fn queued_rich_markdown_final_with_empty_media_drains_as_markdown() {
+    ensure_tracing_capture();
+    let _guard = ts::registry_guard().await;
+    ts::reset(7_000);
+    rl_config!(
+        enabled: true,
+        edits_per_minute: 60,
+        edit_burst: 2,
+    );
+
+    const CHAT: ChatId = ChatId(-100_333);
+    ts::mark_forum(CHAT);
+    ts::burn_bucket(CHAT, ts::BucketKind::Edits, 2, 1.0);
+
+    let mut server = mockito::Server::new_async().await;
+    let delivered = server
+        .mock("POST", "/botTESTTOKEN/editMessageText")
+        .match_body(mockito::Matcher::PartialJson(serde_json::json!({
+            "chat_id": -100333,
+            "message_id": 12,
+            "rich_message": {
+                "markdown": "# Test Plan\n- **Item:** value",
+                "media": []
+            }
+        })))
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(r#"{"ok":true,"result":true}"#)
+        .expect_at_least(1)
+        .expect_at_most(8)
+        .create_async()
+        .await;
+
+    let bot = Bot::with_client(
+        "TESTTOKEN",
+        reqwest_teloxide::Client::builder().build().unwrap(),
+    )
+    .set_api_url(server.url().parse().unwrap());
+
+    assert!(
+        !governor::edit_admission_media_kb(
+            &bot,
+            CHAT,
+            MessageId(12),
+            governor::EditClass::Final,
+            "# Test Plan\n- **Item:** value".into(),
+            true,
+            Vec::new(),
+            None,
+            governor::FinalDialect::Markdown,
+        )
+        .await,
+        "starved bucket queues the final"
+    );
+    assert_eq!(ts::snapshot(CHAT).unwrap().finals_pending, 1);
+
+    wait_for_finals_drain(CHAT, "rich-markdown-empty-media").await;
+
+    delivered.assert();
+    let snap = ts::snapshot(CHAT).unwrap();
+    assert_eq!(snap.delivered_finals, 1);
+    assert_eq!(snap.failed_finals, 0);
+    assert_eq!(snap.finals_pending, 0);
+}
+
+/// #229: Rich HTML finals (such as flow details) drain as rich HTML.
+#[tokio::test(start_paused = true)]
+async fn queued_rich_html_final_drains_as_html() {
+    ensure_tracing_capture();
+    let _guard = ts::registry_guard().await;
+    ts::reset(8_000);
+    rl_config!(
+        enabled: true,
+        edits_per_minute: 60,
+        edit_burst: 2,
+    );
+
+    const CHAT: ChatId = ChatId(-100_333);
+    ts::mark_forum(CHAT);
+    ts::burn_bucket(CHAT, ts::BucketKind::Edits, 2, 1.0);
+
+    let mut server = mockito::Server::new_async().await;
+    let delivered = server
+        .mock("POST", "/botTESTTOKEN/editMessageText")
+        .match_body(mockito::Matcher::PartialJson(serde_json::json!({
+            "chat_id": -100333,
+            "message_id": 13,
+            "rich_message": {
+                "html": "<b>Flow Summary</b>"
+            }
+        })))
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(r#"{"ok":true,"result":true}"#)
+        .expect_at_least(1)
+        .expect_at_most(8)
+        .create_async()
+        .await;
+
+    let bot = Bot::with_client(
+        "TESTTOKEN",
+        reqwest_teloxide::Client::builder().build().unwrap(),
+    )
+    .set_api_url(server.url().parse().unwrap());
+
+    assert!(
+        !governor::edit_admission(
+            &bot,
+            CHAT,
+            MessageId(13),
+            governor::EditClass::Final,
+            "<b>Flow Summary</b>".into(),
+            true,
+        )
+        .await,
+        "starved bucket queues the final"
+    );
+    assert_eq!(ts::snapshot(CHAT).unwrap().finals_pending, 1);
+
+    wait_for_finals_drain(CHAT, "rich-html").await;
+
+    delivered.assert();
+    let snap = ts::snapshot(CHAT).unwrap();
+    assert_eq!(snap.delivered_finals, 1);
+    assert_eq!(snap.failed_finals, 0);
+    assert_eq!(snap.finals_pending, 0);
 }
 
 #[tokio::test(start_paused = true)]
