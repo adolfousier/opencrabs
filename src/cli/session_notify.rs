@@ -362,7 +362,11 @@ fn finish(
         }
         _ => {
             if exit_code == EXIT_OK {
-                println!("✅ {outcome}: {detail}");
+                if outcome == "parked" || outcome == "deferred" {
+                    println!("⚠️ {outcome}: {detail}");
+                } else {
+                    println!("✅ {outcome}: {detail}");
+                }
             } else {
                 eprintln!("❌ {outcome}: {detail} (exit {exit_code})");
             }
