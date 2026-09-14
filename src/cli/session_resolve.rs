@@ -61,6 +61,28 @@ pub(crate) fn candidates(matches: &[&Session]) -> String {
         .join("\n")
 }
 
+/// Resolve a session id against the service: full UUIDs parse directly
+/// without hitting the DB; short prefixes fall back to listing sessions.
+///
+/// This avoids loading and deserializing the entire session table on every
+/// automated full-UUID call (#203).
+pub(crate) async fn resolve_session_id_with_service(
+    session_service: &crate::services::SessionService,
+    id: &str,
+) -> anyhow::Result<Uuid> {
+    if let Ok(uuid) = Uuid::parse_str(id) {
+        return Ok(uuid);
+    }
+    use crate::db::repository::SessionListOptions;
+    let sessions = session_service
+        .list_sessions(SessionListOptions {
+            include_archived: true,
+            ..Default::default()
+        })
+        .await?;
+    resolve_session_id(&sessions, id).map_err(anyhow::Error::msg)
+}
+
 /// Resolve `--session <arg>` against the DB: an existing session id resumes,
 /// `None` creates a fresh one titled `default_title` (#1368).
 ///
@@ -74,20 +96,12 @@ pub(crate) async fn resolve_or_create_session(
     arg: Option<&str>,
     default_title: &str,
 ) -> anyhow::Result<crate::db::models::Session> {
-    use crate::db::repository::SessionListOptions;
-
     let Some(id) = arg else {
         return session_service
             .create_session(Some(default_title.to_string()))
             .await;
     };
-    let sessions = session_service
-        .list_sessions(SessionListOptions {
-            include_archived: true,
-            ..Default::default()
-        })
-        .await?;
-    let uuid = resolve_session_id(&sessions, id).map_err(anyhow::Error::msg)?;
+    let uuid = resolve_session_id_with_service(session_service, id).await?;
     session_service
         .get_session(uuid)
         .await?
