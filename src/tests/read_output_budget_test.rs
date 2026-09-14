@@ -7,7 +7,7 @@
 
 use crate::brain::tools::read::ReadTool;
 use crate::brain::tools::{Tool, ToolExecutionContext};
-use std::io::Write;
+use std::io::{BufWriter, Write};
 use uuid::Uuid;
 
 async fn read(json: serde_json::Value) -> crate::brain::tools::ToolResult {
@@ -42,10 +42,15 @@ async fn default_read_stops_at_output_budget_with_resume_offset() {
     // exercises the whole-file budget path.
     let mut f = tempfile::Builder::new().suffix(".log").tempfile().unwrap();
     let total = 4_000usize;
-    for i in 0..total {
-        writeln!(f, "log entry {i:0>40}").unwrap();
+    {
+        // Buffered: one writeln! per line straight at the file is one write
+        // syscall per line (#1534).
+        let mut w = BufWriter::new(f.as_file_mut());
+        for i in 0..total {
+            writeln!(w, "log entry {i:0>40}").unwrap();
+        }
+        w.flush().unwrap();
     }
-    f.flush().unwrap();
 
     let result = read(serde_json::json!({ "path": f.path().to_str().unwrap() })).await;
     assert!(result.success);
@@ -82,11 +87,14 @@ async fn explicit_range_bypasses_budget_but_never_the_clamp() {
     // fire, while the per-line clamp still applies.
     let mut f = tempfile::Builder::new().suffix(".log").tempfile().unwrap();
     let total = 4_000usize;
-    for i in 0..total {
-        writeln!(f, "log entry {i:0>40}").unwrap();
+    {
+        let mut w = BufWriter::new(f.as_file_mut());
+        for i in 0..total {
+            writeln!(w, "log entry {i:0>40}").unwrap();
+        }
+        writeln!(w, "{}", "y".repeat(5_000)).unwrap(); // one long line at the end
+        w.flush().unwrap();
     }
-    writeln!(f, "{}", "y".repeat(5_000)).unwrap(); // one long line at the end
-    f.flush().unwrap();
 
     let result = read(serde_json::json!({
         "path": f.path().to_str().unwrap(),
@@ -120,10 +128,13 @@ async fn buffered_budget_path_counts_the_rejected_line() {
     // Regression for the observed "File has 100004 total lines" under-report.
     let mut f = tempfile::Builder::new().suffix(".log").tempfile().unwrap();
     let total = 100_005usize;
-    for i in 0..total {
-        writeln!(f, "line {i:0>100}").unwrap();
+    {
+        let mut w = BufWriter::new(f.as_file_mut());
+        for i in 0..total {
+            writeln!(w, "line {i:0>100}").unwrap();
+        }
+        w.flush().unwrap();
     }
-    f.flush().unwrap();
 
     let result = read(serde_json::json!({ "path": f.path().to_str().unwrap() })).await;
     assert!(result.success);

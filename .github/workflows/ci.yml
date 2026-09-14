@@ -105,7 +105,7 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: Clippy
-        run: cargo clippy --locked --lib --bins --tests --all-features -- -D warnings
+        run: cargo clippy --locked --lib --bins --tests --examples --all-features -- -D warnings
 
   # ── Stage 2: Build verification (parallel, gated on lint + audit) ────────
   # Cross-platform BUILD on macOS confirms target compatibility without

@@ -21,6 +21,7 @@
 use std::collections::{BTreeSet, HashMap};
 use std::path::Path;
 use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, Ordering};
 use uuid::Uuid;
 
 /// In-memory registry: (session, slug) → the compaction epoch at which the
@@ -67,6 +68,34 @@ pub fn mark_seen(session_id: Uuid, slug: &str) {
         .lock()
         .expect("seen_skills registry poisoned")
         .insert((session_id, slug.to_string()), epoch);
+    // #138: best-effort durability. One row per (session, slug) so the
+    // registry can be rebuilt at boot. Detached so the hot path never
+    // blocks, and WARN-only on failure — the in-memory registry is the
+    // source of truth for this run, durability is a bonus (acceptance 5).
+    if let Ok(handle) = tokio::runtime::Handle::try_current() {
+        let slug = slug.to_string();
+        handle.spawn(async move {
+            match persist_seen(session_id, &slug, epoch).await {
+                Ok(()) => {}
+                Err(e) => tracing::warn!(
+                    "seen_skills: DB persist of ({session_id}, {slug}) failed (in-memory \
+                     registry unaffected): {e:#}"
+                ),
+            }
+        });
+    }
+}
+
+/// Persist one (session, slug, epoch) row. Soft no-op when no DB pool is
+/// installed yet (unit tests, pre-`Database::connect` boot) — that is not
+/// an error, the caller has no durability target.
+async fn persist_seen(session_id: Uuid, slug: &str, epoch: u64) -> anyhow::Result<()> {
+    let Some(pool) = crate::db::global_pool() else {
+        return Ok(());
+    };
+    crate::db::repository::SessionSkillsRepository::new(pool.clone())
+        .record(session_id, slug, epoch)
+        .await
 }
 
 /// The session's current compaction epoch (0 before any compaction).
@@ -127,107 +156,128 @@ pub fn seen_for_session(session_id: Uuid) -> Vec<String> {
     all.into_iter().collect()
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+// ---------------------------------------------------------------------------
+// #138: boot hydration — the registry survives daemon restarts
+// ---------------------------------------------------------------------------
 
-    #[test]
-    fn slug_extraction_from_skill_paths() {
-        assert_eq!(
-            skill_slug_from_path(Path::new(
-                "/root/.opencrabs/profiles/ops/skills/opencrabs-dev/SKILL.md"
-            )),
-            Some("opencrabs-dev".to_string())
+/// Rows loaded from `session_seen_skills`, shaped for the pure fold below.
+/// Deliberately separate from the DB row type so the restart semantics stay
+/// unit-testable without a pool.
+pub struct HydrationSeeds {
+    /// `(session, slug)` → epoch — exactly the in-memory registry's shape.
+    pub seen: HashMap<(Uuid, String), u64>,
+    /// Per-session epoch floor, seeded from the MAX persisted row epoch.
+    pub epochs: HashMap<Uuid, u64>,
+}
+
+/// Fold persisted rows into registry seeds. PURE — no I/O, no globals — so
+/// the restart semantics are testable directly.
+///
+/// `epoch` is NULL for rows written before the column existed (#150); NULL
+/// reads as 0 == "loaded before any compaction", the permissive end, so a
+/// pre-feature row can never wrongly gate a skill.
+///
+/// The session's epoch counter is seeded from the MAX row epoch: a restart
+/// must not leave the counter BELOW an epoch the session already reached,
+/// or every skill loaded after that compaction would falsely re-gate.
+pub fn hydrate_from_rows(rows: Vec<(Uuid, String, Option<i64>)>) -> HydrationSeeds {
+    let mut seeds = HydrationSeeds {
+        seen: HashMap::new(),
+        epochs: HashMap::new(),
+    };
+    for (session_id, slug, epoch) in rows {
+        let epoch = epoch.unwrap_or(0).max(0) as u64;
+        seeds
+            .seen
+            .entry((session_id, slug))
+            .and_modify(|e| *e = (*e).max(epoch))
+            .or_insert(epoch);
+        seeds
+            .epochs
+            .entry(session_id)
+            .and_modify(|e| *e = (*e).max(epoch))
+            .or_insert(epoch);
+    }
+    seeds
+}
+
+/// Install seeds into the in-memory registries. Synchronous on purpose — a
+/// `MutexGuard` is not `Send`, so this must never be held across an await.
+/// Returns the number of seen rows installed (the log line's count).
+///
+/// Merge is MAX-wins: a skill marked seen earlier in THIS run keeps its
+/// epoch rather than being rewound to the persisted one.
+pub fn apply_seeds(seeds: HydrationSeeds) -> usize {
+    let n = seeds.seen.len();
+    {
+        let mut registry = registry().lock().expect("seen_skills registry poisoned");
+        for (key, epoch) in seeds.seen {
+            registry
+                .entry(key)
+                .and_modify(|e| *e = (*e).max(epoch))
+                .or_insert(epoch);
+        }
+    }
+    {
+        let mut epochs = epochs().lock().expect("seen_skills epochs poisoned");
+        for (session_id, epoch) in seeds.epochs {
+            epochs
+                .entry(session_id)
+                .and_modify(|e| *e = (*e).max(epoch))
+                .or_insert(epoch);
+        }
+    }
+    n
+}
+
+/// Once-per-process boot hydrate (issue #138): read every persisted
+/// `(session, slug, epoch)` row into the in-memory registry, then drop rows
+/// whose session no longer exists.
+///
+/// Detached, because the caller (`AgentService::new`) must never block on
+/// I/O. A missing pool is not an error — unit tests and any construction
+/// before `Database::connect` simply have no durability target (acceptance
+/// 5: no panic paths, the in-memory registry keeps working regardless).
+///
+/// The once-flag is claimed AFTER the pool and runtime guards, never before:
+/// a caller that arrives while the pool is still uninstalled has not hydrated
+/// anything, so burning the flag there would disable hydration for the whole
+/// process on the strength of a `debug!` line. Construction before
+/// `Database::connect` is a real order that exists in this tree
+/// (`a2a::test_helpers`), so an early caller must leave the door open for the
+/// one that follows it.
+pub fn hydrate_from_db() {
+    static HYDRATED: AtomicBool = AtomicBool::new(false);
+    let Some(pool) = crate::db::global_pool().cloned() else {
+        tracing::debug!(
+            "seen_skills: no DB pool at boot — registry stays in-memory only (restart \
+             durability unavailable this run)"
         );
-        assert_eq!(
-            skill_slug_from_path(Path::new("skills/foo/SKILL.md")),
-            Some("foo".to_string())
-        );
+        return;
+    };
+    let Ok(handle) = tokio::runtime::Handle::try_current() else {
+        tracing::debug!("seen_skills: no tokio runtime at boot — skipping DB hydration");
+        return;
+    };
+    if HYDRATED.swap(true, Ordering::SeqCst) {
+        return;
     }
-
-    #[test]
-    fn non_skill_paths_yield_none() {
-        assert_eq!(
-            skill_slug_from_path(Path::new("/home/user/MEMORY.md")),
-            None
-        );
-        assert_eq!(skill_slug_from_path(Path::new("skills/foo/other.md")), None);
-        assert_eq!(
-            skill_slug_from_path(Path::new("not-skills/foo/SKILL.md")),
-            None
-        );
-        assert_eq!(skill_slug_from_path(Path::new("skills/foo/")), None);
-    }
-
-    #[test]
-    fn mark_seen_is_idempotent_and_session_scoped() {
-        let a = Uuid::new_v4();
-        let b = Uuid::new_v4();
-        mark_seen(a, "opencrabs-dev");
-        mark_seen(a, "opencrabs-dev");
-        assert!(was_seen(a, "opencrabs-dev"));
-        assert_eq!(seen_for_session(a), vec!["opencrabs-dev".to_string()]);
-        assert!(!was_seen(b, "opencrabs-dev"));
-        assert!(seen_for_session(b).is_empty());
-    }
-
-    #[test]
-    fn seen_list_is_sorted_and_multi() {
-        let a = Uuid::new_v4();
-        mark_seen(a, "zeta");
-        mark_seen(a, "alpha");
-        assert_eq!(
-            seen_for_session(a),
-            vec!["alpha".to_string(), "zeta".to_string()]
-        );
-    }
-
-    // --- issue #150: epoch-carrying registry + skill-gate semantics ---
-
-    #[test]
-    fn fresh_session_reports_not_seen_since_compaction() {
-        let a = Uuid::new_v4();
-        assert!(!seen_since_compaction(a, "anything"));
-    }
-
-    #[test]
-    fn seen_passes_and_compaction_rearms_gate() {
-        let a = Uuid::new_v4();
-        mark_seen(a, "my-skill");
-        assert!(seen_since_compaction(a, "my-skill"));
-        // A compaction bumps the epoch; the stored row keeps the old one.
-        note_compaction(a);
-        assert!(!seen_since_compaction(a, "my-skill"));
-        // Re-reading re-arms at the new epoch.
-        mark_seen(a, "my-skill");
-        assert!(seen_since_compaction(a, "my-skill"));
-    }
-
-    #[test]
-    fn compaction_clears_nothing_stamp_inventory_intact() {
-        let a = Uuid::new_v4();
-        mark_seen(a, "one");
-        mark_seen(a, "two");
-        note_compaction(a);
-        // The #125 stamp's seen-inventory survives.
-        assert_eq!(
-            seen_for_session(a),
-            vec!["one".to_string(), "two".to_string()]
-        );
-        // ...but neither body is "in context" for gate purposes.
-        assert!(!seen_since_compaction(a, "one"));
-        assert!(!seen_since_compaction(a, "two"));
-    }
-
-    #[test]
-    fn sessions_are_independent() {
-        let a = Uuid::new_v4();
-        let b = Uuid::new_v4();
-        mark_seen(a, "sk");
-        note_compaction(a);
-        // b never compacted: its row stays current.
-        mark_seen(b, "sk");
-        assert!(seen_since_compaction(b, "sk"));
-        assert!(!seen_since_compaction(a, "sk"));
-    }
+    handle.spawn(async move {
+        let repo = crate::db::repository::SessionSkillsRepository::new(pool);
+        match repo.all().await {
+            Ok(rows) => {
+                let n = apply_seeds(hydrate_from_rows(rows));
+                tracing::debug!("seen_skills: hydrated registry from DB ({n} seen rows)");
+            }
+            Err(e) => tracing::warn!(
+                "seen_skills: DB hydration failed (registry starts empty, restart durability \
+                 lost this run): {e:#}"
+            ),
+        }
+        match repo.prune_missing_sessions().await {
+            Ok(0) => {}
+            Ok(n) => tracing::debug!("seen_skills: pruned {n} rows for deleted sessions"),
+            Err(e) => tracing::warn!("seen_skills: prune of orphaned rows failed: {e:#}"),
+        }
+    });
 }

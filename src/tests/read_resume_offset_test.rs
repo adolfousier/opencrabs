@@ -13,7 +13,7 @@
 
 use crate::brain::tools::read::ReadTool;
 use crate::brain::tools::{Tool, ToolExecutionContext};
-use std::io::Write;
+use std::io::{BufWriter, Write};
 use uuid::Uuid;
 
 #[tokio::test]
@@ -23,10 +23,15 @@ async fn truncation_warning_names_the_exact_resume_offset() {
     // budget — which is exactly why the explicit start_line below matters.
     let mut f = tempfile::Builder::new().suffix(".log").tempfile().unwrap();
     let total = 100_005usize;
-    for i in 0..total {
-        writeln!(f, "line {i:0>100}").unwrap();
+    {
+        // Buffered: one writeln! per line straight at the file is one write
+        // syscall per line (#1534).
+        let mut w = BufWriter::new(f.as_file_mut());
+        for i in 0..total {
+            writeln!(w, "line {i:0>100}").unwrap();
+        }
+        w.flush().unwrap();
     }
-    f.flush().unwrap();
     let path = f.path().to_str().unwrap().to_string();
 
     let tool = ReadTool;

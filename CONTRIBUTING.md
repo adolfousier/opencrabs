@@ -130,7 +130,7 @@ cargo fmt --all                      # auto-format before committing
 
 # Run the EXACT CI checks (you MUST pass all three before submitting a PR)
 cargo fmt --all -- --check
-cargo clippy --lib --bins --tests --all-features -- -D warnings
+cargo clippy --lib --bins --tests --examples --all-features -- -D warnings
 cargo test --all-features --verbose
 ```
 

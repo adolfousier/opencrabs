@@ -111,6 +111,50 @@ impl Tool for LoadBrainFileTool {
 
         let home = crate::config::opencrabs_home();
 
+        // Filename form of a skill (issue #138): "<slug>.md" resolves through
+        // the skill registry exactly like the bare slug form — same marking,
+        // same body framing, query filtering included. Before #138 this form
+        // could only miss (skills live in skills/<slug>/SKILL.md, never in the
+        // home dir flat namespace), and a query-filtered miss registered
+        // nothing — the exact undercount the #138 probe caught live.
+        //
+        // A real brain file wins. The whole premise above is that this form
+        // could only ever MISS, so it may only claim names that still miss:
+        // the home file is a user artifact, the skill is shipped, and silently
+        // handing back skill text for a file the user wrote is a lie no log
+        // line makes visible. The existence check mirrors the resolution
+        // below — plain `home.join(name)`, since a kebab-lowercase skill slug
+        // never matches a CONTEXTUAL_BRAIN_FILES entry case-insensitively.
+        if let Some(skill) = name
+            .strip_suffix(".md")
+            .map(str::trim)
+            .filter(|s| !s.is_empty() && !s.contains('/') && !s.contains('\\'))
+            .filter(|_| !home.join(name).exists())
+            .and_then(crate::brain::skills::resolve_skill)
+        {
+            super::seen_skills::mark_seen(ctx.session_id, &skill.name);
+            tracing::info!(
+                "load_brain_file: resolved filename form '{}.md' to skill '{}', marked seen \
+                 for session {}",
+                skill.name,
+                skill.name,
+                ctx.session_id
+            );
+            let body = skill.prompt_body();
+            return Ok(ToolResult::success(if query.is_empty() {
+                format!("--- skill: {} ---\n{}", skill.name, body)
+            } else {
+                let matches = crate::brain::brain_sections::find_sections(&body, query);
+                tracing::info!(
+                    "load_brain_file(skill {}, filename form): query={query:?}: {} section(s) \
+                     returned",
+                    skill.name,
+                    matches.sections.len()
+                );
+                matches.render(&format!("skill: {}", skill.name), query)
+            }));
+        }
+
         // Read-time empty-section stripping. Default on; opt out via
         // `[brain] strip_empty_sections = false` in config.toml.
         // Disk stays authoritative — writes never run through this.

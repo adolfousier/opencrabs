@@ -461,7 +461,17 @@ impl AgentService {
             plan_mode_swap: std::sync::RwLock::new(HashMap::new()),
             session_context_limits: std::sync::RwLock::new(HashMap::new()),
             session_primary_failure_streak: std::sync::RwLock::new(HashMap::new()),
-            active_skills: std::sync::RwLock::new(HashMap::new()),
+            // #138: hydrate the seen-skills registry from the DB before the
+            // first surface can stamp — detached, so construction never
+            // blocks (and a no-pool test env just skips, see hydrate fn).
+            // Fired here because AgentService::new is the chokepoint every
+            // surface (TUI, daemon, cron) constructs its service through;
+            // hydrating once per process is sufficient (registry is
+            // process-wide and hydrate is once-only by flag).
+            active_skills: {
+                crate::brain::tools::seen_skills::hydrate_from_db();
+                std::sync::RwLock::new(HashMap::new())
+            },
             session_pressure_warned: std::sync::RwLock::new(HashMap::new()),
             last_compaction_elapsed: std::sync::RwLock::new(HashMap::new()),
             session_outgoing_text_ring: std::sync::RwLock::new(HashMap::new()),
@@ -1987,6 +1997,11 @@ impl AgentService {
     /// body is re-injected into the system brain on every turn so it
     /// survives context compaction (#219).
     pub fn register_active_skill(&self, session_id: Uuid, skill_name: &str) {
+        // #138: slash invocation is skill consumption too — marking seen
+        // (which persists to the DB) makes the compaction stamp's union
+        // survive restarts for slash-invoked skills, not just read-loaded
+        // ones. In-memory active_skills stays the re-injection driver.
+        crate::brain::tools::seen_skills::mark_seen(session_id, skill_name);
         let mut map = self
             .active_skills
             .write()
