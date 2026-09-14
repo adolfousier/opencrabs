@@ -223,8 +223,14 @@ impl ChannelManager {
                     // the topic. Detached: a slow DB read must not delay the bot.
                     let binding_repo =
                         crate::db::SessionBindingRepository::new(self.db_pool.clone());
-                    let state_for_claims = self.telegram_state.clone();
+                    self.telegram_state
+                        .set_binding_store(binding_repo.clone())
+                        .await;
                     let enqueue_for_claims = tg_agent_service.message_enqueue_callback();
+                    self.telegram_state
+                        .set_enqueue_callback(enqueue_for_claims.clone())
+                        .await;
+                    let state_for_claims = self.telegram_state.clone();
                     tokio::spawn(async move {
                         let loaded = binding_repo.all_for_channel("telegram").await;
                         match (loaded, enqueue_for_claims) {

@@ -385,7 +385,7 @@ impl Tool for TelegramSendTool {
                         "send_poll", "send_buttons", "get_chat",
                         "get_chat_administrators", "get_chat_member_count", "get_chat_member",
                         "ban_user", "unban_user", "set_reaction", "list_topics",
-                        "create_topic", "rename_topic"
+                        "create_topic", "rename_topic", "bind_topic"
                     ],
                     "description": "The Telegram action to perform. \
                         `list_topics` returns ONLY the bot-observed (thread_id, topic_name) pairs \
@@ -394,12 +394,17 @@ impl Tool for TelegramSendTool {
                         Use this to translate an already observed topic name like \"#announcements\" to \
                         the numeric thread_id passed to `send` / `reply` via `thread_id`. For exhaustive \
                         MTProto forum enumeration, use MTProto client tools (e.g. fast-mcp-telegram tg_get_chat_info). \
-                        `create_topic` creates a new forum topic (requires `name`, 1-128 chars). \
-                        `rename_topic` renames an existing forum topic (requires `thread_id` and `name`, 1-128 chars)."
+                        `create_topic` creates a new forum topic (requires `name`, 1-128 chars). Optionally accepts `bind: true` to bind the calling session immediately. \
+                        `rename_topic` renames an existing forum topic (requires `thread_id` and `name`, 1-128 chars). \
+                        `bind_topic` binds the calling session to a forum topic (requires `thread_id`, optional `chat_id`)."
                 },
                 "name": {
                     "type": "string",
                     "description": "Topic name (1–128 characters) for create_topic and rename_topic"
+                },
+                "bind": {
+                    "type": "boolean",
+                    "description": "Optional flag for create_topic: if true, immediately binds the calling session to the newly created topic."
                 },
                 "message": {
                     "type": "string",
@@ -547,12 +552,13 @@ impl Tool for TelegramSendTool {
             "list_topics" => self.action_list_topics(&bot, input, context).await,
             "create_topic" => self.action_create_topic(&bot, input, context).await,
             "rename_topic" => self.action_rename_topic(&bot, input, context).await,
+            "bind_topic" => self.action_bind_topic(input, context).await,
             unknown => Ok(ToolResult::error(format!(
                 "Unknown action '{unknown}'. Valid actions: send, reply, edit, delete, pin, \
                  unpin, forward, send_photo, send_document, send_location, send_poll, \
                  send_buttons, get_chat, get_chat_administrators, get_chat_member_count, \
                  get_chat_member, ban_user, unban_user, set_reaction, list_topics, \
-                 create_topic, rename_topic"
+                 create_topic, rename_topic, bind_topic"
             ))),
         }
     }
@@ -1694,11 +1700,22 @@ impl TelegramSendTool {
                     topic.name.len(),
                     "-",
                 );
+                let bind = input.get("bind").and_then(|v| v.as_bool()).unwrap_or(false);
+                if bind {
+                    let bind_res = self
+                        .telegram_state
+                        .bind_session_topic(context.session_id, chat_id, Some(thread_id))
+                        .await;
+                    if let Err(e) = bind_res {
+                        tracing::warn!("create_topic: failed to bind session to new topic: {e}");
+                    }
+                }
                 let res = serde_json::json!({
                     "status": "success",
                     "chat_id": chat_id,
                     "thread_id": thread_id,
-                    "name": topic.name
+                    "name": topic.name,
+                    "bound": bind
                 });
                 Ok(ToolResult::success(res.to_string()))
             }
@@ -1791,6 +1808,64 @@ impl TelegramSendTool {
                     &e.to_string(),
                 );
                 Ok(ToolResult::error(format!("Failed to rename topic: {e}")))
+            }
+        }
+    }
+
+    /// `bind_topic` — bind the calling session to a forum topic.
+    async fn action_bind_topic(
+        &self,
+        input: &Value,
+        context: &ToolExecutionContext,
+    ) -> Result<ToolResult> {
+        let ChatTarget { chat_id } =
+            pget!(resolve_chat_target(input, context.session_id, &self.telegram_state).await);
+        let thread_id_raw = pget!(get_id(input, "thread_id"));
+        let topic_id = Some(thread_id_raw as i32);
+
+        match self
+            .telegram_state
+            .bind_session_topic(context.session_id, chat_id, topic_id)
+            .await
+        {
+            Ok(_) => {
+                self.telegram_state
+                    .note_thread_evidence(chat_id, topic_id)
+                    .await;
+                log_send_success(
+                    "tool",
+                    "bind_topic",
+                    "bind_topic",
+                    &context.session_id.to_string(),
+                    "action",
+                    chat_id,
+                    topic_id,
+                    0,
+                    0,
+                    "-",
+                );
+                let res = serde_json::json!({
+                    "status": "success",
+                    "session_id": context.session_id.to_string(),
+                    "chat_id": chat_id,
+                    "thread_id": thread_id_raw
+                });
+                Ok(ToolResult::success(res.to_string()))
+            }
+            Err(e) => {
+                log_send_failure(
+                    "tool",
+                    "bind_topic",
+                    "bind_topic",
+                    &context.session_id.to_string(),
+                    "action",
+                    chat_id,
+                    topic_id,
+                    0,
+                    "-",
+                    &e,
+                );
+                Ok(ToolResult::error(format!("Failed to bind topic: {e}")))
             }
         }
     }

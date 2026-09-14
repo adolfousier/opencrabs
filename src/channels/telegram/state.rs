@@ -227,6 +227,12 @@ pub struct TelegramState {
     /// dying as unknown-token stale shells. `None` on surfaces built
     /// without a database — old in-memory-only behaviour.
     followup_store: Mutex<Option<crate::db::repository::PendingFollowupRepository>>,
+    /// Durable backing for `session_bindings` table (#170).
+    /// Used by `bind_session_topic` to persist proactive topic bindings.
+    binding_store: Mutex<Option<crate::db::SessionBindingRepository>>,
+    /// Enqueue callback hook for background task routing (#170).
+    /// Used by `bind_session_topic` to claim session routes for Telegram.
+    enqueue_callback: Mutex<Option<crate::brain::agent::service::MessageEnqueueCallback>>,
     /// Session → when card writes may resume, after Telegram asked us to wait
     /// (#814). Without this the next refresh wrote immediately and renewed the
     /// flood-control window, so the countdown never elapsed.
@@ -426,6 +432,8 @@ impl TelegramState {
             plan_cards: Mutex::new(HashMap::new()),
             plan_card_store: Mutex::new(None),
             followup_store: Mutex::new(None),
+            binding_store: Mutex::new(None),
+            enqueue_callback: Mutex::new(None),
             plan_card_backoff: Mutex::new(HashMap::new()),
             plan_card_locks: Mutex::new(HashMap::new()),
             photo_buffer: Mutex::new(HashMap::new()),
@@ -1184,6 +1192,68 @@ impl TelegramState {
             .lock()
             .await
             .insert(session_id, std::time::Instant::now() + wait);
+    }
+
+    /// Give the session binding map durable backing. Called at startup (#170).
+    pub(crate) async fn set_binding_store(&self, repo: crate::db::SessionBindingRepository) {
+        *self.binding_store.lock().await = Some(repo);
+    }
+
+    /// Set the message enqueue callback for background task routing (#170).
+    pub(crate) async fn set_enqueue_callback(
+        &self,
+        cb: Option<crate::brain::agent::service::MessageEnqueueCallback>,
+    ) {
+        *self.enqueue_callback.lock().await = cb;
+    }
+
+    /// Authoritative method to bind a session to a chat/topic (#170).
+    /// Updates in-memory mappings, persistent database storage, session delivery route,
+    /// turn probe, and channel ownership probe.
+    pub async fn bind_session_topic(
+        self: &std::sync::Arc<Self>,
+        session_id: Uuid,
+        chat_id: i64,
+        topic_id: Option<i32>,
+    ) -> Result<(), String> {
+        // 1. In-memory mappings + sync ownership mirror
+        self.register_session_chat(session_id, chat_id, topic_id)
+            .await;
+
+        // 2. Persistent storage
+        let store = self.binding_store.lock().await.clone();
+        if let Some(repo) = store {
+            repo.upsert(
+                session_id.to_string(),
+                "telegram",
+                &chat_id.to_string(),
+                topic_id,
+            )
+            .await
+            .map_err(|e| format!("could not persist session binding for {session_id}: {e}"))?;
+        }
+
+        // 3. Session routing
+        let enqueue = self.enqueue_callback.lock().await.clone();
+        crate::brain::agent::service::session_routes::claim_for_channel(session_id, enqueue);
+
+        // 4. Probes
+        {
+            let probe_state = std::sync::Arc::clone(self);
+            crate::brain::agent::service::session_routes::register_turn_probe(
+                session_id,
+                std::sync::Arc::new(move || probe_state.is_turn_active(session_id)),
+            );
+        }
+        {
+            let probe_state = std::sync::Arc::clone(self);
+            crate::brain::agent::service::session_routes::register_channel_owner_probe(
+                session_id,
+                std::sync::Arc::new(move || probe_state.channel_ownership_of(session_id)),
+            );
+        }
+
+        Ok(())
     }
 
     /// Give the plan-card map durable backing. Called once at startup.

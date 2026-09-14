@@ -868,6 +868,12 @@ async fn cmd_chat_inner(
             db.pool().clone(),
         ))
         .await;
+    // Durable session bindings backing (#170): allows proactive topic binding
+    // before the first inbound message arrives.
+    #[cfg(feature = "telegram")]
+    telegram_state
+        .set_binding_store(crate::db::SessionBindingRepository::new(db.pool().clone()))
+        .await;
 
     // Register Telegram connect tool (agent-callable bot setup)
     #[cfg(feature = "telegram")]

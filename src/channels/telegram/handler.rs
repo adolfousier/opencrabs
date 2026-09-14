@@ -408,7 +408,7 @@ pub(crate) async fn handle_message(
     telegram_state: Arc<TelegramState>,
     config_rx: tokio::sync::watch::Receiver<Config>,
     channel_msg_repo: ChannelMessageRepository,
-    session_binding_repo: SessionBindingRepository,
+    _session_binding_repo: SessionBindingRepository,
 ) -> ResponseResult<()> {
     let user = match msg.from {
         Some(ref u) => u,
@@ -1877,26 +1877,17 @@ pub(crate) async fn handle_message(
         topic_id,
     );
 
-    // Register session → chat for approval routing, scoped to the forum topic
-    // so each topic resolves to its own session on the fast path (#215).
-    telegram_state
-        .register_session_chat(session_id, msg.chat.id.0, topic_id)
-        .await;
-
-    // Persist where this session lives so a restart re-registers its delivery
-    // route at channel-connect time; without this row an idle-at-boot session
-    // parks every completion until a human messages its topic (#1224).
-    // Best-effort: a failed write only degrades to pre-fix park-and-wait.
-    if let Err(e) = session_binding_repo
-        .upsert(
-            session_id.to_string(),
-            "telegram",
-            &msg.chat.id.0.to_string(),
-            topic_id,
-        )
+    // Register session binding, persist route, and wire delivery probes (#170).
+    // Consolidated in TelegramState::bind_session_topic so proactive bindings
+    // and inbound message handling share the exact same registration path.
+    if let Err(e) = telegram_state
+        .bind_session_topic(session_id, msg.chat.id.0, topic_id)
         .await
     {
-        tracing::warn!("Could not persist session binding for {session_id}: {e}");
+        tracing::warn!(
+            "Could not bind session {session_id} to chat {}: {e}",
+            msg.chat.id.0
+        );
     }
 
     // Resolution is complete and the binding is visible, so a message that
@@ -1904,39 +1895,6 @@ pub(crate) async fn handle_message(
     // own (#1201). Released HERE rather than at end of scope: the turn below
     // must not hold it.
     drop(resolve_gate);
-
-    // Claim this session's background-task completions for Telegram: a completion
-    // must be delivered by the surface that OWNS the session, not by whichever
-    // service happened to run the command (#940).
-    crate::brain::agent::service::session_routes::claim_for_channel(
-        session_id,
-        agent.message_enqueue_callback(),
-    );
-
-    // Expose this session's turn state to the delivery gate (fork #13): a
-    // session_notify without interrupt=true must refuse while a turn is
-    // streaming instead of dropping a bare user message into it. The probe
-    // captures this state Arc, so it stays valid across route re-binds.
-    {
-        let probe_state = telegram_state.clone();
-        crate::brain::agent::service::session_routes::register_turn_probe(
-            session_id,
-            std::sync::Arc::new(move || probe_state.is_turn_active(session_id)),
-        );
-    }
-
-    // Expose this session's channel ownership to the delivery gate (fork
-    // #17): when this session gets REPLACED on its chat/topic (idle-timeout
-    // reset creates a successor), pushes must refuse to wake it into the
-    // successor's conversation instead of two sessions writing the same
-    // channel. Sync mirror read — TelegramState::channel_ownership_of.
-    {
-        let probe_state = telegram_state.clone();
-        crate::brain::agent::service::session_routes::register_channel_owner_probe(
-            session_id,
-            std::sync::Arc::new(move || probe_state.channel_ownership_of(session_id)),
-        );
-    }
 
     // Archive any shared images under the session's project files dir (when the
     // session is assigned to a project) so a project's media lives together and

@@ -46,10 +46,14 @@ fn telegram_send_schema_declares_topic_actions_and_params() {
         enum_strs.contains(&"rename_topic"),
         "action enum missing rename_topic"
     );
+    assert!(
+        enum_strs.contains(&"bind_topic"),
+        "action enum missing bind_topic"
+    );
     assert_eq!(
         enum_strs.len(),
-        22,
-        "action enum should contain exactly 22 actions"
+        23,
+        "action enum should contain exactly 23 actions"
     );
 
     let name = props.get("name").expect("schema has name property");
@@ -158,4 +162,77 @@ async fn record_topic_created_and_edited_persists_to_repository() {
     assert_eq!(topics_after.len(), 1);
     assert_eq!(topics_after[0].thread_id, "42");
     assert_eq!(topics_after[0].topic_name.as_deref(), Some("Announcements"));
+}
+
+#[tokio::test]
+async fn telegram_send_bind_topic_persists_binding_and_records_thread_evidence() {
+    let db = Database::connect_in_memory().await.expect("in-memory db");
+    db.run_migrations().await.expect("migrations");
+    let pool = db.pool().clone();
+
+    let session_repo = crate::db::SessionRepository::new(pool.clone());
+    let session = crate::db::Session::new(None, None, None);
+    session_repo.create(&session).await.expect("create session");
+    let session_id = session.id;
+
+    let state = Arc::new(TelegramState::new());
+    state.set_bot(Bot::new("TESTTOKEN")).await;
+    let binding_repo = crate::db::SessionBindingRepository::new(pool.clone());
+    state.set_binding_store(binding_repo.clone()).await;
+
+    let tool = TelegramSendTool::new(state.clone());
+    let ctx = ToolExecutionContext::new(session_id);
+
+    let res = tool
+        .execute(
+            json!({
+                "action": "bind_topic",
+                "chat_id": -1001234567890i64,
+                "thread_id": 42
+            }),
+            &ctx,
+        )
+        .await
+        .expect("tool execution returns Ok(ToolResult)");
+
+    assert!(res.success, "bind_topic should succeed: {:?}", res.error);
+    let output: serde_json::Value = serde_json::from_str(&res.output).expect("valid json output");
+    assert_eq!(
+        output.get("status").and_then(|v| v.as_str()),
+        Some("success")
+    );
+    assert_eq!(output.get("thread_id").and_then(|v| v.as_i64()), Some(42));
+
+    // Verify session mapping in state
+    let target = state.session_binding(session_id).await;
+    assert_eq!(target, Some((-1001234567890i64, Some(42))));
+
+    // Direct SQLite table checks to pinpoint any issue
+    let (s_cnt, b_cnt): (i64, i64) = pool
+        .get()
+        .await
+        .unwrap()
+        .interact(|conn| {
+            let s: i64 = conn
+                .query_row("SELECT count(*) FROM sessions", [], |r| r.get(0))
+                .unwrap();
+            let b: i64 = conn
+                .query_row("SELECT count(*) FROM session_bindings", [], |r| r.get(0))
+                .unwrap();
+            (s, b)
+        })
+        .await
+        .unwrap();
+    assert_eq!(s_cnt, 1, "sessions table must have 1 row");
+    assert_eq!(b_cnt, 1, "session_bindings table must have 1 row");
+
+    // Verify persistent binding in DB
+    let bound = binding_repo
+        .all_for_channel("telegram")
+        .await
+        .expect("query bindings");
+    assert_eq!(bound.len(), 1);
+    assert_eq!(bound[0].session_id, session_id.to_string());
+    assert_eq!(bound[0].chat_id, "-1001234567890");
+    assert_eq!(bound[0].thread_id, Some(42));
 }
