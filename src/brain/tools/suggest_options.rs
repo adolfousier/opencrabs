@@ -99,7 +99,7 @@ impl Tool for SuggestOptionsTool {
     }
 
     fn description(&self) -> &str {
-        "Surface up to 8 short option messages for the user to pick from as their next input. CHANNEL-AGNOSTIC interactive UI: tap-to-send buttons under your reply on chat channels (Telegram/Discord/...), a pick-list or gray ghost-text accept in the TUI. You MUST call this tool to make options interactive: writing them as plain text leaves dead text with no button to tap. If this is your final action of the turn, the turn ends with the options pending the user's pick. Use ONE option for an obvious single next step — a one-tap confirm (\"Go\", \"Confirm\", \"Agreed\") is often easier for the user than typing the word, and single-option sets are always legal; 2-8 for distinct next directions. Each option must be a complete, ready-to-send user message phrased in the user's voice (e.g. \"Add tests for the new endpoint\", not \"I could add tests\"). Keep labels concise: under 20 chars for multi-option sets, under 30 chars for a solo option (longer options collapse into numbered text or confirmation lines). Ask any open questions in your reply text; provide the candidate answers in options. Do NOT also repeat the options in your prose."
+        "Surface up to 8 short option messages for the user to pick from as their next input. CHANNEL-AGNOSTIC interactive UI: tap-to-send buttons under your reply on chat channels (Telegram/Discord/...), a pick-list or gray ghost-text accept in the TUI. You MUST call this tool to make options interactive: writing them as plain text leaves dead text with no button to tap. If this is your final action of the turn, the turn ends with the options pending the user's pick. Use ONE option for an obvious single next step — a one-tap confirm (\"Go\", \"Confirm\", \"Agreed\") is often easier for the user than typing the word, and single-option sets are always legal; 2-8 for distinct next directions. When presenting multiple options, mark your recommended option with style=\"primary\" (or \"danger\" for destructive choices; \"default\" or omitted for neutral options). Start each option with a clear, distinctive action verb or keyword (e.g. \"Deploy to production\", \"Cancel workflow\"): if options exceed button width they collapse into numbered text and the button shows 'N. <FirstWord>'. Each option must be a complete, ready-to-send user message phrased in the user's voice (e.g. \"Add tests for the new endpoint\", not \"I could add tests\"). Keep labels concise: under 20 chars for multi-option sets, under 30 chars for a solo option (longer options collapse into numbered text or confirmation lines). Ask any open questions in your reply text; provide the candidate answers in options. Do NOT also repeat the options in your prose."
     }
 
     fn input_schema(&self) -> Value {
@@ -112,19 +112,19 @@ impl Tool for SuggestOptionsTool {
                         "anyOf": [
                             {
                                 "type": "string",
-                                "description": "Option label string (default neutral button style)"
+                                "description": "Option label string (default neutral button style). Start with a distinctive action verb or keyword (e.g. 'Deploy', 'Cancel') so folded buttons display 'N. <FirstWord>'."
                             },
                             {
                                 "type": "object",
                                 "properties": {
                                     "label": {
                                         "type": "string",
-                                        "description": "Ready-to-send option message in the user's voice"
+                                        "description": "Ready-to-send option message in the user's voice. Start with a distinctive action verb or keyword (e.g. 'Deploy', 'Cancel') so folded buttons display 'N. <FirstWord>'."
                                     },
                                     "style": {
                                         "type": "string",
                                         "enum": ["default", "primary", "danger"],
-                                        "description": "Button visual style: 'primary' (recommended/action), 'danger' (destructive/cancel), or 'default' (neutral). Omit for default."
+                                        "description": "Button visual style: 'primary' (recommended action when presenting multiple options), 'danger' (destructive/cancel), or 'default' (neutral). Omit for default."
                                     }
                                 },
                                 "required": ["label"]
@@ -133,7 +133,7 @@ impl Tool for SuggestOptionsTool {
                     },
                     "minItems": 1,
                     "maxItems": MAX_OPTIONS,
-                    "description": "1 to 8 distinct, ready-to-send option messages in the user's voice. Each item can be a plain string or an object {label, style}. Prefer concise labels (<=20 chars for multi-option sets, <=30 chars for a solo option) so they render as interactive buttons. Rendered on Telegram/Discord/Slack and pick-list in the TUI — never as plain text."
+                    "description": "1 to 8 distinct, ready-to-send option messages in the user's voice. Each item can be a plain string or an object {label, style}. Mark your recommended option with style='primary'. Start options with a distinctive action verb or keyword. Prefer concise labels (<=20 chars for multi-option sets, <=30 chars for a solo option) so they render as interactive buttons. Rendered on Telegram/Discord/Slack and pick-list in the TUI — never as plain text."
                 }
             },
             "required": ["options"]

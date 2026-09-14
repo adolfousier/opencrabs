@@ -396,14 +396,19 @@ pub(crate) fn go_tier_lines_rich(options: &[String]) -> String {
 }
 
 /// The fold-tier button label for one option — set-size split (owner
-/// order 2026-09-09): n>=2 = the ORIGINAL plain digit (`1`, `2`, …),
-/// pairing with the restored `1. <label>` body lines; n=1 = the single
-/// `Go!` button of the confirmed Go! tier. `number` is 1-based.
-pub(crate) fn go_button_label(number: usize, is_single: bool) -> String {
+/// order 2026-09-09, updated 2026-09-14): n>=2 = `N. <FirstWord>` (e.g. `1. Deploy`, `2. Skip`),
+/// pairing with the restored `1. <label>` body lines while giving each button immediate context;
+/// n=1 = the single `Go!` button of the confirmed Go! tier. `number` is 1-based.
+pub(crate) fn go_button_label(number: usize, label: &str, is_single: bool) -> String {
     if is_single {
         String::from("Go!")
     } else {
-        number.to_string()
+        let first_word = label.split_whitespace().next().unwrap_or_default();
+        if first_word.is_empty() {
+            number.to_string()
+        } else {
+            format!("{number}. {first_word}")
+        }
     }
 }
 
@@ -776,7 +781,7 @@ pub(crate) fn suggestion_rows_rich_html(
             .map(|i| {
                 btn(
                     i,
-                    &go_button_label(i + 1, options.len() == 1),
+                    &go_button_label(i + 1, &options[i].label, options.len() == 1),
                     options[i].style,
                 )
             })
@@ -858,7 +863,7 @@ pub(crate) async fn render_suggestions(
             let all: Vec<InlineKeyboardButton> = (0..raw_options.len())
                 .map(|i| {
                     InlineKeyboardButton::callback(
-                        go_button_label(i + 1, raw_options.len() == 1),
+                        go_button_label(i + 1, &raw_options[i], raw_options.len() == 1),
                         format!("{FOLLOWUP_PREFIX}{token}:{i}"),
                     )
                 })

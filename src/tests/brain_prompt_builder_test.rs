@@ -596,6 +596,14 @@ fn followup_guidance_is_free_of_magic_numbers() {
         line.contains("suggest_options"),
         "guidance must keep naming the tool"
     );
+    assert!(
+        line.contains(r#"style=\"primary\""#),
+        "guidance must instruct primary recommendation styling"
+    );
+    assert!(
+        line.contains("N. <FirstWord>"),
+        "guidance must mention folded button format"
+    );
 }
 
 // ── #129: headless brains must not advertise suggest_options ────────────────
