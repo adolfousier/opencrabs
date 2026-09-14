@@ -110,6 +110,41 @@ async fn test_bash_background_explicit_false_runs_inline() {
 }
 
 #[tokio::test]
+async fn test_bash_injects_opencrabs_session_id() {
+    let tool = BashTool;
+    let session_id = Uuid::new_v4();
+    let mut context = ToolExecutionContext::new(session_id).with_auto_approve(true);
+    context
+        .env_vars
+        .insert("CUSTOM_TEST_VAR".to_string(), "foo_bar_baz".to_string());
+
+    let command = if cfg!(target_os = "windows") {
+        "echo %OPENCRABS_SESSION_ID% %CUSTOM_TEST_VAR%"
+    } else {
+        "echo \"$OPENCRABS_SESSION_ID $CUSTOM_TEST_VAR\""
+    };
+
+    let input = serde_json::json!({
+        "command": command,
+        "background": false
+    });
+
+    let result = tool.execute(input, &context).await.unwrap();
+    assert!(result.success);
+    assert!(
+        result.output.contains(&session_id.to_string()),
+        "output '{}' did not contain session_id '{}'",
+        result.output,
+        session_id
+    );
+    assert!(
+        result.output.contains("foo_bar_baz"),
+        "output '{}' did not contain custom env var 'foo_bar_baz'",
+        result.output
+    );
+}
+
+#[tokio::test]
 async fn test_bash_background_explicit_true_fails_when_unavailable() {
     let tool = BashTool;
     let session_id = Uuid::new_v4();

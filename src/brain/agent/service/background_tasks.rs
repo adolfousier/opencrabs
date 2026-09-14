@@ -150,7 +150,7 @@ impl BackgroundTaskManager {
                 }
             }
             let started = std::time::Instant::now();
-            let result = run_detached(&command, &cwd).await;
+            let result = run_detached(&command, &cwd, session_id).await;
             // Capture ONCE: the log line, the status file and the receipt
             // payload (#15) must all report the same runtime.
             let elapsed_secs = started.elapsed().as_secs_f32();
@@ -270,12 +270,13 @@ pub(super) fn task_repo() -> Option<crate::db::BackgroundTaskRepository> {
 }
 
 /// Run `command` through `sh -c` in `cwd`, capturing merged stdout+stderr.
-async fn run_detached(command: &str, cwd: &std::path::Path) -> CmdResult {
+async fn run_detached(command: &str, cwd: &std::path::Path, session_id: Uuid) -> CmdResult {
     use tokio::process::Command;
     let output = Command::new("sh")
         .arg("-c")
         .arg(command)
         .current_dir(cwd)
+        .env("OPENCRABS_SESSION_ID", session_id.to_string())
         .output()
         .await;
     match output {

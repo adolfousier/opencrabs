@@ -152,6 +152,14 @@ fn detach_session_pre_exec(_cmd: &mut Command) {
     // console model) and pre_exec is a Unix-only API.
 }
 
+/// Inject session identity and context environment variables into the command.
+fn apply_context_env(cmd: &mut Command, context: &ToolExecutionContext) {
+    for (k, v) in &context.env_vars {
+        cmd.env(k, v);
+    }
+    cmd.env("OPENCRABS_SESSION_ID", context.session_id.to_string());
+}
+
 /// First-token of a shell command, normalized for SSH detection.
 fn first_token(cmd: &str) -> &str {
     cmd.split([';', '|', '&'])
@@ -578,6 +586,7 @@ impl Tool for BashTool {
                     .stdin(std::process::Stdio::piped())
                     .stdout(std::process::Stdio::piped())
                     .stderr(std::process::Stdio::piped());
+                apply_context_env(&mut cmd, context);
                 detach_session_pre_exec(&mut cmd);
                 let mut child = cmd.spawn()?;
 
@@ -620,6 +629,7 @@ impl Tool for BashTool {
                     .arg(&probe_cmd)
                     .current_dir(&working_dir)
                     .stdin(std::process::Stdio::null());
+                apply_context_env(&mut cmd, context);
                 detach_session_pre_exec(&mut cmd);
                 cmd.output().await
             };
@@ -693,6 +703,7 @@ impl Tool for BashTool {
                         // DISPLAY, but older builds (Debian 11, macOS preinstalled)
                         // still gate on it being non-empty. Keep both happy.
                         .env("DISPLAY", ":0");
+                    apply_context_env(&mut cmd, context);
                     detach_session_pre_exec(&mut cmd);
                     cmd.output().await
                 };
@@ -758,6 +769,7 @@ impl Tool for BashTool {
                     .arg(&execution_command)
                     .current_dir(&working_dir)
                     .stdin(std::process::Stdio::null());
+                apply_context_env(&mut cmd, context);
                 detach_session_pre_exec(&mut cmd);
                 cmd.output().await
             };
