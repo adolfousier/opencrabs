@@ -188,4 +188,29 @@ fn description_cap_tracks_max_options_const() {
         !d.contains("1-4"),
         "stale pre-merge cap range must not return to the description"
     );
+    assert!(
+        d.contains("style=\"primary\""),
+        "description must mention primary recommendation style guidance"
+    );
+    assert!(
+        d.contains("distinctive action verb or keyword"),
+        "description must instruct starting with an action verb"
+    );
+}
+
+#[test]
+fn input_schema_describes_styles_and_first_word_buttons() {
+    use crate::brain::tools::Tool;
+    use crate::brain::tools::suggest_options::SuggestOptionsTool;
+
+    let schema = SuggestOptionsTool.input_schema();
+    let schema_str = serde_json::to_string(&schema).expect("serialize schema");
+    assert!(
+        schema_str.contains("primary"),
+        "schema must document primary style"
+    );
+    assert!(
+        schema_str.contains("folded buttons display 'N. <FirstWord>'"),
+        "schema must document folded first-word button format"
+    );
 }

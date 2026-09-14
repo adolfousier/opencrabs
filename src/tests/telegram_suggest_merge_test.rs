@@ -166,16 +166,19 @@ fn test_go_tier_verb_repeat_rule() {
 
 #[test]
 fn test_go_tier_buttons_carry_their_option_number() {
-    // #119 numbering restored 2026-09-09 (owner defect report), PLAIN
-    // digits per the owner order 2026-09-09: each n>=2 fold-tier button
-    // carries its bare 1-based option number (`1` `2` …), visually paired
-    // with its `1. <label>` body line. Callback data still carries the
-    // absolute index. n=1 folds to the single `Go!` button.
+    // Fold tier button labels: n>=2 carries `N. <FirstWord>` (e.g. `1. Ship`, `2. xxx...`),
+    // pairing with the `1. <label>` body line while giving immediate context on the button.
+    // Callback data still carries the absolute index. n=1 folds to the single `Go!` button.
     let token = "ab12cd34";
     let html = suggestion_rows_rich_html(&styled_opts(&["Ship it", &"x".repeat(30)]), token);
     assert!(
-        html.contains(&format!(">{}</tg-button>", go_button_label(1, false)))
-            && html.contains(&format!(">{}</tg-button>", go_button_label(2, false))),
+        html.contains(&format!(
+            ">{}</tg-button>",
+            go_button_label(1, "Ship it", false)
+        )) && html.contains(&format!(
+            ">{}</tg-button>",
+            go_button_label(2, &"x".repeat(30), false)
+        )),
         "one numbered button per option: {html}"
     );
     assert!(
@@ -187,7 +190,9 @@ fn test_go_tier_buttons_carry_their_option_number() {
         "callback data still routes by index: {html}"
     );
     // n=1: the single Go! button.
-    assert_eq!(go_button_label(1, true), "Go!");
+    assert_eq!(go_button_label(1, "Ship it", true), "Go!");
+    assert_eq!(go_button_label(1, "Deploy to prod", false), "1. Deploy");
+    assert_eq!(go_button_label(2, "Cancel run", false), "2. Cancel");
     let single_html = suggestion_rows_rich_html(&styled_opts(&[&"x".repeat(31)]), token);
     assert!(
         single_html.contains(">Go!</tg-button>"),
