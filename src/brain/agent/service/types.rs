@@ -141,7 +141,7 @@ pub enum ProgressEvent {
     /// by the `suggest_options` tool (non-blocking). The TUI renders one
     /// option as ghost text in the input (Tab fills it) and several as a
     /// pick-list; accepting fills the input as editable text, never submits.
-    SuggestedOptions(Vec<String>),
+    SuggestedOptions(Vec<crate::brain::tools::suggest_options::SuggestionItem>),
 }
 
 /// Callback for reporting progress during agent execution.

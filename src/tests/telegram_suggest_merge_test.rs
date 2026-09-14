@@ -19,6 +19,12 @@ fn opts(v: &[&str]) -> Vec<String> {
     v.iter().map(|s| s.to_string()).collect()
 }
 
+fn styled_opts(v: &[&str]) -> Vec<crate::brain::tools::suggest_options::SuggestionItem> {
+    v.iter()
+        .map(|s| crate::brain::tools::suggest_options::SuggestionItem::default_styled(*s))
+        .collect()
+}
+
 // ── Layout ladder (lifted, unchanged in substance) ────────────────────────
 
 #[test]
@@ -166,7 +172,7 @@ fn test_go_tier_buttons_carry_their_option_number() {
     // with its `1. <label>` body line. Callback data still carries the
     // absolute index. n=1 folds to the single `Go!` button.
     let token = "ab12cd34";
-    let html = suggestion_rows_rich_html(&opts(&["Ship it", &"x".repeat(30)]), token);
+    let html = suggestion_rows_rich_html(&styled_opts(&["Ship it", &"x".repeat(30)]), token);
     assert!(
         html.contains(&format!(">{}</tg-button>", go_button_label(1, false)))
             && html.contains(&format!(">{}</tg-button>", go_button_label(2, false))),
@@ -182,7 +188,7 @@ fn test_go_tier_buttons_carry_their_option_number() {
     );
     // n=1: the single Go! button.
     assert_eq!(go_button_label(1, true), "Go!");
-    let single_html = suggestion_rows_rich_html(&opts(&[&"x".repeat(31)]), token);
+    let single_html = suggestion_rows_rich_html(&styled_opts(&[&"x".repeat(31)]), token);
     assert!(
         single_html.contains(">Go!</tg-button>"),
         "single fold keeps the Go! button: {single_html}"
@@ -199,7 +205,7 @@ fn test_callback_data_carries_the_index_not_the_text() {
     // resolves the serving session from the stash entry, never from data the
     // client could forge or mix across overlapping keyboards.
     let token = "ab12cd34";
-    let html = suggestion_rows_rich_html(&opts(&["Ship it", "Hold"]), token);
+    let html = suggestion_rows_rich_html(&styled_opts(&["Ship it", "Hold"]), token);
 
     for i in 0..2 {
         let expected = format!("{FOLLOWUP_PREFIX}{token}:{i}");
@@ -333,7 +339,8 @@ fn test_chokepoint_ships_solo_rows_the_emitter_approved() {
 /// it indented (owner-reported 2026-09-05 on the board chat, msg 41990).
 #[test]
 fn test_rows_and_trailer_start_a_fresh_markdown_block() {
-    let options: Vec<String> = vec!["One".into(), "Two".into(), "Three".into()];
+    let _raw_options: Vec<String> = vec!["One".into(), "Two".into(), "Three".into()];
+    let options = styled_opts(&["One", "Two", "Three"]);
     for prose in [false, true] {
         let mut md = String::from("Answer paragraph.\nSecond line.");
         append_rows_and_trailer_md(&mut md, &options, "tok", prose, Some("Sign-off."));

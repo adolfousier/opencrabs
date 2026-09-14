@@ -75,7 +75,8 @@ pub(crate) struct StreamingState {
     /// mid-turn, but the buttons must be the LAST thing in the chat, so we stash
     /// the options here and render them once, after the final delivery. Only the
     /// latest set is kept if the tool fires more than once.
-    pub(crate) pending_suggestions: Option<Vec<String>>,
+    pub(crate) pending_suggestions:
+        Option<Vec<crate::brain::tools::suggest_options::SuggestionItem>>,
     /// Trailing text reclaimed from the flow AFTER the option-surface Tool
     /// entry (#31): the model's post-halt sign-off iteration. Stashed by the
     /// options-pending reclaim in `deliver_final_response`, rendered by

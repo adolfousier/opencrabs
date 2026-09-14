@@ -1927,8 +1927,10 @@ async fn handle_message(
                 // buttons under the response; a tap injects a new turn.
                 ProgressEvent::SuggestedOptions(options) => {
                     let state = slack_state_grp.clone();
+                    let raw_options: Vec<String> =
+                        options.into_iter().map(|item| item.label).collect();
                     tokio::spawn(async move {
-                        super::suggest_options::render_suggestions(&state, session_id, options)
+                        super::suggest_options::render_suggestions(&state, session_id, raw_options)
                             .await;
                     });
                 }

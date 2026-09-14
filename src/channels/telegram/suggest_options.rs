@@ -196,6 +196,8 @@ pub(crate) fn mark_picked_button(html: &str, picked_idx: usize) -> String {
                 {
                     let style_end = s + "style=\"".len() + e;
                     new_attrs.replace_range(s + "style=\"".len()..style_end, "success");
+                } else {
+                    new_attrs.push_str(" style=\"success\"");
                 }
             } else {
                 // #71: a styled button still renders enabled-looking even
@@ -209,6 +211,30 @@ pub(crate) fn mark_picked_button(html: &str, picked_idx: usize) -> String {
                     new_attrs.replace_range(s..style_end, "");
                 }
             }
+            // Bot API 10.3 spec: disabled button requires type="disabled",
+            // not the boolean attribute `disabled`!
+            // Strip data="..." payload and replace type="..." with type="disabled".
+            if let Some(s) = new_attrs.find("data=\"")
+                && let Some(e) = new_attrs[s + "data=\"".len()..].find('"')
+            {
+                let data_end = s + "data=\"".len() + e + 1;
+                // If there's a leading space, include it
+                let strip_start = if s > 0 && new_attrs.as_bytes()[s - 1] == b' ' {
+                    s - 1
+                } else {
+                    s
+                };
+                new_attrs.replace_range(strip_start..data_end, "");
+            }
+            if let Some(s) = new_attrs.find("type=\"")
+                && let Some(e) = new_attrs[s + "type=\"".len()..].find('"')
+            {
+                let type_end = s + "type=\"".len() + e;
+                new_attrs.replace_range(s + "type=\"".len()..type_end, "disabled");
+            } else {
+                new_attrs.push_str(" type=\"disabled\"");
+            }
+            // Backward compatibility for any parser expecting `disabled` token
             if !new_attrs.contains("disabled") {
                 new_attrs.push_str(" disabled");
             }
@@ -576,7 +602,7 @@ fn push_blank_line(md: &mut String) {
 /// the server renders it indented).
 pub(crate) fn append_rows_and_trailer_md(
     md: &mut String,
-    options: &[String],
+    options: &[crate::brain::tools::suggest_options::SuggestionItem],
     token: &str,
     prose: bool,
     trailer: Option<&str>,
@@ -589,8 +615,9 @@ pub(crate) fn append_rows_and_trailer_md(
         // before the block: owner correction 2026-09-09 — a single \n
         // glued the fold block to the body's last line (Telegram rich
         // renderer needs a paragraph break there).
+        let raw_labels: Vec<String> = options.iter().map(|o| o.label.clone()).collect();
         push_blank_line(md);
-        md.push_str(&go_tier_lines(options));
+        md.push_str(&go_tier_lines(&raw_labels));
     }
     push_blank_line(md);
     md.push_str(&suggestion_rows_rich_html(options, token));
@@ -605,31 +632,51 @@ pub(crate) fn append_rows_and_trailer_md(
 /// throughout — picked over app-default after Alexey compared both live.
 /// Callback payloads stay `followup:<session>:<idx>`, so taps route through
 /// the existing callback dispatcher unchanged regardless of surface.
-pub(crate) fn suggestion_rows_rich_html(options: &[String], token: &str) -> String {
-    let btn = |i: usize, label: &str| {
+pub(crate) fn suggestion_rows_rich_html(
+    options: &[crate::brain::tools::suggest_options::SuggestionItem],
+    token: &str,
+) -> String {
+    use crate::brain::tools::suggest_options::SuggestionStyle;
+    let btn = |i: usize, label: &str, style: SuggestionStyle| {
+        let style_attr = match style {
+            SuggestionStyle::Primary => " style=\"primary\"",
+            SuggestionStyle::Danger => " style=\"danger\"",
+            SuggestionStyle::Default => "",
+        };
         format!(
-            "<tg-button type=\"callback_data\" data=\"{FOLLOWUP_PREFIX}{token}:{i}\" \
-             style=\"primary\">{}</tg-button>",
+            "<tg-button type=\"callback_data\" data=\"{FOLLOWUP_PREFIX}{token}:{i}\"{style_attr}>{}</tg-button>",
             super::markdown::escape_html(label)
         )
     };
-    match pick_layout(options) {
+    let labels: Vec<String> = options.iter().map(|o| o.label.clone()).collect();
+    match pick_layout(&labels) {
         SuggestLayout::SharedRow => format!(
             "<tg-button-row>{}</tg-button-row>",
             options
                 .iter()
                 .enumerate()
-                .map(|(i, opt)| btn(i, opt))
+                .map(|(i, opt)| btn(i, &opt.label, opt.style))
                 .collect::<String>()
         ),
         SuggestLayout::Column => options
             .iter()
             .enumerate()
-            .map(|(i, opt)| format!("<tg-button-row>{}</tg-button-row>", btn(i, opt)))
+            .map(|(i, opt)| {
+                format!(
+                    "<tg-button-row>{}</tg-button-row>",
+                    btn(i, &opt.label, opt.style)
+                )
+            })
             .collect::<Vec<_>>()
             .join("\n"),
         SuggestLayout::NumberedProse => (0..options.len())
-            .map(|i| btn(i, &go_button_label(i + 1, options.len() == 1)))
+            .map(|i| {
+                btn(
+                    i,
+                    &go_button_label(i + 1, options.len() == 1),
+                    options[i].style,
+                )
+            })
             .collect::<Vec<_>>()
             .chunks(MAX_NUMBERS_PER_ROW)
             .map(|c| format!("<tg-button-row>{}</tg-button-row>", c.concat()))
@@ -645,7 +692,7 @@ pub(crate) async fn render_suggestions(
     session_id: Uuid,
     chat_id: ChatId,
     thread_id: Option<ThreadId>,
-    options: Vec<String>,
+    options: Vec<crate::brain::tools::suggest_options::SuggestionItem>,
     // Merge candidate captured by deliver_final_response: the bubble the final
     // response landed in, whatever surface sent it (classic HTML, or table-free
     // rich markdown). Some = attach the controls to THAT bubble — one message
@@ -669,13 +716,14 @@ pub(crate) async fn render_suggestions(
         return;
     }
 
+    let raw_options: Vec<String> = options.iter().map(|o| o.label.clone()).collect();
     // Per-keyboard identity (#1217): register BEFORE building buttons so the
-    // opaque token rides in every callback payload; taps resolve against this
-    // exact set even when a newer turn registers its own keyboard meanwhile.
+    // callback token exists before the keyboard goes to the wire. Opaque
+    // token rides in every callback payload; taps resolve against this exact
+    // set even when a newer turn registers its own keyboard meanwhile.
     let token = state
-        .register_pending_followups(session_id, options.clone())
+        .register_pending_followups(session_id, raw_options.clone())
         .await;
-
     // Layout tiers are measured, not guessed (see BUTTON_LABEL_MAX_UNITS
     // and SINGLE_BUTTON_MAX_UNITS): short labels share one row, medium
     // labels get a full-width row each, a lone option rides one
@@ -686,28 +734,28 @@ pub(crate) async fn render_suggestions(
     // is encoded in the
     // callback data; the option text itself can exceed Telegram's 64-byte
     // callback-data limit, so we never put it there.
-    let layout = pick_layout(&options);
+    let layout = pick_layout(&raw_options);
     let text_btn = |i: usize, opt: &str| {
         InlineKeyboardButton::callback(opt.to_string(), format!("{FOLLOWUP_PREFIX}{token}:{i}"))
     };
     let rows: Vec<Vec<InlineKeyboardButton>> = match layout {
         SuggestLayout::SharedRow => vec![
-            options
+            raw_options
                 .iter()
                 .enumerate()
                 .map(|(i, opt)| text_btn(i, opt))
                 .collect(),
         ],
-        SuggestLayout::Column => options
+        SuggestLayout::Column => raw_options
             .iter()
             .enumerate()
             .map(|(i, opt)| vec![text_btn(i, opt)])
             .collect(),
         SuggestLayout::NumberedProse => {
-            let all: Vec<InlineKeyboardButton> = (0..options.len())
+            let all: Vec<InlineKeyboardButton> = (0..raw_options.len())
                 .map(|i| {
                     InlineKeyboardButton::callback(
-                        go_button_label(i + 1, options.len() == 1),
+                        go_button_label(i + 1, raw_options.len() == 1),
                         format!("{FOLLOWUP_PREFIX}{token}:{i}"),
                     )
                 })
@@ -751,7 +799,7 @@ pub(crate) async fn render_suggestions(
                         body.push('\n');
                     }
                     body.push('\n');
-                    body.push_str(&go_tier_lines_rich(&options));
+                    body.push_str(&go_tier_lines_rich(&raw_options));
                 }
                 (body, false, None)
             }
@@ -794,7 +842,7 @@ pub(crate) async fn render_suggestions(
     // (#119 fold tier; they ARE the questions), button
     // modes need SOME text for the Bot API to accept the message, so they
     // degrade to the bare 💡.
-    let standalone_body = standalone_fallback_body(&layout, &options);
+    let standalone_body = standalone_fallback_body(&layout, &raw_options);
 
     let option_count = options.len();
     match place_once(

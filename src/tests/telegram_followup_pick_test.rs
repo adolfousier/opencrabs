@@ -282,7 +282,14 @@ async fn stale_map_is_bounded_at_the_cap() {
 fn shared_row_html() -> String {
     // Build via the real renderer so the transform is tested against the
     // production markup shape, not a hand-typed lookalike.
-    suggestion_rows_rich_html(&["Approve".to_string(), "Decline".to_string()], "tok")
+    use crate::brain::tools::suggest_options::SuggestionItem;
+    suggestion_rows_rich_html(
+        &[
+            SuggestionItem::default_styled("Approve"),
+            SuggestionItem::default_styled("Decline"),
+        ],
+        "tok",
+    )
 }
 
 #[test]
@@ -295,8 +302,8 @@ fn picked_button_flips_to_success_check_disabled() {
         "picked flips to success: {picked_span}"
     );
     assert!(
-        picked_span.contains(" disabled"),
-        "picked disabled: {picked_span}"
+        picked_span.contains("type=\"disabled\""),
+        "picked uses type=disabled: {picked_span}"
     );
     assert!(
         picked_span.ends_with("\u{2713} Approve"),
@@ -309,7 +316,10 @@ fn unpicked_buttons_disabled_drop_style_and_label() {
     let marked = mark_picked_button(&shared_row_html(), 0);
     let second = marked.split("<tg-button ").nth(2).unwrap();
     let span = &second[..second.find("</tg-button>").unwrap()];
-    assert!(span.contains(" disabled"), "sibling disabled: {span}");
+    assert!(
+        span.contains("type=\"disabled\""),
+        "sibling uses type=disabled: {span}"
+    );
     assert!(
         !span.contains("style="),
         "#71: sibling drops its style (style visually eats disabled): {span}"
@@ -345,7 +355,10 @@ fn tap_redraw_rich_host_body_has_marked_rows_and_record() {
         panic!("rich host stays rich")
     };
     assert!(body.contains("style=\"success\""), "picked marked: {body}");
-    assert!(body.contains(" disabled"), "buttons disabled: {body}");
+    assert!(
+        body.contains("type=\"disabled\""),
+        "buttons disabled: {body}"
+    );
     assert!(
         !body.contains("style=\"primary\"\">Approve"),
         "the picked label must be check-prefixed"
@@ -400,7 +413,10 @@ fn markdown_host_pick_rows_are_rewritten_not_stripped() {
         panic!("markdown host must ride the markdown plane: {rewrite:?}")
     };
     assert!(body.contains("style=\"success\""), "picked marked: {body}");
-    assert!(body.contains(" disabled"), "buttons disabled: {body}");
+    assert!(
+        body.contains("type=\"disabled\""),
+        "buttons disabled: {body}"
+    );
     assert!(
         !body.contains("style=\"primary\"\">Approve"),
         "the picked label must be check-prefixed"

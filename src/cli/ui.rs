@@ -759,7 +759,7 @@ async fn cmd_chat_inner(
                 ProgressEvent::SuggestedOptions(options) => {
                     progress_sender.send(TuiEvent::SuggestedOptions {
                         session_id,
-                        options,
+                        options: options.into_iter().map(|item| item.label).collect(),
                     })
                 }
             };
