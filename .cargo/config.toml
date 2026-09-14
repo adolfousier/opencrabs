@@ -13,3 +13,10 @@ linker = "aarch64-linux-gnu-gcc"
 [env]
 CPATH = "/opt/homebrew/opt/openssl@3/include:/usr/local/opt/openssl@3/include"
 LIBRARY_PATH = "/opt/homebrew/opt/openssl@3/lib:/usr/local/opt/openssl@3/lib"
+# Stack floor for test threads: macOS libtest default stacks overflow on the deep
+# async tool-loop trees (the #1237 family — the per-test 64 MiB thread wrap in
+# ca9192c2 was the surgical form, the documented manual mitigation was exporting
+# RUST_MIN_STACK=16777216 before full-suite runs). Baking it in makes plain
+# `cargo test` work everywhere, CI and fresh clones included. Without force=true,
+# a shell-set RUST_MIN_STACK still wins.
+RUST_MIN_STACK = "16777216"
