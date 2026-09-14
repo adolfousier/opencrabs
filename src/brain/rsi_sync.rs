@@ -268,6 +268,170 @@ pub struct CapBailReport {
     pub top_new_sections: Vec<String>,
 }
 
+/// Which of the two cap-bail states a report is in (#1583).
+///
+/// The distinction decides how the bail is reported. A `Transient` bail
+/// can resolve itself (upstream changes, a `pruned.toml` entry, a cap
+/// raise), so it keeps per-cycle reporting. A `Permanent` bail cannot:
+/// the file is over the cap before any merge is considered, so every
+/// cycle hits the same wall forever — and per-cycle reporting of a state
+/// that cannot change is exactly the 126-duplicate-entries bug.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CapBailState {
+    /// `local_lines > cap`: the local file alone exceeds its cap. No
+    /// merge size can ever fit, so sync can never unstick it — only
+    /// raising the cap or an owner-approved cleanup pass can. Reported
+    /// once per state fingerprint, not once per cycle.
+    Permanent,
+    /// `local <= cap < merged`: the file fits, but the pending merge
+    /// would push it over. Resolvable by ordinary means (including
+    /// pruning the offending upstream headers), so it keeps per-cycle
+    /// reporting and can clear on its own.
+    Transient,
+}
+
+/// Width, in lines, of the local-size bucket inside a permanent-bail
+/// fingerprint. An append-only file drifts up a few lines a week through
+/// no state change; the bucket absorbs that drift so a re-emit means the
+/// file meaningfully grew or the cap moved, not that Tuesday happened.
+const CAP_BAIL_BUCKET_LINES: usize = 25;
+
+impl CapBailReport {
+    /// Classify this bail (#1583). `local_lines > cap` is `Permanent`
+    /// regardless of how many new sections triggered the check: even with
+    /// zero new sections the file is already over budget, so the deadlock
+    /// is a property of the file, not of this particular merge.
+    pub fn state(&self) -> CapBailState {
+        if self.local_lines > self.cap {
+            CapBailState::Permanent
+        } else {
+            CapBailState::Transient
+        }
+    }
+
+    /// Fingerprint of the Permanent state: filename + cap + bucketed
+    /// local size, hashed (only equality ever matters, not the value).
+    /// Two bails with the same fingerprint are the same deadlocked state
+    /// re-observed; the second one is noise.
+    pub fn permanent_fingerprint(&self) -> String {
+        cap_bail_fingerprint(&self.filename, self.cap, self.local_lines)
+    }
+}
+
+/// State fingerprint for a permanent cap-bail (#1583). Separated from the
+/// method so the regression tests can vary the inputs directly.
+pub fn cap_bail_fingerprint(filename: &str, cap: usize, local_lines: usize) -> String {
+    content_fingerprint(&format!(
+        "{filename}|{cap}|{}",
+        local_lines / CAP_BAIL_BUCKET_LINES
+    ))
+}
+
+/// Last-emitted permanent-bail fingerprint per file (#1583), persisted at
+/// `~/.opencrabs/rsi/cap_bail_state.toml`.
+///
+/// This is the memory that makes dedup survive across cycles: the engine
+/// runs `sync_templates` on every start and hourly after that, and each
+/// run is a fresh in-process decision — without a sidecar, every process
+/// would re-emit the first permanent bail it sees. Entries are written
+/// only when a permanent bail is actually emitted, so a healthy install
+/// never grows this file.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct CapBailLedger {
+    /// filename → fingerprint of the permanent state last reported.
+    pub emitted_fingerprints: HashMap<String, String>,
+}
+
+impl CapBailLedger {
+    /// Load from `~/.opencrabs/rsi/cap_bail_state.toml`.
+    pub fn load() -> Self {
+        let path = Self::ledger_path();
+        if !path.exists() {
+            return Self::default();
+        }
+        match std::fs::read_to_string(&path) {
+            Ok(c) => Self::parse(&c),
+            Err(e) => {
+                tracing::warn!(
+                    "RSI sync cap-bail ledger: failed to read {}: {e}",
+                    path.display()
+                );
+                Self::default()
+            }
+        }
+    }
+
+    /// Parse the sidecar. `pub(crate)` so the regression tests under
+    /// `src/tests/` can round-trip the format without touching the real
+    /// `~/.opencrabs`.
+    pub(crate) fn parse(content: &str) -> Self {
+        let mut emitted_fingerprints = HashMap::new();
+        for line in content.lines() {
+            let trimmed = line.trim();
+            if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with('[') {
+                continue;
+            }
+            if let Some((file, fingerprint)) = trimmed.split_once('=') {
+                emitted_fingerprints.insert(
+                    file.trim().trim_matches('"').to_string(),
+                    fingerprint.trim().trim_matches('"').to_string(),
+                );
+            }
+        }
+        Self {
+            emitted_fingerprints,
+        }
+    }
+
+    /// Render the sidecar bytes, keys sorted for deterministic output.
+    pub(crate) fn render(&self) -> String {
+        let mut out = String::from(
+            "# Last-emitted permanent cap-bail fingerprint per file (#1583).\n\
+             # Identical fingerprints are suppressed; a changed one re-emits.\n",
+        );
+        let mut files: Vec<&String> = self.emitted_fingerprints.keys().collect();
+        files.sort();
+        for file in files {
+            out.push_str(&format!(
+                "\"{file}\" = \"{}\"\n",
+                self.emitted_fingerprints[file]
+            ));
+        }
+        out
+    }
+
+    /// Persist to `~/.opencrabs/rsi/cap_bail_state.toml`.
+    pub fn save(&self) -> std::io::Result<()> {
+        let path = Self::ledger_path();
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(&path, self.render())
+    }
+
+    fn ledger_path() -> PathBuf {
+        crate::config::opencrabs_home().join("rsi/cap_bail_state.toml")
+    }
+
+    /// The dedup gate: should this permanent bail be reported?
+    ///
+    /// Returns `true` (and records the fingerprint) the first time a file
+    /// enters a given state, and `false` for every identical
+    /// re-observation. Taking the decision and the record in one call
+    /// means the caller cannot report without remembering, or remember
+    /// without reporting. Transient bails never touch this ledger — they
+    /// keep per-cycle reporting because they can clear themselves.
+    pub fn gate(&mut self, report: &CapBailReport) -> bool {
+        let fingerprint = report.permanent_fingerprint();
+        if self.emitted_fingerprints.get(&report.filename) == Some(&fingerprint) {
+            return false;
+        }
+        self.emitted_fingerprints
+            .insert(report.filename.clone(), fingerprint);
+        true
+    }
+}
+
 /// Whether an upgrade happened since the last sync.
 ///
 /// No longer a gate (#820): it decides nothing about whether to fetch, because
@@ -680,6 +844,72 @@ fn top_new_sections_by_size(new_sections: &str, n: usize) -> Vec<String> {
         .collect()
 }
 
+/// Build the improvements.md entry for a cap bail (#1583 wording split).
+///
+/// `pub(crate)` so the regression tests under `src/tests/` can pin the
+/// Permanent wording — which must name the two real resolution levers and
+/// warn that pruning upstream headers will not help — without disk I/O.
+pub(crate) fn cap_bail_entry(report: &CapBailReport) -> String {
+    let top_list = if report.top_new_sections.is_empty() {
+        "(none detected)".to_string()
+    } else {
+        report
+            .top_new_sections
+            .iter()
+            .map(|s| format!("  - {s}"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    match report.state() {
+        CapBailState::Transient => format!(
+            "\n## [Bailed] Sync cap exceeded for {filename}\n\n\
+             **Date:** {date}\n\
+             **Cap:** {cap} lines\n\
+             **Local file size:** {local} lines\n\
+             **Upstream template size:** {upstream} lines\n\
+             **Merged would be:** {merged} lines\n\
+             **Top new sections that would have been added:**\n{top}\n\n\
+             To resolve: raise `[brain.caps].{filename}` in config.toml, prune \
+             the file, or add the offending headers to your `rsi/pruned.toml`.\n",
+            filename = report.filename,
+            date = chrono::Utc::now().format("%Y-%m-%d %H:%M UTC"),
+            cap = report.cap,
+            local = report.local_lines,
+            upstream = report.upstream_lines,
+            merged = report.merged_lines,
+            top = top_list,
+        ),
+        CapBailState::Permanent => format!(
+            "\n## [Bailed] Sync permanently capped for {filename}\n\n\
+             **Date:** {date}\n\
+             **Cap:** {cap} lines\n\
+             **Local file size:** {local} lines — over the cap on its own\n\
+             **Upstream template size:** {upstream} lines\n\
+             **Merged would be:** {merged} lines\n\
+             **Top new sections withheld:**\n{top}\n\n\
+             {filename} is over the cap on its own: no merge can fit under \
+             {cap} lines, so template sync cannot fix this and upstream \
+             sections stay withheld until the cap or the file changes.\n\n\
+             To resolve (either):\n\
+             - raise `[brain.caps].{filename}` in config.toml, or\n\
+             - run an owner-approved cleanup pass (`write_opencrabs_file` with \
+             `cleanup_intent`, or a `/compact`-style prune) to bring the file \
+             back under the cap.\n\n\
+             Pruning upstream headers in `rsi/pruned.toml` will NOT unstick \
+             this — the local file alone is over the cap.\n\n\
+             (Reported once per state change — file size bucket + cap — not \
+             on every sync cycle.)\n",
+            filename = report.filename,
+            date = chrono::Utc::now().format("%Y-%m-%d %H:%M UTC"),
+            cap = report.cap,
+            local = report.local_lines,
+            upstream = report.upstream_lines,
+            merged = report.merged_lines,
+            top = top_list,
+        ),
+    }
+}
+
 /// Append a cap-bail diagnostic to `~/.opencrabs/rsi/improvements.md`
 /// so the user sees it next session without having to scrape stdout.
 fn log_cap_bail_to_improvements(report: &CapBailReport) {
@@ -691,34 +921,7 @@ fn log_cap_bail_to_improvements(report: &CapBailReport) {
         tracing::warn!("RSI sync cap-bail: failed to create rsi dir for improvements log: {e}");
         return;
     }
-    let top_list = if report.top_new_sections.is_empty() {
-        "(none detected)".to_string()
-    } else {
-        report
-            .top_new_sections
-            .iter()
-            .map(|s| format!("  - {s}"))
-            .collect::<Vec<_>>()
-            .join("\n")
-    };
-    let entry = format!(
-        "\n## [Bailed] Sync cap exceeded for {filename}\n\n\
-         **Date:** {date}\n\
-         **Cap:** {cap} lines\n\
-         **Local file size:** {local} lines\n\
-         **Upstream template size:** {upstream} lines\n\
-         **Merged would be:** {merged} lines\n\
-         **Top new sections that would have been added:**\n{top}\n\n\
-         To resolve: raise `[brain.caps].{filename}` in config.toml, prune \
-         the file, or add the offending headers to your `rsi/pruned.toml`.\n",
-        filename = report.filename,
-        date = chrono::Utc::now().format("%Y-%m-%d %H:%M UTC"),
-        cap = report.cap,
-        local = report.local_lines,
-        upstream = report.upstream_lines,
-        merged = report.merged_lines,
-        top = top_list,
-    );
+    let entry = cap_bail_entry(report);
     match std::fs::OpenOptions::new()
         .create(true)
         .append(true)
@@ -848,14 +1051,46 @@ async fn sync_single_file(
             cap,
             top_new_sections: top_new_sections_by_size(&new_sections, 3),
         };
-        tracing::warn!(
-            "RSI sync: {filename} BAILED — merged would be {merged} lines, cap is {cap}. \
-             Top new sections: {top:?}. Raise [brain.caps].{filename} or prune sections.",
-            merged = report.merged_lines,
-            cap = report.cap,
-            top = report.top_new_sections,
-        );
-        log_cap_bail_to_improvements(&report);
+        // #1583: a file already over the cap on its own is deadlocked —
+        // no merge can pass while local > cap, so reporting that state
+        // every cycle is pure noise (126 identical entries on this
+        // install). Transient bails keep per-cycle reporting because
+        // they can clear themselves.
+        if report.state() == CapBailState::Permanent {
+            let mut ledger = CapBailLedger::load();
+            if ledger.gate(&report) {
+                tracing::warn!(
+                    "RSI sync: {filename} BAILED — local file is {local} lines, over \
+                     the {cap}-line cap on its own. Sync cannot help; raise \
+                     [brain.caps].{filename} or run an owner-approved cleanup pass. \
+                     Identical bails are suppressed until the state changes.",
+                    local = report.local_lines,
+                    cap = report.cap,
+                );
+                log_cap_bail_to_improvements(&report);
+                if let Err(e) = ledger.save() {
+                    tracing::warn!(
+                        "RSI sync cap-bail: failed to persist dedup ledger: {e} \
+                         (the permanent bail will re-emit next cycle)"
+                    );
+                }
+            } else {
+                tracing::debug!(
+                    "RSI sync: {filename} still permanently over the {}-line cap \
+                     (state fingerprint unchanged) — duplicate bail suppressed",
+                    report.cap
+                );
+            }
+        } else {
+            tracing::warn!(
+                "RSI sync: {filename} BAILED — merged would be {merged} lines, cap is {cap}. \
+                 Top new sections: {top:?}. Raise [brain.caps].{filename} or prune sections.",
+                merged = report.merged_lines,
+                cap = report.cap,
+                top = report.top_new_sections,
+            );
+            log_cap_bail_to_improvements(&report);
+        }
         return FileSyncResult {
             filename: filename.to_string(),
             synced: false,

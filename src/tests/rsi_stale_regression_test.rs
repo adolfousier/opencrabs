@@ -35,6 +35,14 @@
 //! keep document order, attribute every anchor to the line that carries
 //! it, and never let an exempted historical twin of a dead tool leak into
 //! the findings.
+//!
+//! Plus the **#1583 cap-bail state + dedup** cases: a brain file over its
+//! `[brain.caps]` line cap on its own is a deadlocked sync state, and the
+//! fix classifies it (`Permanent` vs `Transient`), reports `Permanent`
+//! once per state fingerprint (filename + cap + size bucket) instead of
+//! once per cycle, and words the Permanent entry so it names the only two
+//! real resolution levers — a cap raise or an owner-approved cleanup
+//! pass — while warning that pruning upstream headers will NOT unstick it.
 
 use crate::brain::rsi::{StaleScanInput, build_cycle_prompt, stale_scan_prompt_block};
 use crate::brain::rsi_stale_ledger::{
@@ -43,6 +51,9 @@ use crate::brain::rsi_stale_ledger::{
 use crate::brain::rsi_stale_scan::{
     AnchorKind, FindingAction, LineClass, StaleFinding, Verdict, anchor_kind, classify_line,
     scan_brain_files,
+};
+use crate::brain::rsi_sync::{
+    CapBailLedger, CapBailReport, CapBailState, cap_bail_entry, cap_bail_fingerprint,
 };
 use crate::brain::tools::brain_file_safety::{ShrinkCheck, check_no_shrink, is_rule_consolidation};
 use crate::config::{Config, ProviderConfig};
@@ -868,5 +879,243 @@ fn past_tense_narration_stays_unclassified() {
         anchor_kind("cmd-wrap", "- the tool invoked was `cmd-wrap` that day"),
         None,
         "'invoked' (past tense) must not become a Binary anchor"
+    );
+}
+
+// ---------------------- 8. cap-bail state + dedup (#1583) -----------
+
+/// A cap-bail report with `new_lines` pending upstream lines (the merge
+/// delta) and no ranked top sections, mirroring the #1583 receipt shape:
+/// AGENTS.md at 531 local lines against a 500-line default cap.
+fn cap_bail(
+    filename: &str,
+    local: usize,
+    upstream: usize,
+    new_lines: usize,
+    cap: usize,
+) -> CapBailReport {
+    CapBailReport {
+        filename: filename.to_string(),
+        local_lines: local,
+        upstream_lines: upstream,
+        merged_lines: local + new_lines,
+        cap,
+        top_new_sections: Vec::new(),
+    }
+}
+
+/// `local_lines > cap` classifies `Permanent` even with ZERO new
+/// sections — the deadlock is a property of the file, not of any
+/// particular merge, which is why 126 cycles of identical bails could
+/// never clear. Pinned on the exact receipt numbers from the issue
+/// (531 local / 500 cap) plus the just-over boundary.
+#[test]
+fn cap_bail_state_permanent_when_local_alone_over_cap() {
+    // The receipt: 531 local, 239 upstream, 24 new lines → merged 555.
+    let receipt = cap_bail("AGENTS.md", 531, 239, 24, 500);
+    assert_eq!(receipt.state(), CapBailState::Permanent);
+
+    // Zero new sections (merged == local) is STILL Permanent: no merge
+    // size can fit under a cap the bare file already exceeds.
+    let zero_new = cap_bail("AGENTS.md", 531, 239, 0, 500);
+    assert_eq!(
+        zero_new.state(),
+        CapBailState::Permanent,
+        "local>cap must be Permanent regardless of merge size"
+    );
+
+    // Boundary: one line over is over.
+    assert_eq!(
+        cap_bail("MEMORY.md", 501, 300, 1, 500).state(),
+        CapBailState::Permanent
+    );
+}
+
+/// `local <= cap < merged` classifies `Transient`: the file fits, only
+/// the pending merge would push it over, and ordinary levers (cap raise,
+/// prune, `rsi/pruned.toml` entry) can clear it — so per-cycle reporting
+/// stays correct there. Boundary local == cap included.
+#[test]
+fn cap_bail_state_transient_when_only_the_merge_exceeds_cap() {
+    assert_eq!(
+        cap_bail("TOOLS.md", 480, 300, 40, 500).state(),
+        CapBailState::Transient
+    );
+    assert_eq!(
+        cap_bail("BOOT.md", 500, 300, 55, 500).state(),
+        CapBailState::Transient,
+        "local == cap is Transient: the file itself fits"
+    );
+}
+
+/// The Permanent state fingerprint = filename + cap + local-size bucket.
+/// The bucket absorbs append-only drift (a few lines a week is not a
+/// state change) while a bucket jump or a cap change re-arms the gate —
+/// the owner must hear about a meaningfully worse file, exactly once per
+/// worsening.
+#[test]
+fn permanent_fingerprint_buckets_size_and_binds_file_and_cap() {
+    let base = cap_bail_fingerprint("AGENTS.md", 500, 531);
+
+    // Same bucket (531..=549 all land in bucket 21): identical state.
+    assert_eq!(
+        base,
+        cap_bail_fingerprint("AGENTS.md", 500, 549),
+        "drift within one bucket must not re-arm the gate"
+    );
+
+    // Next bucket up: a meaningfully larger file is a NEW state.
+    assert_ne!(
+        base,
+        cap_bail_fingerprint("AGENTS.md", 500, 575),
+        "crossing a bucket boundary must change the fingerprint"
+    );
+
+    // Cap moved (owner raised it): new state, re-emit even if size held.
+    assert_ne!(
+        base,
+        cap_bail_fingerprint("AGENTS.md", 600, 531),
+        "a cap change must change the fingerprint"
+    );
+
+    // Per-file independence: CODE.md over the same cap is its own state.
+    assert_ne!(
+        base,
+        cap_bail_fingerprint("CODE.md", 500, 531),
+        "fingerprints must not collide across files"
+    );
+}
+
+/// The dedup gate: first Permanent bail for a state emits; identical
+/// re-observations (same file, same cap, same bucket) are suppressed;
+/// a bucket change OR a cap change re-emits and then suppresses again;
+/// a different file is gated independently.
+#[test]
+fn permanent_bail_dedup_gate_emits_once_per_fingerprint() {
+    let mut ledger = CapBailLedger::default();
+
+    // First observation of the #1583 state: emit (this is the ONE entry
+    // the owner should ever see for this state).
+    assert!(
+        ledger.gate(&cap_bail("AGENTS.md", 531, 239, 24, 500)),
+        "first permanent bail must emit"
+    );
+
+    // Identical cycle, and a same-bucket drift (531 → 540 → 549): the
+    // 126-duplicate-entries bug, suppressed.
+    assert!(!ledger.gate(&cap_bail("AGENTS.md", 531, 239, 24, 500)));
+    assert!(!ledger.gate(&cap_bail("AGENTS.md", 540, 239, 15, 500)));
+    assert!(!ledger.gate(&cap_bail("AGENTS.md", 549, 239, 6, 500)));
+
+    // Meaningful growth (next bucket): re-emit once, then suppress.
+    assert!(
+        ledger.gate(&cap_bail("AGENTS.md", 575, 260, 10, 500)),
+        "a new size bucket is a new state and must re-emit"
+    );
+    assert!(!ledger.gate(&cap_bail("AGENTS.md", 580, 260, 10, 500)));
+
+    // Cap raised but file still over it (600 < 631): new state, emit once.
+    assert!(
+        ledger.gate(&cap_bail("AGENTS.md", 631, 260, 10, 600)),
+        "a cap change must re-emit"
+    );
+    assert!(!ledger.gate(&cap_bail("AGENTS.md", 631, 260, 10, 600)));
+
+    // A different deadlocked file (CODE.md) is gated independently.
+    assert!(
+        ledger.gate(&cap_bail("CODE.md", 573, 200, 8, 500)),
+        "per-file states must not suppress each other"
+    );
+    assert!(!ledger.gate(&cap_bail("CODE.md", 573, 200, 8, 500)));
+
+    // The ledger's memory is one row per FILE (the latest emitted
+    // fingerprint), not one per historical state.
+    assert_eq!(ledger.emitted_fingerprints.len(), 2);
+}
+
+/// The gate's memory must survive the process boundary (the engine syncs
+/// hourly, each run a fresh decision), so the sidecar format round-trips:
+/// parse(render(x)) == x, and a hand-written sidecar parses to the same
+/// map a real run would have written.
+#[test]
+fn cap_bail_dedup_ledger_roundtrips_disk_format() {
+    let mut ledger = CapBailLedger::default();
+    let ag = cap_bail("AGENTS.md", 531, 239, 24, 500);
+    let code = cap_bail("CODE.md", 573, 200, 8, 500);
+    assert!(ledger.gate(&ag));
+    assert!(ledger.gate(&code));
+
+    let rendered = ledger.render();
+    assert!(
+        rendered.contains("#1583"),
+        "sidecar must explain itself in a header comment"
+    );
+    let revived = CapBailLedger::parse(&rendered);
+    assert_eq!(
+        revived, ledger,
+        "render → parse must be lossless, or dedup resets every process"
+    );
+
+    // And after revival, the same state is STILL suppressed.
+    let mut revived = revived;
+    assert!(!revived.gate(&ag), "revived ledger must keep suppressing");
+
+    // A hand-written sidecar with quoted keys parses to the same shape.
+    let fp = cap_bail_fingerprint("AGENTS.md", 500, 531);
+    let hand = format!("# comment line\n\"AGENTS.md\" = \"{fp}\"\n");
+    let parsed = CapBailLedger::parse(&hand);
+    assert_eq!(
+        parsed
+            .emitted_fingerprints
+            .get("AGENTS.md")
+            .map(String::as_str),
+        Some(fp.as_str())
+    );
+}
+
+/// The Permanent entry must tell the truth about the deadlock: over the
+/// cap on its own, sync cannot help, the two real levers (raise the cap
+/// or an owner-approved cleanup pass), and an explicit warning that
+/// pruning upstream headers will NOT unstick it. The Transient entry
+/// keeps the classic wording where pruning IS a valid lever.
+#[test]
+fn permanent_cap_bail_entry_names_the_real_resolution_levers() {
+    let permanent = cap_bail_entry(&cap_bail("AGENTS.md", 531, 239, 24, 500));
+    assert!(
+        permanent.contains("Sync permanently capped for AGENTS.md"),
+        "permanent state needs its own header, got:\n{permanent}"
+    );
+    assert!(
+        permanent.contains("over the cap on its own"),
+        "must state the file exceeds the cap alone, got:\n{permanent}"
+    );
+    assert!(
+        permanent.contains("template sync cannot fix this"),
+        "must state sync cannot help, got:\n{permanent}"
+    );
+    assert!(
+        permanent.contains("raise `[brain.caps].AGENTS.md`"),
+        "lever 1: raise the per-file cap, got:\n{permanent}"
+    );
+    assert!(
+        permanent.contains("cleanup_intent") && permanent.contains("/compact"),
+        "lever 2: owner-approved cleanup pass, got:\n{permanent}"
+    );
+    assert!(
+        permanent.contains("will NOT unstick") && permanent.contains("pruned.toml"),
+        "must warn that pruning upstream headers does not resolve it, got:\n{permanent}"
+    );
+
+    // Transient keeps the per-cycle wording where pruning upstream
+    // headers IS one of the valid resolutions.
+    let transient = cap_bail_entry(&cap_bail("TOOLS.md", 480, 300, 40, 500));
+    assert!(transient.contains("Sync cap exceeded for TOOLS.md"));
+    assert!(
+        transient.contains("rsi/pruned.toml"),
+        "transient resolution list keeps the pruned.toml lever"
+    );
+    assert!(
+        !transient.contains("permanently"),
+        "transient entry must not claim a permanent state"
     );
 }
