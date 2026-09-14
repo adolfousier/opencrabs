@@ -305,6 +305,18 @@ impl PlanDocument {
         self.updated_at = Utc::now();
     }
 
+    /// Insert a task at a specific 0-based vector index, shifting downstream
+    /// task `order` numbers (1-based) accordingly.
+    pub fn insert_task(&mut self, index: usize, mut task: PlanTask) {
+        let insert_idx = index.min(self.tasks.len());
+        task.order = insert_idx + 1;
+        self.tasks.insert(insert_idx, task);
+        for (i, t) in self.tasks.iter_mut().enumerate() {
+            t.order = i + 1;
+        }
+        self.updated_at = Utc::now();
+    }
+
     /// Resolve integer index dependencies to UUIDs.
     /// Integer indices (1-based) in dependencies are converted to the UUID of the task at that order.
     /// Note: This requires dependencies to use UUIDs, not integer indices.
