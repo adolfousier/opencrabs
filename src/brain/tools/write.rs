@@ -212,9 +212,7 @@ impl Tool for WriteTool {
         let contended = write_lock.as_ref().is_some_and(|l| !l.is_held());
 
         // Write the file
-        fs::write(&path, &input.content)
-            .await
-            .map_err(ToolError::Io)?;
+        super::fs_util::atomic_write_file(&path, input.content.as_bytes()).await?;
         drop(write_lock);
 
         // The session now knows the file as what it just wrote, so its next

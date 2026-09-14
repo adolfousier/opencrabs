@@ -20,6 +20,7 @@ pub mod tool_name_heal;
 pub mod bash;
 pub mod edit;
 pub mod file_versions;
+pub mod fs_util;
 pub mod glob;
 pub mod grep;
 pub mod hashline;

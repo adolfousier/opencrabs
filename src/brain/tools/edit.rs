@@ -347,9 +347,7 @@ impl Tool for EditTool {
         let contended = write_lock.as_ref().is_some_and(|l| !l.is_held());
 
         // Write modified content
-        fs::write(&path, &new_content)
-            .await
-            .map_err(ToolError::Io)?;
+        super::fs_util::atomic_write_file(&path, new_content.as_bytes()).await?;
         drop(write_lock);
 
         // Track file in session (fire and forget, path-only)
