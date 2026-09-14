@@ -173,3 +173,53 @@ async fn malformed_params_are_protocol_errors() {
         error_codes::INVALID_PARAMS
     );
 }
+
+#[tokio::test]
+#[allow(clippy::await_holding_lock)]
+async fn delivery_mode_turn_end_without_interrupt_resolves_cleanly() {
+    // Fork #158 regression: CLI with `--mode turn-end` sends delivery.mode="turn-end"
+    // without an interrupt key. This must resolve cleanly (DeliveryMode::TurnEnd)
+    // rather than failing with INVALID_PARAMS (-32602) from disagreement.
+    let _guard = test_guard();
+    let ctx = placeholder_service_context().await;
+    let session = SessionService::new(ctx.clone())
+        .create_session(Some("#158 turn-end test session".to_string()))
+        .await
+        .expect("session row created");
+    let sid = session.id;
+
+    let captured: Arc<Mutex<Option<QueuedUserMessage>>> = Arc::new(Mutex::new(None));
+    let sink = captured.clone();
+    register_session_route(
+        sid,
+        Arc::new(move |_id, queued| {
+            *sink.lock().unwrap() = Some(queued);
+        }),
+    );
+
+    // (1) With `interrupt: false` alongside `delivery.mode: "turn-end"`: fails with -32602 (the defect)
+    let mut bad_p = params(&sid.to_string(), "turn-end conflicting ping");
+    bad_p["delivery"] = serde_json::json!({ "mode": "turn-end" });
+    bad_p["interrupt"] = serde_json::json!(false);
+    let bad_resp = handle_session_notify(serde_json::json!(6), bad_p, ctx.clone()).await;
+    assert_eq!(
+        bad_resp.error.expect("error response").code,
+        error_codes::INVALID_PARAMS,
+        "explicit interrupt:false alongside mode:turn-end must be rejected by policy"
+    );
+
+    // (2) With `interrupt` omitted (the fix): succeeds cleanly
+    let mut good_p = params(&sid.to_string(), "turn-end ping");
+    good_p["delivery"] = serde_json::json!({ "mode": "turn-end" });
+    let resp = handle_session_notify(serde_json::json!(7), good_p, ctx).await;
+    assert!(
+        resp.error.is_none(),
+        "delivery.mode turn-end without interrupt must succeed: {resp:?}"
+    );
+    assert_eq!(outcome_of(&resp), "delivered");
+    let queued = captured.lock().unwrap().take().expect("message enqueued");
+    assert_eq!(
+        queued.origin,
+        crate::brain::agent::PushOrigin::SessionNotify
+    );
+}

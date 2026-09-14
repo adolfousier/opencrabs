@@ -137,8 +137,13 @@ pub(crate) async fn run(
     let mut params = serde_json::json!({
         "session_id": target.to_string(),
         "message": text,
-        "interrupt": interrupt,
     });
+    // Omit `interrupt` unless explicitly true (fork #158): the CLI flags default
+    // `interrupt` to false, but unconditionally sending `interrupt: false`
+    // conflicts with `delivery.mode: "turn-end"` in `notify_policy::resolve_mode`.
+    if interrupt {
+        params["interrupt"] = serde_json::json!(true);
+    }
     if let Some(t) = title {
         params["title"] = serde_json::json!(t);
     }
