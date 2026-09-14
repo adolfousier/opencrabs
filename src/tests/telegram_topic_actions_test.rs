@@ -8,10 +8,21 @@ use crate::db::ChannelMessageRepository;
 use crate::db::Database;
 use serde_json::json;
 use std::sync::Arc;
+use teloxide::Bot;
 use uuid::Uuid;
 
 fn make_tool() -> TelegramSendTool {
     let state = Arc::new(TelegramState::new());
+    TelegramSendTool::new(state)
+}
+
+/// `execute()` refuses a botless state before any action dispatch ("Telegram
+/// is not connected"), so tests that drive the full tool must install a dummy
+/// bot first. The name-bounds validations return before any request is built —
+/// the bot is never used on the wire.
+async fn make_connected_tool() -> TelegramSendTool {
+    let state = Arc::new(TelegramState::new());
+    state.set_bot(Bot::new("TESTTOKEN")).await;
     TelegramSendTool::new(state)
 }
 
@@ -47,7 +58,7 @@ fn telegram_send_schema_declares_topic_actions_and_params() {
 
 #[tokio::test]
 async fn telegram_send_rejects_empty_or_too_long_topic_name() {
-    let tool = make_tool();
+    let tool = make_connected_tool().await;
     let ctx = ToolExecutionContext::new(Uuid::new_v4());
 
     // Empty name
