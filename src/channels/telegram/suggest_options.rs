@@ -467,21 +467,47 @@ pub(crate) fn empty_keyboard() -> teloxide::types::InlineKeyboardMarkup {
 /// untouched — but render their 1-based index, and the original labels
 /// move into an `<ol>` after the last row. Idempotent: a folded body's
 /// digit labels never re-trigger the fold.
+/// Enforces button width budgets across an HTML body.
+///
+/// Hand-authored multi-button rows exceeding the shared row budget (total >20 or
+/// per-label >12 units) are re-shaped to `Column` layout (one button per row, keeping
+/// original labels intact) when all labels in the contiguous button set fit the solo
+/// budget (`SINGLE_BUTTON_MAX_UNITS` = 30).
+///
+/// If any button label in the set exceeds 30 units, the set falls back to the
+/// `NumberedProse` shape (proven cut-free twice in #79): buttons keep their attributes
+/// — callback data and URL routing are untouched — but render their 1-based index,
+/// and the original labels move into an `<ol>` after the last row of that set.
+///
+/// Contiguous runs of `<tg-button-row>` blocks (separated only by whitespace) form
+/// a single logical set; intervening non-whitespace text delineates independent sets.
+///
+/// Idempotent: a re-shaped or folded body never re-triggers transformation.
 pub(crate) fn enforce_button_fit(html: &str) -> String {
     const ROW_OPEN: &str = "<tg-button-row>";
     const ROW_CLOSE: &str = "</tg-button-row>";
     const BTN_OPEN: &str = "<tg-button";
     const BTN_CLOSE: &str = "</tg-button>";
 
-    // Pass 1 — collect row spans, per-row open tags, and all labels.
-    // Per-row verdicts go through row_fits — THE single budget authority
-    // (#119 option A): the funnel no longer carries its own cap copies,
-    // so it can never re-fold a row the emitter legitimately approved.
-    let mut rows: Vec<(usize, usize)> = Vec::new();
-    let mut open_tags: Vec<Vec<&str>> = Vec::new();
-    let mut labels: Vec<&str> = Vec::new();
-    let mut row_labels: Vec<&str> = Vec::new();
-    let mut fits = true;
+    struct EnforcerButton<'a> {
+        open_tag: &'a str,
+        label: &'a str,
+    }
+
+    struct EnforcerRow<'a> {
+        row_start: usize,
+        row_end: usize,
+        buttons: Vec<EnforcerButton<'a>>,
+    }
+
+    struct EnforcerSet<'a> {
+        rows: Vec<EnforcerRow<'a>>,
+        set_start: usize,
+        set_end: usize,
+    }
+
+    // Pass 1 — collect row spans and parsed buttons.
+    let mut rows: Vec<EnforcerRow<'_>> = Vec::new();
     let mut scan_from = 0usize;
     while let Some(rel) = html[scan_from..].find(ROW_OPEN) {
         let row_start = scan_from + rel;
@@ -490,8 +516,7 @@ pub(crate) fn enforce_button_fit(html: &str) -> String {
         };
         let row_end = row_start + crel + ROW_CLOSE.len();
         let block = &html[row_start + ROW_OPEN.len()..row_end - ROW_CLOSE.len()];
-        let mut tags_in_row: Vec<&str> = Vec::new();
-        row_labels.clear();
+        let mut buttons: Vec<EnforcerButton<'_>> = Vec::new();
         let mut bscan = 0usize;
         while let Some(brel) = block[bscan..].find(BTN_OPEN) {
             let bstart = bscan + brel;
@@ -510,46 +535,119 @@ pub(crate) fn enforce_button_fit(html: &str) -> String {
                 break;
             };
             let label = &block[label_start..label_start + lrel];
-            row_labels.push(label);
-            tags_in_row.push(open_tag);
-            labels.push(label);
+            buttons.push(EnforcerButton { open_tag, label });
             bscan = label_start + lrel + BTN_CLOSE.len();
         }
-        fits &= row_fits(&row_labels);
-        rows.push((row_start, row_end));
-        open_tags.push(tags_in_row);
+        rows.push(EnforcerRow {
+            row_start,
+            row_end,
+            buttons,
+        });
         scan_from = row_end;
     }
-    if rows.is_empty() || fits {
+
+    if rows.is_empty() {
         return html.to_string();
     }
 
-    // Pass 2 — fold: index digits on the buttons, labels into an `<ol>`.
+    // Pass 2 — partition rows into contiguous sets.
+    // Runs of `<tg-button-row>` blocks with only whitespace between them form one set.
+    // Intervening non-whitespace text delineates independent sets.
+    let mut sets: Vec<EnforcerSet<'_>> = Vec::new();
+    for row in rows {
+        if let Some(current_set) = sets.last_mut() {
+            let inter = &html[current_set.set_end..row.row_start];
+            if inter.trim().is_empty() {
+                current_set.set_end = row.row_end;
+                current_set.rows.push(row);
+                continue;
+            }
+        }
+        sets.push(EnforcerSet {
+            set_start: row.row_start,
+            set_end: row.row_end,
+            rows: vec![row],
+        });
+    }
+
+    // Quick check: if every row in every set satisfies row_fits as-authored, return untouched.
+    let all_as_authored_fit = sets.iter().all(|s| {
+        s.rows.iter().all(|r| {
+            let labels: Vec<&str> = r.buttons.iter().map(|b| b.label).collect();
+            row_fits(&labels)
+        })
+    });
+    if all_as_authored_fit {
+        return html.to_string();
+    }
+
+    // Pass 3 — assemble transformed output per set.
     let mut out = String::with_capacity(html.len() + 64);
     let mut pos = 0usize;
-    let mut index = 0usize;
-    let last_row = rows.len() - 1;
-    for (i, &(row_start, row_end)) in rows.iter().enumerate() {
-        out.push_str(&html[pos..row_start]);
-        out.push_str(ROW_OPEN);
-        for tag in &open_tags[i] {
-            index += 1;
-            out.push_str(tag);
-            out.push('>');
-            out.push_str(&index.to_string());
-            out.push_str(BTN_CLOSE);
-        }
-        out.push_str(ROW_CLOSE);
-        pos = row_end;
-        if i == last_row {
-            out.push_str("\n<ol>");
-            for label in &labels {
-                out.push_str("<li>");
-                out.push_str(label);
-                out.push_str("</li>");
+
+    for set in &sets {
+        // Append text preceding this set
+        out.push_str(&html[pos..set.set_start]);
+
+        let set_fits_as_authored = set.rows.iter().all(|r| {
+            let labels: Vec<&str> = r.buttons.iter().map(|b| b.label).collect();
+            row_fits(&labels)
+        });
+
+        if set_fits_as_authored {
+            out.push_str(&html[set.set_start..set.set_end]);
+        } else {
+            // Check if all buttons individually fit the solo Column budget (<= 30 units).
+            // row_fits is THE single authority (#119 Option A, #137):
+            let can_reshape_to_column = set
+                .rows
+                .iter()
+                .flat_map(|r| &r.buttons)
+                .all(|b| row_fits(&[b.label]));
+
+            if can_reshape_to_column {
+                // Re-shape into Column layout: one button per row, preserving original labels.
+                let mut first = true;
+                for row in &set.rows {
+                    for btn in &row.buttons {
+                        if !first {
+                            out.push('\n');
+                        }
+                        first = false;
+                        out.push_str(ROW_OPEN);
+                        out.push_str(btn.open_tag);
+                        out.push('>');
+                        out.push_str(btn.label);
+                        out.push_str(BTN_CLOSE);
+                        out.push_str(ROW_CLOSE);
+                    }
+                }
+            } else {
+                // Fall back to NumberedProse fold, scoped to this set.
+                let mut index = 0usize;
+                let mut set_labels: Vec<&str> = Vec::new();
+                for row in &set.rows {
+                    out.push_str(ROW_OPEN);
+                    for btn in &row.buttons {
+                        index += 1;
+                        set_labels.push(btn.label);
+                        out.push_str(btn.open_tag);
+                        out.push('>');
+                        out.push_str(&index.to_string());
+                        out.push_str(BTN_CLOSE);
+                    }
+                    out.push_str(ROW_CLOSE);
+                }
+                out.push_str("\n<ol>");
+                for label in set_labels {
+                    out.push_str("<li>");
+                    out.push_str(label);
+                    out.push_str("</li>");
+                }
+                out.push_str("</ol>");
             }
-            out.push_str("</ol>");
         }
+        pos = set.set_end;
     }
     out.push_str(&html[pos..]);
     out

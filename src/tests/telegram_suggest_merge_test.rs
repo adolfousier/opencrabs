@@ -264,19 +264,104 @@ fn test_enforce_button_fit_folds_oversized_labels_keeping_routing() {
 }
 
 #[test]
-fn test_enforce_button_fit_folds_rows_over_the_total_budget() {
+fn test_enforce_button_fit_reshapes_over_budget_shared_row_to_column() {
     // Two 12-char labels = 24 total: past SHARED_ROW_TOTAL_UNITS=20 (#79).
+    // Under #137, because both labels fit within SINGLE_BUTTON_MAX_UNITS=30,
+    // the enforcer re-shapes the row into a Column layout (one button per row)
+    // with original labels intact, rather than folding into digits + <ol>.
     let body = "<tg-button-row>\
                 <tg-button type=\"callback_data\" data=\"followup:t:0\">Полёт норм!!\
                 </tg-button><tg-button type=\"callback_data\" data=\"followup:t:1\">\
                 Всё чётко!!!</tg-button></tg-button-row>";
     let out = enforce_button_fit(body);
-    assert!(
-        out.contains(">1</tg-button>") && out.contains(">2</tg-button>"),
-        "{out}"
+    assert!(!out.contains("<ol>"), "{out}");
+    assert!(!out.contains(">1</tg-button>"), "{out}");
+    assert!(out.contains("Полёт норм!!"), "{out}");
+    assert!(out.contains("Всё чётко!!!"), "{out}");
+    // Verify each button is in its own row
+    assert_eq!(
+        out,
+        "<tg-button-row><tg-button type=\"callback_data\" data=\"followup:t:0\">Полёт норм!!</tg-button></tg-button-row>\n<tg-button-row><tg-button type=\"callback_data\" data=\"followup:t:1\">Всё чётко!!!</tg-button></tg-button-row>"
     );
-    assert!(out.contains("<li>Полёт норм!!</li>"), "{out}");
-    assert!(out.contains("<li>Всё чётко!!!</li>"), "{out}");
+    // Idempotent:
+    assert_eq!(enforce_button_fit(&out), out);
+}
+
+#[test]
+fn test_enforce_button_fit_folds_multi_button_row_when_label_exceeds_solo_budget() {
+    // Multi-button row where one button label exceeds SINGLE_BUTTON_MAX_UNITS (30).
+    // Column re-shaping cannot accommodate a label > 30 units, so it must fall back
+    // to NumberedProse fold (index digits + <ol>).
+    let long_label = "Проверка ширины кнопки хххххххххЖЖЖ"; // 35 chars
+    let body = format!(
+        "<tg-button-row>\
+         <tg-button type=\"callback_data\" data=\"followup:t:0\">{long_label}</tg-button>\
+         <tg-button type=\"callback_data\" data=\"followup:t:1\">OK</tg-button>\
+         </tg-button-row>"
+    );
+    let out = enforce_button_fit(&body);
+    assert!(out.contains(">1</tg-button>"), "{out}");
+    assert!(out.contains(">2</tg-button>"), "{out}");
+    assert!(out.contains(&format!("<li>{long_label}</li>")), "{out}");
+    assert!(out.contains("<li>OK</li>"), "{out}");
+    // Idempotent:
+    assert_eq!(enforce_button_fit(&out), out);
+}
+
+#[test]
+fn test_enforce_button_fit_groups_contiguous_rows_into_single_set() {
+    // Two rows separated only by whitespace belong to the same contiguous set.
+    // Row 1 has one button (10 chars), Row 2 has two buttons (14 + 15 chars).
+    // Row 2 is over budget (total 29 > 20, labels > 12), but all labels <= 30.
+    // Entire set re-shapes into 3 single-button rows.
+    let body = "<tg-button-row>\
+                <tg-button type=\"callback_data\" data=\"followup:t:0\">Option One</tg-button>\
+                </tg-button-row>\n\n<tg-button-row>\
+                <tg-button type=\"callback_data\" data=\"followup:t:1\">Option Two Long</tg-button>\
+                <tg-button type=\"callback_data\" data=\"followup:t:2\">Option Three Long</tg-button>\
+                </tg-button-row>";
+    let out = enforce_button_fit(body);
+    assert!(!out.contains("<ol>"), "{out}");
+    assert!(!out.contains(">1</tg-button>"), "{out}");
+    let expected = "<tg-button-row><tg-button type=\"callback_data\" data=\"followup:t:0\">Option One</tg-button></tg-button-row>\n<tg-button-row><tg-button type=\"callback_data\" data=\"followup:t:1\">Option Two Long</tg-button></tg-button-row>\n<tg-button-row><tg-button type=\"callback_data\" data=\"followup:t:2\">Option Three Long</tg-button></tg-button-row>";
+    assert_eq!(out, expected);
+    assert_eq!(enforce_button_fit(&out), out);
+}
+
+#[test]
+fn test_enforce_button_fit_splits_sets_on_intervening_non_whitespace_text() {
+    // Three sets separated by non-whitespace text nodes:
+    // Set 1: 2 buttons that fit as-authored (3 + 2 <= 20).
+    // Set 2: 2 buttons over shared budget (17 + 16 > 20), but both <= 30 -> re-shapes to Column.
+    // Set 3: 1 button with 35 chars > 30 -> folds to NumberedProse.
+    let body = "<p>First question:</p>\n\
+                <tg-button-row><tg-button type=\"callback_data\" data=\"followup:t:0\">Yes</tg-button><tg-button type=\"callback_data\" data=\"followup:t:1\">No</tg-button></tg-button-row>\n\
+                <p>Second question:</p>\n\
+                <tg-button-row><tg-button type=\"callback_data\" data=\"followup:t:2\">Choice Alpha Long</tg-button><tg-button type=\"callback_data\" data=\"followup:t:3\">Choice Beta Long</tg-button></tg-button-row>\n\
+                <p>Third question:</p>\n\
+                <tg-button-row><tg-button type=\"callback_data\" data=\"followup:t:4\">Проверка ширины кнопки хххххххххЖЖЖ</tg-button></tg-button-row>";
+    let out = enforce_button_fit(body);
+
+    // Set 1 remains as-authored:
+    assert!(out.contains("<tg-button-row><tg-button type=\"callback_data\" data=\"followup:t:0\">Yes</tg-button><tg-button type=\"callback_data\" data=\"followup:t:1\">No</tg-button></tg-button-row>"), "{out}");
+    // Set 2 re-shapes into 2 separate rows:
+    assert!(out.contains("<tg-button-row><tg-button type=\"callback_data\" data=\"followup:t:2\">Choice Alpha Long</tg-button></tg-button-row>\n<tg-button-row><tg-button type=\"callback_data\" data=\"followup:t:3\">Choice Beta Long</tg-button></tg-button-row>"), "{out}");
+    // Set 3 folds with its own <ol> list:
+    assert!(out.contains("<tg-button-row><tg-button type=\"callback_data\" data=\"followup:t:4\">1</tg-button></tg-button-row>\n<ol><li>Проверка ширины кнопки хххххххххЖЖЖ</li></ol>"), "{out}");
+    // Intervening text is preserved:
+    assert!(out.contains("<p>First question:</p>"), "{out}");
+    assert!(out.contains("<p>Second question:</p>"), "{out}");
+    assert!(out.contains("<p>Third question:</p>"), "{out}");
+    // Idempotent:
+    assert_eq!(enforce_button_fit(&out), out);
+}
+
+#[test]
+fn test_enforce_button_fit_handles_malformed_and_empty_rows() {
+    let body = "<tg-button-row></tg-button-row>\n<tg-button-row><tg-button type=\"callback_data\" data=\"test\">OK</tg-button></tg-button-row>";
+    let out = enforce_button_fit(body);
+    assert!(out.contains("OK"), "{out}");
+    assert_eq!(enforce_button_fit(&out), out);
 }
 
 // ── row_fits — the single budget verdict (#119 option A) ─────────────────
