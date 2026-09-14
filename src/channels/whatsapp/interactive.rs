@@ -158,3 +158,20 @@ fn id_from_params(params: &str) -> Option<String> {
         .as_str()
         .map(str::to_string)
 }
+
+/// Decode a suggestion-card tap id (`wa_suggest_N`) into its 1-based number
+/// (#1411). Any other id (approval taps, foreign payloads, zero, junk)
+/// yields `None` so the ordinary message path stays untouched. Kept pure so
+/// the routing contract is testable without a live socket.
+pub(crate) fn parse_suggestion_tap(id: &str) -> Option<usize> {
+    let n: usize = id.strip_prefix("wa_suggest_")?.parse().ok()?;
+    (n >= 1).then_some(n)
+}
+
+/// Whether a suggestion set may render as a native-flow card: the opt-in flag
+/// is checked by the caller; this enforces the button cap, because a truncated
+/// card would silently drop selectable options. Pure for the same reason as
+/// [`parse_suggestion_tap`].
+pub(crate) fn suggestion_card_fits(count: usize) -> bool {
+    (1..=MAX_BUTTONS).contains(&count)
+}

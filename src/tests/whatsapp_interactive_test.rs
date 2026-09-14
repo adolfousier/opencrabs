@@ -5,7 +5,9 @@
 //! needs before it will even consider rendering, and the tap parsing that has
 //! to work for a rendered card to be useful.
 
-use crate::channels::whatsapp::interactive::{Button, MAX_BUTTONS, build, parse_tap};
+use crate::channels::whatsapp::interactive::{
+    Button, MAX_BUTTONS, build, parse_suggestion_tap, parse_tap, suggestion_card_fits,
+};
 
 /// Reach through the view-once envelope to the card itself.
 fn card(msg: &waproto::whatsapp::Message) -> &waproto::whatsapp::message::InteractiveMessage {
@@ -217,4 +219,28 @@ fn interactive_buttons_are_off_by_default() {
             .whatsapp
             .interactive_buttons
     );
+}
+
+/// #1411: a `wa_suggest_N` tap decodes to the 1-based number the follow-up
+/// router already understands; everything else stays unclaimed.
+#[test]
+fn suggestion_taps_decode_to_their_number() {
+    assert_eq!(parse_suggestion_tap("wa_suggest_1"), Some(1));
+    assert_eq!(parse_suggestion_tap("wa_suggest_3"), Some(3));
+    assert_eq!(parse_suggestion_tap("wa_suggest_0"), None);
+    assert_eq!(parse_suggestion_tap("wa_suggest_"), None);
+    assert_eq!(parse_suggestion_tap("wa_suggest_x"), None);
+    assert_eq!(parse_suggestion_tap("wa_approve_yes"), None);
+    assert_eq!(parse_suggestion_tap(""), None);
+}
+
+/// #1411: cards only for 1..=MAX_BUTTONS. An empty set is never sent
+/// (guarded upstream) and a fourth option must fall back to the list rather
+/// than render a card whose button is silently truncated.
+#[test]
+fn suggestion_cards_only_fit_within_the_button_cap() {
+    assert!(!suggestion_card_fits(0));
+    assert!(suggestion_card_fits(1));
+    assert!(suggestion_card_fits(MAX_BUTTONS));
+    assert!(!suggestion_card_fits(MAX_BUTTONS + 1));
 }

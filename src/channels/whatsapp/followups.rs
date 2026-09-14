@@ -1,8 +1,10 @@
 //! Optional follow-up suggestions from `suggest_options` (#600).
 //!
-//! WhatsApp has no working button UI, so suggestions render as a numbered
-//! text list and a bare numeric reply selects one. The set is consumed on a
-//! valid selection and cleared by the handler on any other message.
+//! Suggestions render as a native-flow card when `interactive_buttons` is on
+//! and the set fits the button cap (#1411), and as a numbered text list
+//! otherwise. Either way a bare numeric reply selects one (card taps are
+//! rewritten to the number), the set is consumed on a valid selection, and it
+//! is cleared by the handler on any other message.
 
 use uuid::Uuid;
 
