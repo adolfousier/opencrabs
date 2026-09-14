@@ -490,3 +490,75 @@ fn details_rich_structure_detected() {
         md
     ));
 }
+
+// ── code fence length matching (#94) ────────────────────────────────
+
+#[test]
+fn code_fence_four_backticks_contains_three_backticks() {
+    let md = "````rust\n```\nnested\n```\n````";
+    let blocks = parse_markdown(md);
+    assert_eq!(blocks.len(), 1);
+    assert_eq!(
+        blocks[0],
+        Block::Code {
+            lang: Some("rust".to_string()),
+            text: "```\nnested\n```".to_string(),
+        }
+    );
+}
+
+#[test]
+fn code_fence_closer_can_be_longer_than_opener() {
+    let md = "```\nline 1\n`````";
+    let blocks = parse_markdown(md);
+    assert_eq!(blocks.len(), 1);
+    assert_eq!(
+        blocks[0],
+        Block::Code {
+            lang: None,
+            text: "line 1".to_string(),
+        }
+    );
+}
+
+#[test]
+fn code_fence_closer_shorter_than_opener_does_not_close() {
+    let md = "````\n```\nstill code\n````";
+    let blocks = parse_markdown(md);
+    assert_eq!(blocks.len(), 1);
+    assert_eq!(
+        blocks[0],
+        Block::Code {
+            lang: None,
+            text: "```\nstill code".to_string(),
+        }
+    );
+}
+
+#[test]
+fn code_fence_tilde_matching() {
+    let md = "~~~python\nprint('hello')\n~~~";
+    let blocks = parse_markdown(md);
+    assert_eq!(blocks.len(), 1);
+    assert_eq!(
+        blocks[0],
+        Block::Code {
+            lang: Some("python".to_string()),
+            text: "print('hello')".to_string(),
+        }
+    );
+}
+
+#[test]
+fn code_fence_tilde_does_not_close_backticks() {
+    let md = "````\n~~~\ncode\n````";
+    let blocks = parse_markdown(md);
+    assert_eq!(blocks.len(), 1);
+    assert_eq!(
+        blocks[0],
+        Block::Code {
+            lang: None,
+            text: "~~~\ncode".to_string(),
+        }
+    );
+}

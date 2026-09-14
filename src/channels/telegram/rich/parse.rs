@@ -26,11 +26,10 @@ pub(super) fn parse_blocks(lines: &[String]) -> Vec<Block> {
         }
 
         // Fenced code block.
-        if is_fence(t) {
-            let lang = fence_lang(t);
+        if let Some((fence_char, open_len, lang)) = parse_fence_open(t) {
             i += 1;
             let mut buf = Vec::new();
-            while i < lines.len() && !is_fence(lines[i].trim()) {
+            while i < lines.len() && !is_fence_close(lines[i].trim(), fence_char, open_len) {
                 buf.push(lines[i].clone());
                 i += 1;
             }
@@ -184,7 +183,7 @@ pub(super) fn parse_blocks(lines: &[String]) -> Vec<Block> {
 fn starts_block(lines: &[String], i: usize) -> bool {
     let t = lines[i].trim();
     t.is_empty()
-        || is_fence(t)
+        || parse_fence_open(t).is_some()
         || heading(t).is_some()
         || is_divider(t)
         || t.starts_with('>')
@@ -199,15 +198,38 @@ fn is_details_open(t: &str) -> bool {
     t == "<details>" || t == "<details open>" || t.starts_with("<details ")
 }
 
-/// A fence line: three or more backticks.
-fn is_fence(t: &str) -> bool {
-    t.starts_with("```")
+/// Parse an opening fence line (````lang` or `~~~lang`), returning `(delimiter_char, run_length, Option<lang>)`.
+/// CommonMark requires at least 3 delimiter characters.
+fn parse_fence_open(t: &str) -> Option<(char, usize, Option<String>)> {
+    let first = t.chars().next()?;
+    if first != '`' && first != '~' {
+        return None;
+    }
+    let count = t.chars().take_while(|&c| c == first).count();
+    if count < 3 {
+        return None;
+    }
+    let rest = t[count..].trim();
+    // In backtick fences, the info string cannot contain backticks.
+    if first == '`' && rest.contains('`') {
+        return None;
+    }
+    let lang = if rest.is_empty() {
+        None
+    } else {
+        Some(rest.to_string())
+    };
+    Some((first, count, lang))
 }
 
-/// The language tag of an opening fence, if any.
-fn fence_lang(t: &str) -> Option<String> {
-    let lang = t.trim_start_matches('`').trim();
-    (!lang.is_empty()).then(|| lang.to_string())
+/// Whether line `t` closes a code fence that opened with delimiter `fence_char` of length `open_len`.
+/// CommonMark closing fence: same delimiter character, run length >= open_len, no non-whitespace trailing characters.
+fn is_fence_close(t: &str, fence_char: char, open_len: usize) -> bool {
+    let count = t.chars().take_while(|&c| c == fence_char).count();
+    if count < open_len {
+        return false;
+    }
+    t[count..].trim().is_empty()
 }
 
 /// Parse an ATX heading, returning `(level, content)`.

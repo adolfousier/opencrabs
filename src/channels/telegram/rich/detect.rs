@@ -96,6 +96,7 @@ pub(crate) fn has_rich_structure(text: &str) -> bool {
             is_atx_heading(t)
                 || list::is_item(t)
                 || t.starts_with("```")
+                || t.starts_with("~~~")
                 || t == "$$"
                 || is_details_open(t)
         })
