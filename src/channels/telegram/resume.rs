@@ -13,6 +13,7 @@ use crate::brain::agent::service::background_tasks;
 use crate::brain::agent::{AgentService, ProgressCallback, ProgressEvent};
 use crate::config::Config;
 use crate::db::ChannelMessageRepository;
+use futures::future::BoxFuture;
 use std::sync::Arc;
 use teloxide::prelude::*;
 use teloxide::types::ChatAction;
@@ -420,7 +421,10 @@ pub(crate) async fn resume_session(
             return Ok(());
         }
     };
-    resume_session_inner(
+    let bot_for_flush = bot.clone();
+    let agent_for_flush = agent.clone();
+    let state_for_flush = telegram_state.clone();
+    let result = resume_session_inner(
         bot,
         chat_id,
         thread_id,
@@ -430,7 +434,173 @@ pub(crate) async fn resume_session(
         telegram_state,
         track_push_turn,
     )
-    .await
+    .await;
+
+    // #201: the tool loop has exited — an item enqueued during the final
+    // generation round (after the last between-rounds drain) has no consumer
+    // left on this path, so it sat until the NEXT turn drained it — an
+    // operator nudge by any other name. Mirror the ingress end-of-turn
+    // flush: drain and dispatch leftovers AFTER the guard drops, so the
+    // follow-up turn the flush opens can take the slot. The reaction arm
+    // awaits its turn to completion before this returns; the detached arm
+    // spawns and does not block.
+    drop(_turn_guard);
+    flush_queued_after_turn(
+        bot_for_flush,
+        chat_id,
+        thread_id,
+        session_id,
+        agent_for_flush,
+        state_for_flush,
+    )
+    .await;
+
+    result
+}
+
+/// End-of-turn flush of queued items (#201) — the extracted consumer of
+/// `drain_queued_items`. Until #201 the ONLY production call site was the
+/// tail of `handle_message`, so an item enqueued after the tool loop's last
+/// between-rounds drain was stranded on push-initiated turns: the turn
+/// ended with nothing left to drain and the item sat until the next turn
+/// on the session. Call this at every turn path's end, AFTER the
+/// active-turn guard drops so a follow-up turn can take the slot.
+///
+/// Split by origin first (#1213): a detached result gets a real tool loop
+/// (spawned — this function never blocks on it, and the resumed turn is a
+/// `resume_session` wrapper turn that flushes again at ITS end); reactions
+/// and ingress leftovers keep the full streaming pipeline (#1213 — a
+/// toolless single-shot would leave the model announcing work it has no
+/// tools to execute) under a fresh turn guard, re-queued if another turn
+/// won the race.
+pub(crate) fn flush_queued_after_turn(
+    bot: Bot,
+    chat_id: ChatId,
+    thread_id: Option<teloxide::types::ThreadId>,
+    session_id: Uuid,
+    agent: Arc<AgentService>,
+    telegram_state: Arc<TelegramState>,
+) -> BoxFuture<'static, ()> {
+    Box::pin(async move {
+        // Empty is the common case (one cheap lock check) — a real inference
+        // only fires when something was queued.
+        let (detached, leftover_reactions): (Vec<_>, Vec<_>) = telegram_state
+            .drain_queued_items(session_id)
+            .into_iter()
+            .partition(|item| item.origin == super::state::QueuedOrigin::DetachedWork);
+
+        if !detached.is_empty() {
+            let combined = detached
+                .iter()
+                .map(|i| i.msg.context_text.as_str())
+                .collect::<Vec<_>>()
+                .join("\n\n");
+            tracing::info!(
+                "Telegram: {} detached result(s) landed during final delivery for session \
+                 {session_id} — resuming with a full tool loop rather than the toolless flush",
+                detached.len()
+            );
+            let bot_for_resume = bot.clone();
+            let agent_for_resume = agent.clone();
+            let state_for_resume = telegram_state.clone();
+            let chat_for_resume = chat_id;
+            let detached_for_clear: Vec<_> = detached
+                .iter()
+                .map(|item| (session_id, item.msg.clone()))
+                .collect();
+            // Spawned: the turn guard is already dropped above, so the resumed
+            // turn can take it, and this caller must not block until that whole
+            // turn finishes.
+            tokio::spawn(async move {
+                if let Err(e) = resume_session(
+                    bot_for_resume,
+                    chat_for_resume,
+                    thread_id,
+                    session_id,
+                    combined,
+                    agent_for_resume,
+                    state_for_resume,
+                    true, // end-of-turn detached flush is a push-initiated wake (#12)
+                )
+                .await
+                {
+                    tracing::warn!(
+                        "Telegram: resumed turn for a detached result failed \
+                         (session {session_id}): {e}"
+                    );
+                }
+                // The resume turn delivering (or even failing) retires the
+                // durable twin (#111): the retry context is gone with this run,
+                // so replaying the row next boot would double-deliver. Clear
+                // unconditionally — a lost in-memory retry costs a plain
+                // undelivered push, the pre-#111 behavior; a surviving row
+                // costs a duplicate.
+                for (_sid, m) in &detached_for_clear {
+                    crate::brain::agent::service::notify_queue::clear_on_delivery(session_id, m);
+                }
+            });
+        }
+
+        let leftover_reactions: Vec<_> = leftover_reactions.into_iter().map(|i| i.msg).collect();
+        if !leftover_reactions.is_empty() {
+            // #1213: leftovers can be background-task or subagent completions
+            // that raced the final-bubble delivery — the resume callback found
+            // the turn guard still held and queued them here, but no tool loop
+            // remained to drain them between rounds. A toolless single-shot
+            // reply leaves the model announcing follow-up work it has no tools
+            // to execute, then the session stalls until the next inbound
+            // message. Run them through the FULL streaming pipeline (tools
+            // intact), under the turn gate so a completion resuming concurrently
+            // cannot fork a second overlapping block (#845). If another turn won
+            // the race, re-queue: that turn drains them between rounds as
+            // designed.
+            let combined = leftover_reactions
+                .iter()
+                .map(|m| m.context_text.as_str())
+                .collect::<Vec<_>>()
+                .join("\n\n");
+            match telegram_state.try_begin_turn(session_id) {
+                Some(_flush_turn_guard) => {
+                    tracing::info!(
+                        "Telegram: flushing {} stranded reaction(s) for session {session_id} via full pipeline (#1213)",
+                        leftover_reactions.len()
+                    );
+                    // Guard held across the await: the resumed pipeline owns the
+                    // session exclusively, same as any other turn.
+                    let result = resume_session_inner(
+                        bot.clone(),
+                        chat_id,
+                        thread_id,
+                        session_id,
+                        combined,
+                        agent.clone(),
+                        telegram_state.clone(),
+                        true, // stranded-reaction flush is a push-initiated wake (#12)
+                    )
+                    .await;
+                    // Retire the durable twin on resume ATTEMPT (#111): this
+                    // run's retry context is gone either way, so a surviving row
+                    // next boot would double-deliver. Failure direction is a
+                    // plain undelivered push (pre-#111), never a duplicate.
+                    for r in &leftover_reactions {
+                        crate::brain::agent::service::notify_queue::clear_on_delivery(
+                            session_id, r,
+                        );
+                    }
+                    if let Err(e) = result {
+                        tracing::warn!(
+                            "Telegram: flushed-reaction full pipeline failed for session {session_id}: {e}"
+                        );
+                    }
+                }
+                None => {
+                    for r in leftover_reactions {
+                        telegram_state.enqueue_reaction(session_id, r);
+                    }
+                }
+            }
+        }
+    })
 }
 
 /// Unguarded core of `resume_session`. The turn-slot contract lives in the
