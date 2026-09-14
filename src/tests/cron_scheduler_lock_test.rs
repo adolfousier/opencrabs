@@ -73,3 +73,50 @@ fn lock_is_released_on_drop_and_can_be_retaken() {
         "after the holder drops, the profile lock must be retakeable (a crashed daemon must not wedge scheduling)"
     );
 }
+
+#[test]
+fn instance_running_true_when_lock_held_by_live_pid() {
+    let dir = TempDir::new().unwrap();
+    let lock_dir = dir.path().join("instance");
+    std::fs::create_dir_all(&lock_dir).unwrap();
+    let lock_file = lock_dir.join("ops.lock");
+    std::fs::write(&lock_file, std::process::id().to_string()).unwrap();
+
+    assert!(
+        crate::config::profile::instance_running_in(&lock_dir, "ops"),
+        "Live process ID should be detected as running instance"
+    );
+}
+
+#[test]
+fn instance_running_false_when_no_lock_file() {
+    let dir = TempDir::new().unwrap();
+    let lock_dir = dir.path().join("instance");
+    std::fs::create_dir_all(&lock_dir).unwrap();
+
+    assert!(
+        !crate::config::profile::instance_running_in(&lock_dir, "ops"),
+        "Missing lock file should report instance not running"
+    );
+}
+
+#[test]
+fn instance_running_false_when_pid_dead_or_garbage() {
+    let dir = TempDir::new().unwrap();
+    let lock_dir = dir.path().join("instance");
+    std::fs::create_dir_all(&lock_dir).unwrap();
+
+    let dead_file = lock_dir.join("dead.lock");
+    std::fs::write(&dead_file, u32::MAX.to_string()).unwrap();
+    assert!(
+        !crate::config::profile::instance_running_in(&lock_dir, "dead"),
+        "Dead PID should report instance not running"
+    );
+
+    let garbage_file = lock_dir.join("garbage.lock");
+    std::fs::write(&garbage_file, "not-a-pid").unwrap();
+    assert!(
+        !crate::config::profile::instance_running_in(&lock_dir, "garbage"),
+        "Garbage PID string should report instance not running"
+    );
+}
