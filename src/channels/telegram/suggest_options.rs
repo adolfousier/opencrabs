@@ -589,7 +589,12 @@ pub(crate) fn append_rows_and_trailer_md(
         // before the block: owner correction 2026-09-09 — a single \n
         // glued the fold block to the body's last line (Telegram rich
         // renderer needs a paragraph break there).
+        // #207 fold-list counter isolation: a preceding markdown ordered list
+        // (e.g. 1..3 in prose) fuses with this fold block if separated by only
+        // a blank line, causing Telegram to continue numbering (4..6) while
+        // buttons show 1..3. A horizontal rule (---) breaks the list container.
         push_blank_line(md);
+        md.push_str("---\n\n");
         md.push_str(&go_tier_lines(options));
     }
     push_blank_line(md);
@@ -751,6 +756,7 @@ pub(crate) async fn render_suggestions(
                         body.push('\n');
                     }
                     body.push('\n');
+                    body.push_str("<hr/>\n");
                     body.push_str(&go_tier_lines_rich(&options));
                 }
                 (body, false, None)
