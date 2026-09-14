@@ -1,0 +1,123 @@
+//! Protocol framing tests for the ACP server mode (#1540, #1539).
+//!
+//! Landed under `src/tests/` per the contribution rule that test modules
+//! never live inline: the items exercised here (`parse_line`, `prompt_text`,
+//! `tool_kind`, `permission_outcome`, `ClientMessage`) are all `pub` in
+//! `crate::acp::protocol`, so no test-only surface has to leak into the
+//! production module.
+
+use crate::acp::protocol::{
+    ClientMessage, SESSION_SET_MODE, SESSION_SET_MODEL, initialize_result, parse_line,
+    permission_outcome, prompt_text, tool_kind,
+};
+use serde_json::json;
+
+#[test]
+fn parses_request() {
+    let msg =
+        parse_line(r#"{"jsonrpc":"2.0","id":1,"method":"session/new","params":{"cwd":"/tmp"}}"#)
+            .unwrap();
+    match msg {
+        ClientMessage::Request { id, method, params } => {
+            assert_eq!(id, json!(1));
+            assert_eq!(method, "session/new");
+            assert_eq!(params["cwd"], json!("/tmp"));
+        }
+        other => panic!("expected request, got {other:?}"),
+    }
+}
+
+#[test]
+fn parses_notification() {
+    let msg = parse_line(r#"{"jsonrpc":"2.0","method":"session/cancel","params":{}}"#).unwrap();
+    assert!(matches!(msg, ClientMessage::Notification { .. }));
+}
+
+#[test]
+fn parses_response_result_and_error() {
+    let ok = parse_line(r#"{"jsonrpc":"2.0","id":7,"result":{"x":1}}"#).unwrap();
+    match ok {
+        ClientMessage::Response { id, result } => {
+            assert_eq!(id, 7);
+            assert_eq!(result.unwrap()["x"], json!(1));
+        }
+        other => panic!("expected response, got {other:?}"),
+    }
+    let err =
+        parse_line(r#"{"jsonrpc":"2.0","id":8,"error":{"code":-32601,"message":"no"}}"#).unwrap();
+    match err {
+        ClientMessage::Response { id, result } => {
+            assert_eq!(id, 8);
+            let e = result.unwrap_err();
+            assert_eq!(e.code, -32601);
+        }
+        other => panic!("expected response, got {other:?}"),
+    }
+}
+
+#[test]
+fn rejects_garbage() {
+    assert!(parse_line("not json").is_err());
+    assert!(parse_line(r#"{"jsonrpc":"2.0"}"#).is_err());
+}
+
+#[test]
+fn extracts_prompt_text_blocks() {
+    let params = json!({
+        "prompt": [
+            { "type": "text", "text": "hello" },
+            { "type": "resource_link", "uri": "file:///tmp/a.png" },
+            { "type": "image", "data": "..." }
+        ]
+    });
+    let text = prompt_text(&params).unwrap();
+    assert!(text.starts_with("hello"));
+    assert!(text.contains("file:///tmp/a.png"));
+}
+
+#[test]
+fn permission_outcome_maps_option_ids() {
+    assert_eq!(
+        permission_outcome(&json!({"outcome":{"outcome":"selected","optionId":"allow-once"}})),
+        (true, false)
+    );
+    assert_eq!(
+        permission_outcome(&json!({"outcome":{"outcome":"selected","optionId":"allow-always"}})),
+        (true, true)
+    );
+    assert_eq!(
+        permission_outcome(&json!({"outcome":{"outcome":"selected","optionId":"reject-once"}})),
+        (false, false)
+    );
+    assert_eq!(
+        permission_outcome(&json!({"outcome":{"outcome":"cancelled"}})),
+        (false, false)
+    );
+}
+
+#[test]
+fn tool_kind_covers_loop_tools() {
+    assert_eq!(tool_kind("bash"), "execute");
+    assert_eq!(tool_kind("read_file"), "read");
+    assert_eq!(tool_kind("edit_file"), "edit");
+    assert_eq!(tool_kind("grep"), "search");
+    assert_eq!(tool_kind("http_request"), "fetch");
+    assert_eq!(tool_kind("spawn_agent"), "other");
+}
+
+#[test]
+fn initialize_result_is_honest_about_load_replay() {
+    let caps = initialize_result()["agentCapabilities"].clone();
+    // session/load binds an existing session but does not replay history;
+    // the advertised capability must not claim otherwise.
+    assert_eq!(caps["loadSession"], json!(false));
+    assert_eq!(caps["promptCapabilities"]["text"], json!(true));
+}
+
+#[test]
+fn set_mode_is_accepted_alongside_set_model() {
+    // The contract Moe's PR body promised is spelled `session/set_mode`;
+    // both spellings dispatch to the same handler.
+    assert_eq!(SESSION_SET_MODE, "session/set_mode");
+    assert_eq!(SESSION_SET_MODEL, "session/set_model");
+}

@@ -6,7 +6,8 @@
 //! owns its model override and the cancel token of its in-flight turn.
 //!
 //! Dispatch shape: requests are answered inline when they are cheap
-//! (initialize/new/load/set_model); `session/prompt` spawns a turn task so
+//! (initialize/new/load/set_model or set_mode); `session/prompt` spawns a
+//! turn task so
 //! the loop keeps reading — `session/cancel` must be processable mid-turn.
 //! Notifications never get responses, per JSON-RPC.
 
@@ -40,11 +41,7 @@ pub fn new_steer_map() -> SteerMap {
 pub struct SessionState {
     /// The opencrabs session — same UUID the ACP session id stringifies.
     pub id: Uuid,
-    /// Working directory the client bound the session to (informational;
-    /// the process was already spawned with this cwd).
-    #[allow(dead_code)]
-    pub cwd: String,
-    /// Model override from `--model` or `session/set_model`.
+    /// Model override from `--model` or `session/set_model`/`session/set_mode`.
     pub model: Mutex<Option<String>>,
     /// Cancel token of the in-flight turn; None when idle.
     pub active_cancel: Mutex<Option<CancellationToken>>,
@@ -112,7 +109,7 @@ impl AcpServer {
                 state.handle.respond(id, protocol::initialize_result());
             }
             protocol::SESSION_NEW => {
-                Self::session_new(state, id, params, None).await;
+                Self::session_new(state, id, None).await;
             }
             protocol::SESSION_LOAD => {
                 let session_id = params
@@ -120,7 +117,7 @@ impl AcpServer {
                     .and_then(Value::as_str)
                     .map(str::to_string);
                 match session_id {
-                    Some(sid) => Self::session_new(state, id, params, Some(&sid)).await,
+                    Some(sid) => Self::session_new(state, id, Some(&sid)).await,
                     None => state.handle.respond_error(
                         id,
                         protocol::INVALID_PARAMS,
@@ -128,7 +125,7 @@ impl AcpServer {
                     ),
                 }
             }
-            protocol::SESSION_SET_MODEL => {
+            protocol::SESSION_SET_MODEL | protocol::SESSION_SET_MODE => {
                 Self::session_set_model(state, id, params).await;
             }
             protocol::SESSION_PROMPT => {
@@ -180,19 +177,15 @@ impl AcpServer {
     }
 
     /// `session/new` and `session/load` share one body: the resolver treats
-    /// `None` as create and `Some(id)` as resume (prefix or full UUID).
-    async fn session_new(state: Arc<ServerState>, id: Value, params: Value, resume: Option<&str>) {
-        let cwd = params
-            .get("cwd")
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .to_string();
+    /// `None` as create and `Some(id)` as resume (prefix or full UUID). The
+    /// client's `cwd` is accepted and ignored: the process already runs in
+    /// its own working directory, so there is nothing to bind it to.
+    async fn session_new(state: Arc<ServerState>, id: Value, resume: Option<&str>) {
         match resolve_or_create_session(&state.sessions, resume, "ACP").await {
             Ok(session) => {
                 let acp_id = session.id.to_string();
                 let st = Arc::new(SessionState {
                     id: session.id,
-                    cwd,
                     model: Mutex::new(state.default_model.clone()),
                     active_cancel: Mutex::new(None),
                 });
@@ -208,7 +201,10 @@ impl AcpServer {
     }
 
     async fn session_set_model(state: Arc<ServerState>, id: Value, params: Value) {
-        let model = params.get("modelId").and_then(Value::as_str);
+        let model = params
+            .get("modelId")
+            .or_else(|| params.get("modeId"))
+            .and_then(Value::as_str);
         match (Self::lookup(&state, &params).await, model) {
             (Some(st), Some(model)) => {
                 *st.model.lock().await = Some(model.to_string());
@@ -222,7 +218,7 @@ impl AcpServer {
             (_, None) => state.handle.respond_error(
                 id,
                 protocol::INVALID_PARAMS,
-                "session/set_model requires modelId",
+                "session/set_model requires modelId (modeId accepted)",
             ),
         }
     }
@@ -246,7 +242,14 @@ impl AcpServer {
             );
             return;
         };
-        if st.active_cancel.lock().await.is_some() {
+        // Claim the in-flight slot under the same lock that checks it: the
+        // token is created here, before any other prompt can observe the
+        // session idle. run_turn used to create it two awaits after this
+        // check, leaving a window where two fast prompts both saw None and
+        // both spawned turns against one session.
+        let cancel = CancellationToken::new();
+        let mut guard = st.active_cancel.lock().await;
+        if guard.is_some() {
             state.handle.respond_error(
                 id,
                 protocol::INVALID_REQUEST,
@@ -254,6 +257,8 @@ impl AcpServer {
             );
             return;
         }
-        tokio::spawn(turn::run_turn(state, st, id, text));
+        *guard = Some(cancel.clone());
+        drop(guard);
+        tokio::spawn(turn::run_turn(state, st, id, text, cancel));
     }
 }

@@ -127,10 +127,18 @@ async fn reader_task(
     write_tx: mpsc::UnboundedSender<Value>,
     inner: Arc<TransportInner>,
 ) {
-    let mut lines = BufReader::new(tokio::io::stdin()).lines();
+    // One JSON-RPC frame per line. lines()/next_line() grow their buffer
+    // until a newline arrives, so a stream without one (runaway writer,
+    // binary garbage) inflates memory without bound. read_capped_line keeps
+    // the ceiling at MAX_LINE_BYTES: generous for prompts legitimately
+    // carrying hundreds of thousands of tokens, finite for a stuck stream.
+    // An oversized frame is answered as a parse error and the stream
+    // resyncs at the next newline instead of killing the server.
+    let mut reader = BufReader::new(tokio::io::stdin());
     loop {
-        match lines.next_line().await {
-            Ok(Some(line)) => {
+        match read_capped_line(&mut reader, MAX_LINE_BYTES).await {
+            LineRead::Line(bytes) => {
+                let line = String::from_utf8_lossy(&bytes);
                 if line.trim().is_empty() {
                     continue;
                 }
@@ -157,12 +165,115 @@ async fn reader_task(
                     }
                 }
             }
-            Ok(None) => return, // EOF — client closed stdin
-            Err(e) => {
+            LineRead::Oversized => {
+                let frame = protocol::error_response(
+                    serde_json::Value::Null,
+                    protocol::PARSE_ERROR,
+                    format!("inbound line exceeds {MAX_LINE_BYTES} bytes"),
+                );
+                if write_tx.send(frame).is_err() {
+                    return;
+                }
+            }
+            LineRead::Eof => {
+                fail_pending(&inner, "client closed stdin").await;
+                return;
+            }
+            LineRead::Failed(e) => {
                 tracing::warn!("acp transport: stdin read failed: {e}");
+                fail_pending(&inner, "stdin read failed").await;
                 return;
             }
         }
+    }
+}
+
+/// Hard ceiling for one inbound JSON-RPC line. Sized far above any honest
+/// prompt (64 MiB); its only job is bounding a newline-less runaway stream.
+const MAX_LINE_BYTES: usize = 64 * 1024 * 1024;
+
+/// Outcome of one capped inbound frame read.
+#[derive(Debug)]
+pub(crate) enum LineRead {
+    /// Complete frame, newline consumed.
+    Line(Vec<u8>),
+    /// stdin closed with nothing buffered past the last newline.
+    Eof,
+    /// OS-level read failure.
+    Failed(std::io::Error),
+    /// More than `cap` bytes arrived without a newline; the remainder was
+    /// drained up to the next frame boundary.
+    Oversized,
+}
+
+/// Read one newline-terminated frame, refusing to hold more than `cap`
+/// bytes. The bound is checked while growing chunk by chunk — a length
+/// check after the fact would be too late, since `read_until` would already
+/// have sized its buffer to fit the entire runaway line.
+pub(crate) async fn read_capped_line<R: tokio::io::AsyncRead + Unpin>(
+    reader: &mut BufReader<R>,
+    cap: usize,
+) -> LineRead {
+    let mut line: Vec<u8> = Vec::new();
+    let mut overflowing = false;
+    loop {
+        let chunk = match reader.fill_buf().await {
+            Ok(c) => c,
+            Err(e) => return LineRead::Failed(e),
+        };
+        if chunk.is_empty() {
+            // EOF while draining an oversized frame: that frame was dropped,
+            // so surface Oversized once (the drain found its end); a fresh
+            // call on the closed stream reports Eof.
+            return if overflowing {
+                LineRead::Oversized
+            } else if line.is_empty() {
+                LineRead::Eof
+            } else {
+                LineRead::Line(line)
+            };
+        }
+        match chunk.iter().position(|&b| b == b'\n') {
+            Some(pos) => {
+                if !overflowing {
+                    line.extend_from_slice(&chunk[..pos]);
+                }
+                reader.consume(pos + 1);
+                // A frame completed inside one big fill never trips the
+                // growth check in the None branch; judge the finished line
+                // against the cap here as well.
+                return if overflowing || line.len() > cap {
+                    LineRead::Oversized
+                } else {
+                    LineRead::Line(line)
+                };
+            }
+            None => {
+                if !overflowing {
+                    line.extend_from_slice(chunk);
+                    if line.len() > cap {
+                        line.clear();
+                        overflowing = true;
+                    }
+                }
+                let n = chunk.len();
+                reader.consume(n);
+            }
+        }
+    }
+}
+
+/// Fail every in-flight server-initiated call. Once the inbound stream is
+/// gone no response can resolve them: awaiting turn tasks (an approval that
+/// never got its answer) must deny immediately instead of hanging until the
+/// timeout/cancel backstop.
+async fn fail_pending(inner: &TransportInner, reason: &str) {
+    let mut waiting = inner.pending.waiting.lock().await;
+    for (_, tx) in waiting.drain() {
+        let _ = tx.send(Err(RpcError {
+            code: -32000,
+            message: reason.to_string(),
+        }));
     }
 }
 

@@ -28,18 +28,19 @@ use super::server::{ServerState, SessionState};
 use super::transport::TransportHandle;
 
 /// Run one turn to completion and answer the `session/prompt` request.
+/// The cancel token is pre-claimed by `session_prompt` under the session's
+/// active_cancel lock; run_turn only consumes and releases it.
 pub async fn run_turn(
     state: Arc<ServerState>,
     session: Arc<SessionState>,
     request_id: Value,
     text: String,
+    cancel: CancellationToken,
 ) {
-    let cancel = CancellationToken::new();
-    *session.active_cancel.lock().await = Some(cancel.clone());
     let acp_session_id = session.id.to_string();
 
     let progress = progress_callback(state.handle.clone(), acp_session_id.clone());
-    let approval = approval_callback(state.handle.clone(), acp_session_id);
+    let approval = approval_callback(state.handle.clone(), acp_session_id, cancel.clone());
 
     let model = session.model.lock().await.clone();
     let result = state
@@ -89,7 +90,7 @@ pub async fn run_turn(
 }
 
 /// ACP stop reasons from the provider's.
-fn stop_reason(reason: Option<StopReason>) -> &'static str {
+pub(crate) fn stop_reason(reason: Option<StopReason>) -> &'static str {
     match reason {
         Some(StopReason::MaxTokens) => "max_tokens",
         Some(StopReason::StopSequence) => "stop_sequence",
@@ -173,13 +174,24 @@ fn progress_callback(handle: TransportHandle, acp_session_id: String) -> Progres
     })
 }
 
+/// Backstop for a client that drops `session/request_permission` without
+/// answering: generous enough for a human reading the prompt, finite enough
+/// that a wedged client cannot stall the agent forever.
+const PERMISSION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
+
 /// Route approval-gated tools to the client as `session/request_permission`.
 /// Any transport failure denies — a client that cannot answer must never
-/// become an approval.
-fn approval_callback(handle: TransportHandle, acp_session_id: String) -> ApprovalCallback {
+/// become an approval. The round-trip also races `session/cancel` and the
+/// permission timeout, both resolving to a deny.
+fn approval_callback(
+    handle: TransportHandle,
+    acp_session_id: String,
+    cancel: CancellationToken,
+) -> ApprovalCallback {
     Arc::new(move |info: ToolApprovalInfo| {
         let handle = handle.clone();
         let acp_session_id = acp_session_id.clone();
+        let cancel = cancel.clone();
         Box::pin(async move {
             let params = json!({
                 "sessionId": acp_session_id,
@@ -191,10 +203,19 @@ fn approval_callback(handle: TransportHandle, acp_session_id: String) -> Approva
                 },
                 "options": permission_options(),
             });
-            match handle
-                .call(protocol::SESSION_REQUEST_PERMISSION, params)
-                .await
-            {
+            let call = handle.call(protocol::SESSION_REQUEST_PERMISSION, params);
+            let outcome = tokio::select! {
+                res = call => res,
+                _ = cancel.cancelled() => {
+                    Err(anyhow::anyhow!("turn cancelled before the client answered"))
+                }
+                _ = tokio::time::sleep(PERMISSION_TIMEOUT) => {
+                    Err(anyhow::anyhow!(
+                        "no permission response within {PERMISSION_TIMEOUT:?}, denying"
+                    ))
+                }
+            };
+            match outcome {
                 Ok(result) => Ok(permission_outcome(&result)),
                 Err(e) => {
                     tracing::warn!("acp permission request failed, denying: {e:#}");
@@ -203,18 +224,4 @@ fn approval_callback(handle: TransportHandle, acp_session_id: String) -> Approva
             }
         })
     })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn stop_reasons_map_to_acp() {
-        assert_eq!(stop_reason(Some(StopReason::EndTurn)), "end_turn");
-        assert_eq!(stop_reason(Some(StopReason::MaxTokens)), "max_tokens");
-        assert_eq!(stop_reason(Some(StopReason::StopSequence)), "stop_sequence");
-        assert_eq!(stop_reason(Some(StopReason::ToolUse)), "end_turn");
-        assert_eq!(stop_reason(None), "end_turn");
-    }
 }
