@@ -935,6 +935,13 @@ pub struct WhatsAppConfig {
     /// is bounded (10k messages / 90 days) by `channels::whatsapp::history`.
     #[serde(default)]
     pub history_import_chats: Vec<String>,
+    /// #1529: WhatsApp newsletter/channel JIDs to poll every 15 minutes and
+    /// surface to the owner as one digest message per tick. Per-channel
+    /// opt-in; empty = the poller never starts. Posts are never injected as
+    /// inbound agent turns (#1542's anti-pattern) — owner-facing summary
+    /// plus a stored `newsletter` row in `channel_messages` only.
+    #[serde(default)]
+    pub newsletters: Vec<String>,
 }
 
 impl WhatsAppConfig {

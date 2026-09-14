@@ -333,6 +333,60 @@ impl ChannelMessageRepository {
             .context("Failed to search channel message history")
     }
 
+    /// #1529: per-newsletter poll cursor — (last_server_id, last_ts). Absent
+    /// row means "never polled": the poller baselines silently rather than
+    /// replaying history at whoever flipped the config on.
+    pub async fn newsletter_cursor(&self, wa_jid: &str) -> Result<Option<(i64, i64)>> {
+        let j = wa_jid.to_string();
+        self.pool
+            .get()
+            .await
+            .context("Failed to get connection")?
+            .interact(move |conn| {
+                conn.query_row(
+                    "SELECT last_server_id, last_ts FROM whatsapp_newsletter_cursors \
+                     WHERE wa_jid = ?1",
+                    params![j],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .optional()
+            })
+            .await
+            .map_err(interact_err)?
+            .context("Failed to read newsletter cursor")
+    }
+
+    /// Advance (or baseline) the poll cursor. Upsert: first sight creates the
+    /// row, later ticks overwrite it.
+    pub async fn set_newsletter_cursor(
+        &self,
+        wa_jid: &str,
+        last_server_id: i64,
+        last_ts: i64,
+    ) -> Result<()> {
+        let j = wa_jid.to_string();
+        self.pool
+            .get()
+            .await
+            .context("Failed to get connection")?
+            .interact(move |conn| {
+                conn.execute(
+                    "INSERT INTO whatsapp_newsletter_cursors \
+                     (wa_jid, last_server_id, last_ts, updated_at) \
+                     VALUES (?1, ?2, ?3, strftime('%s','now')) \
+                     ON CONFLICT(wa_jid) DO UPDATE SET \
+                       last_server_id = excluded.last_server_id, \
+                       last_ts = excluded.last_ts, \
+                       updated_at = excluded.updated_at",
+                    params![j, last_server_id, last_ts],
+                )
+            })
+            .await
+            .map_err(interact_err)?
+            .context("Failed to write newsletter cursor")
+            .map(|_| ())
+    }
+
     pub async fn content_by_platform_message_id(
         &self,
         channel: &str,

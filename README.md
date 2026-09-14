@@ -2491,6 +2491,26 @@ ephemeral_ttl = 0
 # only after you have seen a card with your own eyes.
 interactive_buttons = false
 
+# Bounded per-chat history sync (#1525). List the normalized chat ids (the
+# JID strings, e.g. "+351..." style phones become 351...@s.whatsapp.net) whose
+# offline-sync and on-demand-recovered frames should be STORED rather than
+# answered. Opt-in is per chat and there is no global enable: adding a chat is
+# the consent gesture, since import reaches back into conversations the agent
+# never saw. The bot asks the phone for one bounded page per opted-in chat on
+# connect (caps: 10,000 messages or 90 days, whichever hits first), stores the
+# answers tagged `imported` in the same partition live messages use, and hands
+# them to the agent only through the read-only `whatsapp_history` tool.
+# Empty (the default) never asks the phone for anything.
+history_import_chats = []
+
+# Newsletter poller (#1529). List newsletter/channel JIDs (the `@newsletter`
+# ids; `whatsapp_send` action `list_newsletters` shows what the account is
+# subscribed to) to check every 15 minutes. New posts are summarized into ONE
+# digest message to the owner and stored for retrieval — never injected as
+# inbound agent turns. First sight of a channel baselines silently, so opting
+# in never replays old posts. Empty (the default) starts no poller.
+newsletters = []
+
 # Broadcast rails (#1485). Status updates reach a LIST of people, so they are
 # opt-in per number: an EMPTY allowlist allows nobody, which is the opposite of
 # the usual convention and is deliberate. Sends are paced; `0` or unset means

@@ -25,6 +25,7 @@ pub(crate) mod identity;
 pub(crate) mod inbound;
 pub(crate) mod interactive;
 pub(crate) mod media_retry;
+pub(crate) mod newsletter;
 mod onboarding_events;
 pub(crate) mod outbox;
 mod pairing;

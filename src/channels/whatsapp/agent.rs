@@ -6,6 +6,7 @@
 use super::WhatsAppState;
 use super::handler;
 use super::history;
+use super::newsletter;
 use crate::brain::agent::AgentService;
 use crate::config::Config;
 use crate::db::ChannelMessageRepository;
@@ -352,6 +353,29 @@ impl WhatsAppAgent {
                                 // within the same session.
                                 let was_connected = wa_state.is_connected().await;
                                 wa_state.set_connected(client.clone(), owner.clone()).await;
+                                // #1529: the newsletter poller, one task per
+                                // process session. First connect only: the
+                                // event loop survives keepalive reconnects and
+                                // a second poller would race the cursor.
+                                // Empty opt-in (the default) never spawns.
+                                if !was_connected
+                                    && let Some(owner_jid) = owner.clone()
+                                {
+                                    let chans = config_rx
+                                        .borrow()
+                                        .channels
+                                        .whatsapp
+                                        .newsletters
+                                        .clone();
+                                    if !chans.is_empty() {
+                                        tokio::spawn(newsletter::run_poller(
+                                            wa_state.clone(),
+                                            channel_msg_repo.clone(),
+                                            owner_jid,
+                                            chans,
+                                        ));
+                                    }
+                                }
                                 if was_connected {
                                     tracing::debug!(
                                         "WhatsApp: reconnected — suppressing duplicate \

@@ -99,6 +99,9 @@ pub(crate) const MIGRATION_SQL: &[&str] = &[
     // boot hydrates the in-memory registry back. Appended last per the list
     // invariant; the CREATE is idempotent, so no heal pass is needed.
     include_str!("../migrations/20260913000001_add_session_seen_skills.sql"),
+    // #1529: per-newsletter poll cursors. Idempotent CREATE, so no heal
+    // pass; appended last per the list invariant above.
+    include_str!("../migrations/20260914000001_add_whatsapp_newsletter_cursors.sql"),
 ];
 
 pub(crate) fn build_migrations() -> Migrations<'static> {
