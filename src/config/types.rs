@@ -487,13 +487,6 @@ pub struct TelegramConfig {
     /// in `allowed_users`. Accepts int or string arrays.
     #[serde(default, deserialize_with = "deser_users_compat")]
     pub bot_owner: Vec<String>,
-    /// Enable draft streaming for DMs (Bot API sendRichMessageDraft).
-    /// When true, the bot sends an ephemeral "typing" message and updates it
-    /// in-place as tokens stream in. Disable if it causes client-side issues
-    /// (e.g. Telegram Android hanging on rapid draft transitions).
-    /// Requires `rich_messages` to also be enabled. Default: true.
-    #[serde(default = "default_true")]
-    pub draft_streaming: bool,
     /// Proactive per-peer flood governors (#1211), `[channels.telegram.
     /// rate_limiter]`. Three independent token buckets keyed by forum chat id
     /// — typing (~1 call / 3 s, burst 8, concurrent sessions coalesced per
