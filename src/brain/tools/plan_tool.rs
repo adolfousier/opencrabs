@@ -212,15 +212,11 @@ fn requires_checkable_criteria(task_type: &TaskType) -> bool {
 
 #[cfg(feature = "telegram")]
 fn format_mermaid_plan_error(context: &str, errors: &[String]) -> String {
+    let err = crate::channels::telegram::rich::mermaid::format_mermaid_error(context, errors);
     format!(
-        "PLAN TASK REFUSED: Mermaid diagram syntax error in {context}.\n\n\
-         Renderer diagnostic:\n{}\n\n\
-         Correction rules:\n\
-         1. Sequence Diagrams: 'Note over A,B:' supports at most two participants spanning the range. Do not list three or more comma-separated actors.\n\
-         2. Mobile Layout & Aspect Ratio: Always use top-down vertical layouts ('flowchart TD' or 'direction TB'). Never use 'LR' or wide unconstrained subgraphs that become illegible on mobile screens.\n\
-         3. Labels: Do not use backticks or HTML tags in labels. Use '<br/>' for line breaks.\n\n\
-         Please fix the Mermaid diagram syntax in the task description and try again.",
-        errors.join("\n")
+        "PLAN TASK REFUSED: {err}
+
+Please fix the Mermaid diagram syntax in the task description and try again."
     )
 }
 
