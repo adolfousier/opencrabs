@@ -19,19 +19,30 @@ impl GoalManager {
     }
 
     /// Set a new goal for a session. Replaces any existing active goal.
+    /// If `max_turns` is None, falls back to `agent.goal_max_turns` from config,
+    /// or `DEFAULT_MAX_TURNS` (20).
     pub async fn set_goal(
         &self,
         session_id: Uuid,
         goal_text: String,
         channel: Option<String>,
         channel_chat_id: Option<String>,
+        max_turns: Option<u32>,
     ) -> Result<GoalState, String> {
         // Clear any existing goal for this session first
         if let Err(e) = self.clear_goal(session_id).await {
             tracing::warn!(error = %e, session_id = %session_id, "failed to clear goal");
         }
 
-        let goal = GoalState::new(session_id, goal_text, channel, channel_chat_id);
+        let effective_max_turns =
+            max_turns.or_else(|| crate::config::Config::current().agent.goal_max_turns);
+        let goal = GoalState::new(
+            session_id,
+            goal_text,
+            channel,
+            channel_chat_id,
+            effective_max_turns,
+        );
         let pool = self.ctx.pool();
         let conn = pool
             .get()
@@ -182,7 +193,11 @@ impl GoalManager {
     }
 
     /// Increment the turn counter and parse failure count.
-    async fn increment_turns(&self, session_id: Uuid, parse_failed: bool) -> Result<(), String> {
+    pub async fn increment_turns(
+        &self,
+        session_id: Uuid,
+        parse_failed: bool,
+    ) -> Result<(), String> {
         let pool = self.ctx.pool();
         let conn = pool
             .get()
@@ -256,12 +271,12 @@ impl GoalManager {
                 goal.turns_used,
                 goal.max_turns
             );
-            if let Err(e) = self.set_state(session_id, "failed").await {
-                tracing::warn!(error = %e, session_id = %session_id, "failed to set goal state to failed");
+            if let Err(e) = self.set_state(session_id, "paused").await {
+                tracing::warn!(error = %e, session_id = %session_id, "failed to set goal state to paused");
             }
             return GoalDecision::Paused {
                 reason: format!(
-                    "turn budget exhausted after {}/{} turns",
+                    "Goal turn budget exhausted ({}/{} turns used). The goal has been paused. Use `/goal resume` or increase the turn budget to continue.",
                     goal.turns_used, goal.max_turns
                 ),
             };

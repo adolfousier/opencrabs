@@ -708,6 +708,7 @@ impl GoalState {
         goal_text: String,
         channel: Option<String>,
         channel_chat_id: Option<String>,
+        max_turns: Option<u32>,
     ) -> Self {
         let now = Utc::now().to_rfc3339();
         Self {
@@ -716,7 +717,7 @@ impl GoalState {
             goal_text,
             state: "active".to_string(),
             turns_used: 0,
-            max_turns: 20,
+            max_turns: max_turns.unwrap_or(20) as i32,
             consecutive_parse_failures: 0,
             judge_verdict: None,
             judge_reason: None,

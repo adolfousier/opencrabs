@@ -973,8 +973,14 @@ impl SlashCommandTool {
             },
             _ => {
                 // Set a new goal
+                let (max_turns, goal_text) = parse_goal_args(trimmed);
+                if goal_text.is_empty() {
+                    return Ok(ToolResult::error(
+                        "Please specify a goal description, e.g. `/goal fix all failing tests` or `/goal --turns 30 fix tests`.".into(),
+                    ));
+                }
                 match goal_mgr
-                    .set_goal(session_id, trimmed.to_string(), None, None)
+                    .set_goal(session_id, goal_text.to_string(), None, None, max_turns)
                     .await
                 {
                     Ok(goal) => Ok(ToolResult::success(format!(
@@ -1091,4 +1097,21 @@ impl SlashCommandTool {
             )))
         }
     }
+}
+
+fn parse_goal_args(args: &str) -> (Option<u32>, &str) {
+    let s = args.trim();
+    if let Some(rest) = s.strip_prefix("--turns ").or_else(|| s.strip_prefix("-t ")) {
+        if let Some((turns_str, rem)) = rest.trim_start().split_once(' ')
+            && let Ok(turns) = turns_str.parse::<u32>()
+        {
+            return (Some(turns), rem.trim());
+        }
+    } else if let Some(rest) = s.strip_prefix("--max-turns ")
+        && let Some((turns_str, rem)) = rest.trim_start().split_once(' ')
+        && let Ok(turns) = turns_str.parse::<u32>()
+    {
+        return (Some(turns), rem.trim());
+    }
+    (None, s)
 }
