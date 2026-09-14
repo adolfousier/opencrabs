@@ -387,10 +387,12 @@ impl Tool for TelegramSendTool {
                         "ban_user", "unban_user", "set_reaction", "list_topics"
                     ],
                     "description": "The Telegram action to perform. \
-                        `list_topics` returns the (thread_id, topic_name) pairs the bot has \
-                        observed in a forum-enabled supergroup — use this to translate a \
-                        user-typed topic name like \"#announcements\" to the numeric thread_id \
-                        you then pass to `send` / `reply` / `send_photo` via the `thread_id` field."
+                        `list_topics` returns ONLY the bot-observed (thread_id, topic_name) pairs \
+                        recorded in local DB for a forum-enabled supergroup — it does NOT enumerate \
+                        the full forum surface (Telegram Bot API has no getForumTopics endpoint). \
+                        Use this to translate an already observed topic name like \"#announcements\" to \
+                        the numeric thread_id passed to `send` / `reply` via `thread_id`. For exhaustive \
+                        MTProto forum enumeration, use MTProto client tools (e.g. fast-mcp-telegram tg_get_chat_info)."
                 },
                 "message": {
                     "type": "string",
@@ -1608,8 +1610,9 @@ impl TelegramSendTool {
             )));
         }
         // Render a compact human/agent-readable table.
-        let mut out =
-            format!("Topics in chat {chat_id} (only those the bot has seen activity in):\n");
+        let mut out = format!(
+            "Topics in chat {chat_id} (bot-observed topics from local DB only — does not enumerate full forum surface):\n"
+        );
         out.push_str("  thread_id | topic_name              | messages | last_seen\n");
         for t in &topics {
             let name = t.topic_name.as_deref().unwrap_or("(unknown)");

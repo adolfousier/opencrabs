@@ -253,3 +253,29 @@ async fn topics_for_chat_message_count_includes_all_rows_after_rename() {
         "JOIN must not drop rows from the count"
     );
 }
+
+#[test]
+fn telegram_send_tool_schema_describes_bot_observed_scope_for_list_topics() {
+    use crate::brain::tools::Tool;
+    use crate::brain::tools::telegram_send::TelegramSendTool;
+    use std::sync::Arc;
+
+    let tool = TelegramSendTool::new(Arc::default());
+    let schema = tool.input_schema();
+    let action_desc = schema["properties"]["action"]["description"]
+        .as_str()
+        .expect("action description must exist");
+
+    assert!(
+        action_desc.contains("ONLY the bot-observed"),
+        "action description should make bot-observed constraint explicit"
+    );
+    assert!(
+        action_desc.contains("does NOT enumerate the full forum surface"),
+        "action description should make clear it does not enumerate full forum surface"
+    );
+    assert!(
+        action_desc.contains("fast-mcp-telegram tg_get_chat_info"),
+        "action description should guide users/agents to MTProto tools for exhaustive enumeration"
+    );
+}
