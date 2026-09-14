@@ -116,6 +116,7 @@ pub mod trello_connect;
 pub mod trello_send;
 #[cfg(feature = "whatsapp")]
 pub mod whatsapp_connect;
+pub mod whatsapp_history;
 #[cfg(feature = "whatsapp")]
 pub mod whatsapp_send;
 

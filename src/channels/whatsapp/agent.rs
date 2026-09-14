@@ -5,6 +5,7 @@
 
 use super::WhatsAppState;
 use super::handler;
+use super::history;
 use crate::brain::agent::AgentService;
 use crate::config::Config;
 use crate::db::ChannelMessageRepository;
@@ -213,6 +214,85 @@ impl WhatsAppAgent {
                             }
                             Event::Connected(_) => {
                                 tracing::info!("WhatsApp: connected successfully");
+                                // #1525: fire one bounded history request per
+                                // opted-in chat, on connect. The phone answers
+                                // with encrypted frames that arrive through the
+                                // normal event stream; the capture gate in
+                                // `handle_message` stores them and keeps them
+                                // off the agent. Empty opt-in (the default)
+                                // costs nothing here, and the work is spawned
+                                // so the event loop never waits on the phone.
+                                {
+                                    let hist_chats = config_rx
+                                        .borrow()
+                                        .channels
+                                        .whatsapp
+                                        .history_import_chats
+                                        .clone();
+                                    if !hist_chats.is_empty() {
+                                        let client = client.clone();
+                                        let wa_state = wa_state.clone();
+                                        let repo = channel_msg_repo.clone();
+                                        tokio::spawn(async move {
+                                            let owner = wa_state.owner_jid.lock().await.clone();
+                                            for chat in hist_chats {
+                                                let oldest =
+                                                    match repo.oldest_for_chat("whatsapp", &chat).await
+                                                    {
+                                                        Ok(o) => o,
+                                                        Err(e) => {
+                                                            tracing::warn!(
+                                                                "whatsapp history: anchor lookup failed for {chat}: {e}"
+                                                            );
+                                                            continue;
+                                                        }
+                                                    };
+                                                let now = chrono::Utc::now();
+                                                let plan = match &oldest {
+                                                    Some((pid, sid, ts)) => history::plan_import(
+                                                        Some((
+                                                            pid.as_str(),
+                                                            history::from_me_of(
+                                                                sid,
+                                                                owner.as_deref(),
+                                                            ),
+                                                            *ts,
+                                                        )),
+                                                        now,
+                                                    ),
+                                                    None => history::plan_import(None, now),
+                                                };
+                                                let Some(plan) = plan else { continue };
+                                                let Ok(jid) =
+                                                    chat.parse::<wacore_binary::jid::Jid>()
+                                                else {
+                                                    tracing::warn!(
+                                                        "whatsapp history: unparseable chat id {chat}"
+                                                    );
+                                                    continue;
+                                                };
+                                                match client
+                                                    .fetch_message_history(
+                                                        &jid,
+                                                        &plan.oldest_msg_id,
+                                                        plan.oldest_from_me,
+                                                        plan.oldest_ts_ms,
+                                                        plan.count,
+                                                    )
+                                                    .await
+                                                {
+                                                    Ok(req) => tracing::info!(
+                                                        "whatsapp history: import requested for {chat} (up to {} msgs, request {req})",
+                                                        plan.count
+                                                    ),
+                                                    Err(e) => tracing::warn!(
+                                                        "whatsapp history: request failed for {chat}: {e}"
+                                                    ),
+                                                }
+                                            }
+                                        });
+                                    }
+                                }
                                 // #1487: refresh the local blocklist mirror so
                                 // the inbound guard reflects blocks the owner
                                 // made from their phone, not only ones the bot

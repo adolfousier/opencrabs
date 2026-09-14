@@ -927,6 +927,14 @@ pub struct WhatsAppConfig {
     /// A `whatsapp_send` call may override it per message.
     #[serde(default)]
     pub ephemeral_ttl: Option<u32>,
+    /// #1525: chats whose recovered history frames are captured into
+    /// `channel_messages` (message_type `imported`) instead of waking the
+    /// agent. Exact normalized chat id strings (the `Display` of the source
+    /// JID, as the live capture stores them), per-chat opt-in; an empty list
+    /// means the feature is entirely off. The request fires on connect and
+    /// is bounded (10k messages / 90 days) by `channels::whatsapp::history`.
+    #[serde(default)]
+    pub history_import_chats: Vec<String>,
 }
 
 impl WhatsAppConfig {

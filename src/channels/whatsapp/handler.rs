@@ -615,6 +615,62 @@ pub(crate) async fn handle_message(
     let idle_timeout_hours = wa_cfg.session_idle_hours;
     let voice_config = cfg.voice_config();
 
+    // #1525: recovered history frames must not wake the agent. Offline sync
+    // and PDO recovery arrive through this same pipeline, flagged on the
+    // message info; for opted-in chats they are stored (windowed, tagged
+    // `imported`, deduped by platform id) and the handler ends here.
+    // Non-opted-in chats keep exactly their existing handling — the feature
+    // changes only what it was added for.
+    {
+        let recovered = info.is_offline || info.unavailable_request_id.is_some();
+        if recovered && !wa_cfg.history_import_chats.is_empty() {
+            let hist_key = format!("{}", info.source.chat);
+            if super::history::opted_in(&wa_cfg.history_import_chats, &hist_key) {
+                if let Some(t) = text.as_deref()
+                    && !t.is_empty()
+                    && super::history::in_window(info.timestamp, chrono::Utc::now())
+                {
+                    let pmid = info.id.to_string();
+                    match channel_msg_repo
+                        .content_by_platform_message_id("whatsapp", &hist_key, &pmid)
+                        .await
+                    {
+                        Ok(None) => {
+                            let cm = DbChannelMessage {
+                                created_at: info.timestamp,
+                                ..DbChannelMessage::new(
+                                    "whatsapp".into(),
+                                    hist_key.clone(),
+                                    if info.source.is_group {
+                                        Some(hist_key.clone())
+                                    } else {
+                                        None
+                                    },
+                                    phone.clone(),
+                                    info.push_name.clone(),
+                                    t.to_string(),
+                                    super::history::IMPORTED_TYPE.into(),
+                                    Some(pmid),
+                                )
+                            };
+                            if let Err(e) = channel_msg_repo.insert(&cm).await {
+                                tracing::warn!("whatsapp history: import capture failed: {e}");
+                            }
+                        }
+                        Ok(Some(_)) => {
+                            // An earlier frame of the same sync already stored
+                            // this message — id-level dedupe, nothing to add.
+                        }
+                        Err(e) => {
+                            tracing::warn!("whatsapp history: dedupe lookup failed: {e}")
+                        }
+                    }
+                }
+                return;
+            }
+        }
+    }
+
     // SECURITY: owner / self-chat authorization. The bot pairs AS the owner's
     // account, so the owner's messages arrive in the "Message Yourself"
     // self-chat (is_from_me, chat == sender). `wa_should_respond` accepts that

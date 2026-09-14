@@ -243,6 +243,96 @@ impl ChannelMessageRepository {
     /// it up by id instead of guessing "the most recent bot message". Returns
     /// the most recent match (ids are unique per chat, but a defensive ORDER BY
     /// keeps this deterministic). `None` when nothing was stored under that id.
+    /// The chat's earliest stored row that carries a platform message id —
+    /// the anchor for a bounded PDO history request (#1525). Returns
+    /// (platform_message_id, sender_id, created_at).
+    pub async fn oldest_for_chat(
+        &self,
+        channel: &str,
+        chat_id: &str,
+    ) -> Result<Option<(String, String, chrono::DateTime<chrono::Utc>)>> {
+        let ch = channel.to_string();
+        let cid = chat_id.to_string();
+        let found: Option<(String, String, i64)> = self
+            .pool
+            .get()
+            .await
+            .context("Failed to get connection")?
+            .interact(move |conn| {
+                conn.query_row(
+                    "SELECT platform_message_id, sender_id, created_at FROM channel_messages \
+                     WHERE channel = ?1 AND channel_chat_id = ?2 \
+                       AND platform_message_id IS NOT NULL \
+                     ORDER BY created_at ASC LIMIT 1",
+                    params![ch, cid],
+                    |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, i64>(2)?,
+                        ))
+                    },
+                )
+                .optional()
+            })
+            .await
+            .map_err(interact_err)?
+            .context("Failed to look up channel message anchor")?;
+        Ok(found.map(|(pid, sid, ts)| {
+            (
+                pid,
+                sid,
+                chrono::DateTime::from_timestamp(ts, 0).unwrap_or_default(),
+            )
+        }))
+    }
+
+    /// Read-only bounded history search for one chat (#1525): newest-first
+    /// substring rows, within a caller-supplied epoch-seconds window.
+    pub async fn search_history(
+        &self,
+        channel: &str,
+        chat_id: &str,
+        query: &str,
+        since_ts: i64,
+        limit: i64,
+    ) -> Result<Vec<(String, String, i64)>> {
+        let ch = channel.to_string();
+        let cid = chat_id.to_string();
+        // Escape LIKE wildcards and the escape character itself: a search
+        // for "100%" must match a literal percent, not a pattern.
+        let escaped = query
+            .replace('\\', "\\\\")
+            .replace('%', "\\%")
+            .replace('_', "\\_");
+        let pattern = format!("%{escaped}%");
+        self.pool
+            .get()
+            .await
+            .context("Failed to get connection")?
+            .interact(move |conn| {
+                let mut stmt = conn.prepare_cached(
+                    "SELECT content, sender_name, created_at FROM channel_messages \
+                     WHERE channel = ?1 AND channel_chat_id = ?2 AND created_at >= ?3 \
+                       AND content LIKE ?4 ESCAPE '\\' \
+                     ORDER BY created_at DESC LIMIT ?5",
+                )?;
+                let rows = stmt
+                    .query_map(params![ch, cid, since_ts, pattern, limit], |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, i64>(2)?,
+                        ))
+                    })?
+                    .collect::<rusqlite::Result<Vec<_>>>()?;
+                Ok::<_, rusqlite::Error>(rows)
+            })
+            .await
+            .map_err(interact_err)?
+            .context("Failed to search channel message history")
+    }
+
     pub async fn content_by_platform_message_id(
         &self,
         channel: &str,

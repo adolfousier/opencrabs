@@ -927,6 +927,15 @@ async fn cmd_chat_inner(
         ),
     ));
 
+    // Register WhatsApp history search tool (#1525, read-only retrieval
+    // over the shared channel_messages store)
+    #[cfg(feature = "whatsapp")]
+    tool_registry.register(Arc::new(
+        crate::brain::tools::whatsapp_history::WhatsAppHistoryTool::new(
+            crate::db::ChannelMessageRepository::new(db.pool().clone()),
+        ),
+    ));
+
     // Shared Discord state for proactive messaging
     #[cfg(feature = "discord")]
     let discord_state = Arc::new(crate::channels::discord::DiscordState::new());

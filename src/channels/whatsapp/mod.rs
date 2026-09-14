@@ -20,6 +20,7 @@ mod connection;
 pub(crate) mod ephemeral;
 mod followups;
 pub(crate) mod handler;
+pub(crate) mod history;
 pub(crate) mod identity;
 pub(crate) mod inbound;
 pub(crate) mod interactive;
