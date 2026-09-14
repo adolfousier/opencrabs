@@ -12,6 +12,15 @@ fn pid_zero_is_never_alive() {
 }
 
 #[test]
+fn pid_max_or_negative_wrap_is_never_alive() {
+    // u32::MAX as i32 is -1. In POSIX kill(-1, 0) signals all processes the caller
+    // has permission to signal and returns 0, which would look "alive" without
+    // the signed_pid > 0 check.
+    assert!(!is_pid_alive(u32::MAX));
+    assert!(!is_pid_alive(i32::MAX as u32 + 1));
+}
+
+#[test]
 fn current_process_is_alive() {
     // Our own PID is, by definition, a live process.
     assert!(is_pid_alive(std::process::id()));

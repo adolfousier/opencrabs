@@ -1284,9 +1284,14 @@ pub(crate) fn is_pid_alive(pid: u32) -> bool {
     // file whose PID parsed to 0 (corruption) would look alive forever and wedge
     // the channel that owns that credential (issue #192). Guard it on every
     // platform.
-    // Similarly, pid > i32::MAX as u32 would wrap to a negative i32, where
-    // `kill(-1, 0)` broadcasts to every process we can signal.
-    if pid == 0 || pid > i32::MAX as u32 {
+    // Likewise, any PID exceeding i32::MAX would wrap to a negative pid_t when cast
+    // to i32. On Unix, negative PIDs signal process groups or all processes (e.g.
+    // kill(-1, 0) signals every process the caller has permission to signal and
+    // returns 0), leading to false positives on values like u32::MAX.
+    let Ok(signed_pid) = i32::try_from(pid) else {
+        return false;
+    };
+    if signed_pid <= 0 {
         return false;
     }
     #[cfg(unix)]
@@ -1294,7 +1299,7 @@ pub(crate) fn is_pid_alive(pid: u32) -> bool {
         // kill(pid, 0) returns 0 if we can signal the process.
         // If it returns -1, check errno: ESRCH means the process doesn't exist,
         // EPERM means it exists but we lack permission (still alive).
-        let ret = unsafe { libc::kill(pid as i32, 0) };
+        let ret = unsafe { libc::kill(signed_pid, 0) };
         if ret == 0 {
             return true;
         }
