@@ -26,6 +26,7 @@ use std::time::{Duration, Instant};
 /// Base URL of the mermaid.ink image renderer. The diagram source is
 /// base64url-appended. NOTE: this sends the diagram text to a third party.
 const MERMAID_INK_BASE: &str = "https://mermaid.ink/img/";
+const MERMAID_INK_SVG_BASE: &str = "https://mermaid.ink/svg/";
 
 /// Query parameters appended to every mermaid.ink render request.
 ///
@@ -227,6 +228,27 @@ pub(crate) fn ink_url(source: &str) -> String {
 /// Same URL at an explicit parameter set — the ladder's clamp rung.
 fn ink_url_params(source: &str, params: &str) -> String {
     format!("{}{}{}", MERMAID_INK_BASE, base64url(source), params)
+}
+
+/// Dedicated vector endpoint for a diagram source. Same base64url payload as [`ink_url`],
+/// over `https://mermaid.ink/svg/` — the endpoint serves a real `image/svg+xml`.
+pub(crate) fn ink_url_svg(source: &str) -> String {
+    format!("{}{}", MERMAID_INK_SVG_BASE, base64url(source))
+}
+
+/// Standard mobile viewport width and single-screen reading box dimensions.
+/// Diagrams exceeding these dimensions or hitting width clamp rungs are considered capped/scaled (>= 1x).
+pub(crate) const STANDARD_VIEWPORT_MAX_WIDTH: u32 = 1200;
+pub(crate) const STANDARD_VIEWPORT_MAX_HEIGHT: u32 = 1800;
+
+/// Whether a diagram's dimensions represent a capped or scaled-down render (>= 1x).
+/// When width exceeds standard reading width (1200px), height exceeds comfortable
+/// vertical reading bounds (1800px), or aspect ratio is extreme, Telegram mobile
+/// scales the image down substantially, rendering small text illegible.
+pub(crate) fn is_diagram_capped(w: u32, h: u32) -> bool {
+    w > STANDARD_VIEWPORT_MAX_WIDTH
+        || h > STANDARD_VIEWPORT_MAX_HEIGHT
+        || (w > 0 && h > 0 && ((w as f32 / h as f32) > 2.5 || (h as f32 / w as f32) > 3.0))
 }
 
 /// Whether a render fits Telegram's photo box (width + height budget).
@@ -520,8 +542,10 @@ pub(crate) fn replacement_for(
     match outcome {
         MermaidResult::Image(url) => {
             let id = format!("diag{index}");
+            // URL path does not carry byte dimensions locally; always provide vector link for URL-based delivery
+            let md = format!("![diagram](tg://photo?id={id}){}", svg_link_md(source));
             (
-                format!("![diagram](tg://photo?id={id})"),
+                md,
                 Some(MediaEntry {
                     id,
                     url: Some(url.clone()),
@@ -531,8 +555,16 @@ pub(crate) fn replacement_for(
         }
         MermaidResult::ImageBytes(bytes) => {
             let id = format!("diag{index}");
+            let capped = png_dims(bytes)
+                .map(|(w, h)| is_diagram_capped(w, h))
+                .unwrap_or(false);
+            let md = if capped {
+                format!("![diagram](tg://photo?id={id}){}", svg_link_md(source))
+            } else {
+                format!("![diagram](tg://photo?id={id})")
+            };
             (
-                format!("![diagram](tg://photo?id={id})"),
+                md,
                 Some(MediaEntry {
                     id,
                     url: None,
@@ -669,6 +701,42 @@ pub(crate) fn failure_html(err: &str, source: &str) -> String {
 }
 
 /// Minimal HTML entity escaping (matches render_html's escaping).
+/// Generic svg escape-hatch link fragment for markdown contexts —
+/// a small `[Open SVG vector]` link to the full-size vector render when the diagram
+/// is capped or scaled down.
+pub(crate) fn svg_link_md(source: &str) -> String {
+    format!("\n[Open SVG vector]({})", ink_url_svg(source))
+}
+
+/// Canonical correction rules for Mermaid diagrams shared across the codebase.
+pub fn unified_mermaid_rules() -> &'static str {
+    "Correction rules:\n\
+     1. Syntax & Notes: Fix the exact token or line reported by the renderer. For sequence diagrams, \
+     'Note over A,B:' supports at most two participants spanning the range — do not list three or more comma-separated actors. \
+     Do not use backticks or HTML tags in labels (only '<br/>' is allowed for line breaks).\n\
+     2. Mobile Layout & Aspect Ratio: Always use top-down vertical layouts ('flowchart TD' or 'direction TB'). \
+     Never use wide 'LR' layouts or unconstrained horizontal subgraphs that shrink illegibly on mobile screens."
+}
+
+/// Format a unified Mermaid syntax error message with context and diagnostic errors.
+pub fn format_mermaid_error(context: &str, errors: &[String]) -> String {
+    let quoted = errors.join("\n");
+    let rules = unified_mermaid_rules();
+    if context.is_empty() {
+        format!(
+            "Mermaid diagram syntax error.\n\n\
+             Renderer diagnostic:\n{quoted}\n\n\
+             {rules}"
+        )
+    } else {
+        format!(
+            "Mermaid diagram syntax error in {context}.\n\n\
+             Renderer diagnostic:\n{quoted}\n\n\
+             {rules}"
+        )
+    }
+}
+
 fn escape(t: &str) -> String {
     t.replace('&', "&amp;")
         .replace('<', "&lt;")

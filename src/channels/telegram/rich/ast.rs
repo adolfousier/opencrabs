@@ -131,3 +131,10 @@ pub enum Inline {
         url: String,
     },
 }
+
+impl MermaidResult {
+    #[allow(dead_code)]
+    pub fn is_image(&self) -> bool {
+        matches!(self, MermaidResult::Image(_) | MermaidResult::ImageBytes(_))
+    }
+}

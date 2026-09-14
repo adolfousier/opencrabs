@@ -123,6 +123,11 @@ fn mermaid_regen_nudge_quotes_renderer_errors_and_counts_attempts() {
         "must quote the renderer's own error text: {nudge}"
     );
     assert!(nudge.contains("Regen attempt 1/3"), "{nudge}");
+    assert!(
+        nudge.contains("Correction rules:"),
+        "must include unified correction rules: {nudge}"
+    );
+    assert!(nudge.contains("Mobile Layout & Aspect Ratio:"), "{nudge}");
     assert!(nudge.starts_with("[System:"), "{nudge}");
     assert!(nudge.ends_with(']'), "{nudge}");
 }

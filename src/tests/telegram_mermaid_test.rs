@@ -15,9 +15,9 @@ use crate::channels::telegram::rich::ast::{Block, Inline, MermaidResult};
 use crate::channels::telegram::rich::markdown_to_html_mermaid;
 use crate::channels::telegram::rich::mermaid::{
     MediaEntry, base64url, cache_get, cache_put, classify_render_failure, error_note, failure_html,
-    find_mermaid_fences, has_mermaid_fence, image_html, ink_url, is_image_response,
-    looks_like_mermaid_source, markdown_failure_block, replacement_for, resolve_blocks,
-    resolve_markdown_media,
+    find_mermaid_fences, has_mermaid_fence, image_html, ink_url, is_diagram_capped,
+    is_image_response, looks_like_mermaid_source, markdown_failure_block, replacement_for,
+    resolve_blocks, resolve_markdown_media,
 };
 
 // ---------------------------------------------------------------------------
@@ -258,7 +258,8 @@ fn find_mermaid_fences_ignores_non_mermaid_and_unclosed() {
 fn replacement_for_image_emits_media_reference_and_entry() {
     let outcome = MermaidResult::Image("https://mermaid.ink/img/xyz".into());
     let (md, entry) = replacement_for(&outcome, 0, "graph TD;");
-    assert_eq!(md, "![diagram](tg://photo?id=diag0)");
+    assert!(md.starts_with("![diagram](tg://photo?id=diag0)"));
+    assert!(md.contains("[Open SVG vector](https://mermaid.ink/svg/"));
     let e = entry.expect("image outcome must carry a media entry");
     assert_eq!(e.id, "diag0");
     assert_eq!(e.url, Some("https://mermaid.ink/img/xyz".into()));
@@ -269,7 +270,7 @@ fn replacement_for_image_emits_media_reference_and_entry() {
 fn replacement_for_image_uses_fence_index_in_id() {
     let outcome = MermaidResult::Image("u".into());
     let (md, entry) = replacement_for(&outcome, 3, "src");
-    assert_eq!(md, "![diagram](tg://photo?id=diag3)");
+    assert!(md.starts_with("![diagram](tg://photo?id=diag3)"));
     assert_eq!(entry.unwrap().id, "diag3");
 }
 
@@ -277,6 +278,7 @@ fn replacement_for_image_uses_fence_index_in_id() {
 fn replacement_for_image_bytes_carries_png_and_no_url() {
     let outcome = MermaidResult::ImageBytes(vec![0x89, b'P', b'N', b'G', 0, 0, 0, 0]);
     let (md, entry) = replacement_for(&outcome, 1, "graph TD;");
+    // Dimensions not parseable from dummy 8-byte slice -> not capped -> no link
     assert_eq!(md, "![diagram](tg://photo?id=diag1)");
     let e = entry.expect("bytes outcome must carry a media entry");
     assert_eq!(e.id, "diag1");
@@ -285,6 +287,46 @@ fn replacement_for_image_bytes_carries_png_and_no_url() {
         e.bytes.as_deref(),
         Some(&[0x89, b'P', b'N', b'G', 0, 0, 0, 0][..])
     );
+}
+
+#[test]
+fn replacement_for_image_bytes_appends_svg_link_when_capped() {
+    // Construct a minimal PNG IHDR with 1500x800 dimensions (w > STANDARD_VIEWPORT_MAX_WIDTH 1200)
+    let mut png = vec![0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
+    let len: u32 = 13;
+    png.extend_from_slice(&len.to_be_bytes());
+    png.extend_from_slice(b"IHDR");
+    let width: u32 = 1500;
+    let height: u32 = 800;
+    png.extend_from_slice(&width.to_be_bytes());
+    png.extend_from_slice(&height.to_be_bytes());
+    png.extend_from_slice(&[8, 6, 0, 0, 0]); // 8-bit RGBA
+    png.extend_from_slice(&[0, 0, 0, 0]); // dummy CRC
+
+    let outcome = MermaidResult::ImageBytes(png);
+    let (md, entry) = replacement_for(&outcome, 2, "flowchart TD\nA-->B");
+    assert!(md.starts_with("![diagram](tg://photo?id=diag2)"));
+    assert!(md.contains("\n[Open SVG vector](https://mermaid.ink/svg/"));
+    assert!(entry.is_some());
+}
+
+#[test]
+fn is_diagram_capped_checks_dimensions_and_aspect_ratio() {
+    // Normal bounds
+    assert!(!is_diagram_capped(800, 1000));
+    assert!(!is_diagram_capped(1200, 1800));
+
+    // Width capped (> 1200)
+    assert!(is_diagram_capped(1201, 800));
+
+    // Height capped (> 1800)
+    assert!(is_diagram_capped(800, 1801));
+
+    // Aspect ratio: too wide (w/h > 2.5)
+    assert!(is_diagram_capped(1000, 300));
+
+    // Aspect ratio: too tall (h/w > 3.0)
+    assert!(is_diagram_capped(300, 1000));
 }
 
 #[test]
