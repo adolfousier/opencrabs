@@ -18,7 +18,7 @@ use teloxide::payloads::SendPhotoSetters;
 use teloxide::prelude::*;
 use teloxide::types::{
     ChatId, InlineKeyboardButton, InlineKeyboardMarkup, InputFile, MessageId, ReactionType,
-    ReplyParameters, UserId,
+    ReplyParameters, ThreadId, UserId,
 };
 use uuid::Uuid;
 
@@ -384,13 +384,22 @@ impl Tool for TelegramSendTool {
                         "forward", "send_photo", "send_document", "send_location",
                         "send_poll", "send_buttons", "get_chat",
                         "get_chat_administrators", "get_chat_member_count", "get_chat_member",
-                        "ban_user", "unban_user", "set_reaction", "list_topics"
+                        "ban_user", "unban_user", "set_reaction", "list_topics",
+                        "create_topic", "rename_topic"
                     ],
                     "description": "The Telegram action to perform. \
-                        `list_topics` returns the (thread_id, topic_name) pairs the bot has \
-                        observed in a forum-enabled supergroup — use this to translate a \
-                        user-typed topic name like \"#announcements\" to the numeric thread_id \
-                        you then pass to `send` / `reply` / `send_photo` via the `thread_id` field."
+                        `list_topics` returns ONLY the bot-observed (thread_id, topic_name) pairs \
+                        recorded in local DB for a forum-enabled supergroup — it does NOT enumerate \
+                        the full forum surface (Telegram Bot API has no getForumTopics endpoint). \
+                        Use this to translate an already observed topic name like \"#announcements\" to \
+                        the numeric thread_id passed to `send` / `reply` via `thread_id`. For exhaustive \
+                        MTProto forum enumeration, use MTProto client tools (e.g. fast-mcp-telegram tg_get_chat_info). \
+                        `create_topic` creates a new forum topic (requires `name`, 1-128 chars). \
+                        `rename_topic` renames an existing forum topic (requires `thread_id` and `name`, 1-128 chars)."
+                },
+                "name": {
+                    "type": "string",
+                    "description": "Topic name (1–128 characters) for create_topic and rename_topic"
                 },
                 "message": {
                     "type": "string",
@@ -536,11 +545,14 @@ impl Tool for TelegramSendTool {
             "unban_user" => self.action_unban_user(&bot, input, context).await,
             "set_reaction" => self.action_set_reaction(&bot, input, context).await,
             "list_topics" => self.action_list_topics(&bot, input, context).await,
+            "create_topic" => self.action_create_topic(&bot, input, context).await,
+            "rename_topic" => self.action_rename_topic(&bot, input, context).await,
             unknown => Ok(ToolResult::error(format!(
                 "Unknown action '{unknown}'. Valid actions: send, reply, edit, delete, pin, \
                  unpin, forward, send_photo, send_document, send_location, send_poll, \
                  send_buttons, get_chat, get_chat_administrators, get_chat_member_count, \
-                 get_chat_member, ban_user, unban_user, set_reaction, list_topics"
+                 get_chat_member, ban_user, unban_user, set_reaction, list_topics, \
+                 create_topic, rename_topic"
             ))),
         }
     }
@@ -1608,8 +1620,9 @@ impl TelegramSendTool {
             )));
         }
         // Render a compact human/agent-readable table.
-        let mut out =
-            format!("Topics in chat {chat_id} (only those the bot has seen activity in):\n");
+        let mut out = format!(
+            "Topics in chat {chat_id} (bot-observed topics from local DB only — does not enumerate full forum surface):\n"
+        );
         out.push_str("  thread_id | topic_name              | messages | last_seen\n");
         for t in &topics {
             let name = t.topic_name.as_deref().unwrap_or("(unknown)");
@@ -1633,5 +1646,152 @@ impl TelegramSendTool {
              via the optional `thread_id` field to route a message into a specific topic.",
         );
         Ok(ToolResult::success(out))
+    }
+
+    /// `create_topic` — create a new forum topic in a supergroup.
+    async fn action_create_topic(
+        &self,
+        bot: &teloxide::Bot,
+        input: &Value,
+        context: &ToolExecutionContext,
+    ) -> Result<ToolResult> {
+        let ChatTarget { chat_id } =
+            pget!(resolve_chat_target(input, context.session_id, &self.telegram_state).await);
+        let name = pget!(get_str(input, "name")).trim();
+        if name.is_empty() || name.chars().count() > 128 {
+            return Ok(ToolResult::error(
+                "Parameter 'name' must be between 1 and 128 characters.".to_string(),
+            ));
+        }
+
+        match send_retrying_rate_limit("telegram_send create_topic", || {
+            bot.create_forum_topic(ChatId(chat_id), name.to_string())
+        })
+        .await
+        {
+            Ok(topic) => {
+                let thread_id = topic.thread_id.0.0;
+                self.telegram_state
+                    .note_thread_evidence(chat_id, Some(thread_id))
+                    .await;
+                crate::channels::telegram::record_topic_created(
+                    None,
+                    chat_id,
+                    thread_id,
+                    &topic.name,
+                    false,
+                )
+                .await;
+                log_send_success(
+                    "tool",
+                    "create_topic",
+                    "create_topic",
+                    &context.session_id.to_string(),
+                    "action",
+                    chat_id,
+                    Some(thread_id),
+                    0,
+                    topic.name.len(),
+                    "-",
+                );
+                let res = serde_json::json!({
+                    "status": "success",
+                    "chat_id": chat_id,
+                    "thread_id": thread_id,
+                    "name": topic.name
+                });
+                Ok(ToolResult::success(res.to_string()))
+            }
+            Err(e) => {
+                log_send_failure(
+                    "tool",
+                    "create_topic",
+                    "create_topic",
+                    &context.session_id.to_string(),
+                    "action",
+                    chat_id,
+                    None,
+                    name.len(),
+                    "-",
+                    &e.to_string(),
+                );
+                Ok(ToolResult::error(format!("Failed to create topic: {e}")))
+            }
+        }
+    }
+
+    /// `rename_topic` — rename an existing forum topic in a supergroup.
+    async fn action_rename_topic(
+        &self,
+        bot: &teloxide::Bot,
+        input: &Value,
+        context: &ToolExecutionContext,
+    ) -> Result<ToolResult> {
+        let ChatTarget { chat_id } =
+            pget!(resolve_chat_target(input, context.session_id, &self.telegram_state).await);
+        let thread_id_raw = pget!(get_id(input, "thread_id"));
+        let name = pget!(get_str(input, "name")).trim();
+        if name.is_empty() || name.chars().count() > 128 {
+            return Ok(ToolResult::error(
+                "Parameter 'name' must be between 1 and 128 characters.".to_string(),
+            ));
+        }
+
+        let thread_id = ThreadId(MessageId(thread_id_raw as i32));
+        use teloxide::payloads::EditForumTopicSetters;
+        match send_retrying_rate_limit("telegram_send rename_topic", || {
+            bot.edit_forum_topic(ChatId(chat_id), thread_id)
+                .name(name.to_string())
+        })
+        .await
+        {
+            Ok(_) => {
+                self.telegram_state
+                    .note_thread_evidence(chat_id, Some(thread_id_raw as i32))
+                    .await;
+                crate::channels::telegram::record_topic_created(
+                    None,
+                    chat_id,
+                    thread_id_raw as i32,
+                    name,
+                    true,
+                )
+                .await;
+                log_send_success(
+                    "tool",
+                    "rename_topic",
+                    "rename_topic",
+                    &context.session_id.to_string(),
+                    "action",
+                    chat_id,
+                    Some(thread_id_raw as i32),
+                    0,
+                    name.len(),
+                    "-",
+                );
+                let res = serde_json::json!({
+                    "status": "success",
+                    "chat_id": chat_id,
+                    "thread_id": thread_id_raw,
+                    "name": name
+                });
+                Ok(ToolResult::success(res.to_string()))
+            }
+            Err(e) => {
+                log_send_failure(
+                    "tool",
+                    "rename_topic",
+                    "rename_topic",
+                    &context.session_id.to_string(),
+                    "action",
+                    chat_id,
+                    Some(thread_id_raw as i32),
+                    name.len(),
+                    "-",
+                    &e.to_string(),
+                );
+                Ok(ToolResult::error(format!("Failed to rename topic: {e}")))
+            }
+        }
     }
 }
