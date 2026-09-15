@@ -1253,7 +1253,11 @@ impl App {
                 true
             }
             "/help" => {
-                self.mode = AppMode::Help;
+                // Through `switch_mode`, never a bare `self.mode` assignment:
+                // entering help is what loads the command catalog (#1586).
+                if let Err(e) = self.switch_mode(AppMode::Help).await {
+                    tracing::warn!("Failed to open help screen: {e}");
+                }
                 true
             }
             "/mission-control" => {
