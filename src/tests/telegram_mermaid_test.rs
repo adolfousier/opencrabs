@@ -18,7 +18,7 @@ use crate::channels::telegram::rich::mermaid::{
     cache_put, classify_render_failure, error_note, failure_html, find_mermaid_fences,
     has_mermaid_fence, image_html, ink_url, is_diagram_capped, is_image_response,
     looks_like_mermaid_source, markdown_failure_block, markdown_failure_block_with_link,
-    replacement_for, resolve_blocks, resolve_markdown_media,
+    replacement_for, resolve_blocks, resolve_markdown_media, svg_link_md,
 };
 
 // ---------------------------------------------------------------------------
@@ -308,7 +308,21 @@ fn replacement_for_image_bytes_appends_svg_link_when_capped() {
     let (md, entry) = replacement_for(&outcome, 2, "flowchart TD\nA-->B");
     assert!(md.starts_with("![diagram](tg://photo?id=diag2)"));
     assert!(md.contains("\n[Open SVG vector](https://mermaid.ink/svg/"));
+    assert!(
+        md.ends_with('\n'),
+        "vector link replacement must end with newline for clean block separation"
+    );
     assert!(entry.is_some());
+}
+
+#[test]
+fn svg_link_md_is_padded_with_newlines() {
+    let link = svg_link_md("graph TD;\nA-->B;");
+    assert!(link.starts_with('\n'), "svg link should start on new line");
+    assert!(
+        link.ends_with('\n'),
+        "svg link must end with newline to prevent abutting subsequent table headers (#239)"
+    );
 }
 
 #[test]

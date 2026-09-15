@@ -209,18 +209,124 @@ fn parse_alignment(sep: &str, cols: usize) -> Vec<Align> {
 
 /// Single canonical table-normalization entry for the rich plane (#132):
 /// expand collapsed one-line tables first (so [`try_parse`] can see them),
-/// then insert the blank line Telegram's rich parser demands before a table
-/// block (#95). Every rich-build entry point and the structure-detection gate
-/// call THIS — never the two passes individually — so gate and renderer always
-/// agree on the same text and a new send path inherits both fixes (#690,
-/// #980, #1085 whack-a-mole retired). Both passes are idempotent and
-/// fence-safe; pipe-free input returns unchanged.
+/// infer missing table separators, then insert the blank line Telegram's rich
+/// parser demands before a table block (#95). Every rich-build entry point and the
+/// structure-detection gate call THIS — never the individual passes
+/// individually — so gate and renderer always agree on the same text and a new
+/// send path inherits all fixes (#690, #980, #1085, #239 whack-a-mole retired).
+/// All passes are idempotent and fence-safe; pipe-free input returns unchanged.
 ///
 /// Also shields bare leading hashes (e.g. `#174`) so Telegram's rich parser
 /// doesn't promote them into headings without CommonMark's required trailing space (#193).
 pub(crate) fn normalize_tables(text: &str) -> String {
     let shielded = shield_bare_leading_hashes(text);
-    ensure_blank_line_before_tables(&reflow_collapsed_tables(&shielded))
+    let reflowed = reflow_collapsed_tables(&shielded);
+    let inferred = infer_missing_table_separators(&reflowed);
+    ensure_blank_line_before_tables(&inferred)
+}
+
+/// Infer and synthesize missing GFM table separator rows (`|---|---|...`) for
+/// tables authored without a delimiter row (#239).
+///
+/// When an agent or user authors a table like:
+/// ```text
+/// Header 1 | Header 2 | Header 3
+/// Row 1 Col 1 | Row 1 Col 2 | Row 1 Col 3
+/// Row 2 Col 1 | Row 2 Col 2 | Row 2 Col 3
+/// ```
+/// Telegram's rich markdown parser and standard GFM specifications require a
+/// delimiter line (`|---|---|---|`) to promote the block into a native table grid.
+/// Without it, the rows render as unaligned plain text or collapse on forwarding.
+///
+/// This pass scans outside code/mermaid fences for consecutive non-blank piped rows
+/// where line 0 has N >= 2 columns, line 1 is NOT already a separator row, and
+/// line 1 also has N >= 2 columns. It synthesizes and inserts `|---|---|` (matching
+/// header column count) immediately after the header row.
+///
+/// Safe:
+/// - Already-valid tables (with existing separator) are parsed by [`try_parse`] and untouched.
+/// - Code fences (``` and ~~~) are strictly bypassed.
+/// - Single lines with stray pipes in prose are untouched (requires 2+ consecutive multi-column rows).
+/// - Idempotent: running multiple times produces identical output.
+pub(crate) fn infer_missing_table_separators(text: &str) -> String {
+    if !text.contains('|') {
+        return text.to_string();
+    }
+    let lines: Vec<String> = text.lines().map(|l| l.to_string()).collect();
+    let mut out: Vec<String> = Vec::with_capacity(lines.len() + 2);
+    let mut in_fence = false;
+    let mut fence_char = ' ';
+    let mut fence_len = 0;
+    let mut i = 0;
+
+    while i < lines.len() {
+        let line = &lines[i];
+        let trimmed = line.trim_start();
+
+        if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
+            let ch = trimmed.chars().next().unwrap();
+            let count = trimmed.chars().take_while(|&c| c == ch).count();
+            if !in_fence {
+                in_fence = true;
+                fence_char = ch;
+                fence_len = count;
+                out.push(line.clone());
+                i += 1;
+                continue;
+            } else if ch == fence_char && count >= fence_len {
+                in_fence = false;
+                out.push(line.clone());
+                i += 1;
+                continue;
+            }
+        }
+
+        if in_fence {
+            out.push(line.clone());
+            i += 1;
+            continue;
+        }
+
+        // Check if this position is already a well-formed table with a valid separator
+        if let Some((_, next)) = try_parse(&lines, i) {
+            while i < next {
+                out.push(lines[i].clone());
+                i += 1;
+            }
+            continue;
+        }
+
+        // Check if lines[i] and lines[i+1] look like a table missing a separator
+        if looks_like_row(line) && !is_separator(line) && i + 1 < lines.len() {
+            let next_line = &lines[i + 1];
+            if looks_like_row(next_line) && !is_separator(next_line) {
+                let h_cells = split_cells(line);
+                let n_cells = split_cells(next_line);
+                if h_cells.len() >= 2 && n_cells.len() >= 2 {
+                    // Line i is the header row!
+                    out.push(line.clone());
+                    let sep = format!("|{}|", vec!["---"; h_cells.len()].join("|"));
+                    out.push(sep);
+                    i += 1;
+                    // Consume all consecutive body rows so we don't insert multiple separators
+                    while i < lines.len() && looks_like_row(&lines[i]) && !is_separator(&lines[i]) {
+                        out.push(lines[i].clone());
+                        i += 1;
+                    }
+                    continue;
+                }
+            }
+        }
+
+        out.push(line.clone());
+        i += 1;
+    }
+
+    let mut result = out.join("\n");
+    if text.ends_with('\n') {
+        result.push('\n');
+    }
+    result
 }
 
 /// Escape bare leading `#` (not followed by space, or not a valid ATX heading)

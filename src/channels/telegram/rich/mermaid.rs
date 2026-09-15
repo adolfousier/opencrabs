@@ -834,8 +834,6 @@ pub(crate) fn image_html(url: &str) -> String {
 /// HTML for a diagram that could not be rendered: a bold warning line, the
 /// renderer's error note in a blockquote, and the original source in a code
 /// block so the reader can see (and fix) what failed.
-/// #189 Leg 4: generic svg escape-hatch link fragment for HTML-fallback
-/// contexts — a small `[svg]` anchor to the vector render.
 pub(crate) fn svg_link_html(source: &str) -> String {
     format!("\n<a href=\"{}\">[svg]</a>", escape(&ink_url_svg(source)))
 }
@@ -851,9 +849,10 @@ pub(crate) fn failure_html(err: &str, source: &str) -> String {
 /// Minimal HTML entity escaping (matches render_html's escaping).
 /// Generic svg escape-hatch link fragment for markdown contexts —
 /// a small `[Open SVG vector]` link to the full-size vector render when the diagram
-/// is capped or scaled down.
+/// is capped or scaled down. Always padded with trailing newline so subsequent markdown
+/// blocks (e.g. tables, headers) start on a fresh line and retain proper block spacing.
 pub(crate) fn svg_link_md(source: &str) -> String {
-    format!("\n[Open SVG vector]({})", ink_url_svg(source))
+    format!("\n[Open SVG vector]({})\n", ink_url_svg(source))
 }
 
 /// Canonical correction rules for Mermaid diagrams shared across the codebase.
