@@ -87,7 +87,6 @@ fn inbox_icon(kind: &crate::brain::mission_control::types::McInboxKind) -> &'sta
         McInboxKind::ProposedTool => "🔧",
         McInboxKind::ProposedCommand => "📋",
         McInboxKind::ProposedSkill => "🧠",
-        McInboxKind::ProposedBrainDedup => "🧹",
     }
 }
 

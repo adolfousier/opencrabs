@@ -51,10 +51,6 @@ const RSI_MIN_ENTRIES: i64 = 50;
 /// Max tool iterations for the RSI agent (keep it focused).
 const RSI_MAX_TOOL_ITERATIONS: usize = 10;
 
-/// How often to run the brain-file dedup scan (in RSI cycles).
-/// At 1 hour per cycle, 24 cycles = once per day.
-const DEDUP_SCAN_EVERY_N_CYCLES: u64 = 24;
-
 /// Consecutive converged agent cycles after which agent runs pause (#977).
 /// Two in a row, not one: a single oddly-phrased summary must not pause
 /// the engine, but the live transcript showed the model saying "nothing
@@ -120,7 +116,7 @@ pub(crate) fn hash_opportunities(keys: &[String]) -> String {
 /// user stop instruction (#977). Both mean the next cycle would burn a
 /// paid turn to say the same thing. Consecutive occurrences pause agent
 /// runs until the finding set actually changes (see the loop below); the
-/// engine, digest and dedup scan keep running.
+/// engine and digest keep running.
 ///
 /// Markers come from the live transcript: "Same data. Stopping." and
 /// "Converged. No improvements applied." alternated with "Retired. No
@@ -1352,9 +1348,8 @@ pub fn spawn_rsi_engine(
             .ok()
             .and_then(|s| s.trim().parse().ok())
             .unwrap_or(0);
-        // Persist cycle_number across restarts so the dedup scan
-        // (every 24 cycles) actually fires. Without this, frequent
-        // restarts reset the counter and dedup never triggers.
+        // Persist cycle_number across restarts. Without this, frequent
+        // restarts reset the counter.
         let mut cycle_number: u64 = std::fs::read_to_string(&cycle_number_path)
             .ok()
             .and_then(|s| s.trim().parse().ok())
@@ -1895,31 +1890,10 @@ pub fn spawn_rsi_engine(
                 }
             }
 
-            // Periodic brain-file dedup scan — runs every N cycles
-            // (default: once per day at 24 x 1h cycles). Files proposals
-            // into Mission Control for user review. Does NOT auto-apply.
-            cycle_number += 1;
-            let _ = std::fs::write(&cycle_number_path, cycle_number.to_string());
-            if cycle_number.is_multiple_of(DEDUP_SCAN_EVERY_N_CYCLES) {
-                let brain_path = crate::config::opencrabs_home();
-                let store = crate::brain::rsi_proposals::ProposalsStore::new();
-                // Housekeeping (#606): drop any pending proposal whose name is
-                // already applied/rejected so the store doesn't carry stale
-                // legacy entries the inbox filter only hides at read time.
-                store.prune_handled();
-                let filed = crate::brain::dedup_scan::file_dedup_proposals(&brain_path, &store);
-                if filed > 0 {
-                    tracing::info!("RSI dedup scan: filed {filed} brain-file dedup proposal(s)");
-                    let _ = notification_tx.send(RsiNotification::AgentCycleComplete {
-                        summary: format!("Brain dedup scan: {filed} duplicate(s) found, filed for review in Mission Control."),
-                    });
-                } else {
-                    tracing::debug!("RSI dedup scan: no duplicates found");
-                }
-            }
-
             // Stamp last_cycle so restarts resume from here, not from scratch
             let _ = std::fs::write(&last_cycle_path, "");
+            cycle_number += 1;
+            let _ = std::fs::write(&cycle_number_path, cycle_number.to_string());
         }
     }.instrument(tracing::info_span!("rsi_engine")));
 }

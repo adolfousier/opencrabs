@@ -210,10 +210,6 @@ impl Tool for SelfImproveTool {
                 "old_content": {
                     "type": "string",
                     "description": "For 'update' only: the existing text to find and replace (must be an exact match of the current content)."
-                },
-                "dedup_intent": {
-                    "type": "boolean",
-                    "description": "For 'update' only: set to true when the update is removing a duplicate that already exists elsewhere in the same file. Brain files are append-only — any update whose replacement is shorter than old_content will be rejected unless dedup_intent=true AND every original line still appears in the result."
                 }
             },
             "required": ["action"]
@@ -358,14 +354,8 @@ impl Tool for SelfImproveTool {
                 let updated = existing.replacen(old_content, new_content.trim(), 1);
 
                 // Append-only enforcement: brain files are append-only by user
-                // policy. Removals only allowed when the caller explicitly opts
-                // into a dedup intent AND every line of the original survives.
-                // Note: cleanup_intent is always false here because RSI is autonomous
+                // policy. Note: cleanup_intent is always false here because RSI is autonomous
                 // and cannot get user approval for destructive operations.
-                let dedup_intent = input
-                    .get("dedup_intent")
-                    .and_then(|v| v.as_bool())
-                    .unwrap_or(false);
                 use crate::brain::tools::brain_file_safety;
                 // A surgical replace MAY shorten, but only when the rule
                 // survives identifiably: `new_content` must still carry
@@ -374,8 +364,7 @@ impl Tool for SelfImproveTool {
                 // check_no_shrink caps the bytes regardless of what we claim.
                 //
                 // Without this RSI could not consolidate at all: rewording is
-                // a shrink, and dedup_intent cannot prove reworded bytes
-                // reappear, so the files could only ever grow.
+                // a shrink, so the files could only ever grow.
                 let consolidation =
                     brain_file_safety::is_rule_consolidation(old_content, new_content);
                 if let brain_file_safety::ShrinkCheck::Rejected { message } =
@@ -383,37 +372,11 @@ impl Tool for SelfImproveTool {
                         &target_path,
                         &existing,
                         &updated,
-                        dedup_intent,
                         false, // cleanup_intent: RSI cannot do cleanup (no approval mechanism)
                         consolidation,
                     )
                 {
                     return Ok(ToolResult::error(message));
-                }
-
-                // Record pruned sections when dedup shrinks a brain file.
-                // This is how the sidecar learns what the RSI loop removed so
-                // sync_templates() does not re-add it on the next upstream sync.
-                if dedup_intent {
-                    let removed =
-                        crate::brain::rsi_pruned::detect_removed_sections(&existing, &updated);
-                    if !removed.is_empty() {
-                        let mut pruned_state = crate::brain::rsi_pruned::PrunedState::load();
-                        pruned_state.record_pruned(target_file, removed);
-                        if let Err(e) = pruned_state.save() {
-                            tracing::warn!(
-                                "self_improve dedup: recorded {} pruned header(s) for {} but pruned.toml save failed: {} \
-                                 — sync_templates() will re-add those sections on the next sync until this is fixed",
-                                pruned_state
-                                    .pruned
-                                    .get(target_file)
-                                    .map(|h| h.len())
-                                    .unwrap_or(0),
-                                target_file,
-                                e
-                            );
-                        }
-                    }
                 }
 
                 // Ensure RSI dirs exist for logging
@@ -697,22 +660,6 @@ impl Tool for SelfImproveTool {
                         "{msg}. The append may have been clobbered — re-apply after the sync settles."
                     )));
                 }
-
-                // #765 event-based cross-file trigger: the appended improvement
-                // may duplicate content living in another brain file (the
-                // within-file guard above only sees this file). Run the
-                // report-only cross-file scan so it surfaces in the inbox.
-                // Best-effort — never fails the write.
-                {
-                    let brain_dir = crate::config::opencrabs_home();
-                    let filed = crate::brain::dedup_scan::scan_after_brain_write(&brain_dir);
-                    if filed > 0 {
-                        tracing::info!(
-                            "RSI self_improve: cross-file scan filed {filed} dedup proposal(s) after writing {target_file}"
-                        );
-                    }
-                }
-
                 // Log to rsi/improvements.md
                 let entry = format!(
                     "\n## [Applied] {}\n\n**Date:** {}\n**Target:** {}\n**Rationale:** {}\n**Status:** Applied\n",

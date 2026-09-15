@@ -9,7 +9,7 @@
 
 use super::theme;
 use crate::brain::mission_control::{
-    McActivity, McInboxDetail, McInboxItem, McInboxKind, McScheduleItem, McScheduleKind,
+    McActivity, McInboxItem, McInboxKind, McScheduleItem, McScheduleKind,
     inbox_service,
 };
 use crate::tui::app::App;
@@ -105,7 +105,6 @@ fn render_inbox_item(item: &McInboxItem) -> Vec<Line<'static>> {
         McInboxKind::ProposedTool => "tool",
         McInboxKind::ProposedCommand => "command",
         McInboxKind::ProposedSkill => "skill",
-        McInboxKind::ProposedBrainDedup => "dedup",
     };
     let filed = item.created_at.format("%Y-%m-%d %H:%M UTC").to_string();
     let mut lines: Vec<Line<'static>> = vec![
@@ -123,35 +122,8 @@ fn render_inbox_item(item: &McInboxItem) -> Vec<Line<'static>> {
     }
 
     // Render type-specific detail sections when available.
-    if let Some(detail) = &item.detail {
-        match detail {
-            McInboxDetail::BrainDedup {
-                duplicate_text,
-                rationale,
-                duplicate_of,
-                warnings,
-            } => {
-                lines.extend([blank(), section_heading("Rationale")]);
-                for s in wrap_paragraph(rationale) {
-                    lines.push(body_line(s));
-                }
-                lines.extend([
-                    blank(),
-                    section_heading("Duplicates"),
-                    kv("Of", duplicate_of),
-                ]);
-                lines.extend([blank(), section_heading("Duplicate text (to be removed)")]);
-                for s in wrap_paragraph(duplicate_text) {
-                    lines.push(body_line(s));
-                }
-                if !warnings.is_empty() {
-                    lines.extend([blank(), section_heading("Warnings")]);
-                    for w in warnings {
-                        lines.push(body_line(format!("⚠ {w}")));
-                    }
-                }
-            }
-        }
+    if let Some(_detail) = &item.detail {
+        // No variant-specific details currently active.
     }
 
     lines.extend([
