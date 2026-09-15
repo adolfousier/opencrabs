@@ -1785,7 +1785,9 @@ impl App {
         cost: Option<f64>,
         first_text: &mut bool,
     ) {
-        use crate::tui::app::reasoning_split::{Segment, is_intermediate, split_segments};
+        use crate::tui::app::reasoning_split::{
+            BLOCKED_LABEL, Segment, is_intermediate, split_segments,
+        };
         let segments = split_segments(region);
         for (i, seg) in segments.iter().enumerate() {
             let (content, details) = match seg {
@@ -1812,6 +1814,9 @@ impl App {
                     }
                 }
                 Segment::Reasoning(r) => (String::new(), Some(r.clone())),
+                // Narration the phantom detector refused to deliver (#1172).
+                // Collapsed and labelled, never answer text (#1584).
+                Segment::Blocked(b) => (String::new(), Some(format!("{BLOCKED_LABEL}\n\n{b}"))),
             };
             if content.is_empty() && details.is_none() {
                 continue;
