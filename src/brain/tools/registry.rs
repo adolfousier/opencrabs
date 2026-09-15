@@ -146,7 +146,7 @@ impl ToolRegistry {
     /// Register a tool (takes `&self` — safe through shared `Arc`)
     pub fn register(&self, tool: Arc<dyn Tool>) {
         let name = tool.name().to_string();
-        tracing::debug!("Registered tool: {}", name);
+        tracing::trace!("Registered tool: {}", name);
         self.tools.write().unwrap().insert(name, tool);
     }
 
@@ -425,7 +425,7 @@ impl ToolRegistry {
         }
 
         // Execute the tool
-        tracing::info!("Executing tool: {}", name);
+        tracing::debug!("Executing tool: {}", name);
         let is_md_write = tool
             .capabilities()
             .contains(&crate::brain::tools::r#trait::ToolCapability::WriteFiles)
@@ -446,7 +446,7 @@ impl ToolRegistry {
         }
 
         if result.success {
-            tracing::info!("Tool '{}' executed successfully", name);
+            tracing::debug!("Tool '{}' executed successfully", name);
         } else {
             tracing::warn!(
                 "Tool '{}' failed: {:?}",
