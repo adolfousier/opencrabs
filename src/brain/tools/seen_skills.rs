@@ -32,6 +32,15 @@ fn registry() -> &'static std::sync::Mutex<HashMap<(Uuid, String), u64>> {
     REGISTRY.get_or_init(|| std::sync::Mutex::new(HashMap::new()))
 }
 
+type AuxMap = HashMap<(Uuid, String), Vec<String>>;
+
+/// In-memory registry for auxiliary skill files loaded per session:
+/// `(session, slug) -> Vec<file_name>`
+fn aux_registry() -> &'static std::sync::Mutex<AuxMap> {
+    static AUX_REGISTRY: OnceLock<std::sync::Mutex<AuxMap>> = OnceLock::new();
+    AUX_REGISTRY.get_or_init(|| std::sync::Mutex::new(HashMap::new()))
+}
+
 /// Per-session compaction epoch counter (issue #150). `note_compaction`
 /// bumps it; skills seen at an older epoch are no longer "in context".
 fn epochs() -> &'static std::sync::Mutex<HashMap<Uuid, u64>> {
@@ -55,6 +64,58 @@ pub fn skill_slug_from_path(path: &Path) -> Option<String> {
         return None;
     }
     slug.as_os_str().to_str().map(|s| s.to_string())
+}
+
+/// Record that `session_id` consumed an auxiliary file `file` of skill `slug`.
+pub fn mark_aux_seen(session_id: Uuid, slug: &str, file: &str) {
+    let mut reg = aux_registry()
+        .lock()
+        .expect("seen_skills aux registry poisoned");
+    let files = reg.entry((session_id, slug.to_string())).or_default();
+    if !files.iter().any(|f| f == file) {
+        files.push(file.to_string());
+    }
+}
+
+/// Unmark a specific auxiliary file for `session_id` and `slug`.
+pub fn unmark_aux_seen(session_id: Uuid, slug: &str, file: &str) {
+    let mut reg = aux_registry()
+        .lock()
+        .expect("seen_skills aux registry poisoned");
+    if let Some(files) = reg.get_mut(&(session_id, slug.to_string())) {
+        files.retain(|f| f != file);
+    }
+}
+
+/// Clear all auxiliary files recorded for `session_id` and `slug`.
+pub fn clear_aux_seen(session_id: Uuid, slug: &str) {
+    let mut reg = aux_registry()
+        .lock()
+        .expect("seen_skills aux registry poisoned");
+    reg.remove(&(session_id, slug.to_string()));
+}
+
+/// Remove a consumed skill from `session_id`'s registry (pruning on compaction discard).
+pub fn unmark_seen(session_id: Uuid, slug: &str) {
+    registry()
+        .lock()
+        .expect("seen_skills registry poisoned")
+        .remove(&(session_id, slug.to_string()));
+    aux_registry()
+        .lock()
+        .expect("seen_skills aux registry poisoned")
+        .remove(&(session_id, slug.to_string()));
+}
+
+/// All auxiliary skill files `session_id` has consumed, grouped by slug.
+pub fn aux_seen_for_session(session_id: Uuid) -> HashMap<String, Vec<String>> {
+    let reg = aux_registry()
+        .lock()
+        .expect("seen_skills aux registry poisoned");
+    reg.iter()
+        .filter(|((sid, _), _)| *sid == session_id)
+        .map(|((_, slug), files)| (slug.clone(), files.clone()))
+        .collect()
 }
 
 /// Record that `session_id` consumed skill `slug` (via read or slug-form

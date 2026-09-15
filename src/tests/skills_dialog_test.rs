@@ -18,6 +18,7 @@ fn skill(name: &str, description: &str, body: &str, source: SkillSource) -> Skil
         globs: Vec::new(),
         review_gate: false,
         source,
+        auxiliary_files: Vec::new(),
     }
 }
 

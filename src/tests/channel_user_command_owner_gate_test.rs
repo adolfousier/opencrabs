@@ -49,6 +49,7 @@ fn audit_skill() -> Skill {
         globs: Vec::new(),
         review_gate: false,
         source: SkillSource::User,
+        auxiliary_files: Vec::new(),
     }
 }
 

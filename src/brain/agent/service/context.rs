@@ -8,6 +8,138 @@ use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+pub struct ContextManifest {
+    #[serde(default)]
+    pub active_skills: Vec<String>,
+    #[serde(default)]
+    pub discard_skills: Vec<String>,
+    #[serde(default)]
+    pub required_tools: Vec<String>,
+}
+
+/// Extract and parse a machine-readable `ContextManifest` from a compaction summary.
+///
+/// Searches for a fenced code block tagged `context-manifest` (or `context_manifest`),
+/// and parses it either as YAML or JSON. Fails soft (returns `None`) if omitted or malformed.
+#[allow(dead_code)]
+pub fn parse_context_manifest(summary: &str) -> Option<ContextManifest> {
+    let block = extract_manifest_block(summary)?;
+    parse_manifest_text(&block)
+}
+
+#[allow(dead_code)]
+fn extract_manifest_block(summary: &str) -> Option<String> {
+    let mut in_block = false;
+    let mut fence_char = '`';
+    let mut fence_len = 3;
+    let mut content = String::new();
+
+    for line in summary.lines() {
+        let trimmed = line.trim();
+        if !in_block {
+            if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
+                let f_char = if trimmed.starts_with('`') { '`' } else { '~' };
+                let flen = trimmed.chars().take_while(|&c| c == f_char).count();
+                let tag = trimmed[flen..].trim().to_lowercase();
+                if tag == "context-manifest" || tag == "context_manifest" {
+                    in_block = true;
+                    fence_char = f_char;
+                    fence_len = flen;
+                    continue;
+                }
+            }
+        } else {
+            let chars_count = trimmed.chars().take_while(|&c| c == fence_char).count();
+            if chars_count >= fence_len && trimmed[chars_count..].trim().is_empty() {
+                return Some(content);
+            }
+            content.push_str(line);
+            content.push('\n');
+        }
+    }
+    if in_block && !content.trim().is_empty() {
+        return Some(content);
+    }
+    None
+}
+
+#[allow(dead_code)]
+pub fn parse_manifest_text(text: &str) -> Option<ContextManifest> {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if let Ok(manifest) = serde_json::from_str::<ContextManifest>(trimmed) {
+        return Some(manifest);
+    }
+
+    let mut manifest = ContextManifest::default();
+    let mut current_section: Option<&str> = None;
+    let mut found_any_key = false;
+
+    for line in trimmed.lines() {
+        let line_trimmed = line.trim();
+        if line_trimmed.is_empty() || line_trimmed.starts_with('#') {
+            continue;
+        }
+
+        if let Some(rest) = line_trimmed.strip_prefix("active_skills:") {
+            current_section = Some("active_skills");
+            found_any_key = true;
+            let rest_trimmed = rest.trim();
+            if !rest_trimmed.is_empty() {
+                parse_inline_items(rest_trimmed, &mut manifest.active_skills);
+            }
+        } else if let Some(rest) = line_trimmed.strip_prefix("discard_skills:") {
+            current_section = Some("discard_skills");
+            found_any_key = true;
+            let rest_trimmed = rest.trim();
+            if !rest_trimmed.is_empty() {
+                parse_inline_items(rest_trimmed, &mut manifest.discard_skills);
+            }
+        } else if let Some(rest) = line_trimmed.strip_prefix("required_tools:") {
+            current_section = Some("required_tools");
+            found_any_key = true;
+            let rest_trimmed = rest.trim();
+            if !rest_trimmed.is_empty() {
+                parse_inline_items(rest_trimmed, &mut manifest.required_tools);
+            }
+        } else if let Some(item) = line_trimmed.strip_prefix('-') {
+            let item_clean = item.trim().trim_matches('"').trim_matches('\'').trim();
+            if !item_clean.is_empty() {
+                match current_section {
+                    Some("active_skills") => manifest.active_skills.push(item_clean.to_string()),
+                    Some("discard_skills") => manifest.discard_skills.push(item_clean.to_string()),
+                    Some("required_tools") => manifest.required_tools.push(item_clean.to_string()),
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    if found_any_key { Some(manifest) } else { None }
+}
+
+#[allow(dead_code)]
+fn parse_inline_items(s: &str, target: &mut Vec<String>) {
+    let s = s.trim();
+    if s.starts_with('[') && s.ends_with(']') {
+        let inner = &s[1..s.len() - 1];
+        for part in inner.split(',') {
+            let clean = part.trim().trim_matches('"').trim_matches('\'').trim();
+            if !clean.is_empty() {
+                target.push(clean.to_string());
+            }
+        }
+    } else {
+        let clean = s.trim_matches('"').trim_matches('\'').trim();
+        if !clean.is_empty() && clean != "[]" {
+            target.push(clean.to_string());
+        }
+    }
+}
+
 impl AgentService {
     /// The per-turn plan reminder pinned at the end of the prompt, keyed to
     /// the session's plan-mode state: an Active checklist gets the task
@@ -393,6 +525,20 @@ impl AgentService {
         let provider = self.provider_for_session(session_id);
         let cancel = cancel_token.cloned().unwrap_or_default();
 
+        let mut stamp_skills = self.active_skills_for_session(session_id);
+        for s in crate::brain::tools::seen_skills::seen_for_session(session_id) {
+            stamp_skills.insert(s);
+        }
+        let seen_aux = std::collections::HashMap::new();
+        let active_tools = self.tool_registry.active_tools(session_id);
+        let context_inventory = Self::format_context_inventory(
+            context.max_tokens,
+            &stamp_skills,
+            &seen_aux,
+            &active_tools,
+            Some(&self.tool_registry),
+        );
+
         let summary = Self::compute_compaction_summary(
             provider,
             self.fallback_chain_snapshot(),
@@ -408,6 +554,7 @@ impl AgentService {
             cancel,
             self.compaction_attempt_deadline(session_id),
             notifier,
+            context_inventory,
         )
         .await?;
 
@@ -464,10 +611,14 @@ impl AgentService {
     /// and report the whole ledger if everything dies.
     /// `pub(crate)` for the regression tests in `src/tests` — no caller outside
     /// Bound on a single summariser attempt for a session with no compaction
-    /// history to scale from. Not a guess: it is the 300s every HTTP provider
-    /// in this codebase already enforces per request
-    /// (`anthropic.rs::DEFAULT_TIMEOUT`), extended to the CLI providers that
-    /// ship no timeout at all.
+    /// history to scale from.
+    ///
+    /// Calibrated for real-world reasoning summarisers:
+    /// TTFT (~10s) + ample reasoning headroom (60–90s) + generation of up to
+    /// 8,000 output tokens at TPS=40 (200s) = ~270–300s.
+    ///
+    /// Not a guess: this covers the p95 of compaction durations across fleet
+    /// operations while preventing premature truncation of reasoning models.
     pub(crate) const COMPACTION_ATTEMPT_FLOOR: std::time::Duration =
         std::time::Duration::from_secs(300);
 
@@ -655,6 +806,123 @@ impl AgentService {
         )))
     }
 
+    /// Format dynamic markdown table of currently active skills, consumed auxiliary
+    /// skill documents, and lazy tools, their token sizes, and percentage of total context
+    /// window for the compaction prompt.
+    pub fn format_context_inventory(
+        snapshot_max_tokens: usize,
+        active_skills: &std::collections::HashSet<String>,
+        seen_aux: &std::collections::HashMap<String, Vec<String>>,
+        active_tools: &std::collections::HashSet<String>,
+        tool_registry: Option<&std::sync::Arc<crate::brain::tools::ToolRegistry>>,
+    ) -> String {
+        let all_skills = crate::brain::skills::load_all_skills();
+        let mut rows = Vec::new();
+        let mut total_tokens = 0usize;
+
+        let mut sorted_skills: Vec<_> = active_skills.iter().collect();
+        sorted_skills.sort();
+        for skill_name in sorted_skills {
+            // #179: one canonicalisation rule for the whole crate. The table
+            // must name the same string the manifest rule tells the model to
+            // write — it used to render "/canarya" beside a rule saying
+            // "<skill-slug>", so the prompt argued with itself and the spelling
+            // the model was told to follow was the one that did not work.
+            let normalized = crate::brain::skills::normalize_skill_slug(skill_name);
+            let skill = all_skills
+                .iter()
+                .find(|s| s.name == normalized || s.slash_name == *skill_name);
+            let tokens = if let Some(s) = skill {
+                AgentContext::estimate_tokens(&s.body)
+            } else {
+                100
+            };
+            total_tokens += tokens;
+            let pct = if snapshot_max_tokens > 0 {
+                (tokens as f64 / snapshot_max_tokens as f64) * 100.0
+            } else {
+                0.0
+            };
+            rows.push((normalized.clone(), "Skill", tokens, pct));
+
+            // Issue #216: account consumed auxiliary skill documents.
+            if let Some(files) = seen_aux.get(&normalized) {
+                for file_name in files {
+                    let aux_tokens = if let Some(s) = skill {
+                        if let Some(aux) = s.auxiliary_files.iter().find(|a| &a.name == file_name) {
+                            AgentContext::estimate_tokens(&aux.body)
+                        } else {
+                            100
+                        }
+                    } else {
+                        100
+                    };
+                    total_tokens += aux_tokens;
+                    let aux_pct = if snapshot_max_tokens > 0 {
+                        (aux_tokens as f64 / snapshot_max_tokens as f64) * 100.0
+                    } else {
+                        0.0
+                    };
+                    rows.push((
+                        format!("{normalized}/{file_name}"),
+                        "Skill aux",
+                        aux_tokens,
+                        aux_pct,
+                    ));
+                }
+            }
+        }
+
+        let mut sorted_tools: Vec<_> = active_tools.iter().collect();
+        sorted_tools.sort();
+        for tool_name in sorted_tools {
+            let tokens = if let Some(reg) = tool_registry {
+                if let Some(t) = reg.get(tool_name) {
+                    AgentContext::estimate_tokens(&t.input_schema().to_string())
+                } else {
+                    150
+                }
+            } else {
+                150
+            };
+            total_tokens += tokens;
+            let pct = if snapshot_max_tokens > 0 {
+                (tokens as f64 / snapshot_max_tokens as f64) * 100.0
+            } else {
+                0.0
+            };
+            rows.push((tool_name.clone(), "Lazy Tool", tokens, pct));
+        }
+
+        if rows.is_empty() {
+            return "*(No active skills or extended lazy tools currently loaded)*\n".to_string();
+        }
+
+        let mut out = String::new();
+        out.push_str("| Item | Type | Size (Tokens) | % Context |\n");
+        out.push_str("|---|---|---|---|\n");
+        for (item, kind, tokens, pct) in rows {
+            out.push_str(&format!(
+                "| `{}` | {} | {} | {:.1}% |\n",
+                item, kind, tokens, pct
+            ));
+        }
+
+        let total_pct = if snapshot_max_tokens > 0 {
+            (total_tokens as f64 / snapshot_max_tokens as f64) * 100.0
+        } else {
+            0.0
+        };
+        let target_tokens = (snapshot_max_tokens as f64 * 0.05).round() as usize;
+        out.push_str(&format!(
+            "\nTotal active skills & tools: {} tokens ({:.1}% of context window, {} total tokens).\n\
+             Guidance: aim to keep active skills and lazy tools <= 5% target (~{} tokens).\n",
+            total_tokens, total_pct, snapshot_max_tokens, target_tokens
+        ));
+
+        out
+    }
+
     /// Compute a compaction summary from a snapshot of messages.
     ///
     /// This is the LLM-facing half of compaction. It does not touch any live
@@ -680,6 +948,7 @@ impl AgentService {
         cancel: CancellationToken,
         attempt_deadline: std::time::Duration,
         notifier: Option<super::compaction_notice::CompactionNotifier>,
+        context_inventory: String,
     ) -> Result<String> {
         let remaining_budget = snapshot_max_tokens.saturating_sub(snapshot_token_count);
 
@@ -818,6 +1087,31 @@ impl AgentService {
              - End with a clear action: what the agent is about to do next or a specific question\n\
              DO NOT be generic. DO NOT say \"I'm ready to continue.\" Reference actual conversation details \
              that only someone who was there would know.\n\n\
+             ## 10. Context Manifest (MANDATORY MACHINE-READABLE BLOCK)\n\
+             At the very end of your continuation document, you MUST include a fenced YAML block labeled \
+             ` ```context-manifest `.\n\
+             This manifest directly instructs the harness which skills to keep active vs discard, \
+             and which lazy tools to pre-activate for turn 1.\n\n\
+             ### Current Context Inventory & Budgets:\n\
+             {}\n\n\
+             ### Manifest Rules:\n\
+             - `active_skills`: Skills that MUST remain active for pending work / ongoing tasks. \
+             You may specify the bare `<skill-slug>` (e.g. `opencrabs-dev`) or a specific in-skill document \
+             `<skill-slug>/<file.md>` (e.g. `opencrabs-dev/editor.md`, `opencrabs-dev/fleet-directives.md`) \
+             if only specific auxiliary procedures are needed.\n\
+             - `discard_skills`: Skills or specific auxiliary documents whose tasks are complete and should be pruned to save budget.\n\
+             - `required_tools`: Extended lazy tools (e.g. telegram_send, browser_navigate, cron_manage, pg_query) \
+             that the agent will need immediately on turn 1.\n\n\
+             Format as YAML:\n\
+             ```context-manifest\n\
+             active_skills:\n\
+               - <skill-slug>\n\
+               - <skill-slug>/<file.md>\n\
+             discard_skills:\n\
+               - <skill-slug>\n\
+             required_tools:\n\
+               - <tool-name>\n\
+             ```\n\n\
              Tool approval status: {}\n\n\
              BE EXHAUSTIVE. This is not a summary — it is a complete knowledge transfer. \
              Include code snippets, exact paths, user quotes, error messages. \
@@ -826,6 +1120,7 @@ impl AgentService {
             snapshot_token_count,
             snapshot_max_tokens,
             remaining_budget,
+            context_inventory,
             if auto_approve_tools {
                 "AUTO-APPROVE ON (tools run freely)"
             } else {

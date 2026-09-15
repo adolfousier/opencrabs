@@ -648,6 +648,20 @@ impl AgentService {
         // context that grew impatient.
         let cancel = tokio_util::sync::CancellationToken::new();
 
+        let mut stamp_skills = self.active_skills_for_session(session_id);
+        for s in crate::brain::tools::seen_skills::seen_for_session(session_id) {
+            stamp_skills.insert(s);
+        }
+        let seen_aux = std::collections::HashMap::new();
+        let active_tools = self.tool_registry.active_tools(session_id);
+        let context_inventory = Self::format_context_inventory(
+            max_tokens,
+            &stamp_skills,
+            &seen_aux,
+            &active_tools,
+            Some(&self.tool_registry),
+        );
+
         let handle = tokio::spawn(async move {
             let summary = Self::compute_compaction_summary(
                 provider,
@@ -664,6 +678,7 @@ impl AgentService {
                 cancel,
                 attempt_deadline,
                 None,
+                context_inventory,
             )
             .await?;
             Ok(Self::decorate_compaction_summary(summary, session_id, subagents).await)

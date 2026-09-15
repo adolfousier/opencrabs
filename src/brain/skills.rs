@@ -42,7 +42,7 @@
 //! Only `name` and `description` are recognised today. Other keys are
 //! preserved for forward-compat but ignored.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 /// Compile-time table of built-in skills shipped with the binary.
@@ -98,6 +98,12 @@ pub enum SkillSource {
     User,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuxiliaryFile {
+    pub name: String,
+    pub body: String,
+}
+
 #[derive(Debug, Clone)]
 pub struct Skill {
     /// Slug used to invoke the skill (`/security-audit` → `"security-audit"`).
@@ -123,6 +129,10 @@ pub struct Skill {
     /// usual flow — the gate lives on the slash, not the skill's topic.
     pub review_gate: bool,
     pub source: SkillSource,
+    /// Auxiliary markdown files located directly in the skill directory
+    /// (e.g. `editor.md`, `fleet-directives.md`, `triage.md`), excluding
+    /// `SKILL.md`, `README.md`, `CHANGELOG.md`, dotfiles, and subdirectories.
+    pub auxiliary_files: Vec<AuxiliaryFile>,
 }
 
 /// Hard reminder prepended to a skill's body when it declares
@@ -247,6 +257,7 @@ impl Skill {
             globs: fm_globs,
             review_gate: fm_review_gate,
             source,
+            auxiliary_files: Vec::new(),
         })
     }
 
@@ -289,6 +300,69 @@ pub(crate) fn split_frontmatter(raw: &str) -> Option<(&str, &str)> {
     let body_start = (close_idx + 4).min(after_open.len());
     let body = &after_open[body_start..];
     Some((frontmatter, body))
+}
+
+/// Discover auxiliary `.md` files directly in a skill directory.
+///
+/// Rules:
+/// - Only inspects top-level directory entries (does not recurse into subdirectories).
+/// - Must have `.md` extension.
+/// - Excludes `SKILL.md`, `README.md`, `CHANGELOG.md` (case-sensitive exact match).
+/// - Excludes hidden/dotfiles (starting with `.`).
+/// - Sorted by file name.
+/// - Unreadable files log a warning and are skipped.
+pub fn discover_aux_files(dir: &Path) -> Vec<AuxiliaryFile> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+
+    let mut aux_files = Vec::new();
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        // Top-level files only: skip directories entirely (e.g. reviews/, tools/).
+        if !path.is_file() {
+            continue;
+        }
+
+        let Some(file_name) = path.file_name().and_then(|n| n.to_str()) else {
+            continue;
+        };
+
+        // Skip dotfiles.
+        if file_name.starts_with('.') {
+            continue;
+        }
+
+        // Must end with .md
+        if !file_name.ends_with(".md") {
+            continue;
+        }
+
+        // Exclude exact SKILL.md, README.md, CHANGELOG.md
+        if matches!(file_name, "SKILL.md" | "README.md" | "CHANGELOG.md") {
+            continue;
+        }
+
+        match std::fs::read_to_string(&path) {
+            Ok(body) => {
+                aux_files.push(AuxiliaryFile {
+                    name: file_name.to_string(),
+                    body: body.trim().to_string(),
+                });
+            }
+            Err(e) => {
+                tracing::warn!(
+                    "skills: failed to read auxiliary file '{}' at {}: {e}",
+                    file_name,
+                    path.display()
+                );
+            }
+        }
+    }
+
+    aux_files.sort_by(|a, b| a.name.cmp(&b.name));
+    aux_files
 }
 
 /// User skills directory: `~/.opencrabs/skills/`.
@@ -352,7 +426,8 @@ pub fn load_all_skills() -> Vec<Skill> {
                         }
                     };
                     match Skill::parse(name, &raw, SkillSource::User) {
-                        Ok(skill) => {
+                        Ok(mut skill) => {
+                            skill.auxiliary_files = discover_aux_files(&path);
                             by_name.insert(skill.name.clone(), skill);
                         }
                         Err(e) => {
@@ -392,7 +467,8 @@ pub fn load_all_skills() -> Vec<Skill> {
                 }
             };
             match Skill::parse(name, &raw, SkillSource::User) {
-                Ok(skill) => {
+                Ok(mut skill) => {
+                    skill.auxiliary_files = discover_aux_files(&path);
                     by_name.insert(skill.name.clone(), skill);
                 }
                 Err(e) => {
@@ -409,6 +485,157 @@ pub fn load_all_skills() -> Vec<Skill> {
 /// `load_all_skills` (user overlay wins).
 pub fn resolve_skill(name: &str) -> Option<Skill> {
     load_all_skills().into_iter().find(|s| s.name == name)
+}
+
+/// Locate the on-disk file path for a skill (#210).
+/// User skills overlay takes precedence over project skills.
+/// Built-in skills return `None` (they are compiled into the binary).
+pub fn resolve_skill_path(slug: &str) -> Option<PathBuf> {
+    let slug = normalize_skill_slug(slug);
+
+    // 1. User profile overlay: ~/.opencrabs/skills/<name>/SKILL.md
+    let user_path = user_skills_dir().join(&slug).join("SKILL.md");
+    if user_path.is_file() {
+        return Some(user_path);
+    }
+
+    // 2. Project-specific skills: ~/.opencrabs/projects/*/skills/<name>/SKILL.md
+    let projects_dir = crate::services::ProjectService::projects_dir();
+    if let Ok(projects) = std::fs::read_dir(&projects_dir) {
+        for project_entry in projects.flatten() {
+            let skill_path = project_entry
+                .path()
+                .join("skills")
+                .join(&slug)
+                .join("SKILL.md");
+            if skill_path.is_file() {
+                return Some(skill_path);
+            }
+        }
+    }
+
+    None
+}
+
+/// Retrieve the filesystem modification timestamp (`mtime` as unix epoch seconds)
+/// for a skill's on-disk `SKILL.md` file (#210). Returns `None` for built-in or missing skills.
+pub fn skill_file_mtime(slug: &str) -> Option<u64> {
+    let path = resolve_skill_path(slug)?;
+    let metadata = std::fs::metadata(&path).ok()?;
+    let modified = metadata.modified().ok()?;
+    let duration = modified.duration_since(std::time::UNIX_EPOCH).ok()?;
+    Some(duration.as_secs())
+}
+
+/// Parse a skill specification into its parent skill slug and optional
+/// auxiliary file name (e.g. `opencrabs-dev/editor.md` -> (`"opencrabs-dev"`, `Some("editor.md")`)).
+///
+/// Handles leading slash on the slug (`/foo` or `/foo/bar.md`), trims whitespace,
+/// and normalizes the slug with [`normalize_skill_slug`].
+///
+/// ```
+/// # use opencrabs::brain::skills::parse_skill_spec;
+/// assert_eq!(parse_skill_spec("opencrabs-dev"), ("opencrabs-dev".to_string(), None));
+/// assert_eq!(parse_skill_spec("/opencrabs-dev"), ("opencrabs-dev".to_string(), None));
+/// assert_eq!(
+///     parse_skill_spec("opencrabs-dev/editor.md"),
+///     ("opencrabs-dev".to_string(), Some("editor.md".to_string()))
+/// );
+/// assert_eq!(
+///     parse_skill_spec("/opencrabs-dev/fleet-directives.md"),
+///     ("opencrabs-dev".to_string(), Some("fleet-directives.md".to_string()))
+/// );
+/// assert_eq!(
+///     parse_skill_spec("  /opencrabs-dev/editor.md  "),
+///     ("opencrabs-dev".to_string(), Some("editor.md".to_string()))
+/// );
+/// ```
+pub fn parse_skill_spec(raw: &str) -> (String, Option<String>) {
+    let trimmed = raw.trim();
+    let without_leading_slash = trimmed.strip_prefix('/').unwrap_or(trimmed);
+    if let Some((slug, file)) = without_leading_slash.split_once('/') {
+        let clean_slug = normalize_skill_slug(slug);
+        let clean_file = file.trim();
+        if clean_file.is_empty() {
+            (clean_slug, None)
+        } else {
+            (clean_slug, Some(clean_file.to_string()))
+        }
+    } else {
+        (normalize_skill_slug(without_leading_slash), None)
+    }
+}
+
+/// Canonicalise a skill reference to its bare slug (#179).
+///
+/// The leading `/` is the **invocation sigil** — a presentation prefix on the
+/// slash-command surface only, never part of a skill's identity. A skill is
+/// identified by [`Skill::name`] (the Agent Skills standard's `name` field,
+/// which forbids a slash); `slash_name` is *derived* from it for display.
+///
+/// Every ingestion boundary normalises through here, so the in-memory
+/// `active_skills` set and the `session_seen_skills` table stay single-keyed.
+/// Before this existed the slash-command path wrote `/foo` while the manifest
+/// and brain-file paths wrote `foo` — the same skill under two keys, so a
+/// discard of one form left the other behind.
+///
+/// Deliberately minimal: trim, then strip **at most one** leading slash. No
+/// lowercasing — slugs are already lowercase by the standard, and folding case
+/// would silently merge two distinct skills.
+///
+/// ```
+/// # use opencrabs::brain::skills::normalize_skill_slug;
+/// assert_eq!(normalize_skill_slug("opencrabs-dev"), "opencrabs-dev");
+/// assert_eq!(normalize_skill_slug("/opencrabs-dev"), "opencrabs-dev");
+/// assert_eq!(normalize_skill_slug("  /opencrabs-dev  "), "opencrabs-dev");
+/// assert_eq!(normalize_skill_slug("//x"), "/x");
+/// ```
+pub fn normalize_skill_slug(raw: &str) -> String {
+    let trimmed = raw.trim();
+    trimmed.strip_prefix('/').unwrap_or(trimmed).to_string()
+}
+
+/// Build the system-brain fragment that re-injects the bodies of a session's
+/// active skills, so a skill survives compaction (#219).
+///
+/// #179: the match is on the IDENTITY field [`Skill::name`] — the canonical
+/// bare slug — never on [`Skill::slash_name`], which carries the invocation
+/// sigil. The compaction manifest and every non-slash-command ingestion path
+/// key the active set by bare slug, so matching on `slash_name` silently
+/// injected NOTHING for a skill registered in the documented `- <skill-slug>`
+/// form: the manifest said "active", the matcher disagreed, and the failure
+/// was invisible. Extracted from the tool loop so that exact failure mode is
+/// directly testable.
+pub fn active_skill_bodies(
+    active_skills: &std::collections::HashSet<String>,
+    skills: &[Skill],
+    seen_aux: &std::collections::HashMap<String, Vec<String>>,
+) -> String {
+    let mut section = String::new();
+    for skill in skills {
+        if active_skills.contains(&skill.name) {
+            // `prompt_body()` carries the review-gate reminder for flagged
+            // skills so the gate survives compaction too.
+            section.push_str(&format!(
+                "\n\n--- Active Skill: {} ---\n{}",
+                skill.slash_name,
+                skill.prompt_body()
+            ));
+
+            // Reinject consumed auxiliary files (issue #216).
+            if let Some(files) = seen_aux.get(&skill.name) {
+                for file_name in files {
+                    if let Some(aux) = skill.auxiliary_files.iter().find(|a| &a.name == file_name) {
+                        section.push_str(&format!(
+                            "\n\n--- Active Auxiliary: {} ---\n{}",
+                            aux.name, aux.body
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    section
 }
 
 type GlobsCache = std::sync::Mutex<Option<(std::time::Instant, PathBuf, Vec<Skill>)>>;
@@ -445,4 +672,133 @@ pub fn skills_with_globs() -> Vec<Skill> {
         .collect();
     *guard = Some((std::time::Instant::now(), current_home, fresh.clone()));
     fresh
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_skill_spec_extracts_slug_and_aux() {
+        assert_eq!(
+            parse_skill_spec("opencrabs-dev"),
+            ("opencrabs-dev".to_string(), None)
+        );
+        assert_eq!(
+            parse_skill_spec("/opencrabs-dev"),
+            ("opencrabs-dev".to_string(), None)
+        );
+        assert_eq!(
+            parse_skill_spec("  /opencrabs-dev  "),
+            ("opencrabs-dev".to_string(), None)
+        );
+        assert_eq!(
+            parse_skill_spec("opencrabs-dev/editor.md"),
+            ("opencrabs-dev".to_string(), Some("editor.md".to_string()))
+        );
+        assert_eq!(
+            parse_skill_spec("/opencrabs-dev/editor.md"),
+            ("opencrabs-dev".to_string(), Some("editor.md".to_string()))
+        );
+        assert_eq!(
+            parse_skill_spec("  /opencrabs-dev/fleet-directives.md  "),
+            (
+                "opencrabs-dev".to_string(),
+                Some("fleet-directives.md".to_string())
+            )
+        );
+        assert_eq!(
+            parse_skill_spec("opencrabs-dev/"),
+            ("opencrabs-dev".to_string(), None)
+        );
+        assert_eq!(parse_skill_spec(""), ("".to_string(), None));
+    }
+
+    #[test]
+    fn normalize_skill_slug_strips_at_most_one_sigil() {
+        // The bare slug is already canonical — the documented manifest spelling.
+        assert_eq!(normalize_skill_slug("opencrabs-dev"), "opencrabs-dev");
+        // The slash-command spelling normalises onto the same key.
+        assert_eq!(normalize_skill_slug("/opencrabs-dev"), "opencrabs-dev");
+        // Surrounding whitespace from a YAML list item is trimmed.
+        assert_eq!(normalize_skill_slug("  /opencrabs-dev  "), "opencrabs-dev");
+        assert_eq!(normalize_skill_slug("  opencrabs-dev  "), "opencrabs-dev");
+        // Exactly ONE slash is stripped: `//x` is not a sigil plus a slug.
+        // (This is also why normalisation is not idempotent for `//x` —
+        // the second pass strips the slash that survived the first.)
+        assert_eq!(normalize_skill_slug("//x"), "/x");
+        assert_eq!(normalize_skill_slug(&normalize_skill_slug("//x")), "x");
+        // Empty and sigil-only input stay empty — no panic, no invented slug.
+        assert_eq!(normalize_skill_slug(""), "");
+        assert_eq!(normalize_skill_slug("   "), "");
+        assert_eq!(normalize_skill_slug("/"), "");
+    }
+
+    #[test]
+    fn normalize_skill_slug_does_not_fold_case() {
+        // Folding case would silently merge two distinct skills.
+        assert_eq!(normalize_skill_slug("/OpenCrabs-Dev"), "OpenCrabs-Dev");
+    }
+
+    #[test]
+    fn normalize_skill_slug_is_idempotent_for_real_slugs() {
+        // A well-formed reference normalises to a fixed point: applying it
+        // twice equals applying it once. `//x` is excluded on purpose — it is
+        // not a well-formed reference, and the single-strip rule is pinned in
+        // the test above instead.
+        for raw in ["opencrabs-dev", "/opencrabs-dev", "  /x  ", "x", ""] {
+            let once = normalize_skill_slug(raw);
+            assert_eq!(
+                normalize_skill_slug(&once),
+                once,
+                "not idempotent for {raw:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_discover_aux_files_exclusions_and_sorting() {
+        let temp = tempfile::tempdir().expect("tempdir failed");
+        let dir = temp.path();
+
+        // 1. Regular auxiliary files
+        std::fs::write(dir.join("editor.md"), "editor procedure").unwrap();
+        std::fs::write(dir.join("triage.md"), "triage procedure").unwrap();
+        std::fs::write(dir.join("fleet-directives.md"), "fleet directives").unwrap();
+
+        // 2. Excluded files
+        std::fs::write(dir.join("SKILL.md"), "main skill definition").unwrap();
+        std::fs::write(dir.join("README.md"), "readme").unwrap();
+        std::fs::write(dir.join("CHANGELOG.md"), "changelog").unwrap();
+        std::fs::write(dir.join(".hidden.md"), "hidden").unwrap();
+        std::fs::write(dir.join("oc-deploy"), "binary/tool script").unwrap();
+
+        // 3. Subdirectories (should not recurse)
+        let sub = dir.join("reviews");
+        std::fs::create_dir(&sub).unwrap();
+        std::fs::write(sub.join("reviewer-a.md"), "reviewer a").unwrap();
+
+        let aux = discover_aux_files(dir);
+        let names: Vec<String> = aux.into_iter().map(|a| a.name).collect();
+        assert_eq!(
+            names,
+            vec![
+                "editor.md".to_string(),
+                "fleet-directives.md".to_string(),
+                "triage.md".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn resolve_skill_path_and_mtime_nonexistent() {
+        assert_eq!(
+            resolve_skill_path("definitely-nonexistent-skill-slug-xyz"),
+            None
+        );
+        assert_eq!(
+            skill_file_mtime("definitely-nonexistent-skill-slug-xyz"),
+            None
+        );
+    }
 }
