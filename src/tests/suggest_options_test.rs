@@ -6,7 +6,7 @@
 use crate::brain::agent::ProgressEvent;
 use crate::brain::tools::suggest_options::{
     MAX_OPTIONS, RawSuggestionItem, SuggestOptionsTool, SuggestionItem, SuggestionStyle,
-    sanitize_options,
+    first_fold_word, sanitize_options,
 };
 use crate::brain::tools::{Tool, ToolExecutionContext};
 use serde_json::json;
@@ -26,8 +26,9 @@ fn accepts_one_to_max_distinct() {
         1
     );
     // Contract-relative fixture: exactly MAX_OPTIONS distinct options are accepted.
+    // First words must also be distinct (#235 guard) — use unique prefixes.
     let max: Vec<RawSuggestionItem> = (1..=MAX_OPTIONS)
-        .map(|i| RawSuggestionItem::Bare(format!("option {i}")))
+        .map(|i| RawSuggestionItem::Bare(format!("opt{i} choice")))
         .collect();
     assert_eq!(sanitize_options(max).unwrap().len(), MAX_OPTIONS);
 }
@@ -53,8 +54,9 @@ fn rejects_empty_after_trim() {
 #[test]
 fn rejects_over_cap() {
     // Contract-relative fixture: MAX_OPTIONS + 1 must be rejected.
+    // Distinct first words so the cap (not the #235 guard) is what trips.
     let over: Vec<RawSuggestionItem> = (0..=MAX_OPTIONS)
-        .map(|i| RawSuggestionItem::Bare(format!("option {i}")))
+        .map(|i| RawSuggestionItem::Bare(format!("opt{i} choice {i}")))
         .collect();
     assert_eq!(over.len(), MAX_OPTIONS + 1);
     let err = sanitize_options(over).unwrap_err();
@@ -89,7 +91,7 @@ fn single_danger_option_stays_danger() {
 
 #[test]
 fn multiple_unmarked_options_stay_default() {
-    let out = sanitize_options(raw_strs(&["option A", "option B"])).unwrap();
+    let out = sanitize_options(raw_strs(&["Alpha choice", "Beta choice"])).unwrap();
     assert_eq!(out.len(), 2);
     assert_eq!(out[0].style, SuggestionStyle::Default);
     assert_eq!(out[1].style, SuggestionStyle::Default);
@@ -113,6 +115,41 @@ fn polymorphic_mixed_styles() {
     assert_eq!(out[0].style, SuggestionStyle::Default);
     assert_eq!(out[1].style, SuggestionStyle::Primary);
     assert_eq!(out[2].style, SuggestionStyle::Danger);
+}
+
+#[test]
+fn rejects_same_first_word_with_rephrase_nudge() {
+    let err = sanitize_options(raw_strs(&["Run the tests", "Run the deploy"])).unwrap_err();
+    assert!(err.contains("same first word"), "got: {err}");
+    assert!(err.contains("'run'"), "got: {err}");
+    assert!(err.contains("rephrase"), "got: {err}");
+}
+
+#[test]
+fn same_first_word_guard_is_case_insensitive() {
+    let err = sanitize_options(raw_strs(&["Deploy to prod", "deploy to staging"])).unwrap_err();
+    assert!(err.contains("same first word"), "got: {err}");
+}
+
+#[test]
+fn same_first_word_guard_exempts_single_option() {
+    // A solo option renders one `Go!` button — no fold, no collision.
+    let out = sanitize_options(raw_strs(&["Run everything now"])).unwrap();
+    assert_eq!(out.len(), 1);
+    assert_eq!(out[0].style, SuggestionStyle::Primary);
+}
+
+#[test]
+fn distinct_first_words_pass() {
+    let out = sanitize_options(raw_strs(&["Run the tests", "Show the diff"])).unwrap();
+    assert_eq!(out.len(), 2);
+}
+
+#[test]
+fn first_fold_word_strips_punctuation_and_lowercases() {
+    assert_eq!(first_fold_word("Deploy! to prod"), "deploy");
+    assert_eq!(first_fold_word("  \"Cancel\" run"), "cancel");
+    assert_eq!(first_fold_word(""), "");
 }
 
 #[tokio::test]
