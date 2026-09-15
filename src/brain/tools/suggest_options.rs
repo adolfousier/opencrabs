@@ -99,7 +99,7 @@ impl Tool for SuggestOptionsTool {
     }
 
     fn description(&self) -> &str {
-        "Surface up to 8 short option messages for the user to pick from as their next input. CHANNEL-AGNOSTIC interactive UI: tap-to-send buttons under your reply on chat channels (Telegram/Discord/...), a pick-list or gray ghost-text accept in the TUI. You MUST call this tool to make options interactive: writing them as plain text leaves dead text with no button to tap. If this is your final action of the turn, the turn ends with the options pending the user's pick. Use ONE option for an obvious single next step — a one-tap confirm (\"Go\", \"Confirm\", \"Agreed\") is often easier for the user than typing the word, and single-option sets are always legal; 2-8 for distinct next directions. When presenting multiple options, mark your recommended option with style=\"primary\" (or \"danger\" for destructive choices; \"default\" or omitted for neutral options). Start each option with a clear, distinctive action verb or keyword (e.g. \"Deploy to production\", \"Cancel workflow\"): if options exceed button width they collapse into numbered text and the button shows 'N. <FirstWord>'. Each option must be a complete, ready-to-send user message phrased in the user's voice (e.g. \"Add tests for the new endpoint\", not \"I could add tests\"). Keep labels concise: under 20 chars for multi-option sets, under 30 chars for a solo option (longer options collapse into numbered text or confirmation lines). Ask any open questions in your reply text; provide the candidate answers in options. Do NOT also repeat the options in your prose."
+        "Surface up to 8 short option messages for the user to pick from as their next input. CHANNEL-AGNOSTIC interactive UI: tap-to-send buttons under your reply on chat channels (Telegram/Discord/...), a pick-list or gray ghost-text accept in the TUI. You MUST call this tool to make options interactive: writing them as plain text leaves dead text with no button to tap. If this is your final action of the turn, the turn ends with the options pending the user's pick. Use ONE option for an obvious single next step — a one-tap confirm (\"Go\", \"Confirm\", \"Agreed\") is often easier for the user than typing the word, and single-option sets are always legal; 2-8 for distinct next directions. When presenting multiple options, mark your recommended option with style=\"primary\" (or \"danger\" for destructive choices; \"default\" or omitted for neutral options). Start each option with a clear, distinctive action verb or keyword (e.g. \"Deploy to production\", \"Cancel workflow\"): if options exceed button width they collapse into numbered text and the button shows 'N. <FirstWord>'. Each option must be a complete, ready-to-send user message phrased in the user's voice (e.g. \"Add tests for the new endpoint\", not \"I could add tests\"). Keep labels concise: under 20 chars for multi-option sets, under 30 chars for a solo option (longer options collapse into numbered text or confirmation lines). Each option's first word must be distinctive across the set (case-insensitive) — options sharing a first word are refused with a rephrase nudge, because folded buttons show 'N. <FirstWord>' and would collide. Ask any open questions in your reply text; provide the candidate answers in options. Do NOT also repeat the options in your prose."
     }
 
     fn input_schema(&self) -> Value {
@@ -187,7 +187,20 @@ impl Tool for SuggestOptionsTool {
     }
 }
 
-/// Trim, drop empties, enforce the 1..=MAX distinct contract, and apply
+/// First fold-tier word of a label: the token the `N. <FirstWord>` folded
+/// button shows. Lowercased and stripped of surrounding punctuation so
+/// `Run` vs `run,` still collide.
+pub(crate) fn first_fold_word(label: &str) -> String {
+    label
+        .split_whitespace()
+        .next()
+        .unwrap_or_default()
+        .trim_matches(|c: char| !c.is_alphanumeric())
+        .to_lowercase()
+}
+
+/// Trim, drop empties, enforce the 1..=MAX distinct contract, refuse
+/// same-first-word sets (folded buttons would collide), and apply
 /// single-option promotion rules:
 /// - A single unmarked option (`SuggestionStyle::Default`) is promoted to `SuggestionStyle::Primary`.
 /// - A single option explicitly marked `SuggestionStyle::Danger` stays `Danger`.
@@ -233,6 +246,29 @@ pub(crate) fn sanitize_options(
                 });
                 break;
             }
+        }
+    }
+
+    // Same-first-word guard (owner order 2026-09-15, #235): n>=2 with two
+    // options sharing the first fold word would render colliding `N. <FirstWord>`
+    // buttons (e.g. `1. Run` / `2. Run`). Refuse with a rephrase nudge so the
+    // model restarts each option with a distinctive verb. Single-option sets
+    // are exempt (they render one `Go!` button, no fold).
+    if items.len() >= 2 {
+        use std::collections::HashMap;
+        let mut seen: HashMap<String, &str> = HashMap::new();
+        for item in &items {
+            let key = first_fold_word(&item.label);
+            if key.is_empty() {
+                continue;
+            }
+            if let Some(prev) = seen.get(&key) {
+                return Err(format!(
+                    "Options share the same first word '{key}' ('{prev}' vs '{}'). Folded buttons show 'N. <FirstWord>', so they would collide — rephrase so each option starts with a distinctive action verb or keyword.",
+                    item.label
+                ));
+            }
+            seen.insert(key, item.label.as_str());
         }
     }
 
