@@ -1649,13 +1649,11 @@ pub(crate) fn short_session_id(uuid: Uuid) -> String {
 }
 
 /// How recently (seconds) a Telegram-bound session must have been active to
-/// appear in the boot-time wake log (#1227).
+/// appear in the boot-time wake log (#1227, #244).
 ///
-/// Kept short on purpose: a back-to-back dev restart (the recurring case on
-/// the ops box, 10+/day) must not flood the log with every recently-active
-/// session each time. Only sessions that touched their topic inside this
-/// window are recorded.
-pub const WAKE_RECENT_SECS: i64 = 600;
+/// Window for recently active session recovery pass (60 minutes / 3600 seconds, #244).
+/// Captures sessions across longer CI cycles, tool intervals, and daemon restarts.
+pub const WAKE_RECENT_SECS: i64 = 3600;
 
 /// Log every Telegram-bound session that was active shortly before boot but
 /// is not currently being resumed, so the stranded set is auditable (#1227).

@@ -458,6 +458,15 @@ impl PlanDocument {
                 .all(|t| matches!(t.status, TaskStatus::Completed | TaskStatus::Skipped))
     }
 
+    /// Check if the plan is currently Active with pending or incomplete tasks (#244).
+    /// Returns false if the plan is in Editing status, pre-init editing, empty, or already complete.
+    pub fn is_active_incomplete(&self) -> bool {
+        self.status == PlanStatus::Active
+            && !self.pre_init_editing
+            && !self.tasks.is_empty()
+            && !self.is_complete()
+    }
+
     /// If the plan is finished except for a single trailing `Pending` task,
     /// complete it (#737). The model tends to leave the last "deliver the
     /// result" step unchecked precisely because delivering the answer IS that
