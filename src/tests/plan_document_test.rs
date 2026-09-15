@@ -268,3 +268,28 @@ fn trailing_delivery_skips_a_failed_last_task() {
         "a failed last task is a real gap, not a delivery step"
     );
 }
+
+#[test]
+fn plan_document_is_active_incomplete_lifecycle() {
+    let mut plan = PlanDocument::new(Uuid::new_v4(), "Recovery Test".to_string());
+    // Initial state: Editing, empty -> false
+    assert!(!plan.is_active_incomplete());
+
+    // Editing with tasks -> false
+    plan.add_task(task(1));
+    assert!(!plan.is_active_incomplete());
+
+    // Active with pending task -> true (#244)
+    plan.status = PlanStatus::Active;
+    assert!(plan.is_active_incomplete());
+
+    // Active with pre_init_editing flag -> false
+    plan.pre_init_editing = true;
+    assert!(!plan.is_active_incomplete());
+    plan.pre_init_editing = false;
+    assert!(plan.is_active_incomplete());
+
+    // Active with completed task -> false (is_complete() is true)
+    plan.tasks[0].complete(None);
+    assert!(!plan.is_active_incomplete());
+}
