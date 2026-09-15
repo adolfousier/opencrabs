@@ -359,6 +359,7 @@ pub mod project_runner_test;
 pub mod provider_matches_session_test;
 pub mod provider_models_isolation_test;
 pub mod provider_spec_test;
+pub mod provider_streaming_perf_test;
 pub mod queued_message_join_test;
 pub mod ralph_loop_config_test;
 pub mod ralph_receipt_binding_test;

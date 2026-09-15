@@ -2658,6 +2658,10 @@ impl OpenAIProvider {
         // Captured before `request.messages` is consumed below, so the
         // reasoning-echo telemetry (#830) can name the model.
         let request_model_for_log = request.model.clone();
+        let total_request_messages = request.messages.len();
+        let mut total_thinking_blocks: usize = 0;
+        let mut total_reasoning_chars: usize = 0;
+        let mut messages_with_reasoning: usize = 0;
         let mut messages = Vec::new();
 
         // Debug: log system brain
@@ -2830,21 +2834,13 @@ impl OpenAIProvider {
                     None
                 };
 
-                // #830: the `thinking` DB column has not been written since
-                // 2026-05-14 (reasoning now lives as `<!-- reasoning -->`
-                // markers inside `content`), so `thinking_parts` is expected
-                // to be empty on every resumed turn. On a model with
-                // preserve_thinking that is a contract violation, and this
-                // path emitted no telemetry at all, leaving the claim
-                // unmeasurable. One line, no behaviour change.
-                tracing::debug!(
-                    target: "reasoning_echo",
-                    model = %request_model_for_log,
-                    thinking_blocks = thinking_parts.len(),
-                    reasoning_chars = reasoning_content.as_deref().map(str::len).unwrap_or(0),
-                    echoed = reasoning_content.is_some(),
-                    "assistant tool_call message: reasoning_content decision"
-                );
+                // #830 & #245: accumulate thinking metrics across messages
+                // to emit a single consolidated summary per payload build.
+                total_thinking_blocks += thinking_parts.len();
+                total_reasoning_chars += reasoning_content.as_deref().map(str::len).unwrap_or(0);
+                if reasoning_content.is_some() {
+                    messages_with_reasoning += 1;
+                }
 
                 messages.push(OpenAIMessage {
                     role: role.to_string(),
@@ -2880,6 +2876,14 @@ impl OpenAIProvider {
                     None
                 };
 
+                if role == "assistant" {
+                    total_thinking_blocks += thinking_parts.len();
+                    total_reasoning_chars += reasoning_content.as_deref().map(str::len).unwrap_or(0);
+                    if reasoning_content.is_some() {
+                        messages_with_reasoning += 1;
+                    }
+                }
+
                 messages.push(OpenAIMessage {
                     role: role.to_string(),
                     content: Some(content_val),
@@ -2889,6 +2893,16 @@ impl OpenAIProvider {
                 });
             }
         }
+
+        tracing::debug!(
+            target: "reasoning_echo",
+            model = %request_model_for_log,
+            message_count = total_request_messages,
+            thinking_blocks = total_thinking_blocks,
+            reasoning_chars = total_reasoning_chars,
+            echoed_messages = messages_with_reasoning,
+            "payload build: reasoning_content summary"
+        );
 
         // Convert tools to OpenAI format
         let tools: Option<Vec<OpenAITool>> = request.tools.map(|tools| {
@@ -4025,7 +4039,7 @@ impl Provider for OpenAIProvider {
                                     // breaks (`\n\n` before a tool call) and the log writer does NOT
                                     // escape embedded newlines — a raw tail splits the log line and
                                     // orphans every field after it (caught in post-swap smoke).
-                                    let reconc_tail: String = st.response_text_accum.chars().rev().take(60).collect::<String>().chars().rev().collect::<String>().replace('\n', "\\n").replace('\r', "\\r");
+                                    let reconc_tail: String = extract_sanitized_tail(&st.response_text_accum, 60);
                                     let stop_source = if st.saw_finish_reason { "provider" } else { "default" };
                                     tracing::info!(
                                         "[STREAM_RECONCILE] text_chars={}, text_deltas={}, reasoning_chars={}, reasoning_deltas={}, saw_finish_reason={}, stop_reason={:?}, stop_source={}, usage_input={}, usage_output=0, usage_reasoning=0, text_tail={}",
@@ -4218,10 +4232,10 @@ impl Provider for OpenAIProvider {
                                                     }
                                                 }
 
-                                                tracing::debug!(
+                                                tracing::trace!(
                                                     "[TOOL_ACCUM] idx={}, id={}, name={}, args_len={}, args_tail={}",
                                                     idx, accum.id, accum.name, accum.arguments.len(),
-                                                    accum.arguments.chars().rev().take(60).collect::<String>().chars().rev().collect::<String>()
+                                                    extract_sanitized_tail(&accum.arguments, 60)
                                                 );
                                             }
                                         }
@@ -4503,13 +4517,13 @@ impl Provider for OpenAIProvider {
                                                     st.response_text_accum.push_str(&display_text);
                                                     st.text_delta_count += 1;
                                                     st.text_chars += display_text.chars().count();
-                                                    tracing::debug!(
+                                                    tracing::trace!(
                                                         "[TEXT_ACCUM] text_len={}, text_delta_count={}, text_tail={}",
                                                         st.text_chars,
                                                         st.text_delta_count,
                                                         // Sanitized: raw tails carry embedded newlines
                                                         // that split log lines (see STREAM_RECONCILE note).
-                                                        st.response_text_accum.chars().rev().take(60).collect::<String>().chars().rev().collect::<String>().replace('\n', "\\n").replace('\r', "\\r")
+                                                        extract_sanitized_tail(&st.response_text_accum, 60)
                                                     );
                                                     events.push(Ok(StreamEvent::ContentBlockDelta {
                                                         index: 0,
@@ -4618,13 +4632,13 @@ impl Provider for OpenAIProvider {
                                                     st.response_text_accum.push_str(&filtered);
                                                     st.text_delta_count += 1;
                                                     st.text_chars += filtered.chars().count();
-                                                    tracing::debug!(
+                                                    tracing::trace!(
                                                         "[TEXT_ACCUM] text_len={}, text_delta_count={}, text_tail={}",
                                                         st.text_chars,
                                                         st.text_delta_count,
                                                         // Sanitized: raw tails carry embedded newlines
                                                         // that split log lines (see STREAM_RECONCILE note).
-                                                        st.response_text_accum.chars().rev().take(60).collect::<String>().chars().rev().collect::<String>().replace('\n', "\\n").replace('\r', "\\r")
+                                                        extract_sanitized_tail(&st.response_text_accum, 60)
                                                     );
                                                     events.push(Ok(StreamEvent::ContentBlockDelta {
                                                         index: 0,
@@ -4725,7 +4739,7 @@ impl Provider for OpenAIProvider {
                                             // If this chunk already carries real usage (some
                                             // providers inline it), emit immediately + stop.
                                             if raw_input > 0 || raw_output > 0 {
-                                                let reconc_tail: String = st.response_text_accum.chars().rev().take(60).collect::<String>().chars().rev().collect::<String>().replace('\n', "\\n").replace('\r', "\\r");
+                                                let reconc_tail: String = extract_sanitized_tail(&st.response_text_accum, 60);
                                                 let stop_source = if st.saw_finish_reason { "provider" } else { "default" };
                                                 tracing::info!(
                                                     "[STREAM_RECONCILE] text_chars={}, text_deltas={}, reasoning_chars={}, reasoning_deltas={}, saw_finish_reason={}, stop_reason={:?}, stop_source={}, usage_input={}, usage_output={}, usage_reasoning={}, text_tail={}",
@@ -4787,7 +4801,7 @@ impl Provider for OpenAIProvider {
                                                     let final_stop_reason = st.pending_stop_reason.take().unwrap_or(
                                                         crate::brain::provider::types::StopReason::EndTurn,
                                                     );
-                                                    let reconc_tail: String = st.response_text_accum.chars().rev().take(60).collect::<String>().chars().rev().collect::<String>().replace('\n', "\\n").replace('\r', "\\r");
+                                                    let reconc_tail: String = extract_sanitized_tail(&st.response_text_accum, 60);
                                                     let stop_source = if st.saw_finish_reason { "provider" } else { "default" };
                                                     tracing::info!(
                                                         "[STREAM_RECONCILE] text_chars={}, text_deltas={}, reasoning_chars={}, reasoning_deltas={}, saw_finish_reason={}, stop_reason={:?}, stop_source={}, usage_input={}, usage_output={}, usage_reasoning={}, text_tail={}",
@@ -5410,6 +5424,28 @@ pub(crate) fn unwrap_proxy_error(outer: &OpenAIError) -> (String, Option<String>
             .clone()
             .or_else(|| outer.error_type.clone()),
     )
+}
+
+/// Extracts up to `max_chars` characters from the tail of `text` and sanitizes
+/// newlines (`\n` -> `\n`, `\r` -> `\r`) in a single pass without intermediate string allocations.
+pub(crate) fn extract_sanitized_tail(text: &str, max_chars: usize) -> String {
+    if text.is_empty() || max_chars == 0 {
+        return String::new();
+    }
+    let byte_offset = match text.char_indices().rev().take(max_chars).last() {
+        Some((idx, _)) => idx,
+        None => 0,
+    };
+    let tail_slice = &text[byte_offset..];
+    let mut out = String::with_capacity(tail_slice.len());
+    for c in tail_slice.chars() {
+        match c {
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            other => out.push(other),
+        }
+    }
+    out
 }
 
 /// Pydantic / FastAPI default 422 body shape. Used by Unsloth Studio and
