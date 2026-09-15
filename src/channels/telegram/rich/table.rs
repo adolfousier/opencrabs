@@ -208,19 +208,116 @@ fn parse_alignment(sep: &str, cols: usize) -> Vec<Align> {
 }
 
 /// Single canonical table-normalization entry for the rich plane (#132):
-/// expand collapsed one-line tables first (so [`try_parse`] can see them),
-/// then insert the blank line Telegram's rich parser demands before a table
-/// block (#95). Every rich-build entry point and the structure-detection gate
-/// call THIS — never the two passes individually — so gate and renderer always
-/// agree on the same text and a new send path inherits both fixes (#690,
-/// #980, #1085 whack-a-mole retired). Both passes are idempotent and
-/// fence-safe; pipe-free input returns unchanged.
+/// balance unclosed / runaway code fences (#240), expand collapsed one-line
+/// tables first (so [`try_parse`] can see them), then insert the blank line
+/// Telegram's rich parser demands before a table block (#95). Every rich-build
+/// entry point and the structure-detection gate call THIS — never the passes
+/// individually — so gate and renderer always agree on the same text and a new
+/// send path inherits all fixes (#690, #980, #1085 whack-a-mole retired). All
+/// passes are idempotent and fence-safe; pipe-free input returns unchanged.
 ///
 /// Also shields bare leading hashes (e.g. `#174`) so Telegram's rich parser
 /// doesn't promote them into headings without CommonMark's required trailing space (#193).
 pub(crate) fn normalize_tables(text: &str) -> String {
-    let shielded = shield_bare_leading_hashes(text);
+    let balanced = balance_code_fences(text);
+    let shielded = shield_bare_leading_hashes(&balanced);
     ensure_blank_line_before_tables(&reflow_collapsed_tables(&shielded))
+}
+
+/// Balance unclosed or runaway code fences in markdown text (#240).
+///
+/// LLM responses occasionally emit an odd number of ```` ``` ```` or `~~~` delimiters,
+/// or an unclosed bare code fence immediately preceding top-level Markdown structure
+/// (such as section headings `## ` or tables `|---|`). Without balancing, Telegram's
+/// server-side parser and the local fallback parser swallow all subsequent text into
+/// a giant monospaced code block.
+///
+/// Rules:
+/// 1. Track open code fence delimiter (`'` or `~`) and minimum run length (>=3).
+/// 2. For bare/unlabeled code fences (no language tag), if a top-level ATX heading
+///    (e.g. `## `) or GFM table separator row (`|---|`) is encountered while `in_fence`
+///    is true, the runaway fence is closed immediately prior to that line. Explicitly
+///    labeled fences (e.g. ` ```rust `, ` ```python `) remain open across `#` comments.
+/// 3. If a code fence remains unclosed at EOF, automatically append the matching closing
+///    delimiter on its own line.
+pub(crate) fn balance_code_fences(text: &str) -> String {
+    if !text.contains("```") && !text.contains("~~~") {
+        return text.to_string();
+    }
+
+    let mut out: Vec<String> = Vec::new();
+    let mut in_fence = false;
+    let mut fence_char = ' ';
+    let mut fence_len = 0;
+    let mut fence_has_lang = false;
+
+    let lines: Vec<&str> = text.split('\n').collect();
+    let mut i = 0;
+
+    while i < lines.len() {
+        let line = lines[i];
+        let trimmed = line.trim_start();
+
+        if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
+            let ch = trimmed.chars().next().unwrap();
+            let count = trimmed.chars().take_while(|&c| c == ch).count();
+            if count >= 3 {
+                let rest = trimmed[count..].trim();
+                let has_backtick_in_info = ch == '`' && rest.contains('`');
+
+                if !has_backtick_in_info {
+                    if !in_fence {
+                        in_fence = true;
+                        fence_char = ch;
+                        fence_len = count;
+                        fence_has_lang = !rest.is_empty();
+                        out.push(line.to_string());
+                        i += 1;
+                        continue;
+                    } else if ch == fence_char && count >= fence_len && rest.is_empty() {
+                        in_fence = false;
+                        fence_has_lang = false;
+                        out.push(line.to_string());
+                        i += 1;
+                        continue;
+                    }
+                }
+            }
+        }
+
+        // Check for runaway bare fence: if inside an unlabeled fence and we hit a top-level
+        // ATX heading or a GFM table delimiter row, close the fence early before this line.
+        if in_fence && !fence_has_lang {
+            let is_heading = trimmed.starts_with('#') && super::detect::is_atx_heading(trimmed);
+            let is_table_sep = is_separator(trimmed);
+            let is_table_start = if i + 1 < lines.len() {
+                looks_like_row(trimmed) && is_separator(lines[i + 1].trim_start())
+            } else {
+                false
+            };
+
+            if is_heading || is_table_sep || is_table_start {
+                out.push(fence_char.to_string().repeat(fence_len));
+                in_fence = false;
+                out.push(line.to_string());
+                i += 1;
+                continue;
+            }
+        }
+
+        out.push(line.to_string());
+        i += 1;
+    }
+
+    if in_fence {
+        out.push(fence_char.to_string().repeat(fence_len));
+    }
+
+    let mut result = out.join("\n");
+    if text.ends_with('\n') && !result.ends_with('\n') {
+        result.push('\n');
+    }
+    result
 }
 
 /// Escape bare leading `#` (not followed by space, or not a valid ATX heading)
