@@ -595,6 +595,37 @@ fn flow_header_live_and_settled_formats() {
         ),
         "⚙️ **Reading logs** • _3 tool calls_ • _45s_"
     );
+    // Live header with completed/failed tool status glyphs strips the glyph
+    // so in-flight turns keep the ⚙️ gear and do NOT present bare ✅ / ❌.
+    assert_eq!(
+        flow_header_text(
+            55,
+            &FlowHeader::Live(Some("3:14")),
+            Some("✅ glob reviews/20260915-c14/**"),
+            HeaderMarkup::Markdown
+        ),
+        "⚙️ **glob reviews/20260915-c14/** • _55 tool calls_ • _3:14_"
+    );
+    assert_eq!(
+        flow_header_text(
+            55,
+            &FlowHeader::Live(Some("3:14")),
+            Some("❌ read_file missing.md"),
+            HeaderMarkup::Html
+        ),
+        "⚙️ <b>read_file missing.md</b> • <i>55 tool calls</i> • <i>3:14</i>"
+    );
+    // Live header with genuine system status icons (like ⏳ compaction) keeps
+    // the icon bare and drops the standing gear.
+    assert_eq!(
+        flow_header_text(
+            2,
+            &FlowHeader::Live(Some("10s")),
+            Some("⏳ Compacting context…"),
+            HeaderMarkup::Html
+        ),
+        "<b>⏳ Compacting context…</b> • <i>2 tool calls</i> • <i>10s</i>"
+    );
     // Settled: outcome verb, count-in-parens, duration, fully bold; count clause
     // dropped when no tools ran. The status-message arg is ignored when settled.
     assert_eq!(

@@ -219,9 +219,9 @@ fn live_header_drops_gear_before_icon_status() {
 
 #[test]
 fn live_footer_drops_gear_before_icon_activity() {
-    // Same rule on the footer's activity segment: icon-led activity renders
-    // bare, plain-text activity keeps the running cog (#1052).
-    let icon = merged_footer(
+    // In-flight activity strips tool outcome glyphs (✅/❌) so unsettled turns
+    // maintain the running ⚙️ cog, while system pins like ⏳ remain bare (#1052).
+    let tool_done = merged_footer(
         &FooterParts {
             outcome: None,
             plan_state: None,
@@ -235,7 +235,22 @@ fn live_footer_drops_gear_before_icon_activity() {
         },
         HeaderMarkup::Markdown,
     );
-    assert_eq!(icon, "✅ bash git status • 1 tool calls • ⏱ 0:00");
+    assert_eq!(tool_done, "⚙️ bash git status • 1 tool calls • ⏱ 0:00");
+    let icon = merged_footer(
+        &FooterParts {
+            outcome: None,
+            plan_state: None,
+            working_on: None,
+            activity: Some("⏳ Compacting context…"),
+            tool_count: 1,
+            has_log: true,
+            ctx: None,
+            elapsed_secs: 0,
+            bg: None,
+        },
+        HeaderMarkup::Markdown,
+    );
+    assert_eq!(icon, "⏳ Compacting context… • 1 tool calls • ⏱ 0:00");
     let plain = merged_footer(
         &FooterParts {
             outcome: None,

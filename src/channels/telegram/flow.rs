@@ -941,12 +941,22 @@ impl HeaderMarkup {
     }
 }
 
+/// Strip leading tool status glyphs (running gear `⚙️`, completed check `✅`/`✓`/`✔`,
+/// or failed cross `❌`/`✗`/`✖` and variation selectors) and any following whitespace
+/// from a status message, so live headers/footers do not render bare tool completion
+/// icons or double gears on unsettled turns. Text starting with genuine status icons
+/// like `⏳` (compaction) is preserved.
+pub(crate) fn strip_leading_tool_status_icons(s: &str) -> &str {
+    s.trim_start_matches(['⚙', '✅', '❌', '✓', '✔', '✗', '✖', '\u{fe0f}', '\u{fe0e}'])
+        .trim_start()
+}
+
 /// Strip a leading running-gear (`⚙️`, base `⚙` plus its optional variation
 /// selector) and any following whitespace from a status message, so the live
 /// header's own gear is never doubled when the status is the bare-tool fallback
 /// (#509 follow-up). Text that does not start with a gear is returned unchanged.
 fn strip_leading_gear(s: &str) -> &str {
-    s.trim_start_matches(['⚙', '\u{fe0f}']).trim_start()
+    strip_leading_tool_status_icons(s)
 }
 
 /// True when `s` starts with an icon glyph (emoji / symbol / dingbat) rather

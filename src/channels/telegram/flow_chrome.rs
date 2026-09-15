@@ -10,7 +10,7 @@
 
 use super::flow::{
     COMPACTING_HEADER_TEXT, HeaderMarkup, StreamingState, humanize_duration, open_flow,
-    refresh_flow, starts_with_icon,
+    refresh_flow, starts_with_icon, strip_leading_tool_status_icons,
 };
 use super::handler::escape_html;
 use crate::brain::agent::AgentService;
@@ -364,12 +364,13 @@ pub(crate) fn merged_footer(parts: &FooterParts, markup: HeaderMarkup) -> String
         if parts.has_log
             && let Some(act) = parts.activity
         {
-            let act = act.trim_start_matches(['⚙', '\u{fe0f}']).trim_start();
+            let act = strip_leading_tool_status_icons(act);
             if !act.is_empty() {
                 // Gear is dropped when the activity already leads with its own
-                // icon (#29 fix round, owner directive): `✅ bash git status`
-                // and the `⏳ Compacting context — 66% full…` body entry render
-                // bare. Plain-text activity keeps the running cog.
+                // icon (#29 fix round, owner directive): the
+                // `⏳ Compacting context — 66% full…` body entry renders bare.
+                // Tool status icons (✅/❌) are stripped so in-flight activity
+                // maintains the running ⚙️ cog and never bare ✅/❌.
                 live_activity = if starts_with_icon(act) {
                     esc(act)
                 } else {
