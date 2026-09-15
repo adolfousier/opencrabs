@@ -1323,6 +1323,24 @@ pub(crate) async fn handle_message(
                     "[SYSTEM: Compact context now. Summarize this conversation for continuity.]"
                         .to_string();
             }
+            ChannelCommand::ClearContext => {
+                // No agent turn: the marker row is the whole operation (#1585).
+                let reply = match agent.clear_context(session_id).await {
+                    Ok(receipt) => receipt.user_line(),
+                    Err(e) => {
+                        tracing::error!("/clear failed: {e}");
+                        format!("/clear did nothing, the context is unchanged: {e}")
+                    }
+                };
+                let status = waproto::whatsapp::Message {
+                    conversation: Some(reply),
+                    ..Default::default()
+                };
+                if let Err(e) = client.send_message(reply_target.clone(), status).await {
+                    tracing::warn!(error = %e, "failed to send WhatsApp clear receipt");
+                }
+                return;
+            }
             ChannelCommand::UserPrompt(prompt) => {
                 content = prompt;
                 // fall through to agent with the prompt as the message

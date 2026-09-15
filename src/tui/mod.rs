@@ -3,6 +3,7 @@
 //! Provides an interactive terminal interface for the AI orchestration agent using Ratatui.
 
 pub mod app;
+pub(crate) mod clear_notice;
 pub(crate) mod compact_notice;
 pub mod error;
 pub mod events;

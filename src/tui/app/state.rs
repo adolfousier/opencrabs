@@ -152,6 +152,10 @@ pub const SLASH_COMMANDS: &[SlashCommand] = &[
         description: "Compact context now",
     },
     SlashCommand {
+        name: "/clear",
+        description: "Clear context here at no cost; history and title stay",
+    },
+    SlashCommand {
         name: "/theme",
         description: "List / set / reset the TUI color theme (/theme set dracula)",
     },

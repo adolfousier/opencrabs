@@ -421,6 +421,19 @@ pub(crate) async fn handle_channel_command(
                     .to_string();
                 // fall through to agent
             }
+            ChannelCommand::ClearContext => {
+                // No agent turn: the marker row is the whole operation (#1585).
+                let reply = match agent.clear_context(session_id).await {
+                    Ok(receipt) => receipt.user_line(),
+                    Err(e) => {
+                        tracing::error!("/clear failed: {e}");
+                        format!("/clear did nothing, the context is unchanged: {e}")
+                    }
+                };
+                super::ephemeral::send_ack(bot, msg.chat.id, thread_id, ephemeral_rx, &reply)
+                    .await?;
+                return Ok(CommandOutcome::Handled);
+            }
             ChannelCommand::ExecutePlan => {
                 // Approve and /execute are FORBIDDEN while a turn is
                 // running: refuse immediately, never queue (locked).

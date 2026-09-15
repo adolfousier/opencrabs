@@ -167,6 +167,7 @@ pub mod chat_expand_anchor_test;
 pub mod chat_fold_deliverable_test;
 pub mod chunk_hash_cache_test;
 pub mod claude_cli_model_test;
+pub mod clear_context_test;
 pub mod cli_agent_session_resume_test;
 pub mod cli_arg_too_long_test;
 pub mod cli_context_rows_stripped_test;

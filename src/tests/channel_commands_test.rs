@@ -151,6 +151,7 @@ fn make_cmd(name: &str, action: &str, prompt: &str) -> UserCommand {
 fn variant_name(cmd: &ChannelCommand) -> &'static str {
     match cmd {
         ChannelCommand::Compact => "Compact",
+        ChannelCommand::ClearContext => "ClearContext",
         ChannelCommand::Help(_) => "Help",
         ChannelCommand::Usage(_) => "Usage",
         ChannelCommand::MissionControl(_) => "MissionControl",

@@ -1485,6 +1485,26 @@ async fn handle_message(
                     "[SYSTEM: Compact context now. Summarize this conversation for continuity.]"
                         .to_string();
             }
+            ChannelCommand::ClearContext => {
+                // No agent turn: the marker row is the whole operation (#1585).
+                let reply = match state.agent.clear_context(session_id).await {
+                    Ok(receipt) => receipt.user_line(),
+                    Err(e) => {
+                        tracing::error!("/clear failed: {e}");
+                        format!("/clear did nothing, the context is unchanged: {e}")
+                    }
+                };
+                let token = SlackApiToken::new(SlackApiTokenValue::from(state.current_bot_token()));
+                let session = client.open_session(&token);
+                let request = SlackApiChatPostMessageRequest::new(
+                    SlackChannelId::new(channel_id.clone()),
+                    SlackMessageContent::new().with_text(reply),
+                );
+                if let Err(e) = session.chat_post_message(&request).await {
+                    tracing::warn!(error = %e, "failed to post Slack clear receipt");
+                }
+                return;
+            }
             ChannelCommand::UserPrompt(prompt) => {
                 content = prompt;
                 // fall through to agent with the prompt as the message

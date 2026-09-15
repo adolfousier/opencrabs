@@ -909,6 +909,32 @@ impl App {
                 }
                 true
             }
+            "/clear" => {
+                // Cut the agent's context here at no cost (#1585). History
+                // stays on screen; the footer drops to the baseline a new
+                // session starts at.
+                if self.is_processing {
+                    self.push_system_message(crate::tui::clear_notice::busy());
+                    return true;
+                }
+                let Some(session_id) = self.current_session.as_ref().map(|s| s.id) else {
+                    self.push_system_message(crate::tui::clear_notice::no_session());
+                    return true;
+                };
+                match self.agent_service.clear_context(session_id).await {
+                    Ok(receipt) => {
+                        let base = self.agent_service.base_context_tokens();
+                        self.session_input_tokens.insert(session_id, base);
+                        self.last_input_tokens = Some(base);
+                        self.push_system_message(crate::tui::clear_notice::cleared(&receipt));
+                    }
+                    Err(e) => {
+                        tracing::error!("/clear failed: {e}");
+                        self.error_message = Some(crate::tui::clear_notice::failed(&e));
+                    }
+                }
+                true
+            }
             "/theme" => {
                 use crate::tui::render::presets;
                 use crate::tui::render::theme;

@@ -88,11 +88,13 @@ impl CompactionNotifier {
         if !self.reports(&step) {
             return;
         }
-        (self.callback)(
-            self.session_id,
-            ProgressEvent::SelfHealingAlert {
-                message: describe(&step),
-            },
-        );
+        // A person watching a manual compaction die gets the way out with
+        // the news (#1585); an automatic one is not theirs to redo.
+        let message = if self.verbose && matches!(step, CompactionStep::Failed { .. }) {
+            format!("{} {}", describe(&step), super::clear::CLEAR_HINT)
+        } else {
+            describe(&step)
+        };
+        (self.callback)(self.session_id, ProgressEvent::SelfHealingAlert { message });
     }
 }

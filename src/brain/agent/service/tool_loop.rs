@@ -1345,8 +1345,9 @@ impl AgentService {
                          - The AI provider returned an error\n\
                          - The database is locked or inaccessible\n\n\
                          Try again, or continue the conversation normally — \
-                         auto-compaction will trigger at 65% context usage.",
-                        e
+                         auto-compaction will trigger at 65% context usage.\n\n{}",
+                        e,
+                        super::clear::CLEAR_HINT
                     );
                     message_service
                         .append_content(assistant_db_msg.id, &error_msg)

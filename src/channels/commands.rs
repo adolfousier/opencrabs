@@ -219,6 +219,9 @@ pub enum ChannelCommand {
     Stop,
     /// `/compact` — trigger context compaction via the agent
     Compact,
+    /// `/clear` — cut the agent's context here without a summariser call;
+    /// history, session id and title stay (#1585)
+    ClearContext,
     /// `/doctor` — health check (no LLM needed)
     Doctor,
     /// `/evolve` — check for updates and install directly (no LLM needed)
@@ -410,6 +413,13 @@ pub async fn handle_command(
                 ChannelCommand::UnknownCommand("🔒 Owner-only command.".to_string())
             } else {
                 ChannelCommand::Compact
+            }
+        }
+        "/clear" => {
+            if !is_owner {
+                ChannelCommand::UnknownCommand("🔒 Owner-only command.".to_string())
+            } else {
+                ChannelCommand::ClearContext
             }
         }
         "/doctor" => {
@@ -711,6 +721,8 @@ pub async fn handle_command(
         ChannelCommand::Restart
         | ChannelCommand::Exit
         | ChannelCommand::Compact
+        // The channel handler writes the marker and replies with the receipt.
+        | ChannelCommand::ClearContext
         | ChannelCommand::UserPrompt(_)
         | ChannelCommand::PlanModeWithQuery(_)
         | ChannelCommand::NotACommand
@@ -880,6 +892,10 @@ pub(crate) fn format_help() -> String {
             "Switch between sessions (`/sessions:<query>` to filter)",
         ),
         ("/stop", "Abort current operation"),
+        (
+            "/clear",
+            "Clear context here at no cost; history and title stay",
+        ),
         ("/compact", "Compact context (summarize & trim)"),
         (
             "/cowork",
