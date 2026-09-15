@@ -2069,14 +2069,15 @@ impl TelegramAgent {
             });
 
             // #1155 lifecycle coverage: the bot's OWN membership status changed
-            // (kicked, left, promoted, restricted). Nothing to serve here — the
-            // value is (a) visibility in logs and (b) cache hygiene: a kicked
-            // bot forgets the solo-owner evaluation so a re-add re-evaluates
-            // fresh instead of trusting a stale decision.
+            // (kicked, left, promoted, restricted). Clear the solo-owner evaluation
+            // cache and, if joined or promoted in a group/forum, trigger auto-registration
+            // immediately without waiting for user message traffic.
             let my_chat_member_handler = Update::filter_my_chat_member().endpoint({
                 let deps = deps.clone();
+                let bot = bot.clone();
                 move |update: teloxide::types::ChatMemberUpdated| {
                     let deps = deps.clone();
+                    let bot = bot.clone();
                     async move {
                         let chat_id = update.chat.id.0;
                         let new_status = update.new_chat_member.status();
@@ -2084,6 +2085,27 @@ impl TelegramAgent {
                             "Telegram: my membership in chat {chat_id} changed to {new_status:?}"
                         );
                         deps.telegram_state.clear_solo_evaluated(chat_id).await;
+
+                        use teloxide::types::ChatMemberStatus;
+                        if !update.chat.is_private()
+                            && matches!(
+                                new_status,
+                                ChatMemberStatus::Member
+                                    | ChatMemberStatus::Administrator
+                                    | ChatMemberStatus::Owner
+                            )
+                        {
+                            let bot = bot.clone();
+                            let cfg = deps.config_rx.borrow().clone();
+                            let state = deps.telegram_state.clone();
+                            tokio::spawn(async move {
+                                super::menu_auto::maybe_auto_register(
+                                    &bot, chat_id, &cfg, &state,
+                                )
+                                .await;
+                            });
+                        }
+
                         ResponseResult::Ok(())
                     }
                 }
@@ -2233,6 +2255,19 @@ fn spawn_handle_message(bot: Bot, msg: Message, deps: DispatchDeps) {
             let state = deps.telegram_state.clone();
             tokio::spawn(async move {
                 super::menu_refresh::refresh_menus_if_skills_changed(&bot, &state).await;
+            });
+        }
+        // If an inbound message arrives from a non-private chat that has not yet
+        // been evaluated for auto-menu registration, evaluate in the background.
+        if !msg.chat.is_private() {
+            let chat_id = msg.chat.id.0;
+            let state = deps.telegram_state.clone();
+            let bot = bot.clone();
+            let cfg = deps.config_rx.borrow().clone();
+            tokio::spawn(async move {
+                if state.solo_evaluated(chat_id).await.is_none() {
+                    super::menu_auto::maybe_auto_register(&bot, chat_id, &cfg, &state).await;
+                }
             });
         }
         let result = tokio::task::spawn(async move {
@@ -2571,6 +2606,32 @@ async fn register_scoped_menus(bot: &Bot, commands: Vec<teloxide::types::BotComm
         .await
     {
         tracing::warn!("Telegram: failed to set default command menu: {e}");
+    }
+
+    let group_baseline = vec![
+        BotCommand::new("start", "Get your user ID to start using the bot"),
+        BotCommand::new("help", "Show available commands"),
+    ];
+    if let Err(e) = bot
+        .set_my_commands(group_baseline)
+        .scope(BotCommandScope::AllGroupChats)
+        .await
+    {
+        tracing::warn!("Telegram: failed to set AllGroupChats command menu: {e}");
+    }
+
+    let admin_baseline = vec![
+        BotCommand::new("start", "Get your user ID to start using the bot"),
+        BotCommand::new("help", "Show available commands"),
+        BotCommand::new("doctor", "Run connection health check"),
+        BotCommand::new("usage", "Session token and cost stats"),
+    ];
+    if let Err(e) = bot
+        .set_my_commands(admin_baseline)
+        .scope(BotCommandScope::AllChatAdministrators)
+        .await
+    {
+        tracing::warn!("Telegram: failed to set AllChatAdministrators command menu: {e}");
     }
 
     let owner_id: Option<u64> = tg.allowed_users.first().and_then(|s| s.parse().ok());

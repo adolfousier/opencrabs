@@ -1,10 +1,9 @@
-//! #1155 — solo-owner group auto-registration: the pure decision core.
+//! #1155 & #248 — group auto-registration: the pure decision core.
 //!
 //! `evaluate_solo_group` decides whether an unconfigured group gets the full
-//! owner catalog automatically. Trigger rule per the issue: no humans other
-//! than the bot owner; extra BOTS are ignored entirely. These tests pin that
-//! rule so a future refactor cannot quietly start counting bots or
-//! misclassifying the owner.
+//! owner catalog automatically under ChatMember scope. If the owner is present
+//! in the observed member list, returns `SoloEval::Eligible`. Strangers and
+//! extra bots do not block the owner from receiving their menu.
 
 use crate::channels::telegram::menu_auto::{MemberView, SoloEval, evaluate_solo_group};
 
@@ -26,28 +25,20 @@ const OWNER: i64 = 111;
 
 #[test]
 fn owner_plus_bots_is_eligible() {
-    // The whole point of the trigger rule: any number of bots, zero humans
-    // besides the owner, still registers.
     let members = vec![bot(1), bot(2), bot(3), human(OWNER), bot(4)];
     assert_eq!(evaluate_solo_group(&members, OWNER), SoloEval::Eligible);
 }
 
 #[test]
-fn second_human_blocks_registration() {
+fn owner_with_other_humans_is_eligible() {
     let members = vec![human(OWNER), bot(7), human(222)];
-    assert_eq!(
-        evaluate_solo_group(&members, OWNER),
-        SoloEval::OtherHumans(vec![222])
-    );
+    assert_eq!(evaluate_solo_group(&members, OWNER), SoloEval::Eligible);
 }
 
 #[test]
-fn other_humans_excludes_owner_and_bots() {
+fn owner_with_multiple_humans_and_bots_is_eligible() {
     let members = vec![human(OWNER), bot(1), human(222), human(333), bot(2)];
-    assert_eq!(
-        evaluate_solo_group(&members, OWNER),
-        SoloEval::OtherHumans(vec![222, 333])
-    );
+    assert_eq!(evaluate_solo_group(&members, OWNER), SoloEval::Eligible);
 }
 
 #[test]

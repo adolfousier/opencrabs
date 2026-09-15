@@ -33,41 +33,31 @@ pub(crate) struct MemberView {
     pub is_bot: bool,
 }
 
-/// Outcome of the solo-group eligibility decision.
+/// Outcome of the group eligibility decision.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum SoloEval {
-    /// The only human present is the bot owner: publish the catalog.
+    /// The bot owner is present in the group: publish the owner catalog under ChatMember scope.
     Eligible,
-    /// Other humans are present; their ids are listed (owner and all bots
-    /// excluded). Nothing is registered — strangers keep the default floor.
-    OtherHumans(Vec<i64>),
-    /// The owner is not among the members at all. Treated like ineligible:
-    /// registering an owner scope for an absent owner would fail anyway.
+    /// The owner is not among the members at all. Strangers/administrators keep baseline group scopes.
     OwnerAbsent,
 }
 
 /// Pure decision core: given every member we can observe plus the owner id,
 /// decide whether this group qualifies for automatic owner-catalog
-/// registration. Bots are ignored entirely (#1155 trigger rule).
+/// registration. If the owner is present, returns `SoloEval::Eligible`.
+/// Non-owners and extra bots do not block the owner from getting their menu.
 pub(crate) fn evaluate_solo_group(members: &[MemberView], owner_id: i64) -> SoloEval {
-    let mut other_humans = Vec::new();
     let mut owner_present = false;
     for m in members {
-        if m.is_bot {
-            continue;
-        }
         if m.user_id == owner_id {
             owner_present = true;
-            continue;
+            break;
         }
-        other_humans.push(m.user_id);
     }
-    if !owner_present {
-        SoloEval::OwnerAbsent
-    } else if other_humans.is_empty() {
+    if owner_present {
         SoloEval::Eligible
     } else {
-        SoloEval::OtherHumans(other_humans)
+        SoloEval::OwnerAbsent
     }
 }
 
@@ -103,15 +93,10 @@ pub(crate) async fn maybe_auto_register(
             let commands = super::agent::collect_command_catalog();
             publish_owner_menu(bot, chat_id, owner_id, &commands).await;
         }
-        SoloEval::OtherHumans(humans) => {
-            tracing::debug!(
-                "Telegram: group {chat_id} not solo-owner (other humans present: {humans:?}) — \
-                 keeping default menu floor"
-            );
-        }
         SoloEval::OwnerAbsent => {
+            telegram_state.set_solo_evaluated(chat_id, false).await;
             tracing::debug!(
-                "Telegram: group {chat_id} has no owner among members — nothing to register"
+                "Telegram: group {chat_id} has no owner among members — baseline group menus active"
             );
         }
     }
