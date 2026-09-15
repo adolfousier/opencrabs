@@ -13,6 +13,11 @@
 //!
 //! Splitting on the reasoning markers restores the live layout, and it works on
 //! rows already in the database because it changes no storage format.
+//!
+//! A marker counts only at the start of a line, which is how the persist
+//! path writes every one of them. The model quoting a marker mid-sentence
+//! (it reads its own history through `session_search`) used to close a real
+//! block early and turn the rest of the reasoning into the answer (#1587).
 
 /// One chronological piece of a persisted assistant message.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -27,6 +32,8 @@ pub(crate) enum Segment {
     /// in, so the whole section is one collapsed row and never the answer.
     Blocked(String),
 }
+
+use super::ledger_scan::find_at_line_start;
 
 const OPEN: &str = "<!-- reasoning -->";
 const CLOSE: &str = "<!-- /reasoning -->";
@@ -56,10 +63,10 @@ pub(crate) fn split_segments(content: &str) -> Vec<Segment> {
     let mut out = Vec::new();
     let mut rest = content;
 
-    while let Some(start) = rest.find(BLOCKED_OPEN) {
+    while let Some(start) = find_at_line_start(rest, BLOCKED_OPEN, 0) {
         push_reasoning_segments(&mut out, &rest[..start]);
         let after_open = &rest[start + BLOCKED_OPEN.len()..];
-        let (inner, after) = match after_open.find(BLOCKED_CLOSE) {
+        let (inner, after) = match find_at_line_start(after_open, BLOCKED_CLOSE, 0) {
             Some(end) => (&after_open[..end], &after_open[end + BLOCKED_CLOSE.len()..]),
             None => (after_open, ""),
         };
@@ -91,13 +98,10 @@ fn fold_blocked(inner: &str) -> String {
 fn push_reasoning_segments(out: &mut Vec<Segment>, content: &str) {
     let mut rest = content;
 
-    while let Some(start) = rest.find(OPEN) {
-        let before = &rest[..start];
-        if !before.trim().is_empty() {
-            out.push(Segment::Text(before.trim().to_string()));
-        }
+    while let Some(start) = find_at_line_start(rest, OPEN, 0) {
+        push_text(out, &rest[..start]);
         let after_open = &rest[start + OPEN.len()..];
-        match after_open.find(CLOSE) {
+        match find_at_line_start(after_open, CLOSE, 0) {
             Some(end) => {
                 let inner = after_open[..end].trim();
                 if !inner.is_empty() {
@@ -116,8 +120,25 @@ fn push_reasoning_segments(out: &mut Vec<Segment>, content: &str) {
         }
     }
 
-    if !rest.trim().is_empty() {
-        out.push(Segment::Text(rest.trim().to_string()));
+    push_text(out, rest);
+}
+
+/// Push visible text, minus any line that is nothing but a marker: an
+/// orphaned close the model quoted, or the half of a pair a truncated write
+/// left behind. Such a line is never content, and shown raw it reads as a
+/// leak (#1587).
+fn push_text(out: &mut Vec<Segment>, text: &str) {
+    let kept: Vec<&str> = text
+        .lines()
+        .filter(|line| {
+            let t = line.trim();
+            !(t == OPEN || t == CLOSE || t == BLOCKED_OPEN || t == BLOCKED_CLOSE)
+        })
+        .collect();
+    let joined = kept.join("\n");
+    let trimmed = joined.trim();
+    if !trimmed.is_empty() {
+        out.push(Segment::Text(trimmed.to_string()));
     }
 }
 
