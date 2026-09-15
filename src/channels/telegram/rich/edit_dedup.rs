@@ -80,6 +80,7 @@ pub(crate) fn is_not_modified(description: &str) -> bool {
 }
 
 #[cfg(test)]
+#[allow(dead_code)]
 pub(crate) fn clear_for_test() {
     tracked().lock().unwrap_or_else(|e| e.into_inner()).clear();
 }
