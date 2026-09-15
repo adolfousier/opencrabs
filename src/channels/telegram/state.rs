@@ -994,20 +994,6 @@ impl TelegramState {
             .map(|text| (entry, text, idx))
     }
 
-    /// Re-arm a keyboard whose tap could not start a turn (#1226 G): the
-    /// busy-guard fires AFTER `take_pending_followup` consumed the stash,
-    /// so without this a mid-turn tap silently eats the choice while the
-    /// keyboard stays rendered with a dead token. Restores the entry under
-    /// its original token so the still-rendered buttons keep working and a
-    /// retry tap resolves normally.
-    pub(crate) async fn restore_pending_followup(&self, token: &str, entry: PendingFollowupEntry) {
-        self.persist_followup(token, &entry).await;
-        self.pending_followups
-            .lock()
-            .await
-            .insert(token.to_string(), entry);
-    }
-
     /// Drop this session's pending follow-up suggestions (the user sent their
     /// own message, so the buttons are stale).
     pub async fn clear_pending_followups(&self, session_id: Uuid) {
