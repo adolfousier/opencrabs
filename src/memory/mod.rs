@@ -42,7 +42,7 @@ pub mod vector_search;
 // (`memory::doctor_lines`, `super::vector_enabled`, ...). Test-only consumers
 // import from the source module directly (e.g. `memory::keys::`) so a
 // lib-wide re-export can never go unused in the non-test target.
-pub use db::Store;
+pub use db::{MemoryGcReport, Store};
 pub use doctor::doctor_lines;
 pub use embedding::{
     embed_content, embed_content_api, embed_query_api, embed_via_api, engine_if_ready, get_engine,

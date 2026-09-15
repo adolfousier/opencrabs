@@ -12,7 +12,7 @@
 //! wild was created by qmd, and `vector_search.rs` reads these tables
 //! directly, so the DDL below IS the migration story: there isn't one.
 
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::{params, Connection, OptionalExtension};
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 
@@ -50,6 +50,23 @@ pub struct VectorStats {
     pub vector_rows: usize,
     /// UTC timestamp of the most recent embedding, if any.
     pub last_embedded_at: Option<String>,
+}
+
+/// Report of a memory database garbage collection sweep (#241).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct MemoryGcReport {
+    /// Number of orphaned vector metadata rows pruned from `content_vectors`.
+    pub orphaned_vectors_pruned: usize,
+    /// Number of orphaned vector embedding blobs pruned from `vectors_vec`.
+    pub orphaned_embeddings_pruned: usize,
+    /// Number of unreferenced content rows pruned from `content`.
+    pub unreferenced_content_pruned: usize,
+    /// Number of orphaned symbols pruned from `symbols`.
+    pub orphaned_symbols_pruned: usize,
+    /// Number of orphaned call edges pruned from `call_edges`.
+    pub orphaned_call_edges_pruned: usize,
+    /// Number of orphaned imports pruned from `imports`.
+    pub orphaned_imports_pruned: usize,
 }
 
 /// The database store: one connection per database file, owned by the caller
@@ -910,5 +927,151 @@ impl Store {
             .map_err(|e| format!("get_hashes_needing_embedding: {e}"))?;
 
         Ok(results)
+    }
+
+    /// Garbage collect orphaned vectors, unreferenced content chunks, and stale symbols (#241).
+    ///
+    /// Purges:
+    /// - `content_vectors` rows whose `hash` has no active document in `documents`.
+    /// - `vectors_vec` blobs whose `hash_seq` has no corresponding `content_vectors` or active document.
+    /// - `content` rows that are unreferenced by any document.
+    /// - Code-graph tables (`symbols`, `call_edges`, `imports`) for files not existing in active external indexing.
+    pub fn gc_orphans(&self) -> Result<MemoryGcReport, String> {
+        let mut report = MemoryGcReport::default();
+
+        // 1. Delete vector embeddings from vectors_vec for unreferenced or inactive documents
+        let has_vectors_vec: bool = self
+            .conn
+            .query_row(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='vectors_vec'",
+                [],
+                |_| Ok(true),
+            )
+            .unwrap_or(false);
+
+        if has_vectors_vec {
+            let pruned_emb = self
+                .conn
+                .execute(
+                    r"
+                DELETE FROM vectors_vec WHERE hash_seq NOT IN (
+                    SELECT v.hash || '_' || v.seq
+                    FROM content_vectors v
+                    JOIN documents d ON d.hash = v.hash
+                    WHERE d.active = 1
+                )
+                ",
+                    [],
+                )
+                .map_err(|e| format!("gc_orphans vectors_vec: {e}"))?;
+            report.orphaned_embeddings_pruned = pruned_emb;
+        }
+
+        // 2. Delete metadata from content_vectors for unreferenced or inactive documents
+        let pruned_vec = self
+            .conn
+            .execute(
+                r"
+            DELETE FROM content_vectors WHERE hash NOT IN (
+                SELECT hash FROM documents WHERE active = 1
+            )
+            ",
+                [],
+            )
+            .map_err(|e| format!("gc_orphans content_vectors: {e}"))?;
+        report.orphaned_vectors_pruned = pruned_vec;
+
+        // 3. Delete unreferenced content rows
+        let pruned_content = self
+            .conn
+            .execute(
+                r"
+            DELETE FROM content WHERE hash NOT IN (
+                SELECT hash FROM documents
+            )
+            ",
+                [],
+            )
+            .map_err(|e| format!("gc_orphans content: {e}"))?;
+        report.unreferenced_content_pruned = pruned_content;
+
+        // 4. Prune code-graph tables if they exist
+        #[cfg(feature = "code-graph")]
+        {
+            let has_symbols: bool = self
+                .conn
+                .query_row(
+                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='symbols'",
+                    [],
+                    |_| Ok(true),
+                )
+                .unwrap_or(false);
+
+            if has_symbols {
+                // Delete symbols, call_edges, imports for files that are not referenced in documents (collection='external')
+                let pruned_sym = self
+                    .conn
+                    .execute(
+                        r"
+                    DELETE FROM symbols WHERE file_path NOT IN (
+                        SELECT path FROM documents WHERE collection = 'external' AND active = 1
+                    )
+                    ",
+                        [],
+                    )
+                    .map_err(|e| format!("gc_orphans symbols: {e}"))?;
+                report.orphaned_symbols_pruned = pruned_sym;
+
+                let pruned_edges = self
+                    .conn
+                    .execute(
+                        r"
+                    DELETE FROM call_edges WHERE file_path NOT IN (
+                        SELECT path FROM documents WHERE collection = 'external' AND active = 1
+                    )
+                    ",
+                        [],
+                    )
+                    .map_err(|e| format!("gc_orphans call_edges: {e}"))?;
+                report.orphaned_call_edges_pruned = pruned_edges;
+
+                let pruned_imp = self
+                    .conn
+                    .execute(
+                        r"
+                    DELETE FROM imports WHERE file_path NOT IN (
+                        SELECT path FROM documents WHERE collection = 'external' AND active = 1
+                    )
+                    ",
+                        [],
+                    )
+                    .map_err(|e| format!("gc_orphans imports: {e}"))?;
+                report.orphaned_imports_pruned = pruned_imp;
+            }
+        }
+
+        if report.orphaned_vectors_pruned > 0
+            || report.orphaned_embeddings_pruned > 0
+            || report.unreferenced_content_pruned > 0
+            || report.orphaned_symbols_pruned > 0
+        {
+            tracing::info!(
+                orphaned_vectors = report.orphaned_vectors_pruned,
+                orphaned_embeddings = report.orphaned_embeddings_pruned,
+                unreferenced_content = report.unreferenced_content_pruned,
+                orphaned_symbols = report.orphaned_symbols_pruned,
+                "Memory GC sweep pruned orphaned entries"
+            );
+        }
+
+        Ok(report)
+    }
+
+    /// Reclaim unused disk space by running SQLite VACUUM (#241).
+    pub fn vacuum_memory(&self) -> Result<(), String> {
+        self.conn
+            .execute_batch("VACUUM;")
+            .map_err(|e| format!("vacuum_memory: {e}"))?;
+        Ok(())
     }
 }

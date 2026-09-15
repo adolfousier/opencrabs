@@ -216,6 +216,11 @@ fn apply_pragmas_in_memory(
 }
 
 impl Database {
+    /// Create a Database instance wrapping an existing connection pool.
+    pub fn new_with_pool(pool: Pool) -> Self {
+        Self { pool }
+    }
+
     /// Connect to a SQLite database file.
     ///
     /// Pool is tuned for concurrent access:
@@ -309,6 +314,20 @@ impl Database {
     /// Check if the database connection is still valid
     pub fn is_connected(&self) -> bool {
         self.pool.status().size > 0 || self.pool.status().max_size > 0
+    }
+
+    /// Reclaim unused disk space by running SQLite VACUUM (#241).
+    pub async fn vacuum_database(&self) -> Result<()> {
+        let conn = self
+            .pool
+            .get()
+            .await
+            .context("Failed to get connection for vacuum")?;
+        conn.interact(|conn| conn.execute_batch("VACUUM;"))
+            .await
+            .map_err(|e| anyhow::anyhow!("vacuum_database interact error: {e}"))?
+            .context("Failed to execute VACUUM on database")?;
+        Ok(())
     }
 
     /// Total number of migrations, derived from `MIGRATION_SQL` so it can

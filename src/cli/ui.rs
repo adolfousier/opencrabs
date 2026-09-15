@@ -1204,6 +1204,12 @@ async fn cmd_chat_inner(
         Err(e) => tracing::warn!("Sub-agent session sweep failed: {e:#}"),
     }
 
+    // Spawn periodic maintenance sweep (#241) — every 24 hours
+    crate::services::maintenance::MaintenanceService::spawn_periodic(
+        service_context.clone(),
+        std::time::Duration::from_secs(86400),
+    );
+
     let agent_service = Arc::new(
         AgentService::new(provider.clone(), service_context.clone(), config)
             .await

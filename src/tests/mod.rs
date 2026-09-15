@@ -304,6 +304,7 @@ pub mod memory_external_sweep_test;
 pub mod memory_external_test;
 pub mod memory_health_report_test;
 pub mod memory_local_engine_test;
+pub mod memory_maintenance_test;
 pub mod memory_recall_eval_test;
 pub mod memory_recall_multilingual_test;
 pub mod memory_recall_test;
