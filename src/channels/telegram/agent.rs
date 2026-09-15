@@ -458,7 +458,6 @@ impl TelegramAgent {
                                     let agent_clone = agent.clone();
                                     let bot_clone = bot.clone();
                                     let state_clone = state.clone();
-                                    let query_id = query.id.clone();
                                     tokio::spawn(async move {
                                         // Record the pick ON the suggestion block
                                         // rather than posting a new message.
