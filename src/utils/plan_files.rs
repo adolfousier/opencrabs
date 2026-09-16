@@ -314,14 +314,6 @@ pub async fn load_plan(session_id: Uuid) -> Option<PlanDocument> {
     load_plan_from_path(&plan_json_read_path(session_id).await)
 }
 
-/// Check if a session has an active, incomplete plan on disk (#244).
-/// Delegates directly to [`PlanDocument::is_active_incomplete`].
-pub async fn has_active_plan(session_id: Uuid) -> bool {
-    load_plan(session_id)
-        .await
-        .is_some_and(|p| p.is_active_incomplete())
-}
-
 /// Maximum plan file size (10MB): guards every consumer of the loader.
 pub const MAX_PLAN_FILE_SIZE: u64 = 10 * 1024 * 1024;
 
