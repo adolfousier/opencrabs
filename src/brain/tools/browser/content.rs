@@ -86,8 +86,34 @@ impl Tool for BrowserContentTool {
                 Err(e) => return Ok(ToolResult::error(format!("Content extraction failed: {e}"))),
             }
         } else if text_only {
-            // Full page text
-            match page.evaluate("document.body?.innerText || ''").await {
+            // Full page text. `innerText` is computed per node tree and
+            // stops at a shadow boundary, so `document.body.innerText`
+            // alone silently omits everything rendered inside a custom
+            // element (measured, not assumed — pinned by
+            // `body_inner_text_includes_shadow_text` in the e2e fixture).
+            //
+            // Unlike the full-page HTML path below, joining per-tree text
+            // is not an output-sizing problem: the result is bounded by
+            // what is actually rendered on screen, which is what the
+            // caller asked for. Each root contributes its own tree only
+            // (a ShadowRoot's text does not include nested shadow trees),
+            // so nothing is counted twice.
+            let js = super::shadow::with_deep_helpers(
+                "const parts = [];
+                 for (const r of __ocRoots()) {
+                     const base = r === document ? document.body : r;
+                     if (!base) continue;
+                     if (base.innerText !== undefined) {
+                         parts.push(base.innerText);
+                         continue;
+                     }
+                     for (const c of base.children) {
+                         parts.push(c.innerText || c.textContent || '');
+                     }
+                 }
+                 return parts.filter(p => p && p.trim()).join('\n');",
+            );
+            match page.evaluate(js.as_str()).await {
                 Ok(result) => result
                     .value()
                     .and_then(|v: &serde_json::Value| v.as_str())

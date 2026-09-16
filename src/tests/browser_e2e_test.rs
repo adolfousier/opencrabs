@@ -2,9 +2,12 @@
 //! never run in CI by default. Launches a real headless Chrome and
 //! exercises the full CDP path against `https://example.com`.
 //!
-//! Run manually:
+//! Run manually — SERIALLY. Every test builds its own `BrowserManager`
+//! and they all share one Chrome profile directory, so a parallel run
+//! makes them fight over `SingletonLock` and most fail to launch at all
+//! (with an empty error, which reads like a code bug and is not one):
 //!
-//!     cargo test --features browser --lib browser_e2e -- --ignored
+//!     cargo test --features browser --lib browser_e2e -- --ignored --test-threads=1
 //!
 //! Each test pins a specific bug fix from the 2026-05-07 browser
 //! resilience pass (commits 2d09065e, 7f58c6f9, 85f5a73b, and the
@@ -18,8 +21,8 @@
 #![cfg(feature = "browser")]
 
 use crate::brain::tools::browser::{
-    BrowserClickTool, BrowserCloseTool, BrowserEvalTool, BrowserFindTool, BrowserManager,
-    BrowserNavigateTool, BrowserScreenshotTool, BrowserTypeTool,
+    BrowserClickTool, BrowserCloseTool, BrowserContentTool, BrowserEvalTool, BrowserFindTool,
+    BrowserManager, BrowserNavigateTool, BrowserScreenshotTool, BrowserTypeTool,
 };
 use crate::brain::tools::{Tool, ToolExecutionContext};
 use std::sync::Arc;
@@ -489,16 +492,44 @@ async fn body_inner_text_includes_shadow_text() {
         )
         .await
         .expect("eval must not panic");
-    // `innerText` is defined over rendered text, and shadow content IS
-    // rendered — so it comes through even though querySelectorAll cannot
-    // reach the element. That is exactly why `text=` mode still needed
-    // the composed walk: finding the TEXT was never the problem, getting
-    // a handle on the ELEMENT that holds it was.
+    // MEASURED, not reasoned: Chrome returns FALSE here. The intuition
+    // that `innerText` is defined over rendered text, so shadow content
+    // would come through, is wrong — `innerText` is computed per node
+    // tree and stops at a shadow boundary like everything else.
+    //
+    // Two consequences, both acted on:
+    //   * `text=` search genuinely needed the composed walk. It was not
+    //     partly working by accident.
+    //   * full-page `browser_content --text_only` was blind to shadow
+    //     text, so it now joins per-tree text across the composed tree.
+    // If a future Chrome changes this, THIS assertion flips first.
     assert!(
-        res.output.contains("true"),
-        "document.body.innerText is expected to include shadow-rendered text; \
-         got: {}",
+        res.output.contains("false"),
+        "document.body.innerText was measured NOT to include shadow-rendered \
+         text; a `true` here means Chrome changed and browser_content's \
+         full-page text path can be simplified. got: {}",
         res.output
+    );
+
+    // ...and therefore `browser_content --text_only` must NOT rely on it.
+    // This is the assertion that proves the composed-tree join actually
+    // recovers what plain innerText drops.
+    let content = BrowserContentTool::new(mgr.clone());
+    let text = content
+        .execute(serde_json::json!({ "text_only": true }), &ctx)
+        .await
+        .expect("content must not panic");
+    assert!(text.success, "content must succeed: {}", text.output);
+    assert!(
+        text.output.contains("Light Button"),
+        "light DOM text regression: {}",
+        text.output
+    );
+    assert!(
+        text.output.contains("Shadow Button") && text.output.contains("Deep Button"),
+        "full-page text_only must span the composed tree, including a root \
+         nested two levels deep: {}",
+        text.output
     );
 
     let close = BrowserCloseTool::new(mgr);

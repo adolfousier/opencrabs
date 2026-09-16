@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### ✨ Features
 
 - `feat(telegram_send)`: add `create_topic` and `rename_topic` actions for forum supergroups (#161)
-- `feat(browser)`: shadow-DOM aware selector resolution across the browser tools. `browser_find` (css/text/aria and the interactive inventory) searches inside open shadow roots and marks those hits `[shadow]`; `browser_click`, `browser_type`, `browser_wait`, `browser_screenshot`, `browser_act` and selector-scoped `browser_content` resolve the selectors it returns. Closed shadow roots resolve over CDP (which JS cannot reach) but stay non-enumerable; `xpath` mode remains light-DOM only because XPath has no shadow boundary by spec
+- `feat(browser)`: shadow-DOM aware selector resolution across the browser tools. `browser_find` (css/text/aria and the interactive inventory) searches inside open shadow roots and marks those hits `[shadow]`; `browser_click`, `browser_type`, `browser_wait`, `browser_screenshot`, `browser_act` and selector-scoped `browser_content` resolve the selectors it returns. Closed shadow roots resolve over CDP (which JS cannot reach) but stay non-enumerable; `xpath` mode remains light-DOM only because XPath has no shadow boundary by spec. Full-page `browser_content` with `text_only` now spans the composed tree, since `body.innerText` is computed per node tree and silently omitted everything rendered inside a custom element
 
 ## [0.5.1] - 2026-09-12
 

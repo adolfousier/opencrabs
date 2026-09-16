@@ -3367,7 +3367,7 @@ Auto-detects your default Chromium-based browser and uses its native profile (co
 | `browser_type` | Type text into an element (by CSS selector or focused element), including inputs inside open shadow roots |
 | `browser_screenshot` | Capture page screenshot (full page or element), returns base64 PNG |
 | `browser_eval` | Execute JavaScript in page context and return the result |
-| `browser_content` | Get page HTML or text-only content, optionally scoped by CSS selector (the scoped form resolves inside open shadow roots) |
+| `browser_content` | Get page HTML or text-only content, optionally scoped by CSS selector. Selector-scoped extraction resolves inside open shadow roots, and full-page `text_only` spans the composed tree (`body.innerText` alone stops at a shadow boundary); full-page HTML stays light-DOM |
 | `browser_wait` | Wait for a CSS selector to appear, shadow roots included (polls every 200ms, default 10s timeout) |
 | `browser_find` | Find elements by css/xpath/text/aria pattern, or with no pattern inventory ALL visible interactive elements — each returned with a stable unique `data-opencrabs-match` selector + text + tag + visibility, so the follow-up `browser_click` is deterministic (kills the screenshot-discovery loop). `css` / `text` / `aria` and the inventory search inside open shadow roots and mark those hits `[shadow]`; `xpath` is light-DOM only (XPath has no shadow boundary by spec) |
 | `browser_act` | Batched multi-action in one call: ordered `click` / `fill` / `press` / `select` / `wait` array (max 10 actions, 120s budget). All selectors resolved up front — a stale reference rejects the whole batch instead of half-running it; aborts on first failure and reports the completed prefix; one screenshot at the end |

@@ -31,7 +31,8 @@ Selector resolution is shadow-DOM aware by default — nothing to enable.
 | `browser_click`, `browser_wait`, `browser_screenshot`, `browser_act` (click) | Resolved | Resolved (CDP pierces where JS cannot) |
 | `browser_type`, `browser_act` (fill / select / pre-flight) | Resolved | Not resolved (JS path) |
 | `browser_content` with a `selector` | Resolved | Not resolved (JS path) |
-| `browser_content` with no `selector` | Light DOM only (uncapped output; piercing it would be an output-sizing change) | Light DOM only |
+| `browser_content` with no `selector`, `text_only: true` | Composed tree — `body.innerText` alone stops at a shadow boundary | Not resolved (JS path) |
+| `browser_content` with no `selector`, full HTML | Light DOM only (uncapped output; piercing it would be an output-sizing change) | Light DOM only |
 
 Rules of thumb:
 
