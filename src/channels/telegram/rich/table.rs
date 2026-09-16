@@ -328,7 +328,8 @@ pub(crate) fn balance_code_fences(text: &str) -> String {
 
 /// Escape bare leading `#` (not followed by space, or not a valid ATX heading)
 /// with a backslash (`\#`) so Telegram's native rich parser does not promote
-/// lines like `#174` into `<h1>` headers (#193, adolfousier/opencrabs#1257).
+/// lines like `#174`, list items like `- #224`, or quotes like `> #236`
+/// into `<h1>` headers (#193, #243, adolfousier/opencrabs#1257).
 ///
 /// Leaves code fences (``` and ~~~) and valid ATX headings untouched.
 pub(crate) fn shield_bare_leading_hashes(text: &str) -> String {
@@ -370,17 +371,82 @@ pub(crate) fn shield_bare_leading_hashes(text: &str) -> String {
             continue;
         }
 
-        // Outside fence: check if line starts with bare # that is NOT an ATX heading
-        // and not already escaped.
-        if trimmed.starts_with('#') && !super::is_atx_heading(trimmed) {
-            let indent_len = line.len() - trimmed.len();
-            out.push_str(&line[..indent_len]);
+        // Outside fence: check if line starts with bare # or has a bare # following
+        // blockquote, bullet, numbered list, or checkbox prefixes (#243).
+        if let Some(prefix_len) = find_bare_hash_offset(line) {
+            out.push_str(&line[..prefix_len]);
             out.push('\\');
-            out.push_str(trimmed);
+            out.push_str(&line[prefix_len..]);
         } else {
             out.push_str(line);
         }
     }
 
     out
+}
+
+/// Find the byte offset in `line` where a bare leading `#` begins (after optional
+/// blockquote, list bullet, ordered number, or checkbox markers).
+/// Returns `None` if the line contains no bare `#`, starts with a valid ATX heading (`# `),
+/// or is already escaped (`\#`).
+fn find_bare_hash_offset(line: &str) -> Option<usize> {
+    let trimmed = line.trim_start();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    let mut rest = trimmed;
+
+    // 1. Strip blockquote prefixes (> or >> or > >)
+    while let Some(after) = rest.strip_prefix('>') {
+        rest = after.trim_start();
+    }
+
+    // 2. Strip unordered list bullets (-, *, +) or ordered list markers (1., 1))
+    if let Some(after) = rest
+        .strip_prefix("- ")
+        .or_else(|| rest.strip_prefix("* "))
+        .or_else(|| rest.strip_prefix("+ "))
+    {
+        rest = after.trim_start();
+        if let Some(after_cb) = rest
+            .strip_prefix("[ ] ")
+            .or_else(|| rest.strip_prefix("[x] "))
+            .or_else(|| rest.strip_prefix("[X] "))
+        {
+            rest = after_cb.trim_start();
+        }
+    } else if let Some(after_num) = strip_ordered_list_prefix(rest) {
+        rest = after_num;
+        if let Some(after_cb) = rest
+            .strip_prefix("[ ] ")
+            .or_else(|| rest.strip_prefix("[x] "))
+            .or_else(|| rest.strip_prefix("[X] "))
+        {
+            rest = after_cb.trim_start();
+        }
+    }
+
+    // 3. Check if remaining text starts with bare # (not an ATX heading and not already escaped)
+    if rest.starts_with('#') && !super::is_atx_heading(rest) && !rest.starts_with("\\#") {
+        let prefix_len = line.len() - rest.len();
+        Some(prefix_len)
+    } else {
+        None
+    }
+}
+
+/// Strip standard CommonMark ordered list prefix (1-9 digits followed by `.` or `)` and whitespace).
+fn strip_ordered_list_prefix(s: &str) -> Option<&str> {
+    let digits = s.chars().take_while(|c| c.is_ascii_digit()).count();
+    if (1..=9).contains(&digits) {
+        let after_digits = &s[digits..];
+        let after_delim = after_digits
+            .strip_prefix('.')
+            .or_else(|| after_digits.strip_prefix(')'))?;
+        if after_delim.starts_with(' ') || after_delim.starts_with('\t') {
+            return Some(after_delim.trim_start());
+        }
+    }
+    None
 }

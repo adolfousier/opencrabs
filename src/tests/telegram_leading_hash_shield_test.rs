@@ -52,3 +52,60 @@ fn test_multiline_mixed_prose() {
     assert_eq!(shield_bare_leading_hashes(input), expected);
     assert_eq!(normalize_tables(input), expected);
 }
+
+#[test]
+fn test_list_items_with_leading_hashes_are_shielded() {
+    // Unordered dash bullets (#243)
+    let dash = "- #224 -> a5b34466 (Goal turn budget progress)\n- #236 -> 2ed8adeb (Strip tool outcome icons)";
+    let exp_dash = "- \\#224 -> a5b34466 (Goal turn budget progress)\n- \\#236 -> 2ed8adeb (Strip tool outcome icons)";
+    assert_eq!(shield_bare_leading_hashes(dash), exp_dash);
+    assert_eq!(normalize_tables(dash), exp_dash);
+
+    // Unordered asterisk & plus bullets
+    let star = "* #237 cron+notify\n+ #238 align tests";
+    let exp_star = "* \\#237 cron+notify\n+ \\#238 align tests";
+    assert_eq!(shield_bare_leading_hashes(star), exp_star);
+
+    // Indented unordered bullets
+    let indented = "  - #239 table separator\n    * #240 fence balance";
+    let exp_indented = "  - \\#239 table separator\n    * \\#240 fence balance";
+    assert_eq!(shield_bare_leading_hashes(indented), exp_indented);
+}
+
+#[test]
+fn test_ordered_list_items_with_leading_hashes_are_shielded() {
+    let ordered = "1. #224 first item\n2) #225 second item\n12. #226 multi digit item";
+    let exp_ordered = "1. \\#224 first item\n2) \\#225 second item\n12. \\#226 multi digit item";
+    assert_eq!(shield_bare_leading_hashes(ordered), exp_ordered);
+    assert_eq!(normalize_tables(ordered), exp_ordered);
+}
+
+#[test]
+fn test_checkbox_items_with_leading_hashes_are_shielded() {
+    let checkboxes =
+        "- [ ] #241 background sweep\n- [x] #242 closed task\n  * [ ] #243 nested task";
+    let exp_checkboxes =
+        "- [ ] \\#241 background sweep\n- [x] \\#242 closed task\n  * [ ] \\#243 nested task";
+    assert_eq!(shield_bare_leading_hashes(checkboxes), exp_checkboxes);
+    assert_eq!(normalize_tables(checkboxes), exp_checkboxes);
+}
+
+#[test]
+fn test_blockquotes_with_leading_hashes_are_shielded() {
+    let quotes = "> #243 quote issue\n>> #244 nested quote issue\n> - #245 quote list issue";
+    let exp_quotes =
+        "> \\#243 quote issue\n>> \\#244 nested quote issue\n> - \\#245 quote list issue";
+    assert_eq!(shield_bare_leading_hashes(quotes), exp_quotes);
+    assert_eq!(normalize_tables(quotes), exp_quotes);
+}
+
+#[test]
+fn test_headings_and_inline_hashes_in_lists_preserved() {
+    // Valid ATX headings in or out of lists should remain intact
+    let heading_in_list = "- # Heading in list";
+    assert_eq!(shield_bare_leading_hashes(heading_in_list), heading_in_list);
+
+    // Mid-line issue numbers should not be touched
+    let inline_hash = "- Fixed issue #224 in commit abc";
+    assert_eq!(shield_bare_leading_hashes(inline_hash), inline_hash);
+}
