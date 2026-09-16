@@ -84,7 +84,7 @@ pub(crate) fn describe_reaction(reaction: &ReactionMessage) -> Option<String> {
     }
     let target = reaction
         .key
-        .as_ref()
+        .as_option()
         .and_then(|k| k.id.as_deref())
         .unwrap_or("unknown message");
     Some(format!("[reaction] {emoji} on message {target}"))

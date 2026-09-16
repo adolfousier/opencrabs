@@ -113,12 +113,8 @@ impl WhatsAppAgent {
             let channel_msg_repo = self.channel_msg_repo.clone();
             let owner_jid_clone = owner_jid.clone();
 
-            let builder = Bot::builder();
-            #[cfg(crates_publish)]
-            let builder = builder.with_backend(std::sync::Arc::new(backend));
-            #[cfg(not(crates_publish))]
-            let builder = builder.with_backend(backend);
-            let bot_result = builder
+            let bot_result = Bot::builder()
+                .with_backend(backend)
                 .with_transport_factory(TokioWebSocketTransportFactory::new())
                 .with_http_client(UreqHttpClient::new())
                 .with_runtime(TokioRuntime)
@@ -132,7 +128,8 @@ impl WhatsAppAgent {
                     let channel_msg_repo = channel_msg_repo.clone();
                     async move {
                         match &*event {
-                            Event::PairingQrCode { code, .. } => {
+                            Event::PairingQrCode(qr) => {
+                                let code = &qr.code;
                                 tracing::info!(
                                     "WhatsApp: QR code available (scan with your phone)"
                                 );
@@ -407,23 +404,30 @@ impl WhatsAppAgent {
                                     );
                                 }
                             }
-                            Event::Message(msg, info) => {
-                                tracing::debug!("WhatsApp: Event::Message received");
-                                // Spawned onto its own task: the agent turn is a
-                                // very large async state machine, and polling it
-                                // inline inside the event-loop future overflows
-                                // the worker stack (and would block the loop).
-                                tokio::spawn(handler::handle_message(
-                                    (**msg).clone(),
-                                    (**info).clone(),
-                                    client,
-                                    agent,
-                                    session_svc,
-                                    shared_session,
-                                    wa_state.clone(),
-                                    config_rx,
-                                    channel_msg_repo,
-                                ));
+                            Event::Messages(batch) => {
+                                tracing::debug!(
+                                    count = batch.messages.len(),
+                                    "WhatsApp: Event::Messages received"
+                                );
+                                // One task per inbound message: the agent turn
+                                // is a very large async state machine, and
+                                // polling it inline inside the event-loop
+                                // future overflows the worker stack (and would
+                                // block the loop). Live traffic is one message
+                                // per batch; an offline drain delivers several.
+                                for inbound in batch.messages.iter() {
+                                    tokio::spawn(handler::handle_message(
+                                        (*inbound.message).clone(),
+                                        (*inbound.info).clone(),
+                                        client.clone(),
+                                        agent.clone(),
+                                        session_svc.clone(),
+                                        shared_session.clone(),
+                                        wa_state.clone(),
+                                        config_rx.clone(),
+                                        channel_msg_repo.clone(),
+                                    ));
+                                }
                             }
                             Event::LoggedOut(_) => {
                                 tracing::warn!("WhatsApp: logged out");
@@ -459,7 +463,6 @@ impl WhatsAppAgent {
                 .build()
                 .await;
 
-            #[cfg(not(crates_publish))]
             let bot = match bot_result {
                 Ok(b) => b,
                 Err(e) => {
@@ -469,28 +472,12 @@ impl WhatsAppAgent {
                     return;
                 }
             };
-            #[cfg(crates_publish)]
-            let mut bot = match bot_result {
-                Ok(b) => b,
-                Err(e) => {
-                    let msg = format!("Failed to build WhatsApp bot: {}", e);
-                    tracing::error!("WhatsApp: {}", msg);
-                    self.whatsapp_state.broadcast_error(&msg);
-                    return;
-                }
-            };
 
-            // `run()` drives the bot until the connection ends. The newer
-            // upstream API returns `()` (no Result, no separate handle —
-            // build/credential failures surface before this point). The live
-            // client is published to WhatsAppState from the Connected event
-            // callback, so we don't need a handle here.
-            #[cfg(not(crates_publish))]
+            // `run()` drives the bot until the connection ends. It returns `()`
+            // (no Result, no separate handle: build/credential failures surface
+            // before this point). The live client is published to WhatsAppState
+            // from the Connected event callback, so we don't need a handle here.
             bot.run().await;
-            #[cfg(crates_publish)]
-            if let Err(e) = bot.run().await {
-                tracing::warn!(error = %e, "WhatsApp bot run failed");
-            }
             tracing::info!("WhatsApp: bot run loop exited");
         })
     }

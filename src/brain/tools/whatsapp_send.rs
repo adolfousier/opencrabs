@@ -544,9 +544,10 @@ impl Tool for WhatsAppSendTool {
                     input.get("ephemeral").and_then(|v| v.as_u64()),
                     self.config_rx.borrow().channels.whatsapp.ephemeral_ttl,
                 );
-                let send_opts = whatsapp_rust::send::SendOptions {
-                    ephemeral_expiration: ttl,
-                    ..Default::default()
+                let send_opts = match ttl {
+                    Some(seconds) => whatsapp_rust::send::SendOptions::default()
+                        .with_ephemeral_expiration(seconds),
+                    None => whatsapp_rust::send::SendOptions::default(),
                 };
                 let mut queued_any = false;
                 for chunk in chunks {
@@ -660,18 +661,19 @@ impl Tool for WhatsAppSendTool {
                         continue;
                     }
                     let wa_msg = if i == 0 {
+                        // Only the lead chunk quotes the original message.
+                        let quoted = waproto::whatsapp::message::ExtendedTextMessage {
+                            text: Some(chunk.to_string()),
+                            context_info: waproto::whatsapp::ContextInfo {
+                                stanza_id: Some(msg_id.clone()),
+                                remote_jid: Some(jid_str.clone()),
+                                ..Default::default()
+                            }
+                            .into(),
+                            ..Default::default()
+                        };
                         waproto::whatsapp::Message {
-                            extended_text_message: Some(Box::new(
-                                waproto::whatsapp::message::ExtendedTextMessage {
-                                    text: Some(chunk.to_string()),
-                                    context_info: Some(Box::new(waproto::whatsapp::ContextInfo {
-                                        stanza_id: Some(msg_id.clone()),
-                                        remote_jid: Some(jid_str.clone()),
-                                        ..Default::default()
-                                    })),
-                                    ..Default::default()
-                                },
-                            )),
+                            extended_text_message: quoted.into(),
                             ..Default::default()
                         }
                     } else {
@@ -866,7 +868,7 @@ impl Tool for WhatsAppSendTool {
                     pget!(upload_media(&client, bytes, wacore::download::MediaType::Image).await);
 
                 let wa_msg = waproto::whatsapp::Message {
-                    image_message: Some(Box::new(waproto::whatsapp::message::ImageMessage {
+                    image_message: waproto::whatsapp::message::ImageMessage {
                         url: Some(upload.url),
                         direct_path: Some(upload.direct_path),
                         media_key: Some(upload.media_key.to_vec()),
@@ -876,7 +878,8 @@ impl Tool for WhatsAppSendTool {
                         mimetype: Some(mime),
                         caption,
                         ..Default::default()
-                    })),
+                    }
+                    .into(),
                     ..Default::default()
                 };
                 match client.send_message(jid, wa_msg).await {
@@ -913,7 +916,7 @@ impl Tool for WhatsAppSendTool {
                 );
 
                 let wa_msg = waproto::whatsapp::Message {
-                    document_message: Some(Box::new(waproto::whatsapp::message::DocumentMessage {
+                    document_message: waproto::whatsapp::message::DocumentMessage {
                         url: Some(upload.url),
                         direct_path: Some(upload.direct_path),
                         media_key: Some(upload.media_key.to_vec()),
@@ -924,7 +927,8 @@ impl Tool for WhatsAppSendTool {
                         file_name: Some(filename),
                         caption,
                         ..Default::default()
-                    })),
+                    }
+                    .into(),
                     ..Default::default()
                 };
                 match client.send_message(jid, wa_msg).await {
@@ -968,7 +972,7 @@ impl Tool for WhatsAppSendTool {
                 }
 
                 let wa_msg = waproto::whatsapp::Message {
-                    audio_message: Some(Box::new(waproto::whatsapp::message::AudioMessage {
+                    audio_message: waproto::whatsapp::message::AudioMessage {
                         url: Some(upload.url),
                         direct_path: Some(upload.direct_path),
                         media_key: Some(upload.media_key.to_vec()),
@@ -978,7 +982,8 @@ impl Tool for WhatsAppSendTool {
                         mimetype: Some(mime),
                         ptt: Some(ptt),
                         ..Default::default()
-                    })),
+                    }
+                    .into(),
                     ..Default::default()
                 };
                 let sent = client.send_message(jid.clone(), wa_msg).await;
@@ -1020,7 +1025,7 @@ impl Tool for WhatsAppSendTool {
                     pget!(upload_media(&client, bytes, wacore::download::MediaType::Video).await);
 
                 let wa_msg = waproto::whatsapp::Message {
-                    video_message: Some(Box::new(waproto::whatsapp::message::VideoMessage {
+                    video_message: waproto::whatsapp::message::VideoMessage {
                         url: Some(upload.url),
                         direct_path: Some(upload.direct_path),
                         media_key: Some(upload.media_key.to_vec()),
@@ -1030,7 +1035,8 @@ impl Tool for WhatsAppSendTool {
                         mimetype: Some(mime),
                         caption,
                         ..Default::default()
-                    })),
+                    }
+                    .into(),
                     ..Default::default()
                 };
                 match client.send_message(jid, wa_msg).await {
@@ -1061,7 +1067,7 @@ impl Tool for WhatsAppSendTool {
                     pget!(upload_media(&client, bytes, wacore::download::MediaType::Sticker).await);
 
                 let wa_msg = waproto::whatsapp::Message {
-                    sticker_message: Some(Box::new(waproto::whatsapp::message::StickerMessage {
+                    sticker_message: waproto::whatsapp::message::StickerMessage {
                         url: Some(upload.url),
                         direct_path: Some(upload.direct_path),
                         media_key: Some(upload.media_key.to_vec()),
@@ -1070,7 +1076,8 @@ impl Tool for WhatsAppSendTool {
                         file_length: Some(upload.file_length),
                         mimetype: Some(mime),
                         ..Default::default()
-                    })),
+                    }
+                    .into(),
                     ..Default::default()
                 };
                 match client.send_message(jid, wa_msg).await {
@@ -1120,13 +1127,14 @@ impl Tool for WhatsAppSendTool {
                     .map(|s| s.to_string());
 
                 let wa_msg = waproto::whatsapp::Message {
-                    location_message: Some(Box::new(waproto::whatsapp::message::LocationMessage {
+                    location_message: waproto::whatsapp::message::LocationMessage {
                         degrees_latitude: Some(lat),
                         degrees_longitude: Some(lng),
                         name,
                         address,
                         ..Default::default()
-                    })),
+                    }
+                    .into(),
                     ..Default::default()
                 };
                 match client.send_message(jid, wa_msg).await {
@@ -1155,11 +1163,12 @@ impl Tool for WhatsAppSendTool {
 
                 let vcard = build_vcard(&contact_name, &contact_phone);
                 let wa_msg = waproto::whatsapp::Message {
-                    contact_message: Some(Box::new(waproto::whatsapp::message::ContactMessage {
+                    contact_message: waproto::whatsapp::message::ContactMessage {
                         display_name: Some(contact_name.clone()),
                         vcard: Some(vcard),
                         ..Default::default()
-                    })),
+                    }
+                    .into(),
                     ..Default::default()
                 };
                 match client.send_message(jid, wa_msg).await {
@@ -1201,9 +1210,8 @@ impl Tool for WhatsAppSendTool {
                     ..Default::default()
                 };
 
-                #[cfg(crates_publish)]
-                let boxed_reaction = waproto::whatsapp::message::ReactionMessage {
-                    key: Some(message_key),
+                let reaction = waproto::whatsapp::message::ReactionMessage {
+                    key: message_key.into(),
                     text: if emoji.is_empty() {
                         None
                     } else {
@@ -1212,20 +1220,9 @@ impl Tool for WhatsAppSendTool {
                     sender_timestamp_ms: Some(chrono::Utc::now().timestamp_millis()),
                     ..Default::default()
                 };
-                #[cfg(not(crates_publish))]
-                let boxed_reaction = Box::new(waproto::whatsapp::message::ReactionMessage {
-                    key: Some(message_key),
-                    text: if emoji.is_empty() {
-                        None
-                    } else {
-                        Some(emoji.clone())
-                    },
-                    sender_timestamp_ms: Some(chrono::Utc::now().timestamp_millis()),
-                    ..Default::default()
-                });
 
                 let reaction_msg = waproto::whatsapp::Message {
-                    reaction_message: Some(boxed_reaction),
+                    reaction_message: reaction.into(),
                     ..Default::default()
                 };
                 match client.send_message(jid, reaction_msg).await {
@@ -1532,7 +1529,13 @@ impl Tool for WhatsAppSendTool {
                 let opts = whatsapp_rust::features::StatusSendOptions::default();
                 match client
                     .status()
-                    .send_text(&text, broadcast::STATUS_BACKGROUND_ARGB, 0, &jids, opts)
+                    .send_text(
+                        &text,
+                        broadcast::STATUS_BACKGROUND_ARGB,
+                        waproto::whatsapp::message::extended_text_message::FontType::SYSTEM,
+                        &jids,
+                        opts,
+                    )
                     .await
                 {
                     Ok(_) => Ok(ToolResult::success(format!(

@@ -2,7 +2,7 @@
 name = "opencrabs"
 version = "0.5.2"
 edition = "2024"
-rust-version = "1.91"
+rust-version = "1.94"
 authors = ["Adolfo Usier <adolfo@meetneura.ai>"]
 license = "MIT"
 description = "The autonomous, self-improving AI agent. Single Rust binary. Every channel. Recommended: the 40MB prebuilt binary for macOS, Linux and Windows: https://github.com/adolfousier/opencrabs/releases"
@@ -135,16 +135,16 @@ grammers-session = { version = "0.10", default-features = false, features = ["se
 grammers-mtsender = { version = "0.10", optional = true }
 grammers-crypto = { version = "0.10", optional = true }
 
-# WhatsApp — pinned to upstream HEAD (past published 0.6.0) for the rewritten
-# LID/PN device registry: alias-aware LID<->PN resolution collapses a self-DM to
-# one device set, fixing the duplicate PN+LID device addressing that made the
-# server reject every reply with error 400 (0.6.0 double-addressed each device).
-whatsapp-rust = { version = "0.6.0", git = "https://github.com/jlucaso1/whatsapp-rust.git", rev = "645e2ba5b3fc470632da1f727b93a13e9de3b828", optional = true, default-features = false, features = ["tokio-transport", "ureq-client", "tokio-native", "tokio-runtime"] }
-whatsapp-rust-tokio-transport = { version = "0.6.0", git = "https://github.com/jlucaso1/whatsapp-rust.git", rev = "645e2ba5b3fc470632da1f727b93a13e9de3b828", optional = true }
-whatsapp-rust-ureq-http-client = { version = "0.6.0", git = "https://github.com/jlucaso1/whatsapp-rust.git", rev = "645e2ba5b3fc470632da1f727b93a13e9de3b828", optional = true }
-wacore = { version = "0.6.0", git = "https://github.com/jlucaso1/whatsapp-rust.git", rev = "645e2ba5b3fc470632da1f727b93a13e9de3b828", optional = true, default-features = false }
-wacore-binary = { version = "0.6.0", git = "https://github.com/jlucaso1/whatsapp-rust.git", rev = "645e2ba5b3fc470632da1f727b93a13e9de3b828", optional = true, default-features = false, features = ["serde"] }
-waproto = { version = "0.6.0", git = "https://github.com/jlucaso1/whatsapp-rust.git", rev = "645e2ba5b3fc470632da1f727b93a13e9de3b828", optional = true }
+# WhatsApp: crates.io 0.7.0 carries the rewritten LID/PN device registry we
+# previously pinned via git rev. Never re-add a git pin here: cargo publish
+# strips git/rev and verifies against the crates.io version, so any API only
+# present upstream breaks the release publish step.
+whatsapp-rust = { version = "0.7.0", optional = true, default-features = false, features = ["tokio-transport", "ureq-client", "tokio-native", "tokio-runtime"] }
+whatsapp-rust-tokio-transport = { version = "0.7.0", optional = true }
+whatsapp-rust-ureq-http-client = { version = "0.7.0", optional = true }
+wacore = { version = "0.7.0", optional = true, default-features = false }
+wacore-binary = { version = "0.7.0", optional = true, default-features = false, features = ["serde"] }
+waproto = { version = "0.7.0", optional = true }
 qrcode = { version = "0.14", optional = true }
 # Used to render the WhatsApp pairing QR to a scannable PNG for channels
 # (qrcode already pulls image in transitively; this just lets us name its types).
@@ -325,8 +325,5 @@ path = "src/benches/memory.rs"
 name = "live_eval"
 path = "examples/live_eval.rs"
 required-features = ["eval"]
-
-[lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ['cfg(crates_publish)'] }
 
 [lints.clippy]

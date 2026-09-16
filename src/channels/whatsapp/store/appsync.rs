@@ -183,7 +183,6 @@ impl AppSyncStore for Store {
         Ok(())
     }
 
-    #[cfg(not(crates_publish))]
     async fn clear_mutation_macs(&self, name: &str) -> Result<()> {
         // Snapshot re-sync rebuilds the MAC store from the snapshot; leftover
         // entries for this collection would corrupt the next patch's ltHash.

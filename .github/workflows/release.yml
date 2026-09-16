@@ -118,7 +118,7 @@ jobs:
         if: steps.check.outputs.published == 'false'
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-        run: RUSTFLAGS='--cfg crates_publish' cargo publish --allow-dirty
+        run: cargo publish --allow-dirty
 
   build-release:
     name: Build Release

@@ -360,7 +360,7 @@ fn reply_arm_chunks_with_quote_only_on_lead() {
         "reply arm does not single out the lead chunk"
     );
     assert!(
-        arm.contains("extended_text_message: Some"),
+        arm.contains("extended_text_message: quoted.into()"),
         "lead chunk lost the quote message form"
     );
     assert!(

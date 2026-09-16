@@ -47,14 +47,8 @@ async fn send_resilient(
     jid: wacore_binary::jid::Jid,
     msg: Message,
 ) -> Option<String> {
-    #[cfg(crates_publish)]
-    let gen_id = client.generate_message_id().await;
-    #[cfg(not(crates_publish))]
     let gen_id = client.generate_message_id();
-    let opts = SendOptions {
-        message_id: Some(gen_id.clone()),
-        ..Default::default()
-    };
+    let opts = SendOptions::default().with_message_id(gen_id.clone());
     let mut sent = Some(gen_id);
     if let Err(e) = client
         .send_message_with_options(jid.clone(), msg.clone(), opts.clone())
@@ -77,26 +71,26 @@ async fn send_resilient(
 /// Returns the innermost Message that contains actual content.
 fn unwrap_message(msg: &Message) -> &Message {
     // device_sent_message: wraps messages synced across linked devices
-    if let Some(ref dsm) = msg.device_sent_message
-        && let Some(ref inner) = dsm.message
+    if let Some(dsm) = msg.device_sent_message.as_option()
+        && let Some(inner) = dsm.message.as_option()
     {
         return unwrap_message(inner);
     }
     // ephemeral_message: disappearing messages
-    if let Some(ref eph) = msg.ephemeral_message
-        && let Some(ref inner) = eph.message
+    if let Some(eph) = msg.ephemeral_message.as_option()
+        && let Some(inner) = eph.message.as_option()
     {
         return unwrap_message(inner);
     }
     // view_once_message
-    if let Some(ref vo) = msg.view_once_message
-        && let Some(ref inner) = vo.message
+    if let Some(vo) = msg.view_once_message.as_option()
+        && let Some(inner) = vo.message.as_option()
     {
         return unwrap_message(inner);
     }
     // document_with_caption_message
-    if let Some(ref dwc) = msg.document_with_caption_message
-        && let Some(ref inner) = dwc.message
+    if let Some(dwc) = msg.document_with_caption_message.as_option()
+        && let Some(inner) = dwc.message.as_option()
     {
         return unwrap_message(inner);
     }
@@ -106,8 +100,12 @@ fn unwrap_message(msg: &Message) -> &Message {
 /// Extract quoted/replied-to message text from a WhatsApp message.
 fn extract_reply_context(msg: &Message) -> Option<String> {
     let msg = unwrap_message(msg);
-    let ctx = msg.extended_text_message.as_ref()?.context_info.as_ref()?;
-    let quoted = ctx.quoted_message.as_ref()?;
+    let ctx = msg
+        .extended_text_message
+        .as_option()?
+        .context_info
+        .as_option()?;
+    let quoted = ctx.quoted_message.as_option()?;
     let quoted_text = crate::utils::strip_ctx_footer(&extract_text(quoted)?);
     if quoted_text.is_empty() {
         return None;
@@ -130,13 +128,13 @@ pub(crate) fn extract_text(msg: &Message) -> Option<String> {
         return Some(conv.clone());
     }
     // Try extended text message (messages with link previews, etc.)
-    if let Some(ref ext) = msg.extended_text_message
+    if let Some(ext) = msg.extended_text_message.as_option()
         && let Some(ref text) = ext.text
     {
         return Some(text.clone());
     }
     // Try image caption
-    if let Some(ref img) = msg.image_message
+    if let Some(img) = msg.image_message.as_option()
         && let Some(ref caption) = img.caption
         && !caption.is_empty()
     {
@@ -148,31 +146,31 @@ pub(crate) fn extract_text(msg: &Message) -> Option<String> {
 /// Check if the message has a downloadable image.
 pub(crate) fn has_image(msg: &Message) -> bool {
     let msg = unwrap_message(msg);
-    msg.image_message.is_some()
+    msg.image_message.is_set()
 }
 
 /// Check if the message has a downloadable audio/voice note.
 fn has_audio(msg: &Message) -> bool {
     let msg = unwrap_message(msg);
-    msg.audio_message.is_some()
+    msg.audio_message.is_set()
 }
 
 /// Check if the message has a document attachment.
 fn has_document(msg: &Message) -> bool {
     let msg = unwrap_message(msg);
-    msg.document_message.is_some()
+    msg.document_message.is_set()
 }
 
 /// Check if the message carries a video (#1410).
 fn has_video(msg: &Message) -> bool {
     let msg = unwrap_message(msg);
-    msg.video_message.is_some()
+    msg.video_message.is_set()
 }
 
 /// Check if the message carries a sticker (#1483).
 fn has_sticker(msg: &Message) -> bool {
     let msg = unwrap_message(msg);
-    msg.sticker_message.is_some()
+    msg.sticker_message.is_set()
 }
 
 /// Download a video from WhatsApp. Returns (bytes, mime, filename) on success.
@@ -186,7 +184,7 @@ async fn download_video(
     ctx: &super::media_retry::MediaContext,
 ) -> Option<(Vec<u8>, String, String)> {
     let msg = unwrap_message(msg);
-    let video = msg.video_message.as_ref()?;
+    let video = msg.video_message.as_option()?;
     let mime = video
         .mimetype
         .clone()
@@ -197,11 +195,10 @@ async fn download_video(
         "video/webm" => "webm",
         _ => "mp4",
     };
-    let bytes =
-        super::media_retry::download_with_retry(client, video.as_ref(), ctx, "video", |m, path| {
-            m.direct_path = Some(path)
-        })
-        .await?;
+    let bytes = super::media_retry::download_with_retry(client, video, ctx, "video", |m, path| {
+        m.direct_path = Some(path)
+    })
+    .await?;
     tracing::debug!("WhatsApp: downloaded video ({} bytes)", bytes.len());
     Some((bytes, mime, format!("video.{ext}")))
 }
@@ -214,19 +211,16 @@ async fn download_sticker(
     ctx: &super::media_retry::MediaContext,
 ) -> Option<(Vec<u8>, String, String)> {
     let msg = unwrap_message(msg);
-    let sticker = msg.sticker_message.as_ref()?;
+    let sticker = msg.sticker_message.as_option()?;
     let mime = sticker
         .mimetype
         .clone()
         .unwrap_or_else(|| "image/webp".to_string());
-    let bytes = super::media_retry::download_with_retry(
-        client,
-        sticker.as_ref(),
-        ctx,
-        "sticker",
-        |m, path| m.direct_path = Some(path),
-    )
-    .await?;
+    let bytes =
+        super::media_retry::download_with_retry(client, sticker, ctx, "sticker", |m, path| {
+            m.direct_path = Some(path)
+        })
+        .await?;
     tracing::debug!("WhatsApp: downloaded sticker ({} bytes)", bytes.len());
     Some((bytes, mime, "sticker.webp".to_string()))
 }
@@ -236,16 +230,16 @@ async fn download_sticker(
 /// them, or is a reaction being removed.
 fn describe_non_media(msg: &Message) -> Option<String> {
     let msg = unwrap_message(msg);
-    if let Some(loc) = msg.location_message.as_ref() {
+    if let Some(loc) = msg.location_message.as_option() {
         return Some(super::inbound::describe_location(loc));
     }
-    if let Some(loc) = msg.live_location_message.as_ref() {
+    if let Some(loc) = msg.live_location_message.as_option() {
         return Some(super::inbound::describe_live_location(loc));
     }
-    if let Some(contact) = msg.contact_message.as_ref() {
+    if let Some(contact) = msg.contact_message.as_option() {
         return Some(super::inbound::describe_contact(contact));
     }
-    if let Some(reaction) = msg.reaction_message.as_ref() {
+    if let Some(reaction) = msg.reaction_message.as_option() {
         return super::inbound::describe_reaction(reaction);
     }
     None
@@ -258,16 +252,12 @@ async fn download_document(
     ctx: &super::media_retry::MediaContext,
 ) -> Option<(Vec<u8>, String, String)> {
     let msg = unwrap_message(msg);
-    let doc = msg.document_message.as_ref()?;
+    let doc = msg.document_message.as_option()?;
     let mime = doc.mimetype.clone().unwrap_or_default();
     let fname = doc.file_name.clone().unwrap_or_else(|| "file".to_string());
-    let bytes = super::media_retry::download_with_retry(
-        client,
-        doc.as_ref(),
-        ctx,
-        "document",
-        |m, path| m.direct_path = Some(path),
-    )
+    let bytes = super::media_retry::download_with_retry(client, doc, ctx, "document", |m, path| {
+        m.direct_path = Some(path)
+    })
     .await?;
     tracing::debug!(
         "WhatsApp: downloaded document {} ({} bytes)",
@@ -284,12 +274,11 @@ async fn download_audio(
     ctx: &super::media_retry::MediaContext,
 ) -> Option<Vec<u8>> {
     let msg = unwrap_message(msg);
-    let audio = msg.audio_message.as_ref()?;
-    let bytes =
-        super::media_retry::download_with_retry(client, audio.as_ref(), ctx, "audio", |m, path| {
-            m.direct_path = Some(path)
-        })
-        .await?;
+    let audio = msg.audio_message.as_option()?;
+    let bytes = super::media_retry::download_with_retry(client, audio, ctx, "audio", |m, path| {
+        m.direct_path = Some(path)
+    })
+    .await?;
     tracing::debug!("WhatsApp: downloaded audio ({} bytes)", bytes.len());
     Some(bytes)
 }
@@ -301,7 +290,7 @@ async fn download_image(
     ctx: &super::media_retry::MediaContext,
 ) -> Option<(Vec<u8>, String, String)> {
     let msg = unwrap_message(msg);
-    let img = msg.image_message.as_ref()?;
+    let img = msg.image_message.as_option()?;
 
     let mime = img.mimetype.as_deref().unwrap_or("image/jpeg").to_string();
     let ext = match mime.as_str() {
@@ -312,7 +301,7 @@ async fn download_image(
     };
     let fname = format!("image.{ext}");
 
-    match super::media_retry::download_with_retry(client, img.as_ref(), ctx, "image", |m, path| {
+    match super::media_retry::download_with_retry(client, img, ctx, "image", |m, path| {
         m.direct_path = Some(path)
     })
     .await
@@ -549,7 +538,7 @@ pub(crate) async fn handle_message(
     // cannot be decoded as a pure function: the vote is encrypted, and opening
     // it needs the poll's stored message secret and the client's LID/PN
     // resolution. A vote we cannot label yields None and is logged there.
-    let poll_vote = match unwrap_message(&msg).poll_update_message.as_ref() {
+    let poll_vote = match unwrap_message(&msg).poll_update_message.as_option() {
         Some(update) => {
             let voter = if info.push_name.trim().is_empty() {
                 phone.clone()
@@ -1866,7 +1855,7 @@ pub(crate) async fn handle_message(
                                     "image/jpeg"
                                 };
                                 let img_msg = waproto::whatsapp::Message {
-                                    image_message: Some(Box::new(ImageMessage {
+                                    image_message: ImageMessage {
                                         url: Some(upload.url),
                                         direct_path: Some(upload.direct_path),
                                         media_key: Some(upload.media_key.to_vec()),
@@ -1875,7 +1864,8 @@ pub(crate) async fn handle_message(
                                         file_length: Some(upload.file_length),
                                         mimetype: Some(mime.to_string()),
                                         ..Default::default()
-                                    })),
+                                    }
+                                    .into(),
                                     ..Default::default()
                                 };
                                 if let Err(e) =
@@ -2054,7 +2044,7 @@ pub(crate) async fn handle_message(
                         {
                             Ok(upload) => {
                                 let audio_msg = waproto::whatsapp::Message {
-                                    audio_message: Some(Box::new(AudioMessage {
+                                    audio_message: AudioMessage {
                                         url: Some(upload.url),
                                         direct_path: Some(upload.direct_path),
                                         media_key: Some(upload.media_key.to_vec()),
@@ -2064,7 +2054,8 @@ pub(crate) async fn handle_message(
                                         mimetype: Some("audio/ogg; codecs=opus".to_string()),
                                         ptt: Some(true),
                                         ..Default::default()
-                                    })),
+                                    }
+                                    .into(),
                                     ..Default::default()
                                 };
                                 if let Err(e) =

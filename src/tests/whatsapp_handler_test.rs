@@ -37,10 +37,11 @@ fn extract_text_conversation() {
 #[test]
 fn extract_text_image_caption() {
     let msg = Message {
-        image_message: Some(Box::new(waproto::whatsapp::message::ImageMessage {
+        image_message: waproto::whatsapp::message::ImageMessage {
             caption: Some("look at this".to_string()),
             ..Default::default()
-        })),
+        }
+        .into(),
         ..Default::default()
     };
     assert_eq!(extract_text(&msg), Some("look at this".to_string()));
@@ -60,7 +61,7 @@ fn has_image_text_msg() {
 #[test]
 fn has_image_img_msg() {
     let msg = Message {
-        image_message: Some(Box::default()),
+        image_message: waproto::whatsapp::message::ImageMessage::default().into(),
         ..Default::default()
     };
     assert!(has_image(&msg));

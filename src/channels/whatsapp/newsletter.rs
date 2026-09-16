@@ -278,7 +278,7 @@ fn post_body(m: &waproto::whatsapp::Message) -> String {
     }
     if let Some(t) = m
         .extended_text_message
-        .as_ref()
+        .as_option()
         .and_then(|e| e.text.as_deref())
         .filter(|t| !t.is_empty())
     {
@@ -286,7 +286,7 @@ fn post_body(m: &waproto::whatsapp::Message) -> String {
     }
     if let Some(c) = m
         .image_message
-        .as_ref()
+        .as_option()
         .and_then(|i| i.caption.as_deref())
         .filter(|c| !c.is_empty())
     {
@@ -294,7 +294,7 @@ fn post_body(m: &waproto::whatsapp::Message) -> String {
     }
     if let Some(c) = m
         .video_message
-        .as_ref()
+        .as_option()
         .and_then(|i| i.caption.as_deref())
         .filter(|c| !c.is_empty())
     {

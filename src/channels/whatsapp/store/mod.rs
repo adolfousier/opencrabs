@@ -12,7 +12,6 @@
 mod appsync;
 mod device;
 mod errors;
-#[cfg(not(crates_publish))]
 mod msgsecret;
 mod pool;
 mod protocol;

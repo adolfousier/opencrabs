@@ -159,7 +159,6 @@ impl SignalStore for Store {
         Ok(())
     }
 
-    #[cfg(not(crates_publish))]
     async fn mark_prekeys_uploaded(&self, ids: &[u32]) -> Result<()> {
         // Flip the uploaded flag for keys still present. UPDATE (not upsert) so a
         // key consumed/deleted between the upload snapshot and this call stays

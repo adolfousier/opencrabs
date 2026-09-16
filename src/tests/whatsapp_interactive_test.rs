@@ -12,13 +12,13 @@ use crate::channels::whatsapp::interactive::{
 /// Reach through the view-once envelope to the card itself.
 fn card(msg: &waproto::whatsapp::Message) -> &waproto::whatsapp::message::InteractiveMessage {
     msg.view_once_message
-        .as_ref()
+        .as_option()
         .expect("interactive messages must be wrapped in viewOnceMessage")
         .message
-        .as_ref()
+        .as_option()
         .expect("wrapper carries the real message")
         .interactive_message
-        .as_ref()
+        .as_option()
         .expect("card present")
 }
 
@@ -44,9 +44,9 @@ fn the_card_is_wrapped_in_view_once() {
     // Not about disappearing media: an unwrapped InteractiveMessage is dropped
     // on the floor by the clients that would otherwise render it.
     let msg = build("approve?", None, &approval_buttons());
-    assert!(msg.view_once_message.is_some());
+    assert!(msg.view_once_message.is_set());
     assert!(
-        msg.interactive_message.is_none(),
+        msg.interactive_message.is_unset(),
         "the card belongs inside the wrapper, not beside it"
     );
 }
@@ -62,7 +62,7 @@ fn the_wrapper_declares_multi_device() {
     assert_eq!(
         inner
             .message_context_info
-            .as_ref()
+            .as_option()
             .and_then(|c| c.device_list_metadata_version),
         Some(2)
     );
@@ -74,7 +74,7 @@ fn the_body_carries_the_full_prompt() {
     // but the buttons do not, the text still has to tell the reader what to do.
     let msg = build("Reply yes or no.", None, &approval_buttons());
     assert_eq!(
-        card(&msg).body.as_ref().and_then(|b| b.text.as_deref()),
+        card(&msg).body.as_option().and_then(|b| b.text.as_deref()),
         Some("Reply yes or no.")
     );
 }
@@ -82,11 +82,14 @@ fn the_body_carries_the_full_prompt() {
 #[test]
 fn a_footer_is_optional() {
     let without = build("body", None, &approval_buttons());
-    assert!(card(&without).footer.is_none());
+    assert!(card(&without).footer.is_unset());
 
     let with = build("body", Some("tap or type"), &approval_buttons());
     assert_eq!(
-        card(&with).footer.as_ref().and_then(|f| f.text.as_deref()),
+        card(&with)
+            .footer
+            .as_option()
+            .and_then(|f| f.text.as_deref()),
         Some("tap or type")
     );
 }
@@ -140,8 +143,8 @@ fn a_native_flow_tap_yields_its_id() {
     };
 
     let msg = waproto::whatsapp::Message {
-        interactive_response_message: Some(Box::new(InteractiveResponseMessage {
-            interactive_response_message: Some(Oneof::NativeFlowResponseMessage(
+        interactive_response_message: InteractiveResponseMessage {
+            interactive_response_message: Some(Oneof::NativeFlowResponseMessage(Box::new(
                 NativeFlowResponseMessage {
                     name: Some("quick_reply".to_string()),
                     params_json: Some(
@@ -149,9 +152,10 @@ fn a_native_flow_tap_yields_its_id() {
                     ),
                     ..Default::default()
                 },
-            )),
+            ))),
             ..Default::default()
-        })),
+        }
+        .into(),
         ..Default::default()
     };
     assert_eq!(parse_tap(&msg).as_deref(), Some("wa_approve_yes"));
@@ -163,12 +167,11 @@ fn a_legacy_buttons_tap_is_still_read() {
     // A card sent by a Business account or another tool may answer this way,
     // and refusing to read it would drop a tap the user really made.
     let msg = waproto::whatsapp::Message {
-        buttons_response_message: Some(Box::new(
-            waproto::whatsapp::message::ButtonsResponseMessage {
-                selected_button_id: Some("wa_approve_no".to_string()),
-                ..Default::default()
-            },
-        )),
+        buttons_response_message: waproto::whatsapp::message::ButtonsResponseMessage {
+            selected_button_id: Some("wa_approve_no".to_string()),
+            ..Default::default()
+        }
+        .into(),
         ..Default::default()
     };
     assert_eq!(parse_tap(&msg).as_deref(), Some("wa_approve_no"));
@@ -194,15 +197,16 @@ fn unreadable_tap_params_yield_nothing_rather_than_panicking() {
     // cannot read is a tap we did not receive; the text path still answers.
     for params in ["not json at all", "{}", r#"{"id":42}"#, r#"{"other":"x"}"#] {
         let msg = waproto::whatsapp::Message {
-            interactive_response_message: Some(Box::new(InteractiveResponseMessage {
-                interactive_response_message: Some(Oneof::NativeFlowResponseMessage(
+            interactive_response_message: InteractiveResponseMessage {
+                interactive_response_message: Some(Oneof::NativeFlowResponseMessage(Box::new(
                     NativeFlowResponseMessage {
                         params_json: Some(params.to_string()),
                         ..Default::default()
                     },
-                )),
+                ))),
                 ..Default::default()
-            })),
+            }
+            .into(),
             ..Default::default()
         };
         assert_eq!(parse_tap(&msg), None, "params: {params}");

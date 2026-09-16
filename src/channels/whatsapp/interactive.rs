@@ -78,36 +78,41 @@ pub(crate) fn build(
         .collect();
 
     let interactive = waproto::whatsapp::message::InteractiveMessage {
-        body: Some(Body {
+        body: Body {
             text: Some(body.to_string()),
-        }),
-        footer: footer.map(|f| {
-            Box::new(Footer {
+        }
+        .into(),
+        footer: footer
+            .map(|f| Footer {
                 text: Some(f.to_string()),
                 ..Default::default()
             })
-        }),
-        interactive_message: Some(InteractiveOneof::NativeFlowMessage(NativeFlowMessage {
-            buttons: flow_buttons,
-            message_version: Some(NATIVE_FLOW_VERSION),
-            ..Default::default()
-        })),
+            .into(),
+        interactive_message: Some(InteractiveOneof::NativeFlowMessage(Box::new(
+            NativeFlowMessage {
+                buttons: flow_buttons,
+                message_version: Some(NATIVE_FLOW_VERSION),
+                ..Default::default()
+            },
+        ))),
         ..Default::default()
     };
 
     let inner = waproto::whatsapp::Message {
-        message_context_info: Some(Box::new(waproto::whatsapp::MessageContextInfo {
+        message_context_info: waproto::whatsapp::MessageContextInfo {
             device_list_metadata_version: Some(2),
             ..Default::default()
-        })),
-        interactive_message: Some(Box::new(interactive)),
+        }
+        .into(),
+        interactive_message: interactive.into(),
         ..Default::default()
     };
 
     waproto::whatsapp::Message {
-        view_once_message: Some(Box::new(waproto::whatsapp::message::FutureProofMessage {
-            message: Some(Box::new(inner)),
-        })),
+        view_once_message: waproto::whatsapp::message::FutureProofMessage {
+            message: inner.into(),
+        }
+        .into(),
         ..Default::default()
     }
 }
@@ -131,7 +136,7 @@ fn button_params(id: &str, label: &str) -> String {
 /// read it would drop a tap the user really made.
 pub(crate) fn parse_tap(msg: &waproto::whatsapp::Message) -> Option<String> {
     use waproto::whatsapp::message::interactive_response_message::InteractiveResponseMessage as ResponseOneof;
-    if let Some(resp) = msg.interactive_response_message.as_ref()
+    if let Some(resp) = msg.interactive_response_message.as_option()
         && let Some(ResponseOneof::NativeFlowResponseMessage(flow)) =
             resp.interactive_response_message.as_ref()
         && let Some(params) = flow.params_json.as_deref()
@@ -140,7 +145,7 @@ pub(crate) fn parse_tap(msg: &waproto::whatsapp::Message) -> Option<String> {
         return Some(id);
     }
     msg.buttons_response_message
-        .as_ref()
+        .as_option()
         .and_then(|b| b.selected_button_id.as_deref())
         .map(str::to_string)
 }

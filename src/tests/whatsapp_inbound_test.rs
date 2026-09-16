@@ -148,10 +148,11 @@ fn a_nameless_contact_card_is_still_surfaced() {
 fn an_inbound_reaction_names_its_emoji_and_target() {
     let reaction = ReactionMessage {
         text: Some("👍".to_string()),
-        key: Some(waproto::whatsapp::MessageKey {
+        key: waproto::whatsapp::MessageKey {
             id: Some("3EB0ABC".to_string()),
             ..Default::default()
-        }),
+        }
+        .into(),
         ..Default::default()
     };
     assert_eq!(

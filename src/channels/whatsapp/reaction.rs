@@ -37,7 +37,7 @@ pub(crate) fn build_self_reaction(
         ..Default::default()
     };
     let reaction = waproto::whatsapp::message::ReactionMessage {
-        key: Some(key),
+        key: key.into(),
         // An empty emoji is how WhatsApp encodes REMOVING a reaction, so it
         // is carried as `None` rather than `Some("")`.
         text: if emoji.is_empty() {
@@ -48,12 +48,8 @@ pub(crate) fn build_self_reaction(
         sender_timestamp_ms: Some(timestamp_ms),
         ..Default::default()
     };
-    #[cfg(crates_publish)]
-    let boxed = reaction;
-    #[cfg(not(crates_publish))]
-    let boxed = Box::new(reaction);
     waproto::whatsapp::Message {
-        reaction_message: Some(boxed),
+        reaction_message: reaction.into(),
         ..Default::default()
     }
 }

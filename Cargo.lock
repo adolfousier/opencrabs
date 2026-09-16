@@ -277,12 +277,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7d902e3d592a523def97af8f317b08ce16b7ab854c1985a0c671e6f15cebc236"
 
 [[package]]
-name = "arrayref"
-version = "0.3.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "76a2e8124351fda1ef8aaaa3bbd7ebbcb486bbcd4225aca0aa0d84bb2db8fecb"
-
-[[package]]
 name = "arrayvec"
 version = "0.7.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -550,7 +544,7 @@ dependencies = [
  "clang-sys",
  "itertools 0.13.0",
  "log",
- "prettyplease",
+ "prettyplease 0.2.37",
  "proc-macro2",
  "quote",
  "regex",
@@ -656,6 +650,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "bon"
+version = "3.10.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "60eafe0d77c3a2fc292c1d1346c3041b33c0a108085a2afabf672b70f69dbbc9"
+dependencies = [
+ "bon-macros",
+]
+
+[[package]]
+name = "bon-macros"
+version = "3.10.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bd0f9631d8aaaee112c41985d675ef269e02acbd4f33122836af4f0c5f699ff6"
+dependencies = [
+ "darling 0.24.1",
+ "ident_case",
+ "prettyplease 0.3.0",
+ "proc-macro2",
+ "quote",
+ "syn 3.0.4",
+]
+
+[[package]]
 name = "brotli-decompressor"
 version = "5.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -683,6 +700,62 @@ dependencies = [
  "memchr",
  "regex-automata",
  "serde_core",
+]
+
+[[package]]
+name = "buffa"
+version = "0.9.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a92f2f5df67a9d5ccfc65237bfc954c56328aee40a04a9b92381ecba370be246"
+dependencies = [
+ "base64 0.22.1",
+ "bytes",
+ "foldhash 0.1.5",
+ "hashbrown 0.15.5",
+ "once_cell",
+ "rustversion",
+ "serde",
+ "serde_json",
+ "smoothutf8",
+ "thiserror 2.0.20",
+]
+
+[[package]]
+name = "buffa-build"
+version = "0.9.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "eee6b6b4a8d23f1f98a043f188f4d9d2ef8bee43191f42e93ac577f3c3b0f334"
+dependencies = [
+ "buffa",
+ "buffa-codegen",
+ "tempfile",
+]
+
+[[package]]
+name = "buffa-codegen"
+version = "0.9.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bb4bea10ef85ea3d06a20412c67cb612527feb25f33367eab850139441fb5dd9"
+dependencies = [
+ "buffa",
+ "buffa-descriptor",
+ "prettyplease 0.2.37",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+ "thiserror 2.0.20",
+]
+
+[[package]]
+name = "buffa-descriptor"
+version = "0.9.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2b7dd79a6898e70dac8adae959c8ad2cae51ed96397935c91c996280cedcb55e"
+dependencies = [
+ "buffa",
+ "rustversion",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -1204,6 +1277,20 @@ dependencies = [
  "ryu",
  "serde",
  "static_assertions",
+]
+
+[[package]]
+name = "compact_str"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "79fcda08c33bb58b97008b2cdada6622500e949e060f5913361763121abd2416"
+dependencies = [
+ "castaway",
+ "cfg-if",
+ "itoa",
+ "serde",
+ "static_assertions",
+ "zmij",
 ]
 
 [[package]]
@@ -2508,12 +2595,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0ce7134b9999ecaf8bcd65542e436736ef32ddca1b3e06094cb6ec5755203b80"
 
 [[package]]
-name = "fixedbitset"
-version = "0.5.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1d674e81391d1e1ab681a28d99df07927c6d4aa5b027d7da16ba32d1d21ecd99"
-
-[[package]]
 name = "flate2"
 version = "1.1.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3277,6 +3358,7 @@ dependencies = [
  "allocator-api2",
  "equivalent",
  "foldhash 0.1.5",
+ "serde",
 ]
 
 [[package]]
@@ -3299,18 +3381,6 @@ dependencies = [
  "allocator-api2",
  "equivalent",
  "foldhash 0.2.0",
-]
-
-[[package]]
-name = "hashify"
-version = "0.2.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dd1246c0e5493286aeb2dde35b1f4eb9c4ce00e628641210a5e553fc001a1f26"
-dependencies = [
- "indexmap 2.14.1",
- "proc-macro2",
- "quote",
- "syn 2.0.119",
 ]
 
 [[package]]
@@ -4828,12 +4898,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "multimap"
-version = "0.10.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1d87ecb2933e8aeadb3e3a02b828fed80a7528047e68b4f424523a0981a3a084"
-
-[[package]]
 name = "native-tls"
 version = "0.2.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5801,17 +5865,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "petgraph"
-version = "0.8.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8701b58ea97060d5e5b155d383a69952a60943f0e6dfe30b04c287beb0b27455"
-dependencies = [
- "fixedbitset 0.5.7",
- "hashbrown 0.15.5",
- "indexmap 2.14.1",
-]
-
-[[package]]
 name = "phf"
 version = "0.11.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6130,6 +6183,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "prettyplease"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2bfe0f4c752e450fc2faf62654f1c134747922825d5b04ca717b8874f41a40c0"
+dependencies = [
+ "proc-macro2",
+ "syn 3.0.4",
+]
+
+[[package]]
 name = "primal-check"
 version = "0.3.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6234,55 +6297,6 @@ dependencies = [
  "rusty-fork",
  "tempfile",
  "unarray",
-]
-
-[[package]]
-name = "prost"
-version = "0.14.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "528ac67416ff8646872a3c02cad9cc4ee5dc9f9540c9b10771855c95cb2e5ae1"
-dependencies = [
- "bytes",
- "prost-derive",
-]
-
-[[package]]
-name = "prost-build"
-version = "0.14.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "03da047801ff44bb6a4d407d4860c05fd70bb81714e6b2f3812603d5b145b042"
-dependencies = [
- "heck 0.5.0",
- "itertools 0.14.0",
- "log",
- "multimap",
- "petgraph",
- "prost",
- "prost-types",
- "regex",
- "tempfile",
-]
-
-[[package]]
-name = "prost-derive"
-version = "0.14.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b570b25f7617e43d59005d0990ccb79e950a423952cea19671b7a876da390adf"
-dependencies = [
- "anyhow",
- "itertools 0.14.0",
- "proc-macro2",
- "quote",
- "syn 2.0.119",
-]
-
-[[package]]
-name = "prost-types"
-version = "0.14.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f94967dc7688f3054c7fac87473ffae4cc4c3904800e2d9f5b857246d8963b0a"
-dependencies = [
- "prost",
 ]
 
 [[package]]
@@ -7838,6 +7852,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "smoothutf8"
+version = "0.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6b4ec95892483d6d94284caccfddb9b77111a4dcac33ed25d624248def0fa5f1"
+dependencies = [
+ "simdutf8",
+]
+
+[[package]]
 name = "socket2"
 version = "0.5.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8467,7 +8490,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.3",
  "once_cell",
  "rustix",
  "windows-sys 0.61.2",
@@ -8534,7 +8557,7 @@ dependencies = [
  "fancy-regex 0.11.0",
  "filedescriptor",
  "finl_unicode",
- "fixedbitset 0.4.2",
+ "fixedbitset",
  "hex",
  "lazy_static",
  "libc",
@@ -9277,26 +9300,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "typed-builder"
-version = "0.23.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "31aa81521b70f94402501d848ccc0ecaa8f93c8eb6999eb9747e72287757ffda"
-dependencies = [
- "typed-builder-macro",
-]
-
-[[package]]
-name = "typed-builder-macro"
-version = "0.23.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "076a02dc54dd46795c2e9c8282ed40bcfb1e22747e955de9389a1de28190fb26"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.119",
-]
-
-[[package]]
 name = "typed-path"
 version = "0.12.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9628,8 +9631,9 @@ dependencies = [
 
 [[package]]
 name = "wacore"
-version = "0.6.0"
-source = "git+https://github.com/jlucaso1/whatsapp-rust.git?rev=645e2ba5b3fc470632da1f727b93a13e9de3b828#645e2ba5b3fc470632da1f727b93a13e9de3b828"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6139a98fece24956f1d6bf164c82c5daefb43834813d96a879b41e010707c2c2"
 dependencies = [
  "aes 0.9.3",
  "anyhow",
@@ -9637,13 +9641,16 @@ dependencies = [
  "async-lock",
  "async-trait",
  "base64 0.22.1",
+ "bon",
+ "buffa",
+ "buffa-build",
  "bytes",
  "chrono",
- "compact_str 0.9.1",
+ "compact_str 0.10.0",
  "ctr",
  "event-listener",
- "flate2",
  "futures",
+ "hashbrown 0.17.1",
  "hex",
  "hkdf",
  "hmac 0.13.0",
@@ -9651,36 +9658,37 @@ dependencies = [
  "log",
  "md5",
  "portable-atomic",
- "prost",
  "rand 0.10.2",
  "serde",
  "serde-big-array",
  "serde_json",
  "sha1 0.11.0",
  "sha2 0.11.0",
+ "smallvec",
+ "smoothutf8",
  "subtle",
  "thiserror 2.0.20",
- "typed-builder",
  "wacore-appstate",
  "wacore-binary",
  "wacore-derive",
  "wacore-libsignal",
  "wacore-noise",
  "waproto",
+ "zeroize",
 ]
 
 [[package]]
 name = "wacore-appstate"
-version = "0.6.0"
-source = "git+https://github.com/jlucaso1/whatsapp-rust.git?rev=645e2ba5b3fc470632da1f727b93a13e9de3b828#645e2ba5b3fc470632da1f727b93a13e9de3b828"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5afb5372c68d1cda49b7e86a81a01302b7c71b78e8555178c7cf3be01f09ecc3"
 dependencies = [
  "anyhow",
- "bytemuck",
+ "buffa",
  "hex",
  "hkdf",
  "hmac 0.13.0",
  "log",
- "prost",
  "serde",
  "serde-big-array",
  "serde_json",
@@ -9693,74 +9701,76 @@ dependencies = [
 
 [[package]]
 name = "wacore-binary"
-version = "0.6.0"
-source = "git+https://github.com/jlucaso1/whatsapp-rust.git?rev=645e2ba5b3fc470632da1f727b93a13e9de3b828#645e2ba5b3fc470632da1f727b93a13e9de3b828"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9e56452f93ac1e6167a6ebafec23971fe1ca9332b27cc887520f4a6753956fde"
 dependencies = [
  "bytes",
- "compact_str 0.9.1",
- "flate2",
- "hashify",
+ "compact_str 0.10.0",
  "itoa",
  "serde",
  "serde_json",
  "smallvec",
+ "smoothutf8",
  "stable_deref_trait",
  "yoke 0.8.3",
+ "zlib-rs",
 ]
 
 [[package]]
 name = "wacore-derive"
-version = "0.6.0"
-source = "git+https://github.com/jlucaso1/whatsapp-rust.git?rev=645e2ba5b3fc470632da1f727b93a13e9de3b828#645e2ba5b3fc470632da1f727b93a13e9de3b828"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "53cba66b01df4bef777c3d131af434dea0f3c8a7da2e42d7fb74e11fd65fb094"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.119",
+ "syn 3.0.4",
 ]
 
 [[package]]
 name = "wacore-libsignal"
-version = "0.6.0"
-source = "git+https://github.com/jlucaso1/whatsapp-rust.git?rev=645e2ba5b3fc470632da1f727b93a13e9de3b828#645e2ba5b3fc470632da1f727b93a13e9de3b828"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dbf8e90eebdf77703305089c1dfe672dddf203e0238e8f47163f76e7f9d5c713"
 dependencies = [
  "aes 0.9.3",
- "arrayref",
  "async-lock",
  "async-trait",
+ "buffa",
  "bytes",
  "cbc 0.2.1",
  "chrono",
  "ctr",
  "curve25519-dalek",
- "derive_more 2.1.1",
- "displaydoc",
  "ghash",
  "hex",
  "hkdf",
  "hmac 0.13.0",
  "log",
- "prost",
+ "portable-atomic",
  "rand 0.10.2",
  "serde",
  "sha1 0.11.0",
  "sha2 0.11.0",
  "subtle",
  "thiserror 2.0.20",
- "uuid",
+ "wacore-derive",
  "waproto",
  "x25519-dalek",
 ]
 
 [[package]]
 name = "wacore-noise"
-version = "0.6.0"
-source = "git+https://github.com/jlucaso1/whatsapp-rust.git?rev=645e2ba5b3fc470632da1f727b93a13e9de3b828#645e2ba5b3fc470632da1f727b93a13e9de3b828"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a15b03c1e5e4bbf20d2d875c96649aaff82d149f025ae3a1421a1b6a9c426114"
 dependencies = [
  "anyhow",
+ "buffa",
  "bytes",
  "hkdf",
  "log",
- "prost",
  "rand 0.10.2",
  "sha2 0.11.0",
  "thiserror 2.0.20",
@@ -9799,13 +9809,15 @@ dependencies = [
 
 [[package]]
 name = "waproto"
-version = "0.6.0"
-source = "git+https://github.com/jlucaso1/whatsapp-rust.git?rev=645e2ba5b3fc470632da1f727b93a13e9de3b828#645e2ba5b3fc470632da1f727b93a13e9de3b828"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fd19a927d4781e92382a478d234f74baeacb4822ceeb45c665bb9cb321622c35"
 dependencies = [
+ "buffa",
+ "buffa-build",
+ "buffa-descriptor",
+ "bytes",
  "heck 0.5.0",
- "prost",
- "prost-build",
- "prost-types",
  "serde",
  "sha2 0.11.0",
 ]
@@ -10042,28 +10054,31 @@ dependencies = [
 
 [[package]]
 name = "whatsapp-rust"
-version = "0.6.0"
-source = "git+https://github.com/jlucaso1/whatsapp-rust.git?rev=645e2ba5b3fc470632da1f727b93a13e9de3b828#645e2ba5b3fc470632da1f727b93a13e9de3b828"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3cb354c32641cfe832bf5c5767a016762234c5efd1b4ce979e2b3e32175d96bc"
 dependencies = [
  "anyhow",
  "async-channel",
  "async-lock",
  "async-trait",
  "base64 0.22.1",
+ "buffa",
  "bytes",
  "chrono",
  "event-listener",
  "futures",
  "getrandom 0.4.3",
+ "hashbrown 0.17.1",
  "hex",
  "itoa",
  "log",
  "portable-atomic",
- "prost",
  "rand 0.10.2",
  "scopeguard",
  "serde",
  "serde_json",
+ "smallvec",
  "thiserror 2.0.20",
  "tokio",
  "wacore",
@@ -10071,12 +10086,14 @@ dependencies = [
  "waproto",
  "whatsapp-rust-tokio-transport",
  "whatsapp-rust-ureq-http-client",
+ "zeroize",
 ]
 
 [[package]]
 name = "whatsapp-rust-tokio-transport"
-version = "0.6.0"
-source = "git+https://github.com/jlucaso1/whatsapp-rust.git?rev=645e2ba5b3fc470632da1f727b93a13e9de3b828#645e2ba5b3fc470632da1f727b93a13e9de3b828"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "02ae442f8a6e747c777225ce1808f2ce5311963cf2dccb17a1f304c749f01832"
 dependencies = [
  "anyhow",
  "async-channel",
@@ -10095,8 +10112,9 @@ dependencies = [
 
 [[package]]
 name = "whatsapp-rust-ureq-http-client"
-version = "0.6.0"
-source = "git+https://github.com/jlucaso1/whatsapp-rust.git?rev=645e2ba5b3fc470632da1f727b93a13e9de3b828#645e2ba5b3fc470632da1f727b93a13e9de3b828"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1ebb64db9f84faa5eddb851ba7f44566363523bbdb88d5772fcc7d168e177797"
 dependencies = [
  "anyhow",
  "async-trait",

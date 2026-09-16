@@ -106,7 +106,7 @@ pub(crate) async fn decode_vote(
     voter_jid: &wacore_binary::jid::Jid,
     voter_label: &str,
 ) -> Option<String> {
-    let key = update.poll_creation_message_key.as_ref()?;
+    let key = update.poll_creation_message_key.as_option()?;
     let poll_id = key.id.as_deref()?;
 
     let Some(options) = state.polls.get(poll_id).await else {
@@ -118,7 +118,7 @@ pub(crate) async fn decode_vote(
         return None;
     };
 
-    let vote = update.vote.as_ref()?;
+    let vote = update.vote.as_option()?;
     let (payload, iv) = (vote.enc_payload.as_deref()?, vote.enc_iv.as_deref()?);
 
     // The secret is keyed on the poll's own chat and author. We only track

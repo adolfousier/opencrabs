@@ -116,6 +116,7 @@ An integration window: ACP server mode over stdio JSON-RPC so Zed and MonoCode d
 
 ### 🧹 Miscellaneous
 
+- **deps**: move WhatsApp crates from a git rev to crates.io whatsapp-rust/wacore/waproto 0.7.0 and drop the `crates_publish` cfg split. `cargo publish` strips git pins and verified the tarball against 0.6.0, which lacked the labels, polls and newsletter APIs the 0.5.2 surfaces use, so the publish step failed and no release shipped. Migrated proto access to buffa `MessageField`, the batched `Event::Messages`, builder-style `SendOptions`, the two-window `delete_expired_tc_tokens`. MSRV 1.94.
 - `82fac8bd` **skills**: drop orphan cfg(test) Skill import left by #1612 sweep
 - `48065540`: drop trailing blank line in notify_policy.rs (#1612)
 - `871c51f2`: move skill_gate.rs inline tests to src/tests/skill_gate_test.rs (#1612)

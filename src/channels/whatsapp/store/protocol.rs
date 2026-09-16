@@ -216,7 +216,11 @@ impl ProtocolStore for Store {
             .map_err(db_err)
     }
 
-    async fn delete_expired_tc_tokens(&self, cutoff_timestamp: i64) -> Result<u32> {
+    /// A row goes only when BOTH windows are stale: the received token
+    /// (`token_timestamp < token_cutoff`, or no token bytes at all) and the
+    /// sender bucket (`sender_timestamp < sender_cutoff`, or never set). A
+    /// recent sender bucket keeps the row even after the received token expires.
+    async fn delete_expired_tc_tokens(&self, token_cutoff: i64, sender_cutoff: i64) -> Result<u32> {
         let did = self.device_id;
         self.pool
             .get()
@@ -224,8 +228,11 @@ impl ProtocolStore for Store {
             .map_err(pool_err)?
             .interact(move |conn| {
                 conn.execute(
-                    "DELETE FROM wa_tc_tokens WHERE token_timestamp < ?1 AND device_id = ?2",
-                    params![cutoff_timestamp, did],
+                    "DELETE FROM wa_tc_tokens \
+                     WHERE device_id = ?3 \
+                       AND (token_timestamp < ?1 OR token IS NULL OR length(token) = 0) \
+                       AND (sender_timestamp IS NULL OR sender_timestamp < ?2)",
+                    params![token_cutoff, sender_cutoff, did],
                 )
             })
             .await
