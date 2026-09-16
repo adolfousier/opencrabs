@@ -5488,12 +5488,12 @@ fn is_unsloth_studio_url(url: &str) -> bool {
 /// multi-byte character in half; decoding each chunk in isolation replaces
 /// the orphaned bytes with U+FFFD (the "resum??"/"????" mojibake class).
 /// This carries the incomplete trailing bytes to the next chunk instead.
-struct Utf8Carry {
+pub(crate) struct Utf8Carry {
     pending: Vec<u8>,
 }
 
 impl Utf8Carry {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             pending: Vec::new(),
         }
@@ -5503,7 +5503,7 @@ impl Utf8Carry {
     /// bytes are held for the next call; genuinely invalid bytes become a
     /// single U+FFFD each (same visible result as `from_utf8_lossy` for
     /// bytes that are truly garbage, without punishing split characters).
-    fn push(&mut self, bytes: &[u8]) -> String {
+    pub(crate) fn push(&mut self, bytes: &[u8]) -> String {
         self.pending.extend_from_slice(bytes);
         let mut out = String::new();
         loop {
@@ -5533,45 +5533,5 @@ impl Utf8Carry {
             }
         }
         out
-    }
-}
-
-#[cfg(test)]
-mod utf8_carry_tests {
-    use super::Utf8Carry;
-
-    #[test]
-    fn ascii_passes_through_unchanged() {
-        let mut c = Utf8Carry::new();
-        // Single complete chunk: emitted as-is.
-        assert_eq!(c.push(b"hello world"), "hello world");
-        // Split chunks: each emitted once, no replay.
-        assert_eq!(c.push(b"hello "), "hello ");
-        assert_eq!(c.push(b"world"), "world");
-        assert_eq!(c.push(b""), "");
-    }
-
-    #[test]
-    fn reassembles_two_byte_char_split_across_chunks() {
-        // 'í' = C3 AD, split between chunks.
-        let mut c = Utf8Carry::new();
-        assert_eq!(c.push(b"resum"), "resum");
-        assert_eq!(c.push(&[0xC3]), "");
-        assert_eq!(c.push(&[0xAD]), "í");
-    }
-
-    #[test]
-    fn reassembles_three_byte_char_split_across_chunks() {
-        // '─' (box drawing) = E2 94 80, the status-table divider.
-        let mut c = Utf8Carry::new();
-        assert_eq!(c.push(&[0xE2]), "");
-        assert_eq!(c.push(&[0x94]), "");
-        assert_eq!(c.push(&[0x80]), "─");
-    }
-
-    #[test]
-    fn substitutes_genuinely_invalid_bytes_once() {
-        let mut c = Utf8Carry::new();
-        assert_eq!(c.push(&[0xFF, b'a']), "\u{FFFD}a");
     }
 }

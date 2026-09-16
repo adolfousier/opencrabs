@@ -807,6 +807,7 @@ pub mod usage_grouping_test;
 pub mod usage_ledger_test;
 pub mod user_correction_metadata_test;
 pub mod utc_timestamp_test;
+pub mod utf8_carry_test;
 pub mod variation_directive_test;
 pub mod voice_onboarding_test;
 pub mod voice_stt_dispatch_test;
@@ -829,6 +830,9 @@ pub mod brain_tools_whatsapp_send_test;
 pub mod channel_commands_test;
 pub mod discord_handler_test;
 pub mod discord_norm_key_test;
+pub mod discord_split_message_test;
+pub mod discord_table_convert_test;
+pub mod discord_thread_title_test;
 #[cfg(unix)]
 pub mod flock_retry_test;
 pub mod flow_progress_key_test;
