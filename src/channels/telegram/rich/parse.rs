@@ -8,7 +8,8 @@ use super::{list, table};
 
 /// Parse a markdown document into a block list.
 pub(crate) fn parse_markdown(input: &str) -> Vec<Block> {
-    let lines: Vec<String> = input.lines().map(str::to_string).collect();
+    let normalized = super::table::balance_code_fences(input);
+    let lines: Vec<String> = normalized.lines().map(str::to_string).collect();
     parse_blocks(&lines)
 }
 
