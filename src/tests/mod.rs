@@ -922,6 +922,7 @@ pub mod telegram_rich_mermaid_test;
 pub mod tui_render_panes_test;
 pub mod telegram_rich_inline_test;
 pub mod timezone_test;
+pub mod target_resolver_test;
 pub mod telegram_target_resolver_test;
 pub mod telegram_telemetry_test;
 pub mod telegram_thread_id_lookup_test;
