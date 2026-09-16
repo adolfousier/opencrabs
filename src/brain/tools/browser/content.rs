@@ -66,18 +66,17 @@ impl Tool for BrowserContentTool {
         };
 
         let content = if let Some(sel) = selector {
-            // Get content of specific element
-            let js = if text_only {
-                format!(
-                    "document.querySelector('{}')?.innerText || '(element not found)'",
-                    sel.replace('\'', "\\'")
-                )
-            } else {
-                format!(
-                    "document.querySelector('{}')?.innerHTML || '(element not found)'",
-                    sel.replace('\'', "\\'")
-                )
-            };
+            // Get content of specific element. `__ocQueryOne` so a
+            // selector pointing inside an open shadow root resolves here
+            // exactly as it does in browser_click / browser_type; the
+            // selector is JSON-encoded so quotes and backslashes in it
+            // cannot break out of the literal.
+            let sel_js = serde_json::to_string(sel).unwrap_or_else(|_| "null".into());
+            let prop = if text_only { "innerText" } else { "innerHTML" };
+            let js = super::shadow::with_deep_helpers(&format!(
+                "const el = __ocQueryOne({sel_js});
+                 return el ? (el.{prop} || '') : '(element not found)';"
+            ));
             match page.evaluate(js.as_str()).await {
                 Ok(result) => result
                     .value()
@@ -97,7 +96,13 @@ impl Tool for BrowserContentTool {
                 Err(e) => return Ok(ToolResult::error(format!("Content extraction failed: {e}"))),
             }
         } else {
-            // Full page HTML
+            // Full page HTML. Deliberately NOT chromey's
+            // `outer_html_full` (which serializes the composed tree
+            // including shadow roots): this path applies no output cap
+            // at all, so dumping every shadow tree would be an
+            // output-sizing change wearing a shadow-DOM costume. It
+            // needs a cap first. Selector-scoped extraction above does
+            // pierce, which is the case the agent actually reaches for.
             match page.content().await {
                 Ok(html) => html,
                 Err(e) => return Ok(ToolResult::error(format!("Failed to get page HTML: {e}"))),

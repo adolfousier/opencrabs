@@ -125,11 +125,15 @@ impl Tool for BrowserTypeTool {
         // dispatch bubbling `input` + `change` events so onChange fires.
         // `+=` (the old behaviour) also appended to placeholder/stale text,
         // producing the "placeholder + credentials" garbage. This replaces.
-        let js = format!(
-            r#"(function(){{
+        // `__ocQueryOne` instead of `document.querySelector`: an input
+        // rendered inside an open shadow root is invisible to the latter,
+        // so a selector `browser_find` just handed back would resolve to
+        // nothing here. Outcome strings are unchanged.
+        let js = super::shadow::with_deep_helpers(&format!(
+            r#"
   var sel = {sel_js};
   var val = {val_js};
-  var el = sel ? document.querySelector(sel) : document.activeElement;
+  var el = sel ? __ocQueryOne(sel) : document.activeElement;
   if (!el) return "no_element";
   var editable = el.isContentEditable;
   if (el.value === undefined && !editable) return "not_input";
@@ -147,9 +151,8 @@ impl Tool for BrowserTypeTool {
   if (desc && desc.set) {{ desc.set.call(el, val); }} else {{ el.value = val; }}
   el.dispatchEvent(new Event("input", {{bubbles:true}}));
   el.dispatchEvent(new Event("change", {{bubbles:true}}));
-  return "ok";
-}})()"#
-        );
+  return "ok";"#
+        ));
 
         let outcome = match page.evaluate(js.as_str()).await {
             Ok(r) => r
