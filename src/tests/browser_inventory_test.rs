@@ -98,7 +98,20 @@ fn inventory_has_no_user_supplied_string_to_escape() {
         !js.contains(r#""+ "#),
         "no concatenation into the selector string"
     );
-    assert!(js.contains("querySelectorAll(sel)"));
+    // The union goes through the deep helper, which matches it in the
+    // document AND in every open shadow root.
+    assert!(js.contains("__ocQueryAll(sel, __OC_MAX_NODES)"));
+}
+
+#[test]
+fn inventory_scan_budget_is_not_the_display_limit() {
+    // The visibility / dedup / occlusion filters reject candidates, so
+    // capping the SCAN at `limit` would silently under-fill the
+    // inventory. Scan is capped by the walk budget; `limit` still bounds
+    // what is indexed.
+    let js = build_inventory_js(5);
+    assert!(js.contains("__ocQueryAll(sel, __OC_MAX_NODES)"));
+    assert!(js.contains("visible.length >= 5"));
 }
 
 // ---------- #1191: nested-duplicate dedup + collapse count ----------
@@ -111,21 +124,35 @@ fn inventory_dedups_generic_wrappers_contained_in_accepted_elements() {
     // its own index. The button+icon+span page yields ONE index for the
     // button, not three.
     let js = build_inventory_js(50);
-    assert!(js.contains("acceptedRects"), "containment tracker present");
+    assert!(js.contains("const accepted = [];"), "containment tracker");
     assert!(
-        js.contains("acceptedRects.some(r =>"),
-        "containment check against already-accepted rects"
+        js.contains("const dup = accepted.some(a =>"),
+        "containment check against already-accepted elements"
     );
     // ±1px tolerance so sub-pixel layout rounding cannot split a real
     // wrapper from its container.
-    assert!(js.contains("r.left - 1 <= rect.left"), "left tolerance");
-    assert!(js.contains("rect.right <= r.right + 1"), "right tolerance");
-    assert!(js.contains("r.top - 1 <= rect.top"), "top tolerance");
+    assert!(js.contains("a.rect.left - 1 <= rect.left"), "left tolerance");
+    assert!(js.contains("rect.right <= a.rect.right + 1"), "right tolerance");
+    assert!(js.contains("a.rect.top - 1 <= rect.top"), "top tolerance");
     assert!(
-        js.contains("rect.bottom <= r.bottom + 1"),
+        js.contains("rect.bottom <= a.rect.bottom + 1"),
         "bottom tolerance"
     );
     assert!(js.contains("collapsed++"), "collapse counter incremented");
+}
+
+#[test]
+fn inventory_collapse_requires_composed_ancestry() {
+    // Rect containment alone stops being sufficient once enumeration
+    // pierces: a shadow-inner control can sit inside an unrelated
+    // light-DOM wrapper's rect without being its descendant, and
+    // collapsing it would throw away the only handle on it.
+    let js = build_inventory_js(50);
+    assert!(
+        js.contains("&& __ocComposedContains(a.el, el));"),
+        "collapse must require the accepted element to be a composed-tree ancestor"
+    );
+    assert!(js.contains("accepted.push({el: el, rect: rect});"));
 }
 
 #[test]
@@ -140,7 +167,7 @@ fn inventory_dedup_preserves_own_semantics_elements() {
         .find("const own = el.tagName === 'INPUT'")
         .expect("own-semantics classification present");
     let dup_pos = js
-        .find("const dup = acceptedRects.some")
+        .find("const dup = accepted.some")
         .expect("containment check present");
     let gate_pos = js.find("if (!own)").expect("gate present");
     assert!(
@@ -173,9 +200,13 @@ fn inventory_attaches_collapse_count_for_header() {
     assert!(js.contains("typeof nodes.occluded === 'number'"));
     // Occlusion v1 (#1187): center hit-test with viewport clamping,
     // descendant tolerance, and dropped candidates earning no index.
-    assert!(js.contains("document.elementFromPoint(cx, cy)"));
+    // Hit-test is scoped to the element's OWN root: plain
+    // `document.elementFromPoint` retargets to the shadow host and
+    // `Node.contains` stops at the boundary, so together they would
+    // report every pierced element as occluded and drop it.
+    assert!(js.contains("__ocHitTest(el, cx, cy)"));
     assert!(js.contains("Math.min(Math.max(rect.left + rect.width / 2, 0), vw - 1)"));
-    assert!(js.contains("hit !== el && !el.contains(hit)"));
+    assert!(js.contains("hit !== el && !__ocComposedContains(el, hit)"));
     assert!(js.contains("occluded++; continue;"));
     assert!(js.contains("items: out"));
 }

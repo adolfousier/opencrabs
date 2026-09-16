@@ -13,10 +13,12 @@
 use crate::brain::tools::browser::build_find_js;
 
 #[test]
-fn css_mode_uses_query_selector_all() {
+fn css_mode_uses_deep_query_selector_all() {
     let js = build_find_js("css", "button.primary", 20);
-    assert!(js.contains(r#"querySelectorAll("button.primary")"#));
-    assert!(js.contains("slice(0, 20)"));
+    // `__ocQueryAll` instead of `document.querySelectorAll`: css search
+    // reaches inside open shadow roots, and the limit is applied by the
+    // helper rather than a trailing `.slice`.
+    assert!(js.contains(r#"__ocQueryAll("button.primary", 20)"#));
 }
 
 #[test]
@@ -31,8 +33,11 @@ fn xpath_mode_uses_document_evaluate() {
 #[test]
 fn text_mode_walks_dom_for_substring() {
     let js = build_find_js("text", "Sign in", 10);
-    assert!(js.contains("createTreeWalker"));
-    assert!(js.contains("SHOW_ELEMENT"));
+    // The composed-tree walk replaces the flat
+    // `createTreeWalker(document.body, ...)`, so text search sees
+    // elements rendered inside open shadow roots.
+    assert!(js.contains("for (const node of __ocWalk())"));
+    assert!(js.contains("out.length >= 10"));
     // Pattern gets lowercased server-side for case-insensitive match
     assert!(js.contains(r#""Sign in".toLowerCase()"#));
 }
@@ -47,7 +52,7 @@ fn aria_mode_uses_attribute_selector() {
 fn unknown_mode_defaults_to_css() {
     let js = build_find_js("nonsense", ".btn", 5);
     assert!(
-        js.contains(r#"querySelectorAll(".btn")"#),
+        js.contains(r#"__ocQueryAll(".btn", 5)"#),
         "unknown mode must fall back to CSS selector path"
     );
 }
@@ -64,7 +69,7 @@ fn escapes_double_quotes_in_pattern() {
     // And no raw unescaped `"bar"` substring sneaks through breaking
     // the outer literal.
     assert!(
-        !js.contains(r#"querySelectorAll("div[data-foo="bar"]")"#),
+        !js.contains(r#"__ocQueryAll("div[data-foo="bar"]", 5)"#),
         "unescaped inner double-quotes would break the JS string literal"
     );
 }
@@ -84,15 +89,31 @@ fn clears_previous_match_attributes_before_re_enumerating() {
     // stale indices from call N would coexist with fresh indices
     // from call N+1 on different elements and the returned selector
     // would be ambiguous.
+    // The clear is DEEP (`__ocClearStamps`): once we stamp inside a
+    // shadow root, a flat `document.querySelectorAll` cleanup would
+    // leave those stamps rotting and a stale
+    // `[data-opencrabs-match="3"]` could resolve to a node from a
+    // previous page state.
     let js = build_find_js("css", ".btn", 5);
-    assert!(js.contains("[data-opencrabs-match]"));
+    assert!(js.contains("__ocClearStamps();"));
     assert!(js.contains("removeAttribute('data-opencrabs-match')"));
+}
+
+#[test]
+fn xpath_mode_stays_light_dom_by_spec() {
+    // XPath has no notion of a shadow boundary, so `document.evaluate`
+    // cannot cross one however we call it. The mode must therefore keep
+    // the flat evaluate and the tool description must say so.
+    let js = build_find_js("xpath", "//button", 5);
+    assert!(js.contains("document.evaluate("));
+    assert!(!js.contains("__ocQueryAll("));
+    assert!(!js.contains("__ocWalk()"));
 }
 
 #[test]
 fn returns_object_with_stable_selector_per_match() {
     // The payload shape the model sees must be:
-    //   { selector, text, tag, visible }
+    //   { selector, text, tag, visible, shadow }
     // Selector uses the attribute we just assigned so it's unique
     // and survives subsequent DOM churn (within the same turn).
     let js = build_find_js("css", "button", 5);
@@ -100,4 +121,7 @@ fn returns_object_with_stable_selector_per_match() {
     assert!(js.contains("text:"));
     assert!(js.contains("tag:"));
     assert!(js.contains("visible:"));
+    // `shadow` is additive — it tells the model the element sits behind
+    // a shadow boundary without changing the selector shape.
+    assert!(js.contains("shadow: __ocInShadow(el)"));
 }

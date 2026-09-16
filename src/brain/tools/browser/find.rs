@@ -24,6 +24,7 @@
 //! click that follows is deterministic.
 
 use super::manager::BrowserManager;
+use super::shadow::deep_helpers_js;
 use crate::brain::tools::error::Result;
 use crate::brain::tools::r#trait::{Tool, ToolCapability, ToolExecutionContext, ToolResult};
 use async_trait::async_trait;
@@ -53,7 +54,11 @@ impl Tool for BrowserFindTool {
          elements on the page (buttons, links, inputs, etc.), each with a \
          stable indexed selector ready for `browser_click`. Use the no-pattern \
          inventory when you have just landed and do not yet know what to \
-         click — prefer it over `browser_screenshot` for discovery."
+         click — prefer it over `browser_screenshot` for discovery. \
+         `css`, `text`, `aria` and the inventory all search INSIDE open shadow \
+         roots (marked `[shadow]` in the output); `xpath` cannot cross a shadow \
+         boundary — that is an XPath spec limit, not ours, so use `css`/`text` \
+         for web-component pages."
     }
 
     fn input_schema(&self) -> Value {
@@ -240,11 +245,18 @@ impl Tool for BrowserFindTool {
 /// passes back to `browser_click` are deterministic and identical in
 /// shape regardless of how the nodes were collected.
 fn wrap_with_index(nodes_expr: &str) -> String {
+    // The composed-tree helpers are spliced into THIS IIFE's scope, so
+    // the nested node-collection IIFE below closes over them and every
+    // mode gets shadow-DOM reach without a second wrapper.
+    let helpers = deep_helpers_js();
     format!(
         r#"
-        (() => {{
-            document.querySelectorAll('[data-opencrabs-match]').forEach(
-                el => el.removeAttribute('data-opencrabs-match'));
+        (() => {{{helpers}
+            // Deep clear: stamping inside a shadow root while clearing
+            // only `document` would leave stale stamps behind, so a
+            // `[data-opencrabs-match="3"]` handed back on the next turn
+            // could resolve to a node from a previous page state.
+            __ocClearStamps();
             const nodes = {nodes_expr};
             const out = [];
             for (let i = 0; i < nodes.length; i++) {{
@@ -260,6 +272,10 @@ fn wrap_with_index(nodes_expr: &str) -> String {
                     text: (el.innerText || el.textContent || '').trim().slice(0, 200),
                     tag: el.tagName.toLowerCase(),
                     visible: visible,
+                    // Tells the model the element lives behind a shadow
+                    // boundary. Additive: the selector shape is unchanged
+                    // and still resolves through browser_click/type/act.
+                    shadow: __ocInShadow(el),
                 }});
             }}
             // Inventory mode attaches `collapsed` to the nodes array (a
@@ -286,6 +302,10 @@ pub(crate) fn build_find_js(mode: &str, pattern: &str, limit: usize) -> String {
     // inside a double-quoted JS string literal; backslash needs escaping).
     let escaped = pattern.replace('\\', "\\\\").replace('"', "\\\"");
     let walker = match mode {
+        // XPath stays main-document only: the spec has no notion of a
+        // shadow boundary, so `document.evaluate` cannot cross one no
+        // matter how we call it. The tool description points at
+        // css/text/aria for web-component pages.
         "xpath" => format!(
             r#"
             (() => {{
@@ -302,11 +322,9 @@ pub(crate) fn build_find_js(mode: &str, pattern: &str, limit: usize) -> String {
             r#"
             (() => {{
                 const needle = "{escaped}".toLowerCase();
-                const walker = document.createTreeWalker(
-                    document.body, NodeFilter.SHOW_ELEMENT);
                 const out = [];
-                let node;
-                while ((node = walker.nextNode()) && out.length < {limit}) {{
+                for (const node of __ocWalk()) {{
+                    if (out.length >= {limit}) break;
                     const t = (node.innerText || node.textContent || "").toLowerCase();
                     if (t.includes(needle)) out.push(node);
                 }}
@@ -316,18 +334,13 @@ pub(crate) fn build_find_js(mode: &str, pattern: &str, limit: usize) -> String {
         ),
         "aria" => format!(
             r#"
-            (() => Array.from(
-                document.querySelectorAll(
-                    '[aria-label*="{escaped}" i]'))
-                .slice(0, {limit}))()
+            (() => __ocQueryAll('[aria-label*="{escaped}" i]', {limit}))()
             "#
         ),
         _ => format!(
             // CSS default
             r#"
-            (() => Array.from(
-                document.querySelectorAll("{escaped}"))
-                .slice(0, {limit}))()
+            (() => __ocQueryAll("{escaped}", {limit}))()
             "#
         ),
     };
@@ -353,9 +366,14 @@ pub(crate) fn build_inventory_js(limit: usize) -> String {
 textarea, summary, [role="button"], [role="link"], [role="checkbox"], \
 [role="tab"], [role="menuitem"], [role="option"], [contenteditable=""], \
 [contenteditable="true"], [tabindex]:not([tabindex="-1"])';
-            const all = Array.from(document.querySelectorAll(sel));
+            // Deep scan: the union is matched in the document AND in
+            // every open shadow root. Capped by the walk budget rather
+            // than by `limit`, because the visibility/dup/occlusion
+            // filters below reject candidates — capping the scan at
+            // `limit` would silently under-fill the inventory.
+            const all = __ocQueryAll(sel, __OC_MAX_NODES);
             const visible = [];
-            const acceptedRects = [];
+            const accepted = [];
             let collapsed = 0;
             let occluded = 0;
             for (const el of all) {{
@@ -381,11 +399,21 @@ textarea, summary, [role="button"], [role="link"], [role="checkbox"], \
                         // contained (±1px tolerance) in an already-accepted
                         // element's rect is the SAME visual target — index
                         // the container only (#1191).
-                        const dup = acceptedRects.some(r =>
-                            r.left - 1 <= rect.left
-                            && rect.right <= r.right + 1
-                            && r.top - 1 <= rect.top
-                            && rect.bottom <= r.bottom + 1);
+                        // Rect containment alone is not enough once we
+                        // pierce: a shadow-inner control can sit inside
+                        // an unrelated light-DOM wrapper's rect without
+                        // being its descendant, and collapsing it would
+                        // drop the only handle on it. Require COMPOSED
+                        // ancestry so the fold still fires for a real
+                        // nested wrapper (including one that is its own
+                        // shadow host, where the host IS the click
+                        // target) and never for a coincidental overlap.
+                        const dup = accepted.some(a =>
+                            a.rect.left - 1 <= rect.left
+                            && rect.right <= a.rect.right + 1
+                            && a.rect.top - 1 <= rect.top
+                            && rect.bottom <= a.rect.bottom + 1
+                            && __ocComposedContains(a.el, el));
                         if (dup) {{ collapsed++; continue; }}
                     }}
                     // Occlusion v1 (#1187): hit-test the rect center —
@@ -404,13 +432,19 @@ textarea, summary, [role="button"], [role="link"], [role="checkbox"], \
                     const inViewport = rect.right >= 0 && rect.bottom >= 0
                         && rect.left <= vw && rect.top <= vh;
                     if (inViewport) {{
-                        const hit = document.elementFromPoint(cx, cy);
-                        if (hit && hit !== el && !el.contains(hit)) {{
+                        // `document.elementFromPoint` retargets to the
+                        // shadow host, and `Node.contains` stops at the
+                        // boundary — together they would report EVERY
+                        // pierced element as occluded. Hit-test inside
+                        // the element's own root and compare ancestry
+                        // along the composed tree instead.
+                        const hit = __ocHitTest(el, cx, cy);
+                        if (hit && hit !== el && !__ocComposedContains(el, hit)) {{
                             occluded++; continue;
                         }}
                     }}
                     visible.push(el);
-                    acceptedRects.push(rect);
+                    accepted.push({{el: el, rect: rect}});
                 }}
             }}
             visible.collapsed = collapsed;
@@ -454,9 +488,14 @@ fn format_matches(matches: &[Value]) -> String {
         let tag = m["tag"].as_str().unwrap_or("");
         let text = m["text"].as_str().unwrap_or("");
         let vis = m["visible"].as_bool().unwrap_or(false);
+        // `[shadow]` tells the model the element lives behind a shadow
+        // boundary, so it can reason about why a hand-written CSS
+        // selector for it would not resolve while the indexed one does.
+        let shadow = m["shadow"].as_bool().unwrap_or(false);
         out.push_str(&format!(
-            "  {i}. <{tag}>{vis_marker} {sel}\n     text: {text}\n",
-            vis_marker = if vis { "" } else { " (hidden)" }
+            "  {i}. <{tag}>{vis_marker}{shadow_marker} {sel}\n     text: {text}\n",
+            vis_marker = if vis { "" } else { " (hidden)" },
+            shadow_marker = if shadow { " [shadow]" } else { "" }
         ));
     }
     out
