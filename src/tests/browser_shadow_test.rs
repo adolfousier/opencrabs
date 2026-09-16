@@ -91,9 +91,15 @@ fn hit_test_is_scoped_to_the_elements_own_root() {
     let js = deep_helpers_js();
     // The whole point: NOT `document.elementFromPoint`, which retargets
     // to the shadow host and would flag every pierced element occluded.
-    assert!(js.contains("const root = el.getRootNode();"));
-    assert!(js.contains("from.elementFromPoint(x, y)"));
-    assert!(!js.contains("document.elementFromPoint"));
+    // Scoped to the helper BODY — the comment above it names the thing
+    // we are banning, so a whole-source scan would match its own prose.
+    let body = js
+        .split("const __ocHitTest")
+        .nth(1)
+        .expect("preamble defines __ocHitTest");
+    assert!(body.contains("const root = el.getRootNode();"));
+    assert!(body.contains("from.elementFromPoint(x, y)"));
+    assert!(!body.contains("document.elementFromPoint"));
 }
 
 #[test]
@@ -209,8 +215,10 @@ fn full_page_content_is_deliberately_not_pierced() {
     // wearing a shadow-DOM costume.
     let src = browser_src("content.rs");
     assert!(src.contains("page.content().await"));
+    // Match the CALL, not the name: the comment at the call site has to
+    // be free to explain which API it is deliberately not using.
     assert!(
-        !src.contains("outer_html_full"),
+        !src.contains("outer_html_full()"),
         "full-page content must stay uncapped-safe until an output cap exists"
     );
     assert!(

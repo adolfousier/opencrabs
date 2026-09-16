@@ -106,8 +106,16 @@ fn xpath_mode_stays_light_dom_by_spec() {
     // the flat evaluate and the tool description must say so.
     let js = build_find_js("xpath", "//button", 5);
     assert!(js.contains("document.evaluate("));
-    assert!(!js.contains("__ocQueryAll("));
-    assert!(!js.contains("__ocWalk()"));
+    // Scope the negative to the node-collection expression: the shared
+    // wrapper DEFINES the deep helpers for every mode, so asserting
+    // against the whole script would only prove the preamble exists.
+    let collector = js
+        .split("const nodes =")
+        .nth(1)
+        .and_then(|rest| rest.split("const out = [];").next())
+        .expect("wrapper splices the collector in as `const nodes = ...`");
+    assert!(!collector.contains("__ocQueryAll("));
+    assert!(!collector.contains("__ocWalk()"));
 }
 
 #[test]
