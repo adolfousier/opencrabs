@@ -257,70 +257,6 @@ A hardening window: per-job cron sessions, a config write guard derived from the
 
 [0.5.1]: https://github.com/adolfousier/opencrabs/compare/v0.5.0...v0.5.1
 
-===== COMMIT MESSAGE =====
-
-release: v0.5.1 - per-job cron sessions, config write guard, skill-globs gate, temporal grounding, Telegram edit governor, whatsapp send-path rewrite, two security fixes
-
-✨ FEATURES
-1. feat(memory): tag corpus provenance on every scope=all hit (#89)
-2. feat(memory): external hits render repo-relative paths (#89)
-3. feat(memory): depth-2 impact chains over call_edges (#89)
-4. feat(memory): structural truncation visibility + offset pagination (#89)
-5. feat(tui): theme catalog, converter + 31-theme curated pack (#1461)
-6. feat(whatsapp): outbound rate limiter with pacing, rolling daily cap, queue and owner alert (#1407)
-7. feat(projects): identify a project by its repository remote, not its name
-8. feat(compaction): report the fallback walk on manual compact and every failure to the user (#1521)
-9. feat(skills): cursor-style globs frontmatter gate for skills (#1515)
-10. feat(brain): temporal grounding via turn ingress dual-time markers and user timezone resolution (#1516)
-
-🔧 FIXES
-1. fix(whatsapp): unify persisted format across send and reply paths (#1490-E)
-2. fix(whatsapp): account for delivered chunks when a chunked send fails partway (#1490-B)
-3. fix(agent): stop reading signature algorithm names as sha claims (#1501)
-4. fix(compaction): ask HTTP providers through the stream path and fold it into one response (#1519)
-5. fix(tui): keep a running session marked processing when it regains focus (#1420)
-6. fix(context): clean persisted ledgers and reasoning from loaded rows for CLI providers too (#1522)
-7. fix(agent): bound output token reserve by context window (#1518)
-8. fix(brain): log backup-prune failures instead of printing them (#1413)
-9. fix(phantom): anchor work-announcement colon marker at end of line (#1513)
-
-🔒 SECURITY
-1. fix(a2a): refuse an unauthenticated non-loopback bind, and compare the token in constant time
-2. fix(config): write config files owner-only, move daemon logs off /tmp, scrub all secrets from logs (OC-05)
-
-📖 DOCS
-1. docs(changelog): state the measured ratio rather than a rounded one
-2. docs(readme): Claude Code CLI refuses its headless mode as root on a VPS
-3. docs(changelog): place v0.5.0 against v0.3.9 rather than calling it the largest release
-
-🧹 MISC
-1. test(onboarding): pin the #1419 xiaomi baseline fallback with tests
-2. refactor(test): move #1422's inline TelegramState tests under src/tests/
-3. style: apply rustfmt to the merged sub-agent parent-binding work
-4. style(tests): apply rustfmt to rotation test, fix mod registration order
-5. style: rustfmt the cherry-picked PR work against current main
-
-📊 STATS
-- 213 commits since v0.5.0
-- 6 contributors
-- 373 files changed, +27,981 / -2,729 lines
-- 8,397 tests (8,367 passed, 0 failed, 30 ignored)
-# README drift audit
-
-1. README.md:4588 "Run tests (8,227 tests across 833 modules: 8,207 of them under
-   src/tests/, ... plus 20 inline in src/tui/render/presets_test.rs and
-   src/channels/telegram/rich/inline.rs" -> STALE, three ways:
-   - count is now 8,397 (8,367 passed, 30 ignored)
-   - module file count is 863, not 833
-   - src/tui/render/presets_test.rs no longer exists; the only inline remainder is
-     4 tests in src/channels/telegram/rich/inline.rs
-   Suggested: "Run tests (8,412 tests across 863 modules: all but 4 under
-   src/tests/, where tests belong; 4 inline in
-   src/channels/telegram/rich/inline.rs;"
-2. No other version or backend refs are stale: QMD is still a live backend in
-   src/memory/*, no v0.5.0 strings elsewhere in README.
-3. Cargo.toml version "0.5.0" -> "0.5.1" (release commit, not README).
-
 ## [0.5.0] - 2026-09-06
 
 595 commits since v0.3.83. 591 files changed, +57,403 / -11,296 lines.
@@ -2224,7 +2160,6 @@ housekeeping. Run `git log v0.3.83..v0.5.0 --no-merges` for the full list.
 - 32 files changed, +2360 / -59 lines
 - 4,507 tests (4,507 passed, 0 failed, 29 ignored)
 
-## [Unreleased]
 ## [0.3.59] - 2026-07-02
 
 25 commits since v0.3.58. 36 files changed, +2374 / -237 lines.
