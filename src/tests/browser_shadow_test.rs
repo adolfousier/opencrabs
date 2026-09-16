@@ -227,7 +227,13 @@ fn no_tool_walks_the_flat_document_body() {
     // misses — the half-fixed round trip this PR exists to prevent.
     // shadow.rs itself is exempt: it owns the one real walker, rooted
     // per-tree rather than at document.body.
-    for file in ["click.rs", "act.rs", "find.rs", "content.rs", "type_text.rs"] {
+    for file in [
+        "click.rs",
+        "act.rs",
+        "find.rs",
+        "content.rs",
+        "type_text.rs",
+    ] {
         let src = browser_src(file);
         assert!(
             !src.contains("createTreeWalker"),

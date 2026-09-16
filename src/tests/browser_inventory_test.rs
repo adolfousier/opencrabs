@@ -131,8 +131,14 @@ fn inventory_dedups_generic_wrappers_contained_in_accepted_elements() {
     );
     // ±1px tolerance so sub-pixel layout rounding cannot split a real
     // wrapper from its container.
-    assert!(js.contains("a.rect.left - 1 <= rect.left"), "left tolerance");
-    assert!(js.contains("rect.right <= a.rect.right + 1"), "right tolerance");
+    assert!(
+        js.contains("a.rect.left - 1 <= rect.left"),
+        "left tolerance"
+    );
+    assert!(
+        js.contains("rect.right <= a.rect.right + 1"),
+        "right tolerance"
+    );
     assert!(js.contains("a.rect.top - 1 <= rect.top"), "top tolerance");
     assert!(
         js.contains("rect.bottom <= a.rect.bottom + 1"),

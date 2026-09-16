@@ -372,7 +372,10 @@ async fn found_shadow_selector_clicks_and_types() {
         clicked.output
     );
     let seen = eval
-        .execute(serde_json::json!({ "script": "window.__clicked || ''" }), &ctx)
+        .execute(
+            serde_json::json!({ "script": "window.__clicked || ''" }),
+            &ctx,
+        )
         .await
         .expect("eval must not panic");
     assert!(
@@ -442,7 +445,10 @@ async fn closed_shadow_root_resolves_over_cdp() {
         clicked.output
     );
     let seen = eval
-        .execute(serde_json::json!({ "script": "window.__clicked || ''" }), &ctx)
+        .execute(
+            serde_json::json!({ "script": "window.__clicked || ''" }),
+            &ctx,
+        )
         .await
         .expect("eval must not panic");
     assert!(

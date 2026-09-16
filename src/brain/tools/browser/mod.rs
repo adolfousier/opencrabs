@@ -46,11 +46,11 @@ pub(crate) use find::inventory_header;
 
 // Composed-tree JS helper builders — re-exported only for test fixtures
 // (src/tests/browser_shadow_test.rs).
-#[cfg(test)]
-pub(crate) use shadow::{MAX_ROOTS, MAX_WALK_NODES, deep_helpers_js, with_deep_helpers};
 pub use manager::{BrowserManager, CloseOutcome};
 pub use navigate::BrowserNavigateTool;
 pub use screenshot::BrowserScreenshotTool;
+#[cfg(test)]
+pub(crate) use shadow::{MAX_ROOTS, MAX_WALK_NODES, deep_helpers_js, with_deep_helpers};
 pub use type_text::BrowserTypeTool;
 pub use wait::BrowserWaitTool;
 
