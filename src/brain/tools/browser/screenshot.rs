@@ -78,7 +78,7 @@ impl Tool for BrowserScreenshotTool {
 
         let bytes = if let Some(sel) = selector {
             // Screenshot a specific element
-            let element = match page.find_element(sel).await {
+            let element = match super::manager::resolve_element(&page, sel).await {
                 Ok(el) => el,
                 Err(e) => return Ok(ToolResult::error(format!("Element '{sel}' not found: {e}"))),
             };

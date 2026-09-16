@@ -227,7 +227,7 @@ impl Tool for BrowserClickTool {
             }
         }
 
-        let element = match page.find_element(&selector).await {
+        let element = match super::manager::resolve_element(&page, &selector).await {
             Ok(el) => el,
             Err(e) => {
                 // Surface the recovery path inline so the agent doesn't

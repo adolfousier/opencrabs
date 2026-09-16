@@ -131,9 +131,12 @@ fn pre_flight_js_embeds_all_selectors_and_all_three_shapes() {
     assert!(js.contains(r#""text=Sign in""#), "js: {js}");
     assert!(js.contains(r#""xpath=//button[1]""#), "js: {js}");
     // All three resolution strategies present.
-    assert!(js.contains("text=") && js.contains("createTreeWalker"));
+    // Pre-flight must resolve exactly what execution will resolve: css
+    // and text pierce open shadow roots, xpath stays main-document
+    // because the XPath spec has no shadow boundary.
+    assert!(js.contains("text=") && js.contains("__ocWalk()"));
     assert!(js.contains("xpath=") && js.contains("document.evaluate"));
-    assert!(js.contains("querySelector"));
+    assert!(js.contains("__ocQueryOne(s)"));
     // Visibility gating is part of resolution (zero-size rects fail).
     assert!(js.contains("getBoundingClientRect"));
     // Per-selector result objects carry index + ok + reason.

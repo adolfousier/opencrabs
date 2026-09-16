@@ -152,8 +152,11 @@ pub(crate) fn format_prefix_report(done: usize, failed: &Act, reason: &str) -> S
 /// pinned by tests.
 pub(crate) fn build_pre_flight_js(selectors: &[String]) -> String {
     let arr = serde_json::to_string(selectors).unwrap_or_else(|_| "[]".into());
-    format!(
-        r#"(function(){{
+    // Pre-flight has to see exactly what execution will see: css and
+    // text resolve across open shadow roots, xpath stays main-document
+    // (the XPath spec has no shadow boundary), matching exec_click.
+    super::shadow::with_deep_helpers(&format!(
+        r#"
   var sels = {arr};
   var results = [];
   for (var i = 0; i < sels.length; i++) {{
@@ -162,9 +165,9 @@ pub(crate) fn build_pre_flight_js(selectors: &[String]) -> String {
     try {{
       if (s.indexOf("text=") === 0) {{
         var needle = s.slice(5).toLowerCase();
-        var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_ELEMENT);
-        var node;
-        while ((node = walker.nextNode())) {{
+        var nodes = __ocWalk();
+        for (var w = 0; w < nodes.length; w++) {{
+          var node = nodes[w];
           var t = (node.innerText || node.textContent || "").toLowerCase();
           if (t.indexOf(needle) !== -1) {{
             var r = node.getBoundingClientRect();
@@ -180,7 +183,7 @@ pub(crate) fn build_pre_flight_js(selectors: &[String]) -> String {
           if (r2.width > 0 && r2.height > 0) el = n;
         }}
       }} else {{
-        var q = document.querySelector(s);
+        var q = __ocQueryOne(s);
         if (q) {{
           var r3 = q.getBoundingClientRect();
           if (r3.width > 0 && r3.height > 0) el = q;
@@ -192,9 +195,8 @@ pub(crate) fn build_pre_flight_js(selectors: &[String]) -> String {
     }}
     results.push({{i: i, ok: !!el, reason: el ? "" : "not found or not visible"}});
   }}
-  return results;
-}})()"#
-    )
+  return results;"#
+    ))
 }
 
 pub struct BrowserActTool {
@@ -525,8 +527,7 @@ impl BrowserActTool {
             }
         } else {
             // Plain CSS — CDP-level click like browser_click.
-            let element = page
-                .find_element(&selector)
+            let element = super::manager::resolve_element(page, &selector)
                 .await
                 .map_err(|e| format!("element '{selector}' not found: {e}"))?;
             element
@@ -549,11 +550,11 @@ impl BrowserActTool {
     ) -> std::result::Result<(), String> {
         let sel_js = serde_json::to_string(selector).unwrap_or_else(|_| "null".into());
         let val_js = serde_json::to_string(text).unwrap_or_else(|_| "\"\"".into());
-        let js = format!(
-            r#"(function(){{
+        let js = super::shadow::with_deep_helpers(&format!(
+            r#"
   var sel = {sel_js};
   var val = {val_js};
-  var el = sel ? document.querySelector(sel) : document.activeElement;
+  var el = sel ? __ocQueryOne(sel) : document.activeElement;
   if (!el) return "no_element";
   var editable = el.isContentEditable;
   if (el.value === undefined && !editable) return "not_input";
@@ -571,9 +572,8 @@ impl BrowserActTool {
   if (desc && desc.set) {{ desc.set.call(el, val); }} else {{ el.value = val; }}
   el.dispatchEvent(new Event("input", {{bubbles:true}}));
   el.dispatchEvent(new Event("change", {{bubbles:true}}));
-  return "ok";
-}})()"#
-        );
+  return "ok";"#
+        ));
         let r = page
             .evaluate(js.as_str())
             .await
@@ -598,9 +598,9 @@ impl BrowserActTool {
     ) -> std::result::Result<(), String> {
         let sel_js = serde_json::to_string(selector).unwrap_or_else(|_| "null".into());
         let val_js = serde_json::to_string(value).unwrap_or_else(|_| "\"\"".into());
-        let js = format!(
-            r#"(function(){{
-  var el = document.querySelector({sel_js});
+        let js = super::shadow::with_deep_helpers(&format!(
+            r#"
+  var el = __ocQueryOne({sel_js});
   if (!el) return "no_element";
   if (el.tagName !== "SELECT") return "not_select";
   var val = {val_js};
@@ -611,9 +611,8 @@ impl BrowserActTool {
   el.value = opt.value;
   el.dispatchEvent(new Event("input", {{bubbles:true}}));
   el.dispatchEvent(new Event("change", {{bubbles:true}}));
-  return "ok";
-}})()"#
-        );
+  return "ok";"#
+        ));
         let r = page
             .evaluate(js.as_str())
             .await

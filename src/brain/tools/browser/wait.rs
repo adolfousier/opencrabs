@@ -94,7 +94,7 @@ impl Tool for BrowserWaitTool {
 
         let deadline = tokio::time::Instant::now() + Duration::from_secs(timeout_secs);
         loop {
-            match page.find_element(sel).await {
+            match super::manager::resolve_element(&page, sel).await {
                 Ok(_) => {
                     return Ok(ToolResult::success(super::events::append_line(
                         format!("Element '{sel}' found on page"),

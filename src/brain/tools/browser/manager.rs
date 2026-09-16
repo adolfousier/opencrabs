@@ -1427,3 +1427,46 @@ pub(crate) fn collect_cross_origin(
         }
     }
 }
+
+/// Resolve a CSS selector to an element, entering shadow roots only when
+/// the plain lookup fails.
+///
+/// `Page::find_element` issues `DOM.querySelector` rooted at the document
+/// node, and CDP's querySelector does not cross a shadow boundary — the
+/// `pierce: true` on the underlying `DOM.getDocument` buys nothing there.
+/// So a selector stamped by `browser_find` inside a shadow root would
+/// enumerate fine and then fail to click, which is strictly worse than
+/// not enumerating it at all. This is the resolution half of that round
+/// trip, shared by `browser_click`, `browser_wait`, `browser_screenshot`
+/// and `browser_act`.
+///
+/// **Plain first, pierced only on failure.** A page with no shadow DOM
+/// pays exactly zero extra round-trips, so there is no regression
+/// surface on the common case; a shadow page pays one
+/// `DOM.getDocument { depth: -1, pierce: true }` plus one query per tree.
+///
+/// This is also the only path that reaches a **closed** shadow root: JS
+/// sees `el.shadowRoot === null` for one by spec, while `pierce: true`
+/// returns it. Closed roots therefore resolve here but never appear in
+/// `browser_find`'s inventory.
+///
+/// Uses `find_elements_pierced().remove(0)` rather than
+/// `find_element_pierced()` because the latter is `els.pop()` — it hands
+/// back the LAST match, where plain `find_element` hands back the first.
+/// Taking the first keeps both branches of this fallback answering the
+/// same question.
+///
+/// On failure the LIGHT-DOM error is returned, not the pierced one: it is
+/// the one whose message names the selector the caller actually passed.
+pub(crate) async fn resolve_element(
+    page: &Page,
+    selector: &str,
+) -> std::result::Result<chromiumoxide::element::Element, chromiumoxide::error::CdpError> {
+    match page.find_element(selector).await {
+        Ok(el) => Ok(el),
+        Err(light_err) => match page.find_elements_pierced(selector).await {
+            Ok(mut els) if !els.is_empty() => Ok(els.remove(0)),
+            _ => Err(light_err),
+        },
+    }
+}
