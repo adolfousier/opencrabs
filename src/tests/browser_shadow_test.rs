@@ -218,3 +218,20 @@ fn full_page_content_is_deliberately_not_pierced() {
         "the reason must stay documented at the call site"
     );
 }
+
+#[test]
+fn no_tool_walks_the_flat_document_body() {
+    // `createTreeWalker(document.body, ...)` stops at every shadow
+    // boundary. If a `text=` path still used it, pre-flight (which walks
+    // the composed tree) would accept a target that execution then
+    // misses — the half-fixed round trip this PR exists to prevent.
+    // shadow.rs itself is exempt: it owns the one real walker, rooted
+    // per-tree rather than at document.body.
+    for file in ["click.rs", "act.rs", "find.rs", "content.rs", "type_text.rs"] {
+        let src = browser_src(file);
+        assert!(
+            !src.contains("createTreeWalker"),
+            "{file} builds its own tree walker — route it through __ocWalk()"
+        );
+    }
+}

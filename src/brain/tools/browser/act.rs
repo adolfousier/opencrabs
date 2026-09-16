@@ -459,14 +459,14 @@ impl BrowserActTool {
         let selector = selector.to_string(); // own for the JS builds below
         if let Some(text) = selector.strip_prefix("text=") {
             let escaped = text.replace('\\', "\\\\").replace('"', "\\\"");
-            let js = format!(
+            // Composed-tree walk, matching `browser_find` mode=text and
+            // browser_act's pre-flight: a `text=` target inside an open
+            // shadow root must click here, or pre-flight accepts a
+            // selector that execution then misses.
+            let js = super::shadow::with_deep_helpers(&format!(
                 r#"
-                (() => {{
                     const needle = "{escaped}".toLowerCase();
-                    const walker = document.createTreeWalker(
-                        document.body, NodeFilter.SHOW_ELEMENT);
-                    let node;
-                    while ((node = walker.nextNode())) {{
+                    for (const node of __ocWalk()) {{
                         const t = (node.innerText || node.textContent || "").toLowerCase();
                         if (!t.includes(needle)) continue;
                         const r = node.getBoundingClientRect();
@@ -476,9 +476,8 @@ impl BrowserActTool {
                         return "ok";
                     }}
                     return "not_found";
-                }})()
                 "#
-            );
+            ));
             let r = page
                 .evaluate(js.as_str())
                 .await
