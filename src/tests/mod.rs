@@ -919,6 +919,7 @@ pub mod telegram_state_test;
 pub mod telegram_status_message_test;
 pub mod telegram_stream_loop_resume_test;
 pub mod telegram_rich_mermaid_test;
+pub mod tui_render_panes_test;
 pub mod telegram_target_resolver_test;
 pub mod telegram_telemetry_test;
 pub mod telegram_thread_id_lookup_test;

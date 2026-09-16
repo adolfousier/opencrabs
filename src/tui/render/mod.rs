@@ -15,7 +15,7 @@ mod input;
 pub(crate) mod mission_control;
 pub(crate) mod notice;
 pub(crate) mod palette;
-mod panes;
+pub(crate) mod panes;
 mod plan_overlay;
 mod plan_widget;
 pub(crate) mod plan_window;
