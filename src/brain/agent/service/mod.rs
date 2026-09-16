@@ -6,7 +6,7 @@
 pub(crate) mod announcement_loop;
 pub(crate) mod background_tasks;
 pub(crate) mod boot_report;
-mod builder;
+pub(crate) mod builder;
 pub(crate) mod clear;
 pub(crate) mod compaction;
 pub(crate) mod compaction_notice;
