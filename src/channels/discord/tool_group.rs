@@ -4,6 +4,11 @@
 //! interaction. State lives in [`super::DiscordState`] keyed by message id
 //! so the click handler can re-render after the turn's closures are gone.
 //! Expansion is per-message: everyone in the channel shares it.
+//!
+//! With `trace_narration` enabled the same bubble also carries the turn's
+//! intermediate narration as dim subtext notes (agent-disco-style live
+//! trace): one editable work-log per turn instead of one message per
+//! intermediate.
 
 use serenity::builder::{CreateActionRow, CreateButton};
 use serenity::model::application::ButtonStyle;
@@ -23,7 +28,44 @@ pub(crate) struct GroupEntry {
 #[derive(Debug, Clone)]
 pub(crate) struct GroupState {
     pub entries: Vec<GroupEntry>,
+    /// Narration lines folded into the bubble (live trace). Authoritative
+    /// state lives in [`DiscordState`]; only [`DiscordState::append_note`]
+    /// and [`DiscordState::drop_note_if`] mutate them —
+    /// [`DiscordState::upsert_tool_group`] preserves the stored notes the
+    /// way it preserves `expanded`.
+    pub notes: Vec<String>,
     pub expanded: bool,
+}
+
+/// Keep at most this many narration lines in the bubble (newest win).
+pub(crate) const NOTE_CAP: usize = 6;
+
+/// Clip each narration line to this many chars — the bubble stays a glance,
+/// not a transcript.
+pub(crate) const NOTE_MAX_CHARS: usize = 160;
+
+/// First non-empty line, trimmed to [`NOTE_MAX_CHARS`] — the bubble form of
+/// one narration event.
+pub(crate) fn clip_note(text: &str) -> String {
+    let line = text
+        .lines()
+        .map(str::trim)
+        .find(|l| !l.is_empty())
+        .unwrap_or("");
+    let mut out: String = line.chars().take(NOTE_MAX_CHARS).collect();
+    if line.chars().count() > NOTE_MAX_CHARS {
+        out.push('…');
+    }
+    out
+}
+
+/// Narration lines as Discord subtext (`-# ` renders dim and small).
+fn notes_block(notes: &[String]) -> String {
+    notes
+        .iter()
+        .map(|n| format!("-# {n}"))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn entry_icon(status: Option<bool>) -> &'static str {
@@ -53,11 +95,10 @@ fn summary_line(entries: &[GroupEntry]) -> String {
 
 /// Message body for the group in its current display state.
 pub(crate) fn render_content(group: &GroupState) -> String {
-    if group.entries.len() == 1 && !group.expanded {
+    let tools_part = if group.entries.len() == 1 && !group.expanded {
         let e = &group.entries[0];
-        return format!("{} **{}**{}", entry_icon(e.status), e.name, e.context);
-    }
-    if group.expanded {
+        format!("{} **{}**{}", entry_icon(e.status), e.name, e.context)
+    } else if group.expanded {
         let lines: Vec<String> = group
             .entries
             .iter()
@@ -66,6 +107,11 @@ pub(crate) fn render_content(group: &GroupState) -> String {
         format!("{}\n{}", summary_line(&group.entries), lines.join("\n"))
     } else {
         summary_line(&group.entries)
+    };
+    if group.notes.is_empty() {
+        tools_part
+    } else {
+        format!("{tools_part}\n{}", notes_block(&group.notes))
     }
 }
 
@@ -94,7 +140,8 @@ impl DiscordState {
 
     /// Insert or update a group, PRESERVING the stored expanded/collapsed
     /// choice on updates (a completing tool must not snap an expanded group
-    /// shut). Returns the stored state so callers render what is kept.
+    /// shut) and the stored narration notes (only `append_note`/`drop_note_if`
+    /// mutate those). Returns the stored state so callers render what is kept.
     pub(crate) async fn upsert_tool_group(
         &self,
         message_id: u64,
@@ -103,7 +150,10 @@ impl DiscordState {
         let mut guard = self.tool_groups.lock().await;
         let (order, map) = &mut *guard;
         match map.get(&message_id) {
-            Some(existing) => group.expanded = existing.expanded,
+            Some(existing) => {
+                group.expanded = existing.expanded;
+                group.notes = existing.notes.clone();
+            }
             None => {
                 order.push(message_id);
                 while order.len() > Self::TOOL_GROUP_CAP {
@@ -122,6 +172,36 @@ impl DiscordState {
         let (_, map) = &mut *guard;
         let group = map.get_mut(&message_id)?;
         group.expanded = !group.expanded;
+        Some(group.clone())
+    }
+
+    /// Append one narration line to the stored group, keeping only the
+    /// newest [`NOTE_CAP`]. Returns the updated state, or None when the
+    /// message has no stored group (aged out of retention).
+    pub(crate) async fn append_note(&self, message_id: u64, note: String) -> Option<GroupState> {
+        let mut guard = self.tool_groups.lock().await;
+        let (_, map) = &mut *guard;
+        let group = map.get_mut(&message_id)?;
+        group.notes.push(note);
+        if group.notes.len() > NOTE_CAP {
+            group.notes.remove(0);
+        }
+        Some(group.clone())
+    }
+
+    /// Remove the LAST narration line matching `pred` — the final-response
+    /// dedup drops the trailing note that mirrors the answer, so the trace
+    /// does not double-post it as a clip. Returns the updated state, or None
+    /// when nothing matched or no group is stored.
+    pub(crate) async fn drop_note_if<F>(&self, message_id: u64, pred: F) -> Option<GroupState>
+    where
+        F: Fn(&str) -> bool,
+    {
+        let mut guard = self.tool_groups.lock().await;
+        let (_, map) = &mut *guard;
+        let group = map.get_mut(&message_id)?;
+        let idx = group.notes.iter().rposition(|n| pred(n))?;
+        group.notes.remove(idx);
         Some(group.clone())
     }
 }

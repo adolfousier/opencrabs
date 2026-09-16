@@ -15,7 +15,7 @@
 use crate::channels::discord::handler::split_message;
 
 /// Every chunk must stand alone: balanced backticks and balanced tags.
-fn each_chunk_is_self_contained(chunks: &[&str]) -> bool {
+fn each_chunk_is_self_contained(chunks: &[String]) -> bool {
     chunks.iter().all(|c| {
         let ticks_balanced = c.matches('`').count().is_multiple_of(2);
         let opens = c.matches("<code>").count() + c.matches("<b>").count();

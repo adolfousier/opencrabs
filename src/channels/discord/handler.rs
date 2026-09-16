@@ -54,14 +54,18 @@ fn splits_cleanly(prefix: &str) -> bool {
     depth == 0
 }
 
-pub fn split_message(text: &str, max_len: usize) -> Vec<&str> {
+pub fn split_message(text: &str, max_len: usize) -> Vec<String> {
     if text.len() <= max_len {
-        return vec![text];
+        return vec![text.to_string()];
     }
     let mut chunks = Vec::new();
     let mut start = 0;
+    // Opener prepended to the next chunk when this one had to close a fence
+    // early (4 bytes: "```\n"). Budgeted against max_len below.
+    let mut reopen = String::new();
     while start < text.len() {
-        let mut end = (start + max_len).min(text.len());
+        let budget = max_len.saturating_sub(reopen.len());
+        let mut end = (start + budget).min(text.len());
         // Ensure end falls on a char boundary (back up if inside a multi-byte char)
         while end < text.len() && !text.is_char_boundary(end) {
             end -= 1;
@@ -77,28 +81,67 @@ pub fn split_message(text: &str, max_len: usize) -> Vec<&str> {
             // first candidate is already safe and the result is byte-identical
             // to the old behaviour. Only the previously-broken case moves.
             let window = &text[start..end];
-            let floor = end - start - 200;
+            let floor = (end - start).saturating_sub(200);
+            // When a fence is already re-opened at the top of this chunk, a
+            // prefix is "clean" only if it CLOSES that fence (odd backtick
+            // count on its own).
+            let want_even = reopen.is_empty();
             let mut chosen = None;
             for (pos, _) in window.char_indices().rev().filter(|(_, c)| *c == '\n') {
                 if pos <= floor {
                     break;
                 }
-                if splits_cleanly(&window[..pos]) {
+                if splits_cleanly(&window[..pos]) == want_even {
                     chosen = Some(start + pos + 1);
                     break;
                 }
             }
-            chosen.unwrap_or_else(|| {
-                window
-                    .rfind('\n')
-                    .filter(|&pos| pos > floor)
-                    .map(|pos| start + pos + 1)
-                    .unwrap_or(end)
-            })
+            chosen
+                .or_else(|| {
+                    // Nothing safe near the limit. Widen the scan over the whole
+                    // remaining span before falling back: a fenced block (a table
+                    // grid) longer than the preference window should travel whole
+                    // into the next chunk instead of being cut open here.
+                    for (pos, _) in window.char_indices().rev().filter(|(_, c)| *c == '\n') {
+                        if splits_cleanly(&window[..pos]) == want_even {
+                            return Some(start + pos + 1);
+                        }
+                    }
+                    None
+                })
+                .unwrap_or_else(|| {
+                    window
+                        .rfind('\n')
+                        .filter(|&pos| pos > floor)
+                        .map(|pos| start + pos + 1)
+                        .unwrap_or(end)
+                })
         } else {
             end
         };
-        chunks.push(&text[start..break_at]);
+        let piece = &text[start..break_at];
+        let mut chunk = String::with_capacity(reopen.len() + piece.len() + 8);
+        chunk.push_str(&reopen);
+        // Balance check spans the reopened fence: an opener contributes 3
+        // backticks, so with one active the piece must be odd to close it.
+        let piece_bt = piece.matches('`').count();
+        let fence_open = (piece_bt + if reopen.is_empty() { 0 } else { 3 }) % 2 != 0;
+        if !fence_open || break_at >= text.len() {
+            chunk.push_str(piece);
+            reopen.clear();
+        } else if start + piece.len() < text.len() {
+            // The break landed inside open markup — realistically a fenced
+            // block the fallbacks couldn't dodge. Close the fence here and
+            // re-open it at the top of the next chunk so every chunk parses
+            // on its own (#876 family).
+            chunk.push_str(piece);
+            chunk.push_str("\n```");
+            reopen = String::from("```\n");
+        } else {
+            chunk.push_str(piece);
+            reopen.clear();
+        }
+        chunks.push(chunk);
         start = break_at;
     }
     chunks
@@ -266,6 +309,30 @@ pub(crate) async fn handle_message(
 
     let mut is_voice = false;
     let mut content = msg.content.clone();
+
+    // Bang-thread (opt-in): "!question" anchors a thread to this message and
+    // routes the whole turn into it. `target` is the display channel for
+    // everything downstream (tool bubble, intermediates, answer, gallery).
+    // DMs have no threads — fall through untouched.
+    let mut target = msg.channel_id;
+    if dc_cfg.bang_new_thread && msg.guild_id.is_some() && content.starts_with('!') {
+        let stripped = content[1..].trim_start().to_string();
+        if !stripped.is_empty() {
+            content = stripped;
+            let title = thread_title(&content);
+            let body = serde_json::json!({ "name": title });
+            match ctx
+                .http
+                .create_thread_from_message(msg.channel_id, msg.id, &body, None)
+                .await
+            {
+                Ok(thread) => target = thread.id,
+                Err(e) => {
+                    tracing::warn!("Discord: bang-thread creation failed, replying inline: {e}")
+                }
+            }
+        }
+    }
 
     // Show typing immediately when processing voice
     if audio_attachment.is_some()
@@ -807,7 +874,38 @@ pub(crate) async fn handle_message(
     );
     let _typing_guard = super::typing::TypingGuard(typing_cancel);
 
-    let sent_intermediates: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+    // Per-turn record of intermediate posts: (clean body, Option<(MessageId,
+    // last-chunk text)>). The body feeds the final-response dedup: tool_loop
+    // emits the last iteration's text BOTH as IntermediateText (so the TUI
+    // persists it) AND as response.content, so without coordination every tool
+    // turn that ends in text was posted twice — once without the ctx footer
+    // (intermediate) and once with it (final). The MessageId + last-chunk text
+    // let the final path append the ctx footer to the kept intermediate via
+    // edit_message, mirroring Slack's chat.update (#459). Per-TURN scope:
+    // a cross-turn window suppressed legitimate repeated answers on Slack.
+    use serenity::model::id::MessageId;
+    /// One intermediate already posted: (normalized body key, handle of the
+    /// last Discord chunk when the text was split).
+    type SentIntermediate = (String, Option<(MessageId, String)>);
+    let sent_intermediates: Arc<Mutex<Vec<SentIntermediate>>> = Arc::new(Mutex::new(Vec::new()));
+
+    // Track every IntermediateText spawn handle so the final-response path can
+    // await ALL of them before reading sent_intermediates. Without this, the
+    // spawn-then-push race posts the intermediate hundreds of ms later, after
+    // the final path already found no match — the exact duplicate class Slack
+    // fixed in #456/#459/#943/#951. std::sync::Mutex because the progress
+    // callback closure is synchronous and we only ever drain it.
+    let intermediate_handles: Arc<std::sync::Mutex<Vec<tokio::task::JoinHandle<()>>>> =
+        Arc::new(std::sync::Mutex::new(Vec::new()));
+    let intermediate_handles_cb = intermediate_handles.clone();
+    let intermediate_handles_final = intermediate_handles.clone();
+    let sent_intermediates_final = sent_intermediates.clone();
+
+    // Turn bubble id, hoisted OUT of the progress-callback block so the
+    // final-response path can find the bubble: trace mode drops the trailing
+    // narration note that mirrors the answer, and auto-thread anchors the
+    // thread to the bubble.
+    let turn_group_mid: Arc<Mutex<Option<MessageId>>> = Arc::new(Mutex::new(None));
 
     // Build progress callback — sends tool call status as Discord messages
     let progress_cb: crate::brain::agent::ProgressCallback = {
@@ -818,10 +916,11 @@ pub(crate) async fn handle_message(
         use super::tool_group::{GroupEntry, GroupState};
 
         let tools: Arc<Mutex<Vec<GroupEntry>>> = Arc::new(Mutex::new(Vec::new()));
-        let group_msg_id: Arc<Mutex<Option<MessageId>>> = Arc::new(Mutex::new(None));
+        let group_msg_id = turn_group_mid.clone();
+        let trace_narration = dc_cfg.trace_narration;
         let group_state_cb = discord_state.clone();
         let http = ctx.http.clone();
-        let channel = msg.channel_id;
+        let channel = target;
 
         Arc::new(move |session_id, event| {
             let tools = tools.clone();
@@ -874,6 +973,7 @@ pub(crate) async fn handle_message(
                                         mid.get(),
                                         GroupState {
                                             entries,
+                                            notes: Vec::new(),
                                             expanded: false,
                                         },
                                     )
@@ -891,6 +991,7 @@ pub(crate) async fn handle_message(
                             None => {
                                 let group = GroupState {
                                     entries,
+                                    notes: Vec::new(),
                                     expanded: false,
                                 };
                                 let content = super::tool_group::render_content(&group);
@@ -947,6 +1048,7 @@ pub(crate) async fn handle_message(
                                     mid.get(),
                                     GroupState {
                                         entries,
+                                        notes: Vec::new(),
                                         expanded: false,
                                     },
                                 )
@@ -978,29 +1080,86 @@ pub(crate) async fn handle_message(
                     let clean = redact_secrets(&clean);
                     let (clean, _) = crate::utils::extract_img_markers(&clean);
                     let (clean, _) = crate::utils::extract_vid_markers(&clean);
+                    // Same table conversion as the final path — keys must
+                    // match for the dedup below.
+                    let clean = super::table_convert::tables_to_discord(&clean);
                     if clean.trim().is_empty() {
                         return;
                     }
+                    // Trace mode: fold the narration into the turn's bubble
+                    // as a dim subtext note instead of posting it. Notes
+                    // before the first tool are dropped — the bubble appears
+                    // with the first tool anyway, and a notes-only bubble
+                    // would be a message we then have to clean up. Also note
+                    // this path must NOT touch sent_intermediates: the final
+                    // dedup would then see a matching key with no id and
+                    // skip the real answer entirely.
+                    if trace_narration {
+                        let gmid = group_msg_id.clone();
+                        let dstate = group_state_cb.clone();
+                        let http = http.clone();
+                        let channel = channel;
+                        let handles = intermediate_handles_cb.clone();
+                        let note = super::tool_group::clip_note(&clean);
+                        let handle = tokio::spawn(async move {
+                            let Some(mid) = *gmid.lock().await else {
+                                return;
+                            };
+                            let Some(group) = dstate.append_note(mid.get(), note).await else {
+                                return;
+                            };
+                            let edit = EditMessage::new()
+                                .content(super::tool_group::render_content(&group))
+                                .components(super::tool_group::render_components(
+                                    &group,
+                                    mid.get(),
+                                ));
+                            if let Err(e) = channel.edit_message(&http, mid, edit).await {
+                                tracing::debug!("Discord: trace note edit failed: {e}");
+                            }
+                        });
+                        if let Ok(mut g) = handles.lock() {
+                            g.push(handle);
+                        }
+                        return;
+                    }
                     let sent = sent_intermediates.clone();
+                    let handles = intermediate_handles_cb.clone();
                     let http = http.clone();
                     let channel = channel;
-                    tokio::spawn(async move {
-                        // Pre-send dedup: Discord doesn't support edit-
-                        // in-place dedup across messages, so skip if
-                        // this exact body was already posted.
+                    let handle = tokio::spawn(async move {
+                        // Pre-send dedup: skip if this exact body was
+                        // already posted this turn.
                         {
                             let mut prev = sent.lock().await;
-                            if prev.iter().any(|s| s == &clean) {
+                            if prev.iter().any(|(b, _)| b == &clean) {
                                 return;
                             }
-                            prev.push(clean.clone());
+                            prev.push((clean.clone(), None));
                         }
+                        // Remember the last chunk's message id so the
+                        // final-response path can append the ctx footer to
+                        // the kept intermediate when it matches (Slack's
+                        // keep-intermediate path, #459).
+                        let mut last: Option<(MessageId, String)> = None;
                         for chunk in split_message(&clean, 2000) {
-                            if let Err(e) = channel.say(&http, chunk).await {
-                                tracing::debug!("Discord: intermediate text send failed: {}", e);
+                            match channel.say(&http, &chunk).await {
+                                Ok(m) => last = Some((m.id, chunk.to_string())),
+                                Err(e) => {
+                                    tracing::debug!("Discord: intermediate text send failed: {}", e)
+                                }
+                            }
+                        }
+                        if let Some(entry) = last {
+                            let mut prev = sent.lock().await;
+                            if let Some(slot) = prev.iter_mut().find(|(b, _)| b == &clean) {
+                                slot.1 = Some(entry);
                             }
                         }
                     });
+                    if let Ok(mut g) = handles.lock() {
+                        g.push(handle);
+                    }
                 }
                 ProgressEvent::RetryAttempt {
                     attempt,
@@ -1089,6 +1248,9 @@ pub(crate) async fn handle_message(
             let (text_only, img_paths) = crate::utils::extract_img_markers(&response_content);
             let text_only = crate::utils::sanitize::strip_llm_artifacts(&text_only);
             let text_only = redact_secrets(&text_only);
+            // Discord has no table markup — convert before dedup so both
+            // copies of a text (intermediate + final) normalize identically.
+            let text_only = super::table_convert::tables_to_discord(&text_only);
 
             // Context budget footer appended to last display chunk, never stored in DB
             let ctx_max = agent.context_limit_for_session(session_id);
@@ -1097,6 +1259,75 @@ pub(crate) async fn handle_message(
                 ctx_max,
                 response.tokens_per_second,
             );
+
+            // --- Intermediate vs final dedup (port of Slack's fix for
+            // #456/#459/#943/#951). tool_loop emits the last iteration's text
+            // as IntermediateText (for TUI persistence) AND returns it as
+            // response.content; without this block the channel posted both —
+            // the answer appeared twice, footerless then footered.
+            //
+            // Await every in-flight intermediate spawn first: the spawn posts
+            // + records the body hundreds of ms after the event fires, and
+            // reading the list earlier classified in-flight intermediates as
+            // not-yet-posted and duplicated them.
+            let pending = {
+                let mut g = intermediate_handles_final.lock().expect("poisoned");
+                std::mem::take(&mut *g)
+            };
+            for h in pending {
+                if let Err(e) = h.await {
+                    tracing::warn!("Discord: intermediate post task panicked: {e}");
+                }
+            }
+            let (skip_final_post, footer_edit_target) = {
+                let posted = sent_intermediates_final.lock().await;
+                if text_only.trim().is_empty() {
+                    // Empty-final guard (#943/#951 class): the model's real
+                    // answer already went out as intermediates and the final
+                    // content is just a wrap-up. Keep them, never post a bare
+                    // footer on its own.
+                    (true, posted.last().and_then(|e| e.1.clone()))
+                } else {
+                    let final_key = norm_key(&text_only);
+                    match posted.iter().rev().find(|(b, _)| norm_key(b) == final_key) {
+                        // The intermediate IS the answer: keep it, append the
+                        // footer to its last chunk via edit, skip the final
+                        // post (Slack's keep-intermediate outcome, #459).
+                        Some((_, Some((id, last_chunk)))) => {
+                            (true, Some((*id, last_chunk.clone())))
+                        }
+                        // Matched but the send failed so no id was recorded:
+                        // still skip the duplicate post, nothing to edit.
+                        Some((_, None)) => (true, None),
+                        None => (false, None),
+                    }
+                }
+            };
+
+            // Trace mode cleanup: tool_loop emits the final text as a
+            // trailing IntermediateText too, and trace folded it into the
+            // bubble as the last note. The full answer posts below, so drop
+            // that mirror note — otherwise the bubble shows a clip of the
+            // answer AND the channel gets the whole thing: the duplicate,
+            // one level deeper. No-op when trace is off (notes stay empty).
+            let answer_head = text_only
+                .lines()
+                .map(str::trim)
+                .find(|l| !l.is_empty())
+                .unwrap_or("")
+                .to_lowercase();
+            if let Some(mid) = *turn_group_mid.lock().await
+                && let Some(group) = discord_state
+                    .drop_note_if(mid.get(), |n| answer_head.starts_with(&n.to_lowercase()))
+                    .await
+            {
+                let edit = serenity::builder::EditMessage::new()
+                    .content(super::tool_group::render_content(&group))
+                    .components(super::tool_group::render_components(&group, mid.get()));
+                if let Err(e) = target.edit_message(&ctx.http, mid, edit).await {
+                    tracing::debug!("Discord: trace mirror-note drop failed: {e}");
+                }
+            }
 
             // Media gallery (#385): batch all generated files into ONE
             // multi-attachment message (Discord caps 10 per message; the
@@ -1123,25 +1354,82 @@ pub(crate) async fn handle_message(
                 for file in batch {
                     message = message.add_file(file.clone());
                 }
-                if let Err(e) = msg.channel_id.send_message(&ctx.http, message).await {
+                if let Err(e) = target.send_message(&ctx.http, message).await {
                     tracing::error!("Discord: failed to send media gallery batch: {}", e);
                 }
             }
 
-            let mut chunks: Vec<String> = split_message(&text_only, 2000)
-                .into_iter()
-                .map(|s| s.to_string())
-                .collect();
-            // Append footer to last display chunk so it's inline, not a separate message
-            if let Some(last) = chunks.last_mut() {
-                last.push_str("\n\n");
-                last.push_str(&footer);
-            } else if !footer.is_empty() {
-                chunks.push(footer);
-            }
-            for chunk in &chunks {
-                if let Err(e) = msg.channel_id.say(&ctx.http, chunk).await {
-                    tracing::error!("Discord: failed to send reply: {}", e);
+            if skip_final_post {
+                // Answer already visible via the kept intermediate: append the
+                // ctx footer to its last chunk (edit, not a new message) so the
+                // completion marker still shows exactly once.
+                if let Some((id, last_chunk)) = footer_edit_target {
+                    let content = if footer.is_empty() {
+                        last_chunk
+                    } else {
+                        format!("{last_chunk}\n\n{footer}")
+                    };
+                    let edit = serenity::builder::EditMessage::new().content(content);
+                    if let Err(e) = target.edit_message(&ctx.http, id, edit).await {
+                        tracing::warn!("Discord: footer edit on kept intermediate failed: {e}");
+                    }
+                }
+            } else {
+                let mut chunks: Vec<String> = split_message(&text_only, 2000);
+                // Append footer to last display chunk so it's inline, not a separate message
+                if let Some(last) = chunks.last_mut() {
+                    last.push_str("\n\n");
+                    last.push_str(&footer);
+                } else if !footer.is_empty() {
+                    chunks.push(footer);
+                }
+                // Auto-thread (opt-in): long answers post a short teaser in
+                // the channel and the full body in a thread anchored to the
+                // turn's bubble (or the user's message). The channel stays
+                // scannable; the deliverable stays whole.
+                let auto_thread = dc_cfg.auto_thread_min_chars > 0
+                    && text_only.chars().count() >= dc_cfg.auto_thread_min_chars;
+                if auto_thread {
+                    let anchor = (*turn_group_mid.lock().await).unwrap_or(msg.id);
+                    let title = thread_title(&text_only);
+                    let body = serde_json::json!({ "name": title });
+                    match ctx
+                        .http
+                        .create_thread_from_message(target, anchor, &body, None)
+                        .await
+                    {
+                        Ok(thread) => {
+                            let truncated = text_only.chars().count() > 280;
+                            let teaser: String = text_only.chars().take(280).collect();
+                            let teaser = format!(
+                                "{teaser}{}\n\n-# Full response in thread: <#{}>",
+                                if truncated { "…" } else { "" },
+                                thread.id
+                            );
+                            if let Err(e) = target.say(&ctx.http, &teaser).await {
+                                tracing::error!("Discord: auto-thread teaser failed: {e}");
+                            }
+                            for chunk in &chunks {
+                                if let Err(e) = thread.id.say(&ctx.http, chunk).await {
+                                    tracing::error!("Discord: auto-thread body failed: {e}");
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            tracing::warn!("Discord: auto-thread failed, posting inline: {e}");
+                            for chunk in &chunks {
+                                if let Err(e) = target.say(&ctx.http, chunk).await {
+                                    tracing::error!("Discord: failed to send reply: {}", e);
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    for chunk in &chunks {
+                        if let Err(e) = target.say(&ctx.http, chunk).await {
+                            tracing::error!("Discord: failed to send reply: {}", e);
+                        }
+                    }
                 }
             }
 
@@ -1161,7 +1449,7 @@ pub(crate) async fn handle_message(
                     .unwrap_or_else(|| "DM".to_string());
                 let cm = DbChannelMessage::new(
                     "discord".into(),
-                    msg.channel_id.get().to_string(),
+                    target.get().to_string(),
                     Some(guild_name),
                     bot_sender_id,
                     "OpenCrabs".into(),
@@ -1204,7 +1492,7 @@ pub(crate) async fn handle_message(
             // too large, stream broken, repetition loop). Same wording
             // as the TUI + Telegram + Slack + WhatsApp paths.
             let error_msg = format!("❌ Error\n\n{}", crate::brain::agent::format_user_error(&e));
-            if let Err(e) = msg.channel_id.say(&ctx.http, error_msg).await {
+            if let Err(e) = target.say(&ctx.http, error_msg).await {
                 tracing::warn!(error = %e, "failed to send Discord message");
             }
         }
@@ -1361,4 +1649,180 @@ pub(crate) fn make_approval_callback(
             }
         })
     })
+}
+
+/// Whitespace-normalized comparison key for intermediate-vs-final matching.
+/// The intermediate path and the final path sanitize through slightly
+/// different orders (markers extracted before vs after artifact stripping),
+/// so the bodies can differ by trailing/running whitespace only. Collapsing
+/// whitespace makes those equivalent without letting real content drift
+/// through (every word must still match, in order).
+fn norm_key(s: &str) -> String {
+    s.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Short, recognizable thread title: drops a leading bang, collapses
+/// whitespace, cuts on a word boundary, and prefixes a marker so the thread
+/// is easy to pick out of Discord's sidebar. Discord caps thread names at
+/// 100 chars; marker + 64 + ellipsis stays well under it.
+fn thread_title(raw: &str) -> String {
+    const MAX: usize = 64;
+    let cleaned = raw.trim_start_matches('!');
+    let cleaned = cleaned.split_whitespace().collect::<Vec<_>>().join(" ");
+    let mut out = String::new();
+    let mut truncated = false;
+    for word in cleaned.split(' ') {
+        let extra = word.chars().count() + usize::from(!out.is_empty());
+        if !out.is_empty() && out.chars().count() + extra > MAX {
+            truncated = true;
+            break;
+        }
+        if !out.is_empty() {
+            out.push(' ');
+        }
+        out.push_str(word);
+    }
+    if out.chars().count() > MAX {
+        out = out.chars().take(MAX).collect();
+        truncated = true;
+    }
+    if truncated {
+        out.push('…');
+    }
+    format!("🧵 {out}")
+}
+
+#[cfg(test)]
+mod thread_title_tests {
+    use super::thread_title;
+
+    #[test]
+    fn keeps_short_prompt_whole() {
+        assert_eq!(
+            thread_title("dame un status del sistema"),
+            "🧵 dame un status del sistema"
+        );
+    }
+
+    #[test]
+    fn drops_leading_bang_and_collapses_whitespace() {
+        assert_eq!(
+            thread_title("!  busca   la\núltima release"),
+            "🧵 busca la última release"
+        );
+    }
+
+    #[test]
+    fn cuts_on_word_boundary_with_ellipsis() {
+        let long = "este prompt es largo a propósito para probar el corte en el borde de cada palabra sin romper ninguna";
+        let t = thread_title(long);
+        assert!(t.starts_with("🧵 "));
+        assert!(t.ends_with('…'));
+        assert!(t.chars().count() <= 67); // marker + space + 64 + ellipsis
+        assert!(!t.contains("romper")); // cut happened before the overflow word
+    }
+
+    #[test]
+    fn hard_caps_single_giant_word() {
+        let giant = "x".repeat(200);
+        let t = thread_title(&giant);
+        assert_eq!(t.chars().count(), 67);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{norm_key, split_message};
+
+    #[test]
+    fn identical_bodies_match() {
+        let body = "Listo, las dos cosas:\n\n1. Provider registry queda apagado\n2. Cron creado";
+        assert_eq!(norm_key(body), norm_key(body));
+    }
+
+    #[test]
+    fn whitespace_only_differences_match() {
+        let a = "Answer text\n\nwith paragraphs\n";
+        let b = "Answer text with paragraphs";
+        assert_eq!(norm_key(a), norm_key(b));
+    }
+
+    #[test]
+    fn different_bodies_do_not_match() {
+        // Narration must NOT dedup against the final answer even if they
+        // share some words — the whole point of the guard.
+        let narration = "On it — checking the logs now";
+        let answer = "On it — the logs say the daemon is healthy";
+        assert_ne!(norm_key(narration), norm_key(answer));
+    }
+
+    #[test]
+    fn empty_and_whitespace_are_equivalent() {
+        assert_eq!(norm_key(""), norm_key("   \n\t  "));
+    }
+
+    #[test]
+    fn split_keeps_short_text_whole() {
+        assert_eq!(split_message("hola", 2000), vec!["hola".to_string()]);
+    }
+
+    #[test]
+    fn split_fenced_grid_never_left_open() {
+        // Regression: the fallback break used to land inside a ```text fence
+        // (table grids are fenced), spilling raw rows into the next message
+        // followed by a phantom opening fence.
+        let mut text = String::from("Los 7 planes\n\n```text\n");
+        for i in 0..40 {
+            text.push_str(&format!(
+                "plan-{i:0>3}.json          una descripcion cualquiera\n"
+            ));
+        }
+        text.push_str("```\n\nultimo parrafo\n");
+        let chunks = split_message(&text, 700);
+        assert!(chunks.len() > 1, "expected the text to split");
+        for chunk in &chunks {
+            assert_eq!(
+                chunk.matches('`').count() % 2,
+                0,
+                "unbalanced backticks in {chunk:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn split_giant_fence_closed_and_reopened() {
+        // A fence bigger than one chunk cannot travel whole; it must be
+        // closed at the chunk edge and re-opened at the top of the next.
+        let mut text = String::from("```text\n");
+        for i in 0..60 {
+            text.push_str(&format!("row-{i:0>3}          padding padding padding\n"));
+        }
+        text.push_str("```\n");
+        let chunks = split_message(&text, 500);
+        assert!(chunks.len() > 1);
+        for chunk in &chunks {
+            assert_eq!(chunk.matches('`').count() % 2, 0, "unbalanced: {chunk:?}");
+        }
+        assert!(
+            chunks[1].starts_with("```"),
+            "reopen fence missing at chunk 2 start: {:?}",
+            &chunks[1][..chunks[1].len().min(40)]
+        );
+    }
+
+    #[test]
+    fn split_respects_hard_limit_even_with_reopen() {
+        let mut text = String::from("```text\n");
+        for i in 0..80 {
+            text.push_str(&format!("row-{i:0>3}          x\n"));
+        }
+        text.push_str("```\n");
+        for chunk in split_message(&text, 300) {
+            assert!(
+                chunk.len() <= 300,
+                "chunk exceeds Discord limit: {} bytes",
+                chunk.len()
+            );
+        }
+    }
 }
