@@ -142,5 +142,6 @@ pub(crate) fn deep_helpers_js() -> String {
 /// `find.rs` splices [`deep_helpers_js`] into its existing wrapper
 /// instead, so it keeps one IIFE rather than two.
 pub(crate) fn with_deep_helpers(body: &str) -> String {
-    format!("(() => {{{}\n{body}\n}})()", deep_helpers_js())
+    let helpers = deep_helpers_js();
+    format!("(() => {{{helpers}\n{body}\n}})()")
 }
