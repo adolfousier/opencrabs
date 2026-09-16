@@ -7,10 +7,165 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.2] - 2026-09-16
+
+133 commits since v0.5.1, 7 contributors. 305 files changed, +22,624 / -5,586 lines.
+
+An integration window: ACP server mode over stdio JSON-RPC so Zed and monocle drive the crab directly (#1540), shadow-DOM aware browser automation, a WhatsApp surface explosion (native voice notes, inbound video/sticker/location/contact/reactions/poll votes, presence + media recovery, reaction acks, edit-in-place streaming, disappearing messages, contact blocking, pin/forward/profile, status updates, newsletter discovery, native-flow buttons, per-chat history), Discord live reply tracing with auto-threading and native markdown tables, Telegram forum topics and a /clear that starts the agent fresh without the summariser call. Along the way we found Telegram's setMyCommands silently rejects request bodies over ~7.8KB while reporting BOT_COMMANDS_TOO_MUCH - the menu-budget fix that finally got /clear onto the phone (#1613). The last inline test blocks in production files were swept into src/tests/ (#1612): 913 test files, zero inline. v0.5.1's changelog also carried a leaked release-draft block; removed here.
+
 ### ✨ Features
 
-- `feat(telegram_send)`: add `create_topic` and `rename_topic` actions for forum supergroups (#161)
-- `feat(browser)`: shadow-DOM aware selector resolution across the browser tools. `browser_find` (css/text/aria and the interactive inventory) searches inside open shadow roots and marks those hits `[shadow]`; `browser_click`, `browser_type`, `browser_wait`, `browser_screenshot`, `browser_act` and selector-scoped `browser_content` resolve the selectors it returns. Closed shadow roots resolve over CDP (which JS cannot reach) but stay non-enumerable; `xpath` mode remains light-DOM only because XPath has no shadow boundary by spec. Full-page `browser_content` with `text_only` now spans the composed tree, since `body.innerText` is computed per node tree and silently omitted everything rendered inside a custom element
+- `aa331182` **telegram**: queue follow-up selections instead of re-arming on mid-turn tap
+- `28627b08` **telegram**: infer missing table separators in rich normalization
+- `18a476b4` **browser**: composed-tree JS helpers for shadow-DOM traversal
+- `3721c7dc` **session**: /clear starts the agent fresh at the current point without a summariser call (#1585)
+- `428f15d0` **suggest_options**: document recommendation primary guidance and first-word folded button labels (#228)
+- `1e04eefa` **whatsapp**: opt-in newsletter poller with owner digests
+- `346737e1` **whatsapp**: bounded per-chat history capture with read-only search
+- `a34fa80b` **whatsapp**: send follow-up suggestions as native-flow button cards
+- `940663fb` **suggest_options**: polymorphic options with styles and single-option promotion
+- `84021b1f` **telegram**: session bind topic instrument and create_topic bind parameter (#170)
+- `1947afcd` **telegram_send**: add create_topic and rename_topic actions (#161)
+- `4881e82c` **telegram**: dedup group history and prune reply quotes against live context (#133)
+- `530d7bbe` **plan**: mid-list task insertion and windowed show_plan
+- `9a0db943` **acp**: ACP server mode over stdio JSON-RPC for Zed/monocle (#1540)
+- `8269270b` **tui**: log viewer in Mission Control, opened with L (#1528)
+- `16c7c9f4` **tui**: search the help screen with / (#1527)
+- `65773709` **channels/whatsapp**: try the native-flow path for interactive buttons (#1411)
+- `ce6178c2` **channels/whatsapp**: status updates, newsletter discovery and labels (#1485)
+- `cf1b320d` **channels/whatsapp**: pin, forward and programmatic profile (#1484)
+- `1c538231` **channels/whatsapp**: block contacts and send disappearing messages (#1487)
+- `e47c67ef` **channels/whatsapp**: send audio as a native voice note (#1486)
+- `5b19ea9c` **channels/whatsapp**: handle inbound video, sticker, location, contact, reactions and poll votes (#1410, #1482, #1483)
+- `157e8106` **channels/whatsapp**: publish presence and recover expired media (#1488)
+- `aa3e39d4` **channels/whatsapp**: acknowledge finished turns with a reaction (#1409)
+- `1a3f3c5b` **channels/whatsapp**: edit-in-place streaming instead of chunk-spam (#1408)
+
+### 🔧 Fixes
+
+- `836f8577` **telegram**: cap command menu payload under Telegram's ~7.8KB setMyCommands limit (#1613)
+- `d643dd3a` **recovery**: expand boot wake window to 60m and classify active plan tasks as interrupted (#1605)
+- `b9bd4a44` **telegram**: restore normalize_tables body and infer_missing_table_separators lost in #1595 conflict resolution
+- `975db95b` **discord**: prevent double-posting final response on tool turns
+- `7099a6b1` **telegram**: expand hash shield to list items, blockquotes, checkboxes
+- `e7db13fd` **telegram**: balance code fences in rich text normalization
+- `1126968c` **whatsapp**: gate whatsapp_history module behind whatsapp feature (#1604)
+- `5fea88ae` **browser**: keep the newline escape out of Rust's hands in the text_only JS
+- `5d77e6c0` **browser**: full-page text_only spans the composed tree
+- `30db96a5` **browser**: text= clicks walk the composed tree too
+- `2088fde1` **browser**: browser_type and scoped browser_content resolve inside shadow roots
+- `040273ed` **browser**: resolve selectors across shadow roots in click/wait/screenshot/act
+- `27ee0c4f` **browser**: browser_find enumerates and keeps shadow-root elements
+- `dff7cf27` **tests**: isolate telegram rich edit dedup fixtures across cases (#1588)
+- `e0423000` **tui**: /help enters the help screen through switch_mode so the catalog loads (#1586)
+- `f89d7bc1` **tui**: treat a marker the model quoted mid-line as text on reload, not as a cut point (#1587)
+- `06a97bce` **tui**: fold phantom-blocked sections into one collapsed row on reload (#1584)
+- `81fad3b2` **rsi**: classify permanent cap-bails and dedup their reporting
+- `a7f7e27b` **tui**: honor /cd <path> instead of always opening the picker
+- `ee4f6426` **telegram**: prevent send_markdown_outbox from re-poisoning evicted dead topic
+- `37963c10` **telegram**: preserve markdown dialect on queued final edit drain
+- `4678856c` **ci**: give test threads a 16 MiB stack floor
+- `85a56941` **cli**: surface honest parked status for surfaceless sessions (#114)
+- `799c9a89` **config**: drop dead draft_streaming references after field removal
+- `71890236` **telegram**: reshape over-budget button rows to column and preserve sets
+- `3bf84b07` **tools**: write_file marks path fully read so subsequent writes succeed
+- `7a3806be` **telegram**: delete dead draft_streaming config field (#181)
+- `6ae90a2b` **mermaid**: unify nudges, readability checks, and capping-based svg vector links
+- `ee9edc7d` **plan**: validate mermaid syntax in session plan markdown sync (#172)
+- `e8c28abc` **compaction**: anchor the marker search on a user row that starts with it (#175)
+- `cc463133` **telegram**: isolate fold list from preceding prose list counters (#207)
+- `5dd0a6f9` **tools**: atomic file writes via tempfile rename in write_file and edit_file (#167)
+- `ce9fda07` **brain/tools**: scope tasks_list and wait_agent to the caller (#191)
+- `d4d20047` **telegram**: match code fence delimiter run length in rich markdown parser (#94)
+- `38f368ce` **goal**: turn budget config, state reconciliation, and visibility (#190)
+- `7db96ac4` **cli**: omit interrupt parameter in session notify unless true
+- `857a04e6` **provider**: streaming chunk inactivity timeout & configurable request timeouts (#217)
+- `0b8d2200` **config**: missing [channels.telegram] table defaults to rich_messages and mermaid_render (#178)
+- `149f965a` **bash**: inject session identity into command environment (#166)
+- `132da1fc` **loop-guard**: exempt paginated arguments from repetitive/near-match loop detection (#199)
+- `1fde332b` **telegram**: surface substantial markdown status updates (#215)
+- `2b1f9b04` **daemon**: await A2A gateway readiness before cron scheduler
+- `ac295cf6` **cron**: seed next_run_at on create/update and backfill on scheduler start
+- `08328efd` **telegram**: eliminate rich governor fail-open to prevent 429 lockouts
+- `141f015e` **bash**: bound retry guard by TTL and block budget
+- `5a8570a6` **telegram**: shield bare leading hashes on rich markdown wire
+- `a2895a95` **bash**: make interactive command splitter quote-aware
+- `f1d4681a` **telegram**: make mermaid render failures visible, retryable and escapable
+- `9c1f2d06` **compaction**: align flow receipt after_pct with post-compaction token count (#211)
+- `56e0b54d` **telegram**: flush queued items at resume-turn end
+- `7ce65177` **agent**: the #752 turn-end verdict honors the structured-report exemption (#1541)
+- `3eaf3525` **skills**: claim the boot-hydration flag after the readiness guards (#1537)
+- `7d7fc03a` **brain**: a real brain file outranks the skill filename form (#1537)
+- `dc10f483` **138**: explicit Result typing in SessionSkillsRepository::all()
+- `85a8b133` **138**: persist seen-skills to DB and register filename-form load_brain_file
+- `4ce1be10` **channels/whatsapp**: key sessions and buffers on the canonical identity (#1533)
+- `07ca9bad` **channels/whatsapp**: accept either identity when gating an approval reply (#1533)
+- `44898960` **channels/whatsapp**: a blocked contact could walk past the guard from a LID
+- `0ddcf0ad` **tui**: clamp Help and Settings scroll to the end of the content (#1527)
+- `3bcc26f7` **whatsapp**: route whatsapp_send to session chat before owner fallback and resolve LID sender_alt
+- `7b55e82c` **channels/whatsapp**: create polls through the lib so votes can be decrypted (#1482)
+- `f68d1bf1` **channels/whatsapp**: charge every message-delivering action to the send budget (#1407)
+
+### 📖 Documentation
+
+- `3df73aef` **browser**: document shadow-DOM resolution rules
+- `1f9ca680` **telegram**: clarify list_topics DB-observed scope (#160)
+- `6a090453` **templates**: sync CODE.md template with the updated brain file
+- `cabaa75f` **readme**: correct the WhatsApp surface and add a check so it stops drifting (#1526)
+- `c3660332` **readme**: describe the WhatsApp channel's new surface
+
+### 🧹 Miscellaneous
+
+- `82fac8bd` **skills**: drop orphan cfg(test) Skill import left by #1612 sweep
+- `48065540`: drop trailing blank line in notify_policy.rs (#1612)
+- `871c51f2`: move skill_gate.rs inline tests to src/tests/skill_gate_test.rs (#1612)
+- `2c7c8252`: move target_resolver.rs inline tests to src/tests/target_resolver_test.rs (#1612)
+- `6ff76500`: move timezone.rs inline tests to src/tests/timezone_test.rs (#1612)
+- `910afa85`: move inline.rs inline tests to src/tests/telegram_rich_inline_test.rs (#1612)
+- `115cd7c0`: move panes.rs inline tests to src/tests/tui_render_panes_test.rs (#1612)
+- `0dab14e3`: move mermaid.rs inline tests to src/tests/telegram_rich_mermaid_test.rs (#1612)
+- `0fa234ea`: move context.rs inline tests to src/tests/agent_service_augment_user_message_test.rs (#1612)
+- `bc9247cd`: fmt import order in notify_policy_test (#1612)
+- `5fae72fc`: extract notify_policy inline block to src/tests (#1612)
+- `df0b1188`: seed z.ai + Xiaomi endpoint types in from_config (#1596)
+- `5d326aa1`: _options: reject same-first-word option sets with a rephrase nudge (#1611)
+- `ab1c8451`: #1608 inline tests to src/tests/ per CONTRIBUTING.md
+- `ad84601f`: live reply tracing, auto-threading, native tables, split fixes (#1608)
+- `02b08061` **discord**: extract norm_key inline tests to src/tests per CONTRIBUTING policy (#1603 follow-up)
+- `f69298e3`: cargo fmt — EOF newlines and line joins after #1593 merge
+- `5dbcccc7` **rsi**: retire brain dedup scanner, proposal queue and dedup_intent parameter (#1593)
+- `8282640f` **plan**: remove dead has_active_plan wrapper — zero callers in production or tests (#1605 follow-up)
+- `baa2f07d`: cargo fmt on custom_openai_compatible.rs (line-length wrap)
+- `f38cc014` **telegram**: consolidate escape_html implementations
+- `960c1269` **streaming**: single-pass tail extraction, log consolidation, level demotion
+- `091df907` **browser**: scope the shadow sentinels so they stop matching their own comments
+- `cd6a899b` **browser**: cargo fmt the shadow-DOM changes
+- `56cadfab` **browser**: inline the format arg in with_deep_helpers
+- `5b2f7cd7` **browser**: e2e fixture for the shadow-DOM round trip
+- `b9795331` **deps**: bump rustls 0.23.43 -> 0.23.45 (RUSTSEC-2026-0285)
+- `c6c3dd7e` **telegram**: drop clear_for_test now that dedup tests isolate fixtures
+- `78452fbb` **cli**: resolve full session uuid without loading session table
+- `8194477f` **acp**: move inline tests to src/tests/ and close the #1540 review gaps
+- `ca9192c2`: run the parallel-session cancel test on a big-stack thread
+- `24c23343` **skills**: move the inline seen_skills test module under src/tests/ (#1537)
+- `800bc07c` **db**: drop the redundant session_id index on session_seen_skills (#1537)
+- `bfd48c6d` **db**: cargo fmt the merged session_skills repository (#1537)
+- `1dcacdea` **lint**: lint the examples/ targets too (#1538)
+- `3dc1ea4e` **read**: buffer the fixture writes instead of one syscall per line (#1534)
+- `4570dbf7` **brain**: resolve the seed home once per test instead of twice (#1536)
+- `4ac8ec6d` **subagent**: run worktree tests against an overridden profile home (#1535)
+- `6eaa2033` **telegram**: run the rate-limit retry tests on a paused clock (#1532)
+- `46acce75` **tui**: stop re-reading every skill and commands.toml per help frame (#1530)
+- `4b7ebafd`: untrack bench scratch files absorbed by the release commit
+
+### 📊 Stats
+
+- 133 commits since v0.5.1
+- 7 contributors: @adolfousier @leshchenko1979 @adi805 @moneyacademyKE @carvalab @loonix @A2agent-ai
+- 305 files changed, +22,624 / -5,586 lines
+- 8,852 tests (8,814 passed, 0 failed, 38 ignored)
+
+[0.5.2]: https://github.com/adolfousier/opencrabs/compare/v0.5.1...v0.5.2
 
 ## [0.5.1] - 2026-09-12
 
