@@ -17,6 +17,7 @@
 
 use super::ast::Block;
 pub use super::ast::MermaidResult;
+use crate::channels::telegram::markdown::escape_html;
 use futures::FutureExt;
 use futures::future::BoxFuture;
 use std::collections::HashMap;
@@ -828,7 +829,7 @@ pub(crate) fn markdown_failure_block_with_link(err: &str, source: &str) -> Strin
 /// HTML for a successfully rendered diagram: a bare `<img>` in a `<figure>`,
 /// which the Telegram rich-HTML parser turns into a native photo block.
 pub(crate) fn image_html(url: &str) -> String {
-    format!("<figure><img src=\"{}\"/></figure>", escape(url))
+    format!("<figure><img src=\"{}\"/></figure>", escape_html(url))
 }
 
 /// HTML for a diagram that could not be rendered: a bold warning line, the
@@ -837,18 +838,20 @@ pub(crate) fn image_html(url: &str) -> String {
 /// #189 Leg 4: generic svg escape-hatch link fragment for HTML-fallback
 /// contexts — a small `[svg]` anchor to the vector render.
 pub(crate) fn svg_link_html(source: &str) -> String {
-    format!("\n<a href=\"{}\">[svg]</a>", escape(&ink_url_svg(source)))
+    format!(
+        "\n<a href=\"{}\">[svg]</a>",
+        escape_html(&ink_url_svg(source))
+    )
 }
 
 pub(crate) fn failure_html(err: &str, source: &str) -> String {
     format!(
         "<b>⚠️ Mermaid diagram could not be rendered</b>\n<blockquote>{}</blockquote>\n<pre><code>{}</code></pre>",
-        escape(err),
-        escape(source)
+        escape_html(err),
+        escape_html(source)
     )
 }
 
-/// Minimal HTML entity escaping (matches render_html's escaping).
 /// Generic svg escape-hatch link fragment for markdown contexts —
 /// a small `[Open SVG vector]` link to the full-size vector render when the diagram
 /// is capped or scaled down.
@@ -883,12 +886,6 @@ pub fn format_mermaid_error(context: &str, errors: &[String]) -> String {
              {rules}"
         )
     }
-}
-
-fn escape(t: &str) -> String {
-    t.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
 }
 
 #[cfg(test)]

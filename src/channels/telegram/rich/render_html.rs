@@ -9,6 +9,7 @@
 use super::ast::{Align, Block, Inline, List, MermaidResult, Table};
 use super::mermaid;
 use super::parse::parse_markdown;
+use crate::channels::telegram::markdown::escape_html;
 
 /// Render a block list to a Telegram-HTML string. Block-level elements are
 /// separated by a blank line so paragraphs, headings, lists, and tables keep
@@ -69,10 +70,10 @@ fn render_block(block: &Block, wrap_p: bool) -> String {
         Block::Code { lang, text } => match lang {
             Some(l) => format!(
                 "<pre><code class=\"language-{}\">{}</code></pre>",
-                escape(l),
-                escape(text)
+                escape_html(l),
+                escape_html(text)
             ),
-            None => format!("<pre><code>{}</code></pre>", escape(text)),
+            None => format!("<pre><code>{}</code></pre>", escape_html(text)),
         },
         // Resolved mermaid fence (#1044): embed the rendered image, or degrade
         // to a legible failure block. Both HTML shapes are built in
@@ -100,7 +101,7 @@ fn render_block(block: &Block, wrap_p: bool) -> String {
             "<blockquote>{}</blockquote>",
             render_html_inner(inner, wrap_p)
         ),
-        Block::Math(expr) => format!("<pre>{}</pre>", escape(expr)),
+        Block::Math(expr) => format!("<pre>{}</pre>", escape_html(expr)),
         Block::Divider => "──────────".to_string(),
         // Telegram HTML has no <details> — render as flat indented blocks
         // with a bold summary header so content is still visible.
@@ -222,7 +223,7 @@ fn render_grid(table: &Table, header: &[String], rows: &[Vec<String>], width: &[
     for row in rows {
         lines.push(fmt(row));
     }
-    format!("<pre>{}</pre>", escape(&lines.join("\n")))
+    format!("<pre>{}</pre>", escape_html(&lines.join("\n")))
 }
 
 /// One- or two-column table → a `key: value` list. The header row is dropped
@@ -307,7 +308,7 @@ fn render_inline(inline: &Inline, s: &mut String, wrap_p: bool) {
         // in both dialects (a newline inside inline code is data, not a
         // break).
         Inline::Text(t) => {
-            let esc = escape(t);
+            let esc = escape_html(t);
             if wrap_p {
                 s.push_str(&esc.replace('\n', "<br>"));
             } else {
@@ -331,11 +332,11 @@ fn render_inline(inline: &Inline, s: &mut String, wrap_p: bool) {
         }
         Inline::Code(t) | Inline::Math(t) => {
             s.push_str("<code>");
-            s.push_str(&escape(t));
+            s.push_str(&escape_html(t));
             s.push_str("</code>");
         }
         Inline::Link { content, url } => {
-            s.push_str(&format!("<a href=\"{}\">", escape(url)));
+            s.push_str(&format!("<a href=\"{}\">", escape_html(url)));
             for c in content {
                 render_inline(c, s, wrap_p);
             }
@@ -380,12 +381,6 @@ fn plain_one(inline: &Inline, s: &mut String) {
             }
         }
     }
-}
-
-fn escape(t: &str) -> String {
-    t.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
 }
 
 /// Parse `text` and render it as Telegram HTML in one call (the fallback path).
