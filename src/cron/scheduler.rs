@@ -12,7 +12,6 @@ use crate::config::Config;
 use crate::db::CronJobRepository;
 use crate::db::CronJobRunRepository;
 use crate::db::models::{CronJob, CronJobRun};
-use crate::db::repository::CronJobPatch;
 use crate::services::{ServiceContext, SessionService};
 use chrono::Utc;
 use std::sync::Arc;
@@ -36,35 +35,6 @@ fn is_active_profile(job_profile: Option<&str>, active: Option<&str>) -> bool {
 /// The originating session id is carried in `prompt` so the restart resumes
 /// the user's session.
 pub const REBUILD_JOB_NAME: &str = "__opencrabs_rebuild__";
-
-/// Reserved recurring job: weekly cross-file brain dedup scan (#765). Unlike
-/// the one-shot rebuild job, this one is NOT self-deleting — it fires every
-/// week as a safety net that catches cross-file drift the event-based trigger
-/// (brain writes) and the manual `/dedup` command can miss (template sync,
-/// manual edits, preamble changes). Report-only: files proposals, never applies.
-pub const DEDUP_SCAN_JOB_NAME: &str = "__opencrabs_dedup_scan__";
-
-/// Weekly dedup scan: Sunday 04:00 UTC (quiet window).
-///
-/// Weekday is 1 = Sunday in the `cron` crate, NOT the Unix 0 (see
-/// `cron_schedule_util_test::numeric_dow_is_sunday_first`). This job shipped
-/// as `0 4 * * 0`, which the crate rejects outright, so it never ran once and
-/// logged a parse failure every minute for its whole lifetime — the cross-file
-/// dedup scan that catches the same rule written into two brain files was dead
-/// the entire time (#1024).
-///
-/// Do NOT "fix" a Unix-style 0 by translating it to 7: 7 is Saturday under this
-/// numbering, so the job would run on the wrong day, silently — worse than not
-/// running. Rejecting 0 is deliberate (`cron_schedule_util_test::dow_zero_is_rejected`).
-pub(crate) const DEDUP_SCAN_CRON: &str = "0 4 * * 1";
-
-/// The pre-#1024 artifact this job originally shipped as: Unix-style dow 0,
-/// which the `cron` crate rejects outright (see [`DEDUP_SCAN_CRON`] docs).
-/// Rows still holding EXACTLY this value are repaired at startup (#1163).
-/// Any other expression — including other invalid ones — is treated as
-/// deliberate and never touched.
-pub(crate) const LEGACY_DEDUP_SCAN_CRON: &str = "0 4 * * 0";
-
 /// Warn-once guard for unparseable cron expressions (#1163): without it an
 /// invalid row warns on every ~60s tick — 1,440 warns/day for a job that
 /// never runs. One warning per process is enough to diagnose.
@@ -117,141 +87,6 @@ pub async fn schedule_background_rebuild(
     tracing::info!("Background rebuild queued for session {session_id}");
     Ok(())
 }
-
-/// Idempotently seed the reserved weekly brain-dedup scan job (#765). A no-op
-/// if a job named [`DEDUP_SCAN_JOB_NAME`] already exists, so repeated scheduler
-/// starts never stack duplicate jobs. The job runs the scanner directly (see
-/// [`run_dedup_scan_job`]) every Sunday at 04:00 UTC.
-pub(crate) async fn ensure_weekly_dedup_scan_job(repo: &CronJobRepository) -> anyhow::Result<()> {
-    if let Ok(existing) = repo.list_all().await
-        && let Some(job) = existing.iter().find(|j| j.name == DEDUP_SCAN_JOB_NAME)
-    {
-        // Repair-in-place (#1163): installs that seeded before #1024 hold
-        // LEGACY_DEDUP_SCAN_CRON, which this parser rejects outright. The
-        // name-idempotent early-return used to make that row immortal:
-        // dead job plus one warn per minute for life. Rewrite ONLY rows
-        // holding that exact legacy artifact; every other expression
-        // (including user-customized schedules) is deliberate and stays.
-        if job.cron_expr == LEGACY_DEDUP_SCAN_CRON {
-            let patch = CronJobPatch {
-                cron_expr: Some(DEDUP_SCAN_CRON.to_string()),
-                reset_next_run: true,
-                ..Default::default()
-            };
-            match repo.update_fields(&job.id.to_string(), patch).await {
-                Ok(true) => tracing::info!(
-                    "Repaired legacy dedup-scan schedule '{}' -> '{}' (#1163)",
-                    LEGACY_DEDUP_SCAN_CRON,
-                    DEDUP_SCAN_CRON
-                ),
-                Ok(false) => {}
-                Err(e) => {
-                    tracing::warn!(error = %e, "failed to repair legacy dedup-scan schedule")
-                }
-            }
-        }
-        return Ok(());
-    }
-    let mut job = CronJob::new(
-        DEDUP_SCAN_JOB_NAME.to_string(),
-        DEDUP_SCAN_CRON.to_string(),
-        "UTC".to_string(),
-        // Reserved job — the prompt is never run as an agent turn; kept as a
-        // human-readable descriptor only.
-        "reserved: weekly cross-file brain dedup scan (report-only)".to_string(),
-        None,
-        None,
-        "off".to_string(),
-        true,
-        // Deliver the interactive approval keyboard to the dev group so pending
-        // cross-file duplicates can be approved or rejected in-chat (#765).
-        Some("telegram:-1002554690655".to_string()),
-        None,
-    );
-    job.next_run_at = super::next_run_utc(&job.cron_expr, chrono_tz::UTC, chrono::Utc::now());
-    repo.insert(&job).await?;
-    tracing::info!("Seeded weekly brain dedup scan job ({DEDUP_SCAN_JOB_NAME})");
-    Ok(())
-}
-
-/// Execute the reserved weekly brain-dedup scan (#765): run the cross-file
-/// scanner directly against this profile's brain dir (no agent prompt, no LLM
-/// cost), filing report-only proposals into the Mission Control inbox. Never
-/// applies — merging across files changes enforcement scope and needs human
-/// approval. Runs inline (the scan touches a handful of small `.md` files) so
-/// it stays inside the per-profile home scope the scheduler's spawned task set,
-/// keeping `opencrabs_home()` pointed at the right profile. Delivers a summary
-/// to the job's channel only when something is pending, so a clean tree doesn't
-/// spam weekly.
-async fn run_dedup_scan_job(job: &CronJob) -> anyhow::Result<()> {
-    let brain_dir = crate::config::opencrabs_home();
-    let store = crate::brain::rsi_proposals::ProposalsStore::new();
-    store.prune_handled();
-    let filed = crate::brain::dedup_scan::file_dedup_proposals(&brain_dir, &store);
-    let pending = store.list_brain_dedup_proposals().len();
-    tracing::info!(
-        "Weekly brain dedup scan complete: {filed} new proposal(s), {pending} pending total"
-    );
-    if pending > 0 {
-        let msg = format!(
-            "🧹 Weekly brain dedup scan: {pending} pending cross-file duplicate proposal(s) \
-             ({filed} new this run). Review and approve in the Mission Control inbox."
-        );
-        // deliver_rebuild_status is the generic per-channel delivery helper
-        // (no-op when the job has no deliver_to); the name is rebuild-specific
-        // but the body just fans `msg` out to the job's configured channels.
-        deliver_rebuild_status(job, &msg).await;
-        // Follow the text summary with an interactive approval keyboard so the
-        // dev group can apply or reject the pending duplicates in-chat (#765).
-        // No-op when the job has no telegram target or the feature is off.
-        send_dedup_approval_keyboard(job).await;
-    }
-    Ok(())
-}
-
-/// Send the interactive brain-dedup approval keyboard to the job's Telegram
-/// target (#765). Parses the chat id from `deliver_to` (format
-/// `telegram:<chat_id>`), builds a bot from the keys.toml token, and posts the
-/// pending proposals with inline Approve/Reject buttons. Removals only happen
-/// on an explicit button tap; this just surfaces the pending list. Silent no-op
-/// when the job has no telegram target, the token is missing, or nothing filed.
-#[cfg(feature = "telegram")]
-async fn send_dedup_approval_keyboard(job: &CronJob) {
-    // Pull the first `telegram:<chat_id>` target out of the (possibly
-    // comma-separated) deliver_to list. A thread component (#104) is
-    // accepted by the grammar but the approval keyboard itself is
-    // chat-level — it goes to the chat's default topic.
-    let Some((chat_id, _thread)) = job.deliver_to.as_deref().and_then(|targets| {
-        targets
-            .split(',')
-            .map(str::trim)
-            .find_map(|t| t.strip_prefix("telegram:"))
-            .and_then(parse_telegram_target)
-    }) else {
-        return;
-    };
-    let Some(token) = read_channel_secret("telegram", "token") else {
-        tracing::warn!("No Telegram bot token in keys.toml, cannot send dedup approval keyboard");
-        return;
-    };
-    let bot = teloxide::Bot::new(token);
-    match crate::channels::telegram::dedup_approval::send_approval_request(
-        &bot,
-        teloxide::types::ChatId(chat_id),
-    )
-    .await
-    {
-        Ok(0) => {}
-        Ok(n) => tracing::info!(
-            "Sent dedup approval keyboard to Telegram chat {chat_id} ({n} proposal(s))"
-        ),
-        Err(e) => tracing::warn!("Failed to send dedup approval keyboard to {chat_id}: {e}"),
-    }
-}
-
-/// Non-telegram builds have no keyboard to send; keep the call site unconditional.
-#[cfg(not(feature = "telegram"))]
-async fn send_dedup_approval_keyboard(_job: &CronJob) {}
 
 /// Execute the reserved background-rebuild job: delete it first (one-shot, no
 /// retry on the 60s tick), build from source, then exec-restart into the
@@ -416,14 +251,6 @@ impl CronScheduler {
         tracing::info!(
             "Cron scheduler started — polling every 60s (shared Cron session, compaction-isolated)"
         );
-        // Seed the reserved weekly brain-dedup safety-net job once per scheduler
-        // start (#765). Idempotent: a no-op if the job already exists. Runs in
-        // the per-profile home scope (daemon case), so the job is stamped with
-        // the correct profile.
-        if let Err(e) = ensure_weekly_dedup_scan_job(&self.repo).await {
-            tracing::warn!("Failed to seed weekly brain dedup scan job: {e}");
-        }
-
         if let Err(e) = self.backfill_missing_next_run().await {
             tracing::error!("Failed to backfill missing next_run_at on startup: {e}");
         }
@@ -800,12 +627,6 @@ async fn execute_job(
     // agent prompt.
     if job.name == REBUILD_JOB_NAME {
         return run_rebuild_job(job, ctx, session_notifier).await;
-    }
-
-    // Reserved weekly cross-file brain dedup scan (#765) — runs the scanner
-    // directly (no agent prompt, no LLM cost) and files report-only proposals.
-    if job.name == DEDUP_SCAN_JOB_NAME {
-        return run_dedup_scan_job(job).await;
     }
 
     // Resolve the config + agent for this job's profile. A job created in a

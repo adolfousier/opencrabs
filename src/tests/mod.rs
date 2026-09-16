@@ -227,8 +227,6 @@ pub mod core_tool_names_test;
 pub mod corrupted_tool_call_test;
 #[cfg(feature = "telegram")]
 pub mod cowork_connect_test;
-pub mod cron_dedup_repair_test;
-pub mod cron_dedup_scan_schedule_test;
 pub mod cron_deliver_to_thread_test;
 pub mod cron_next_run_at_test;
 pub mod cron_profile_isolation_test;
@@ -410,7 +408,6 @@ pub mod tasks_list_test;
 #[cfg(feature = "telegram")]
 pub mod telegram_callback_session_topic_test;
 pub mod telegram_cancel_token_no_drop_test;
-pub mod telegram_dedup_approval_test;
 pub mod telegram_details_fallback_render_test;
 pub mod telegram_draft_streaming_compat_test;
 #[cfg(feature = "telegram")]
@@ -711,7 +708,6 @@ pub mod memory_embedding_gate_test;
 pub mod merge_provider_keys_test;
 pub mod mission_control_activity_malformed_test;
 pub mod mission_control_activity_service_test;
-pub mod mission_control_dedup_detail_test;
 pub mod mission_control_inbox_service_test;
 pub mod mission_control_input_test;
 pub mod mission_control_layout_test;
@@ -730,7 +726,6 @@ pub mod parallel_tools_test;
 pub mod path_lock_test;
 pub mod profile_test;
 pub mod retry_notice_drain_test;
-pub mod rsi_brain_dedup_test;
 pub mod rsi_command_patterns_test;
 pub mod rsi_enabled_gate_test;
 pub mod rsi_fallback_wrap_test;
@@ -832,7 +827,6 @@ pub mod whatsapp_state_test;
 // Channel handler tests (moved from inline #[cfg(test)] modules)
 pub mod brain_tools_whatsapp_send_test;
 pub mod channel_commands_test;
-pub mod cron_scheduler_dedup_job_test;
 pub mod discord_handler_test;
 #[cfg(unix)]
 pub mod flock_retry_test;

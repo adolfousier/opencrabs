@@ -353,7 +353,6 @@ impl Tool for SlashCommandTool {
                     .into(),
             )),
             "/goal" => self.handle_goal(args, context).await,
-            "/dedup" => self.handle_dedup().await,
             "/profiles" => self.handle_profiles(context).await,
             // `/onboard:channels`, `/onboard:voice` and the like are the shapes
             // actually typed; matching only the bare word sent them to the
@@ -736,49 +735,6 @@ impl SlashCommandTool {
         }
 
         Ok(ToolResult::success(lines.join("\n")))
-    }
-
-    /// `/dedup`: run the cross-file brain dedup scan on demand and report
-    /// what got filed into Mission Control for review (#765). Mirrors the
-    /// periodic RSI scan in rsi.rs but is user-triggered. Report-only, it
-    /// never auto-applies, since cross-file merges change enforcement scope.
-    async fn handle_dedup(&self) -> Result<ToolResult> {
-        let brain_path = crate::config::opencrabs_home();
-        let store = crate::brain::rsi_proposals::ProposalsStore::new();
-        // Drop stale entries whose duplicate is already applied/rejected so
-        // the report only shows live proposals (same housekeeping as RSI).
-        store.prune_handled();
-        let filed = crate::brain::dedup_scan::file_dedup_proposals(&brain_path, &store);
-        let pending = store.list_brain_dedup_proposals();
-
-        if pending.is_empty() {
-            return Ok(ToolResult::success(
-                "Brain dedup scan complete: no cross-file duplicates found.".into(),
-            ));
-        }
-
-        let mut report = format!(
-            "Brain dedup scan: {filed} new proposal(s) filed, {} pending total.\n\n",
-            pending.len()
-        );
-        for (i, proposal) in pending.iter().enumerate().take(10) {
-            let d = &proposal.dedup;
-            report.push_str(&format!(
-                "{}. {} ({}): duplicates {}\n",
-                i + 1,
-                d.target_file,
-                d.line_range,
-                d.duplicate_of,
-            ));
-        }
-        if pending.len() > 10 {
-            report.push_str(&format!("... and {} more\n", pending.len() - 10));
-        }
-        report.push_str(
-            "\nReport-only: review and approve in the Mission Control inbox \
-             (or the Telegram approval flow).",
-        );
-        Ok(ToolResult::success(report))
     }
 
     async fn handle_doctor(&self) -> Result<ToolResult> {

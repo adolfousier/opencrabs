@@ -116,7 +116,7 @@ pub const INK: Color = Color::Rgb(20, 20, 30);
 
 // ── Misc ────────────────────────────────────────────────────────────────────
 
-/// Soft purple — proposed-brain-dedup inbox badges.
+/// Soft purple — retired proposed-brain-dedup inbox badges (kept for theme compatibility).
 pub const PURPLE_SOFT: Color = Color::Rgb(160, 120, 200);
 
 // ── Session badge rotation ──────────────────────────────────────────────────

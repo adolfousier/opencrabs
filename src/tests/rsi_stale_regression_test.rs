@@ -487,7 +487,6 @@ fn append_only_finding_yields_update_input_never_deletion() {
         &guard_path,
         &existing,
         &deletion,
-        false, // dedup_intent
         false, // cleanup_intent — never available to autonomous RSI
         is_rule_consolidation(bold_rule, ""),
     ) {
@@ -508,7 +507,6 @@ fn append_only_finding_yields_update_input_never_deletion() {
             &guard_path,
             &existing,
             &updated,
-            false,
             false,
             is_rule_consolidation(bold_rule, reworded),
         ),

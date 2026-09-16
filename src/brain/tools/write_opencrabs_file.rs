@@ -250,10 +250,6 @@ impl Tool for WriteOpenCrabsFileTool {
                     "type": "string",
                     "description": "Replacement text (required for replace)."
                 },
-                "dedup_intent": {
-                    "type": "boolean",
-                    "description": "Set to true ONLY when shrinking a protected brain file (TOOLS.md, MEMORY.md, SOUL.md, USER.md, AGENTS.md, CODE.md, SECURITY.md, BOOT.md) to deduplicate. Brain files are append-only — any overwrite/replace whose result is shorter than the existing file is rejected unless dedup_intent=true AND every original line still appears in the result."
-                },
                 "cleanup_intent": {
                     "type": "boolean",
                     "description": "Set to true ONLY when you need to intentionally clean up a protected brain file (remove outdated content, consolidate sections, etc.). This bypasses the append-only restriction and allows shrinking. Requires explicit user approval (this tool has requires_approval: true). This parameter is NOT available in the autonomous RSI self_improve tool — only user-initiated operations can clean up brain files."
@@ -309,10 +305,6 @@ impl Tool for WriteOpenCrabsFileTool {
                 use crate::brain::tools::brain_file_safety;
                 if brain_file_safety::is_protected_path(&full_path) {
                     let existing = std::fs::read_to_string(&full_path).unwrap_or_default();
-                    let dedup_intent = input
-                        .get("dedup_intent")
-                        .and_then(|v| v.as_bool())
-                        .unwrap_or(false);
                     let cleanup_intent = input
                         .get("cleanup_intent")
                         .and_then(|v| v.as_bool())
@@ -322,15 +314,14 @@ impl Tool for WriteOpenCrabsFileTool {
                             &full_path,
                             &existing,
                             content,
-                            dedup_intent,
                             cleanup_intent,
                             false, // consolidation: only self_improve's surgical update qualifies
                         )
                     {
                         return Ok(ToolResult::error(message));
                     }
-                    // Record pruned sections when shrinking is allowed (dedup/cleanup)
-                    if dedup_intent || cleanup_intent {
+                    // Record pruned sections when shrinking is allowed (cleanup)
+                    if cleanup_intent {
                         let removed =
                             crate::brain::rsi_pruned::detect_removed_sections(&existing, content);
                         if !removed.is_empty() {
@@ -446,18 +437,8 @@ impl Tool for WriteOpenCrabsFileTool {
                             }
                             // Epistemic engine (#862): track MEMORY.md beliefs on append.
                             track_memory_belief(path_str, &effective_content);
-                            // #765 event-based cross-file trigger
                             if brain_file_safety::is_protected_path(&full_path) {
-                                let brain_dir = crate::config::opencrabs_home();
-                                let filed =
-                                    crate::brain::dedup_scan::scan_after_brain_write(&brain_dir);
-                                if filed > 0 {
-                                    tracing::info!(
-                                        "write_opencrabs_file: cross-file scan filed {filed} dedup proposal(s) after append to {path_str}"
-                                    );
-                                }
                                 // Index what we just wrote (#1018). The index was
-                                // refreshed only at startup, so a rule appended here
                                 // stayed unsearchable until the next restart — the
                                 // window where a duplicate check silently passes.
                                 // Writes are the mechanism; the search-side stat
@@ -552,10 +533,6 @@ impl Tool for WriteOpenCrabsFileTool {
                 let new_text_nfc: String = new_text.nfc().collect();
                 let updated =
                     existing_nfc.replacen(old_text_nfc.as_str(), new_text_nfc.as_str(), 1);
-                let dedup_intent = input
-                    .get("dedup_intent")
-                    .and_then(|v| v.as_bool())
-                    .unwrap_or(false);
                 let cleanup_intent = input
                     .get("cleanup_intent")
                     .and_then(|v| v.as_bool())
@@ -565,15 +542,14 @@ impl Tool for WriteOpenCrabsFileTool {
                         &full_path,
                         &existing_nfc,
                         &updated,
-                        dedup_intent,
                         cleanup_intent,
                         false, // consolidation: only self_improve's surgical update qualifies
                     )
                 {
                     return Ok(ToolResult::error(message));
                 }
-                // Record pruned sections when shrinking is allowed (dedup/cleanup)
-                if dedup_intent || cleanup_intent {
+                // Record pruned sections when shrinking is allowed (cleanup)
+                if cleanup_intent {
                     let removed =
                         crate::brain::rsi_pruned::detect_removed_sections(&existing_nfc, &updated);
                     if !removed.is_empty() {

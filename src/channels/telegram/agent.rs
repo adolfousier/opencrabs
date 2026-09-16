@@ -736,20 +736,6 @@ impl TelegramAgent {
                                 return Ok::<(), teloxide::RequestError>(());
                             }
 
-                            // Brain dedup approval (#765): apply or reject a filed
-                            // cross-file duplicate proposal. Report-only upstream;
-                            // the removal only happens on this explicit tap.
-                            if let Some(rest) = data.strip_prefix(
-                                crate::channels::telegram::dedup_approval::DEDUP_PREFIX,
-                            ) {
-                                let brain_dir = crate::config::opencrabs_home();
-                                crate::channels::telegram::dedup_approval::handle_callback(
-                                    &bot, &query, rest, &brain_dir,
-                                )
-                                .await;
-                                return Ok::<(), teloxide::RequestError>(());
-                            }
-
                             // Setup callback for unconfigured providers — show the
                             // help text from `unconfigured_provider_help` instead
                             // of trying to switch (no API key would just fail).

@@ -6,9 +6,9 @@
 //! and the user-facing agent can both touch the inbox concurrently —
 //! see `rsi_proposals` module docs).
 
-use super::types::{McInboxDetail, McInboxItem, McInboxKind};
+use super::types::{McInboxItem, McInboxKind};
 use crate::brain::rsi_proposals::{
-    BrainDedupProposal, CommandProposal, ProposalsStore, SkillProposal, ToolProposal,
+    CommandProposal, ProposalsStore, SkillProposal, ToolProposal,
 };
 
 /// Read every pending tool + command + skill proposal, sorted newest-first.
@@ -34,12 +34,6 @@ pub fn list_with_store(store: &ProposalsStore) -> Vec<McInboxItem> {
                 .list_skill_proposals()
                 .into_iter()
                 .map(item_from_skill),
-        )
-        .chain(
-            store
-                .list_brain_dedup_proposals()
-                .into_iter()
-                .map(item_from_brain_dedup),
         )
         .collect();
     items.sort_by_key(|i| std::cmp::Reverse(i.created_at));
@@ -96,30 +90,5 @@ fn item_from_skill(p: SkillProposal) -> McInboxItem {
         source: p.proposer,
         created_at: p.created_at,
         detail: None,
-    }
-}
-
-fn item_from_brain_dedup(p: BrainDedupProposal) -> McInboxItem {
-    // Show the target file + duplicate count as the summary so the
-    // user can quickly judge whether the cleanup is worth applying.
-    // The full detail (duplicate text, rationale, warnings) is carried
-    // in the detail field for the popup.
-    let detail = McInboxDetail::BrainDedup {
-        duplicate_text: p.dedup.duplicate_text.clone(),
-        rationale: p.rationale.clone(),
-        duplicate_of: p.dedup.duplicate_of.clone(),
-        warnings: p.dedup.warnings.clone(),
-    };
-    McInboxItem {
-        id: p.id,
-        label: p.dedup.target_file.clone(),
-        summary: format!(
-            "remove {} duplicate(s) at {} (dup of {})",
-            p.dedup.count, p.dedup.line_range, p.dedup.duplicate_of
-        ),
-        kind: McInboxKind::ProposedBrainDedup,
-        source: p.proposer,
-        created_at: p.created_at,
-        detail: Some(detail),
     }
 }

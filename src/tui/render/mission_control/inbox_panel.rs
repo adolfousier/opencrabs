@@ -114,7 +114,6 @@ fn card_lines(item: &McInboxItem, card_w: usize, selected: bool) -> Vec<Line<'st
         McInboxKind::ProposedTool => theme::orange(),
         McInboxKind::ProposedCommand => theme::teal(),
         McInboxKind::ProposedSkill => render_theme::role(Role::AmberMuted),
-        McInboxKind::ProposedBrainDedup => render_theme::role(Role::PurpleSoft),
     };
 
     // Header: label (bold) + kind badge

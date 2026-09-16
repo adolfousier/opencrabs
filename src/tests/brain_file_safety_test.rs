@@ -76,7 +76,6 @@ mod shrink_check {
             "tiny",
             false,
             false,
-            false,
         );
         assert_eq!(result, ShrinkCheck::Allowed);
     }
@@ -87,7 +86,7 @@ mod shrink_check {
         let existing = "line one\nline two\n";
         let updated = "line one\nline two\nline three\n";
         assert_eq!(
-            check_no_shrink(protected(), existing, updated, false, false, false),
+            check_no_shrink(protected(), existing, updated, false, false),
             ShrinkCheck::Allowed
         );
     }
@@ -99,18 +98,18 @@ mod shrink_check {
         let existing = "abc def ghi";
         let updated = "abc XYZ ghi";
         assert_eq!(
-            check_no_shrink(protected(), existing, updated, false, false, false),
+            check_no_shrink(protected(), existing, updated, false, false),
             ShrinkCheck::Allowed
         );
     }
 
     #[test]
-    fn shrink_without_dedup_intent_is_rejected() {
+    fn shrink_without_cleanup_intent_is_rejected() {
         // The 2026-04-26 case: agent rewrites the whole file from many
         // KB down to a stub. Hard reject.
         let existing = "rule one\nrule two\nrule three\nrule four\nrule five\n";
         let updated = "rule one\n";
-        match check_no_shrink(protected(), existing, updated, false, false, false) {
+        match check_no_shrink(protected(), existing, updated, false, false) {
             ShrinkCheck::Rejected { message } => {
                 assert!(message.contains("Refusing to shrink"));
                 assert!(message.contains("TOOLS.md"));
@@ -118,49 +117,6 @@ mod shrink_check {
             }
             other => panic!("expected Rejected, got {:?}", other),
         }
-    }
-
-    #[test]
-    fn shrink_with_dedup_intent_passes_when_lines_survive() {
-        // Legit dedup: existing has the same line twice, updated has it
-        // once. Every original line is still present somewhere.
-        let existing = "alpha\nbeta\nalpha\ngamma\n";
-        let updated = "alpha\nbeta\ngamma\n";
-        assert_eq!(
-            check_no_shrink(protected(), existing, updated, true, false, false),
-            ShrinkCheck::Allowed
-        );
-    }
-
-    #[test]
-    fn shrink_with_dedup_intent_rejected_when_unique_line_disappears() {
-        // dedup_intent is set but the agent is sneakily removing
-        // unique content. The hint mentions the intent specifically
-        // so the agent learns it can't be used as a bypass.
-        let existing = "rule one\nrule two\nrule three\n";
-        let updated = "rule one\n";
-        match check_no_shrink(protected(), existing, updated, true, false, false) {
-            ShrinkCheck::Rejected { message } => {
-                assert!(
-                    message.contains("dedup_intent"),
-                    "rejection should call out the abused dedup_intent flag: {message}"
-                );
-            }
-            other => panic!("expected Rejected with dedup_intent hint, got {:?}", other),
-        }
-    }
-
-    #[test]
-    fn empty_lines_in_original_dont_block_dedup() {
-        // Blank-line spacing in the original shouldn't be required to
-        // round-trip — only non-blank lines count toward the survival
-        // check.
-        let existing = "alpha\n\nbeta\n\nalpha\n";
-        let updated = "alpha\nbeta\n";
-        assert_eq!(
-            check_no_shrink(protected(), existing, updated, true, false, false),
-            ShrinkCheck::Allowed
-        );
     }
 }
 
@@ -177,18 +133,18 @@ mod cleanup_intent {
         let existing = "rule one\nrule two\nrule three\nrule four\nrule five\n";
         let updated = "rule one\n";
         assert_eq!(
-            check_no_shrink(protected(), existing, updated, false, true, false),
+            check_no_shrink(protected(), existing, updated, true, false),
             ShrinkCheck::Allowed
         );
     }
 
     #[test]
-    fn cleanup_intent_bypasses_dedup_requirement() {
-        // cleanup_intent doesn't need every original line to survive.
+    fn cleanup_intent_allows_line_deletions() {
+        // cleanup_intent allows deleting arbitrary lines.
         let existing = "alpha\nbeta\ngamma\ndelta\n";
         let updated = "only one line\n";
         assert_eq!(
-            check_no_shrink(protected(), existing, updated, false, true, false),
+            check_no_shrink(protected(), existing, updated, true, false),
             ShrinkCheck::Allowed
         );
     }
@@ -198,23 +154,12 @@ mod cleanup_intent {
         // When cleanup_intent is false, the append-only rule still applies.
         let existing = "rule one\nrule two\nrule three\n";
         let updated = "rule one\n";
-        match check_no_shrink(protected(), existing, updated, false, false, false) {
+        match check_no_shrink(protected(), existing, updated, false, false) {
             ShrinkCheck::Rejected { message } => {
                 assert!(message.contains("Refusing to shrink"));
             }
             other => panic!("expected Rejected, got {:?}", other),
         }
-    }
-
-    #[test]
-    fn cleanup_intent_with_dedup_both_true() {
-        // Both flags set — cleanup_intent takes precedence.
-        let existing = "alpha\nbeta\nalpha\ngamma\n";
-        let updated = "alpha\n";
-        assert_eq!(
-            check_no_shrink(protected(), existing, updated, true, true, false),
-            ShrinkCheck::Allowed
-        );
     }
 
     #[test]
@@ -224,7 +169,7 @@ mod cleanup_intent {
         let existing = "lots of content here";
         let updated = "tiny";
         assert_eq!(
-            check_no_shrink(unprotected, existing, updated, false, true, false),
+            check_no_shrink(unprotected, existing, updated, true, false),
             ShrinkCheck::Allowed
         );
     }

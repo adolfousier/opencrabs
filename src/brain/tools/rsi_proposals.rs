@@ -15,7 +15,7 @@ use super::error::Result;
 use super::r#trait::{Tool, ToolCapability, ToolExecutionContext, ToolResult};
 use crate::brain::CommandLoader;
 use crate::brain::rsi_proposals::{
-    BrainDedupProposal, CommandProposal, ProposalsStore, SkillProposal, ToolProposal,
+    CommandProposal, ProposalsStore, SkillProposal, ToolProposal,
 };
 use crate::brain::tools::ToolRegistry;
 use crate::brain::tools::dynamic::DynamicToolLoader;
@@ -50,9 +50,8 @@ impl RsiProposalsTool {
         let tools = store.list_tool_proposals();
         let cmds = store.list_command_proposals();
         let skills = store.list_skill_proposals();
-        let dedups = store.list_brain_dedup_proposals();
 
-        if tools.is_empty() && cmds.is_empty() && skills.is_empty() && dedups.is_empty() {
+        if tools.is_empty() && cmds.is_empty() && skills.is_empty() {
             return "No pending proposals.".to_string();
         }
 
@@ -79,15 +78,6 @@ impl RsiProposalsTool {
             ));
             for p in &skills {
                 out.push_str(&format_skill_proposal(p));
-            }
-        }
-        if !dedups.is_empty() {
-            out.push_str(&format!(
-                "\n## Pending brain dedup proposals ({})\n\n",
-                dedups.len()
-            ));
-            for p in &dedups {
-                out.push_str(&format_brain_dedup_proposal(p));
             }
         }
         out
@@ -198,72 +188,6 @@ impl RsiProposalsTool {
         ))
     }
 
-    /// Apply a brain dedup proposal by invoking the same logic as
-    /// `write_opencrabs_file` with `dedup_intent=true`: find the
-    /// duplicate_text in the target file and remove it. Refuses if the
-    /// text isn't found verbatim (file may have been edited since the
-    /// scan ran).
-    pub(crate) fn apply_brain_dedup(&self, id: &str) -> std::result::Result<String, String> {
-        let store = self.store();
-        let Some(proposal) = store
-            .take_brain_dedup_proposal(id)
-            .map_err(|e| format!("read inbox: {e}"))?
-        else {
-            return Err(format!("No brain dedup proposal with id '{id}'"));
-        };
-
-        let target_path = self.brain_path.join(&proposal.dedup.target_file);
-        if !target_path.exists() {
-            return Err(format!(
-                "target file '{}' not found at {}",
-                proposal.dedup.target_file,
-                target_path.display()
-            ));
-        }
-
-        let original = std::fs::read_to_string(&target_path)
-            .map_err(|e| format!("read {}: {e}", target_path.display()))?;
-
-        // Count occurrences — should match proposal.dedup.count. If the
-        // text isn't found at all, the file was edited since scan.
-        let occurrences = original.matches(&proposal.dedup.duplicate_text).count();
-        if occurrences == 0 {
-            return Err(format!(
-                "duplicate text not found in '{}' (file may have been edited since scan)",
-                proposal.dedup.target_file
-            ));
-        }
-
-        // Remove ALL occurrences — the canonical copy lives elsewhere
-        // (different file or different line in same file). The scan
-        // already verified this text is a duplicate, so removing all
-        // instances from the target is safe.
-        let new_content = original.replace(&proposal.dedup.duplicate_text, "");
-
-        // Safety check: the dedup_intent contract requires every
-        // original line to still appear in the result. We removed all
-        // duplicate blocks so this should hold unless a block was unique.
-        let original_lines: std::collections::HashSet<&str> = original.lines().collect();
-        let result_lines: std::collections::HashSet<&str> = new_content.lines().collect();
-        // Only flag if we removed lines that had NO other copy left.
-        // (The scan should have only flagged actual duplicates, so
-        // this is a defensive guard.)
-
-        if let Err(e) = std::fs::write(&target_path, &new_content) {
-            return Err(format!("write {}: {e}", target_path.display()));
-        }
-
-        if let Err(e) = store.archive_applied_brain_dedup(&proposal) {
-            tracing::warn!("Brain dedup {} applied but archive write failed: {}", id, e);
-        }
-
-        let _ = (original_lines, result_lines);
-        Ok(format!(
-            "Removed {} duplicate occurrence(s) from '{}' (proposal {}).",
-            occurrences, proposal.dedup.target_file, id
-        ))
-    }
-
     pub(crate) fn reject(
         &self,
         id: &str,
@@ -301,16 +225,6 @@ impl RsiProposalsTool {
             return Ok(format!("Rejected skill proposal '{}'.", id));
         }
 
-        if let Some(p) = store
-            .take_brain_dedup_proposal(id)
-            .map_err(|e| format!("read inbox: {e}"))?
-        {
-            if let Err(e) = store.archive_rejected_brain_dedup(&p, reason) {
-                return Err(format!("archive failed: {e}"));
-            }
-            return Ok(format!("Rejected brain dedup proposal '{}'.", id));
-        }
-
         Err(format!("No proposal with id '{id}'"))
     }
 }
@@ -343,32 +257,6 @@ fn format_command_proposal(p: &CommandProposal) -> String {
         } else {
             p.command.prompt.clone()
         },
-        why = p.rationale,
-        when = p.created_at.format("%Y-%m-%d %H:%M UTC"),
-    )
-}
-
-fn format_brain_dedup_proposal(p: &BrainDedupProposal) -> String {
-    let preview: String = p
-        .dedup
-        .duplicate_text
-        .lines()
-        .take(3)
-        .collect::<Vec<_>>()
-        .join(" | ");
-    let preview = if preview.len() > 120 {
-        format!("{}...", &preview[..117])
-    } else {
-        preview
-    };
-    format!(
-        "- **{id}** — `{file}` lines {range}\n  Removes {count} duplicate(s) of {dup_of}\n  Preview: `{preview}`\n  Why: {why}\n  Filed: {when}\n\n",
-        id = p.id,
-        file = p.dedup.target_file,
-        range = p.dedup.line_range,
-        count = p.dedup.count,
-        dup_of = p.dedup.duplicate_of,
-        preview = preview,
         why = p.rationale,
         when = p.created_at.format("%Y-%m-%d %H:%M UTC"),
     )
@@ -415,7 +303,7 @@ impl Tool for RsiProposalsTool {
                 },
                 "kind": {
                     "type": "string",
-                    "enum": ["tool", "command", "skill", "dedup", "all"],
+                    "enum": ["tool", "command", "skill", "all"],
                     "description": "(list) Filter by kind. Default: 'all'.",
                     "default": "all"
                 },
@@ -474,13 +362,8 @@ impl Tool for RsiProposalsTool {
                         .into_iter()
                         .map(|p| p.id)
                         .collect();
-                    let dedup_ids: Vec<String> = store
-                        .list_brain_dedup_proposals()
-                        .into_iter()
-                        .map(|p| p.id)
-                        .collect();
 
-                    if tool_ids.is_empty() && cmd_ids.is_empty() && dedup_ids.is_empty() {
+                    if tool_ids.is_empty() && cmd_ids.is_empty() {
                         return Ok(ToolResult::success("No pending proposals.".to_string()));
                     }
 
@@ -511,18 +394,6 @@ impl Tool for RsiProposalsTool {
                             }
                         }
                     }
-                    for did in dedup_ids {
-                        match self.apply_brain_dedup(&did) {
-                            Ok(msg) => {
-                                report.push_str(&format!("✓ {}\n", msg));
-                                total_ok += 1;
-                            }
-                            Err(e) => {
-                                report.push_str(&format!("✗ dedup {}: {}\n", did, e));
-                                total_err += 1;
-                            }
-                        }
-                    }
                     report.push_str(&format!(
                         "\nApplied {} proposal(s); {} failed.",
                         total_ok, total_err
@@ -542,21 +413,13 @@ impl Tool for RsiProposalsTool {
                         Ok(msg) => Ok(ToolResult::success(msg)),
                         Err(e) => Ok(ToolResult::error(e)),
                     }
-                } else if id.starts_with("prop_dedup_") {
-                    match self.apply_brain_dedup(&id) {
-                        Ok(msg) => Ok(ToolResult::success(msg)),
-                        Err(e) => Ok(ToolResult::error(e)),
-                    }
                 } else {
                     // Unknown prefix — try each kind, bail if none match.
                     match self.apply_tool(&id) {
                         Ok(msg) => Ok(ToolResult::success(msg)),
                         Err(_) => match self.apply_command(&id) {
                             Ok(msg) => Ok(ToolResult::success(msg)),
-                            Err(_) => match self.apply_brain_dedup(&id) {
-                                Ok(msg) => Ok(ToolResult::success(msg)),
-                                Err(e) => Ok(ToolResult::error(e)),
-                            },
+                            Err(e) => Ok(ToolResult::error(e)),
                         },
                     }
                 }
@@ -590,12 +453,7 @@ impl Tool for RsiProposalsTool {
                         .into_iter()
                         .map(|p| p.id)
                         .collect();
-                    let dedup_ids: Vec<String> = store
-                        .list_brain_dedup_proposals()
-                        .into_iter()
-                        .map(|p| p.id)
-                        .collect();
-                    let total = tool_ids.len() + cmd_ids.len() + dedup_ids.len();
+                    let total = tool_ids.len() + cmd_ids.len();
                     if total == 0 {
                         return Ok(ToolResult::success("No pending proposals.".to_string()));
                     }
@@ -604,9 +462,6 @@ impl Tool for RsiProposalsTool {
                     }
                     for cid in cmd_ids {
                         let _ = self.reject(&cid, reason.as_deref());
-                    }
-                    for did in dedup_ids {
-                        let _ = self.reject(&did, reason.as_deref());
                     }
                     return Ok(ToolResult::success(format!(
                         "Rejected {total} pending proposal(s)."
