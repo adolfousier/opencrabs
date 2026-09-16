@@ -1,5 +1,5 @@
-use crate::brain::provider::custom_openai_compatible::extract_sanitized_tail;
 use crate::brain::provider::custom_openai_compatible::OpenAIProvider;
+use crate::brain::provider::custom_openai_compatible::extract_sanitized_tail;
 use crate::brain::provider::types::{ContentBlock, LLMRequest, Message, Role};
 
 #[test]

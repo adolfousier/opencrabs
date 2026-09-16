@@ -2878,7 +2878,8 @@ impl OpenAIProvider {
 
                 if role == "assistant" {
                     total_thinking_blocks += thinking_parts.len();
-                    total_reasoning_chars += reasoning_content.as_deref().map(str::len).unwrap_or(0);
+                    total_reasoning_chars +=
+                        reasoning_content.as_deref().map(str::len).unwrap_or(0);
                     if reasoning_content.is_some() {
                         messages_with_reasoning += 1;
                     }
