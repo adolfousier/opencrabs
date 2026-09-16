@@ -11,6 +11,7 @@ mod find;
 pub(crate) mod manager;
 mod navigate;
 mod screenshot;
+pub(crate) mod shadow;
 mod type_text;
 mod wait;
 
@@ -42,6 +43,11 @@ pub(crate) use find::build_find_js;
 pub(crate) use find::build_inventory_js;
 #[cfg(test)]
 pub(crate) use find::inventory_header;
+
+// Composed-tree JS helper builders — re-exported only for test fixtures
+// (src/tests/browser_shadow_test.rs).
+#[cfg(test)]
+pub(crate) use shadow::{MAX_ROOTS, MAX_WALK_NODES, deep_helpers_js, with_deep_helpers};
 pub use manager::{BrowserManager, CloseOutcome};
 pub use navigate::BrowserNavigateTool;
 pub use screenshot::BrowserScreenshotTool;
