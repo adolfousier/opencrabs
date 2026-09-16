@@ -842,6 +842,7 @@ pub mod memory_search_code_graph_test;
 #[cfg(feature = "code-graph")]
 pub mod memory_symbol_extractor_tree_test;
 pub mod no_direct_terminal_writes_test;
+pub mod notify_policy_test;
 pub mod notify_receipts_test;
 pub mod pdf_page_range_parser_test;
 pub mod pdf_smart_routing_test;
