@@ -682,13 +682,18 @@ impl OnboardingWizard {
             }
         } else if config.providers.zai.as_ref().is_some_and(|p| p.enabled) {
             wizard.ps.selected_provider = resolve("zai");
-            if let Some(model) = &config
-                .providers
-                .zai
-                .as_ref()
-                .and_then(|p| p.default_model.clone())
-            {
-                wizard.ps.custom_model = model.clone();
+            if let Some(p) = config.providers.zai.as_ref() {
+                // Seed the picker with the saved endpoint type (#1596) so
+                // /models opens on the real value and a no-change Confirm
+                // writes it back instead of the General API default.
+                wizard.ps.zhipu_endpoint_type = if p.endpoint_type.as_deref() == Some("coding") {
+                    1
+                } else {
+                    0
+                };
+                if let Some(model) = &p.default_model {
+                    wizard.ps.custom_model = model.clone();
+                }
             }
         } else if config
             .providers
@@ -712,6 +717,22 @@ impl OnboardingWizard {
                             .position(|t| t.eq_ignore_ascii_case(plan.trim()))
                     })
                     .unwrap_or(0);
+                if let Some(model) = &p.default_model {
+                    wizard.ps.custom_model = model.clone();
+                }
+            }
+        } else if config.providers.xiaomi.as_ref().is_some_and(|p| p.enabled) {
+            wizard.ps.selected_provider = resolve("xiaomi");
+            if let Some(p) = config.providers.xiaomi.as_ref() {
+                // Seed the picker with the saved endpoint type (#1596), same
+                // gap as z.ai: without this, /models resets to General API
+                // and Confirm persists the reset over the saved choice.
+                wizard.ps.xiaomi_endpoint_type = if p.endpoint_type.as_deref() == Some("token-plan")
+                {
+                    1
+                } else {
+                    0
+                };
                 if let Some(model) = &p.default_model {
                     wizard.ps.custom_model = model.clone();
                 }
