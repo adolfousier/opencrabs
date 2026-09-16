@@ -2475,6 +2475,58 @@ pub(crate) fn collect_command_catalog() -> Vec<teloxide::types::BotCommand> {
     // Telegram limit: max 100 commands
     commands.truncate(100);
 
+    trim_catalog_to_budget(commands)
+}
+
+/// Telegram silently caps the whole `setMyCommands` request body at ~7.8KB and
+/// rejects bigger payloads with a misleading `BOT_COMMANDS_TOO_MUCH` — the
+/// documented 100-command limit is not the binding constraint. Empirically
+/// bisected (#1613): a 63-command body at 7750B publishes fine, 7876B is
+/// rejected; the real 64-command catalog serialized to 8505B and failed on
+/// every publish since 2026-09-08, freezing the menu without `/clear`.
+///
+/// Keep the serialized catalog comfortably under the measured line: shrink
+/// descriptions in tiers (96 → 48 → 32 chars — menu chips visually truncate
+/// far earlier anyway), and only then drop tail commands (skills are pushed
+/// last, so built-ins and `commands.toml` entries survive longest). Budget is
+/// on the compact-serialized command array; the scope wrapper adds ~90B.
+const MENU_BUDGET_BYTES: usize = 7000;
+const MENU_DESC_TIERS: [usize; 3] = [96, 48, 32];
+
+/// Trim a command catalog to fit [`MENU_BUDGET_BYTES`]. Pure so the budget
+/// behaviour is unit-testable without the live brain directory.
+pub(crate) fn trim_catalog_to_budget(
+    mut commands: Vec<teloxide::types::BotCommand>,
+) -> Vec<teloxide::types::BotCommand> {
+    use teloxide::types::BotCommand;
+
+    let fits = |cmds: &[BotCommand]| -> bool {
+        serde_json::to_string(cmds)
+            .map(|s| s.len() <= MENU_BUDGET_BYTES)
+            .unwrap_or(false)
+    };
+
+    let mut dropped = 0usize;
+    for tier in MENU_DESC_TIERS {
+        for c in &mut commands {
+            c.description = truncate_description(&c.description, tier);
+        }
+        if fits(&commands) {
+            return commands;
+        }
+    }
+    // Even 32-char descriptions don't fit: sacrifice tail commands (skills
+    // are pushed last, so built-ins and commands.toml entries survive).
+    while !commands.is_empty() && !fits(&commands) {
+        commands.pop();
+        dropped += 1;
+    }
+    if dropped > 0 {
+        tracing::warn!(
+            "Telegram: command menu exceeded the ~7.8KB setMyCommands payload cap; \
+             dropped {dropped} tail command(s) to fit"
+        );
+    }
     commands
 }
 
