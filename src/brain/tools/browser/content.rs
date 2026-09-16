@@ -98,8 +98,12 @@ impl Tool for BrowserContentTool {
             // caller asked for. Each root contributes its own tree only
             // (a ShadowRoot's text does not include nested shadow trees),
             // so nothing is counted twice.
+            // RAW string: the JS below contains a `\n` escape that a normal
+            // Rust literal would collapse into a real newline, producing
+            // `join('<LF>')` — a JS SyntaxError, and the eval fails with an
+            // empty message that reads like a browser problem.
             let js = super::shadow::with_deep_helpers(
-                "const parts = [];
+                r#"const parts = [];
                  for (const r of __ocRoots()) {
                      const base = r === document ? document.body : r;
                      if (!base) continue;
@@ -111,7 +115,7 @@ impl Tool for BrowserContentTool {
                          parts.push(c.innerText || c.textContent || '');
                      }
                  }
-                 return parts.filter(p => p && p.trim()).join('\n');",
+                 return parts.filter(p => p && p.trim()).join('\n');"#,
             );
             match page.evaluate(js.as_str()).await {
                 Ok(result) => result
