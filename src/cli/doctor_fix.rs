@@ -32,8 +32,8 @@ pub async fn clear_stuck_cron_runs(
         .context("Failed to get connection")?
         .interact(move |conn| {
             conn.execute(
-                "UPDATE cron_job_runs SET status='error', \
-                 error='stuck: cleared by doctor --fix (no completion within max age)', \
+                "UPDATE cron_job_runs SET status='interrupted', \
+                 error='interrupted: cleared by doctor --fix (no completion within max age)', \
                  completed_at=strftime('%Y-%m-%dT%H:%M:%SZ','now') \
                  WHERE status='running' AND started_at < ?1",
                 [cutoff],
@@ -152,7 +152,7 @@ pub async fn run_all(
     if stuck > 0 {
         reports.push(FixReport {
             action: "stuck-cron-rows-cleared",
-            detail: format!("{stuck} row(s) marked error"),
+            detail: format!("{stuck} row(s) marked interrupted"),
         });
     }
     reports.extend(clear_stale_preinit_markers(marker_roots, PREINIT_MAX_AGE));

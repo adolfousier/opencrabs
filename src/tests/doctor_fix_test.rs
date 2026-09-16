@@ -48,7 +48,7 @@ async fn seed_run(pool: &crate::db::Pool, id: &str, started_at: chrono::DateTime
 }
 
 #[tokio::test]
-async fn stuck_cron_rows_cleared_fresh_survive() {
+async fn test_clear_stuck_cron_runs_marks_interrupted() {
     let pool = test_db().await;
     let old = Uuid::new_v4().to_string();
     let fresh = Uuid::new_v4().to_string();
@@ -58,30 +58,45 @@ async fn stuck_cron_rows_cleared_fresh_survive() {
     let n = clear_stuck_cron_runs(&pool, 3600).await.unwrap();
     assert_eq!(n, 1, "exactly the stale row should clear");
 
-    let (old_status, fresh_status): (String, String) = pool
+    let (old_status, old_error, fresh_status): (String, String, String) = pool
         .get()
         .await
         .unwrap()
         .interact(move |conn| {
             let mut stmt = conn
-                .prepare("SELECT id, status FROM cron_job_runs ORDER BY id")
+                .prepare("SELECT id, status, error FROM cron_job_runs ORDER BY id")
                 .unwrap();
-            let rows: Vec<(String, String)> = stmt
-                .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
+            let rows: Vec<(String, String, Option<String>)> = stmt
+                .query_map([], |r| {
+                    Ok((
+                        r.get::<_, String>(0)?,
+                        r.get::<_, String>(1)?,
+                        r.get::<_, Option<String>>(2)?,
+                    ))
+                })
                 .unwrap()
                 .flatten()
                 .collect();
             let get = |id: &str| {
                 rows.iter()
-                    .find(|(i, _)| i == id)
-                    .map(|(_, s)| s.clone())
+                    .find(|(i, _, _)| i == id)
+                    .map(|(_, s, e)| (s.clone(), e.clone().unwrap_or_default()))
                     .unwrap()
             };
-            (get(&old), get(&fresh))
+            let (old_s, old_e) = get(&old);
+            let (fresh_s, _) = get(&fresh);
+            (old_s, old_e, fresh_s)
         })
         .await
         .unwrap();
-    assert_eq!(old_status, "error", "stuck row must be closed as error");
+    assert_eq!(
+        old_status, "interrupted",
+        "stuck row must be closed as interrupted"
+    );
+    assert!(
+        old_error.contains("interrupted: cleared by doctor --fix"),
+        "error message must reflect doctor fix interruption"
+    );
     assert_eq!(fresh_status, "running", "live row must stay untouched");
 }
 
