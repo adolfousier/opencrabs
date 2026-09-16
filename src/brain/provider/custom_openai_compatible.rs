@@ -3965,6 +3965,10 @@ impl Provider for OpenAIProvider {
             saw_finish_reason: false,
         }));
 
+        // Incremental UTF-8 carry: SSE chunks can split a multi-byte char in
+        // half; decoding each chunk in isolation turns the orphaned bytes
+        // into U+FFFD (the "resum��" class of mojibake).
+        let mut utf8_carry = Utf8Carry::new();
         let event_stream = byte_stream
             .map(move |chunk_result| -> Vec<std::result::Result<StreamEvent, ProviderError>> {
                 match chunk_result {
@@ -3974,7 +3978,7 @@ impl Provider for OpenAIProvider {
                         // a firehose that floods debug-mode log files on every
                         // streamed response. Keep it at trace, not debug, so it's
                         // opt-in for deep diagnostics only.
-                        let raw_text = String::from_utf8_lossy(&chunk);
+                        let raw_text = utf8_carry.push(&chunk);
                         tracing::trace!("[STREAM_RAW] SSE chunk: {}", raw_text.chars().take(500).collect::<String>());
                         if raw_text.contains("tool_calls") {
                             tracing::trace!("[STREAM_RAW] SSE chunk with tool_calls: {}", raw_text.chars().take(500).collect::<String>());
@@ -5478,4 +5482,96 @@ fn is_unsloth_studio_url(url: &str) -> bool {
     // since the hint is harmless elsewhere.
     let lower = url.to_ascii_lowercase();
     lower.contains("localhost") || lower.contains("127.0.0.1")
+}
+
+/// Incremental UTF-8 decoder for SSE byte chunks. Network chunks can split a
+/// multi-byte character in half; decoding each chunk in isolation replaces
+/// the orphaned bytes with U+FFFD (the "resum??"/"????" mojibake class).
+/// This carries the incomplete trailing bytes to the next chunk instead.
+struct Utf8Carry {
+    pending: Vec<u8>,
+}
+
+impl Utf8Carry {
+    fn new() -> Self {
+        Self {
+            pending: Vec::new(),
+        }
+    }
+
+    /// Feed raw bytes, get back the decodable prefix. Incomplete trailing
+    /// bytes are held for the next call; genuinely invalid bytes become a
+    /// single U+FFFD each (same visible result as `from_utf8_lossy` for
+    /// bytes that are truly garbage, without punishing split characters).
+    fn push(&mut self, bytes: &[u8]) -> String {
+        self.pending.extend_from_slice(bytes);
+        let mut out = String::new();
+        loop {
+            match std::str::from_utf8(&self.pending) {
+                Ok(s) => {
+                    out.push_str(s);
+                    self.pending.clear();
+                    break;
+                }
+                Err(e) => {
+                    let valid = e.valid_up_to();
+                    if valid > 0 {
+                        // Bytes before valid_up_to are guaranteed valid UTF-8.
+                        out.push_str(&String::from_utf8_lossy(&self.pending[..valid]));
+                        self.pending.drain(..valid);
+                    }
+                    match e.error_len() {
+                        // None: incomplete tail — carry it to the next chunk.
+                        None => break,
+                        // Some(n): n bytes are genuinely invalid — substitute.
+                        Some(n) => {
+                            out.push('\u{FFFD}');
+                            self.pending.drain(..n);
+                        }
+                    }
+                }
+            }
+        }
+        out
+    }
+}
+
+#[cfg(test)]
+mod utf8_carry_tests {
+    use super::Utf8Carry;
+
+    #[test]
+    fn ascii_passes_through_unchanged() {
+        let mut c = Utf8Carry::new();
+        // Single complete chunk: emitted as-is.
+        assert_eq!(c.push(b"hello world"), "hello world");
+        // Split chunks: each emitted once, no replay.
+        assert_eq!(c.push(b"hello "), "hello ");
+        assert_eq!(c.push(b"world"), "world");
+        assert_eq!(c.push(b""), "");
+    }
+
+    #[test]
+    fn reassembles_two_byte_char_split_across_chunks() {
+        // 'í' = C3 AD, split between chunks.
+        let mut c = Utf8Carry::new();
+        assert_eq!(c.push(b"resum"), "resum");
+        assert_eq!(c.push(&[0xC3]), "");
+        assert_eq!(c.push(&[0xAD]), "í");
+    }
+
+    #[test]
+    fn reassembles_three_byte_char_split_across_chunks() {
+        // '─' (box drawing) = E2 94 80, the status-table divider.
+        let mut c = Utf8Carry::new();
+        assert_eq!(c.push(&[0xE2]), "");
+        assert_eq!(c.push(&[0x94]), "");
+        assert_eq!(c.push(&[0x80]), "─");
+    }
+
+    #[test]
+    fn substitutes_genuinely_invalid_bytes_once() {
+        let mut c = Utf8Carry::new();
+        assert_eq!(c.push(&[0xFF, b'a']), "\u{FFFD}a");
+    }
 }

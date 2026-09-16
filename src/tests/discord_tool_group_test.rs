@@ -21,6 +21,7 @@ fn group(n: usize, done: bool, expanded: bool) -> GroupState {
     GroupState {
         entries: entries(n, done),
         expanded,
+        notes: Vec::new(),
     }
 }
 
