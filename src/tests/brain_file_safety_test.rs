@@ -70,13 +70,7 @@ mod shrink_check {
     fn unprotected_file_is_always_allowed() {
         // Non-brain files can shrink freely — that's not what this guard
         // is for.
-        let result = check_no_shrink(
-            unprotected(),
-            "lots of content here",
-            "tiny",
-            false,
-            false,
-        );
+        let result = check_no_shrink(unprotected(), "lots of content here", "tiny", false, false);
         assert_eq!(result, ShrinkCheck::Allowed);
     }
 

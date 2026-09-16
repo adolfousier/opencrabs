@@ -820,8 +820,7 @@ pub(crate) async fn handle_message(
     /// One intermediate already posted: (normalized body key, handle of the
     /// last Discord chunk when the text was split).
     type SentIntermediate = (String, Option<(MessageId, String)>);
-    let sent_intermediates: Arc<Mutex<Vec<SentIntermediate>>> =
-        Arc::new(Mutex::new(Vec::new()));
+    let sent_intermediates: Arc<Mutex<Vec<SentIntermediate>>> = Arc::new(Mutex::new(Vec::new()));
 
     // Track every IntermediateText spawn handle so the final-response path can
     // await ALL of them before reading sent_intermediates. Without this, the
@@ -1170,15 +1169,13 @@ pub(crate) async fn handle_message(
                     (true, posted.last().and_then(|e| e.1.clone()))
                 } else {
                     let final_key = norm_key(&text_only);
-                    match posted
-                        .iter()
-                        .rev()
-                        .find(|(b, _)| norm_key(b) == final_key)
-                    {
+                    match posted.iter().rev().find(|(b, _)| norm_key(b) == final_key) {
                         // The intermediate IS the answer: keep it, append the
                         // footer to its last chunk via edit, skip the final
                         // post (Slack's keep-intermediate outcome, #459).
-                        Some((_, Some((id, last_chunk)))) => (true, Some((*id, last_chunk.clone()))),
+                        Some((_, Some((id, last_chunk)))) => {
+                            (true, Some((*id, last_chunk.clone())))
+                        }
                         // Matched but the send failed so no id was recorded:
                         // still skip the duplicate post, nothing to edit.
                         Some((_, None)) => (true, None),

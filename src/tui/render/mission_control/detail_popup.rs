@@ -9,8 +9,7 @@
 
 use super::theme;
 use crate::brain::mission_control::{
-    McActivity, McInboxItem, McInboxKind, McScheduleItem, McScheduleKind,
-    inbox_service,
+    McActivity, McInboxItem, McInboxKind, McScheduleItem, McScheduleKind, inbox_service,
 };
 use crate::tui::app::App;
 use crate::tui::app::mission_control::McPanel;

@@ -158,13 +158,7 @@ fn growth_is_unaffected_by_any_of_this() {
     let updated = format!("{TIGHT_RULE}\n\n{LONG_RULE}");
     for consolidation in [true, false] {
         assert_eq!(
-            check_no_shrink(
-                &protected(),
-                &existing,
-                &updated,
-                false,
-                consolidation
-            ),
+            check_no_shrink(&protected(), &existing, &updated, false, consolidation),
             ShrinkCheck::Allowed
         );
     }

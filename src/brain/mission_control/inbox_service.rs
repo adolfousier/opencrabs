@@ -7,9 +7,7 @@
 //! see `rsi_proposals` module docs).
 
 use super::types::{McInboxItem, McInboxKind};
-use crate::brain::rsi_proposals::{
-    CommandProposal, ProposalsStore, SkillProposal, ToolProposal,
-};
+use crate::brain::rsi_proposals::{CommandProposal, ProposalsStore, SkillProposal, ToolProposal};
 
 /// Read every pending tool + command + skill proposal, sorted newest-first.
 pub fn list() -> Vec<McInboxItem> {

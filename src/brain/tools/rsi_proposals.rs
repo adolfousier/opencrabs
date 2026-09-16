@@ -14,9 +14,7 @@
 use super::error::Result;
 use super::r#trait::{Tool, ToolCapability, ToolExecutionContext, ToolResult};
 use crate::brain::CommandLoader;
-use crate::brain::rsi_proposals::{
-    CommandProposal, ProposalsStore, SkillProposal, ToolProposal,
-};
+use crate::brain::rsi_proposals::{CommandProposal, ProposalsStore, SkillProposal, ToolProposal};
 use crate::brain::tools::ToolRegistry;
 use crate::brain::tools::dynamic::DynamicToolLoader;
 use async_trait::async_trait;
