@@ -816,6 +816,24 @@ pub struct DiscordConfig {
     /// `allowed_users`. Accepts int or string arrays.
     #[serde(default, deserialize_with = "deser_users_compat")]
     pub bot_owner: Vec<String>,
+    /// Fold intermediate narration (the text a model writes between tool
+    /// calls) into the turn's tool-group bubble as dim subtext lines instead
+    /// of posting each as a separate message — one editable "work log" per
+    /// turn (agent-disco-style live trace). Default: false.
+    #[serde(default)]
+    pub trace_narration: bool,
+    /// Post answers longer than this many characters as a short teaser in
+    /// the channel plus an anchored thread carrying the full body. 0
+    /// disables. Discord's own message cap is 2000, so 1800 is a sensible
+    /// threshold. Default: 0 (disabled).
+    #[serde(default)]
+    pub auto_thread_min_chars: usize,
+    /// Treat messages starting with `!` as thread requests: strip the `!`,
+    /// anchor a thread to the message, and route the whole turn (tool
+    /// bubble, trace notes, answer) into it. No-op in DMs (no threads).
+    /// Default: false.
+    #[serde(default)]
+    pub bang_new_thread: bool,
 }
 
 impl DiscordConfig {
