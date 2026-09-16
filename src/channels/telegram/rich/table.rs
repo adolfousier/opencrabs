@@ -209,19 +209,25 @@ fn parse_alignment(sep: &str, cols: usize) -> Vec<Align> {
 
 /// Single canonical table-normalization entry for the rich plane (#132):
 /// balance unclosed / runaway code fences (#240), expand collapsed one-line
-/// tables first (so [`try_parse`] can see them), then insert the blank line
-/// Telegram's rich parser demands before a table block (#95). Every rich-build
-/// entry point and the structure-detection gate call THIS — never the passes
-/// individually — so gate and renderer always agree on the same text and a new
-/// send path inherits all fixes (#690, #980, #1085 whack-a-mole retired). All
-/// passes are idempotent and fence-safe; pipe-free input returns unchanged.
+/// tables first (so [`try_parse`] can see them), infer missing table separators
+/// (#239), then insert the blank line Telegram's rich parser demands before a
+/// table block (#95). Every rich-build entry point and the structure-detection
+/// gate call THIS — never the passes individually — so gate and renderer always
+/// agree on the same text and a new send path inherits all fixes (#690, #980,
+/// #1085 whack-a-mole retired). All passes are idempotent and fence-safe;
+/// pipe-free input returns unchanged.
 ///
 /// Also shields bare leading hashes (e.g. `#174`) so Telegram's rich parser
 /// doesn't promote them into headings without CommonMark's required trailing space (#193).
 pub(crate) fn normalize_tables(text: &str) -> String {
-    let balanced = balance_code_fences(text);
-    let shielded = shield_bare_leading_hashes(&balanced);
-    ensure_blank_line_before_tables(&reflow_collapsed_tables(&shielded))
+/// balance unclosed / runaway code fences (#240), expand collapsed one-line
+/// tables first (so [`try_parse`] can see them), infer missing table separators
+/// (#239), then insert the blank line Telegram's rich parser demands before a
+/// table block (#95). Every rich-build entry point and the structure-detection
+/// gate call THIS — never the passes individually — so gate and renderer always
+/// agree on the same text and a new send path inherits all fixes (#690, #980,
+/// #1085 whack-a-mole retired). All passes are idempotent and fence-safe;
+/// pipe-free input returns unchanged.
 }
 
 /// Balance unclosed or runaway code fences in markdown text (#240).
