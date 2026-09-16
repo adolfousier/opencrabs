@@ -160,4 +160,3 @@ pub(crate) fn resolve_mode(
         _ => Err("delivery.mode and interrupt disagree — pass one, not both".into()),
     }
 }
-
