@@ -1472,38 +1472,6 @@ pub(crate) fn make_approval_callback(
 /// so the bodies can differ by trailing/running whitespace only. Collapsing
 /// whitespace makes those equivalent without letting real content drift
 /// through (every word must still match, in order).
-fn norm_key(s: &str) -> String {
+pub(crate) fn norm_key(s: &str) -> String {
     s.split_whitespace().collect::<Vec<_>>().join(" ")
-}
-
-#[cfg(test)]
-mod tests {
-    use super::norm_key;
-
-    #[test]
-    fn identical_bodies_match() {
-        let body = "Listo, las dos cosas:\n\n1. Provider registry queda apagado\n2. Cron creado";
-        assert_eq!(norm_key(body), norm_key(body));
-    }
-
-    #[test]
-    fn whitespace_only_differences_match() {
-        let a = "Answer text\n\nwith paragraphs\n";
-        let b = "Answer text with paragraphs";
-        assert_eq!(norm_key(a), norm_key(b));
-    }
-
-    #[test]
-    fn different_bodies_do_not_match() {
-        // Narration must NOT dedup against the final answer even if they
-        // share some words — the whole point of the guard.
-        let narration = "On it — checking the logs now";
-        let answer = "On it — the logs say the daemon is healthy";
-        assert_ne!(norm_key(narration), norm_key(answer));
-    }
-
-    #[test]
-    fn empty_and_whitespace_are_equivalent() {
-        assert_eq!(norm_key(""), norm_key("   \n\t  "));
-    }
 }
