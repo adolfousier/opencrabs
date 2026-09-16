@@ -4,9 +4,7 @@
 //! `src/brain/agent/service/notify_policy.rs`; project policy
 //! (CONTRIBUTING.md) requires all tests under `src/tests/`.
 
-use crate::brain::agent::service::notify_policy::{
-    validate_sender_label, SENDER_LABEL_MAX_CHARS,
-};
+use crate::brain::agent::service::notify_policy::{SENDER_LABEL_MAX_CHARS, validate_sender_label};
 
 #[test]
 fn sender_label_rejects_framing_breakers_and_overlong() {
