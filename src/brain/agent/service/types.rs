@@ -490,6 +490,10 @@ impl AgentService {
             "[Channel:",
             "[Reaction directive:",
             "[Recent group history",
+            // Discord and Slack say "channel" where Telegram and WhatsApp say
+            // "group" (#1618, #1619, #1620). Without this the whole history
+            // block reached the title prompt.
+            "[Recent channel history",
             "[Telegram group",
             "[Telegram DM",
             "[Discord",

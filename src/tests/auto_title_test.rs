@@ -268,6 +268,19 @@ mod strip_channel_preamble {
     }
 
     #[test]
+    fn strips_the_channel_noun_history_block() {
+        // Discord and Slack frame the block as "channel history"; only the
+        // "group" wording was listed, so their whole window reached the title
+        // prompt (#1618, #1619, #1620).
+        let input = "[Recent channel history (2 messages) — prior context from various senders,                      NOT the person you are replying to now:\n[13:57] Adi: hello\n\
+                     --- end history ---]\n\nFix the login bug";
+        assert_eq!(
+            AgentService::strip_channel_preamble(input),
+            "Fix the login bug"
+        );
+    }
+
+    #[test]
     fn handles_nested_brackets_in_history() {
         // Group history lines contain [HH:MM] timestamps inside the outer block
         let input =
