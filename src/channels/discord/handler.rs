@@ -5,6 +5,7 @@
 
 use super::DiscordState;
 use crate::brain::agent::AgentService;
+use crate::channels::group_history;
 use crate::config::{Config, RespondTo};
 use crate::db::ChannelMessageRepository;
 use crate::db::models::ChannelMessage as DbChannelMessage;
@@ -778,17 +779,29 @@ pub(crate) async fn handle_message(
         format!("{}: {}", msg.author.name, content)
     };
 
-    // For non-owner users, prepend sender identity so the agent knows who
-    // it's talking to and doesn't assume it's the owner.
-    let agent_input = if !is_owner {
+    // Name the current sender. In a guild channel this always runs — even for
+    // the owner — because the history block below carries other members' names,
+    // and without the label the model addresses the sender by one of those
+    // (#682). DMs keep the old shape: nobody else's name is in play there.
+    let agent_input = if msg.guild_id.is_some() {
         let name = &msg.author.name;
         let uid = msg.author.id.get();
-        if msg.guild_id.is_some() {
-            let channel = msg.channel_id.get();
-            format!("[Discord message from {name} (ID {uid}) in channel {channel}]\n{content}")
-        } else {
-            format!("[Discord DM from {name} (ID {uid})]\n{content}")
-        }
+        let channel = msg.channel_id.get().to_string();
+        let role = if is_owner { "owner" } else { "user" };
+        format!(
+            "{}\n{content}",
+            group_history::current_sender_label(
+                "Discord channel",
+                &channel,
+                name,
+                &format!(" (ID {uid})"),
+                role,
+            )
+        )
+    } else if !is_owner {
+        let name = &msg.author.name;
+        let uid = msg.author.id.get();
+        format!("[Discord DM from {name} (ID {uid})]\n{content}")
     } else {
         content
     };
@@ -801,29 +814,26 @@ pub(crate) async fn handle_message(
     };
 
     // Inject recent channel history so the agent has full conversation context.
+    // Deduped against the live session window: after a compaction the model
+    // still holds those turns, so re-sending all 30 every turn was pure waste
+    // (#1619, the Discord half of #133).
     let agent_input = if msg.guild_id.is_some() {
         let chat_id_str = msg.channel_id.get().to_string();
-        match channel_msg_repo
+        let fetched = channel_msg_repo
             .recent(Some("discord"), &chat_id_str, 30, None, None)
             .await
+            .unwrap_or_default();
+        match group_history::build_preamble(
+            session_svc.pool(),
+            session_id,
+            fetched,
+            "channel",
+            "Discord",
+        )
+        .await
         {
-            Ok(messages) if !messages.is_empty() => {
-                let history: Vec<String> = messages
-                    .iter()
-                    .rev()
-                    .map(|m| {
-                        let ts = m.created_at.format("%H:%M");
-                        format!("[{}] {}: {}", ts, m.sender_name, m.content)
-                    })
-                    .collect();
-                format!(
-                    "[Recent channel history ({} messages):\n{}\n--- end history ---]\n{}",
-                    history.len(),
-                    history.join("\n"),
-                    agent_input
-                )
-            }
-            _ => agent_input,
+            Some(preamble) => format!("{preamble}\n{agent_input}"),
+            None => agent_input,
         }
     } else {
         agent_input
