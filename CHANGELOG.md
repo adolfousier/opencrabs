@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### 🐛 Bug Fixes
+
+- `c1422802` **whatsapp**: release the outbox at turn start so a follow-up never edits the previous answer (#1614)
+
 ## [0.5.2] - 2026-09-16
 
 133 commits since v0.5.1, 7 contributors. 305 files changed, +22,624 / -5,586 lines.
