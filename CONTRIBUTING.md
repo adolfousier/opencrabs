@@ -240,7 +240,7 @@ Repository-wide means the unit is the logical change, not the file. Every file a
 - **Don't bundle** rename / move / restructure with logic changes. The reviewer cannot tell what's mechanical and what's behavioural.
 - **Split test additions from production fixes only if the test would compile against the un-fixed code.** Otherwise commit them together so the test demonstrates the fix.
 - **Commit message body explains the WHY**, not the diff. The diff already shows what changed; the message should answer "why was that wrong?" and "what would break if we reverted this?".
-- **Add `[skip ci]` to chore / docs / non-functional commits** so CI doesn't churn on whitespace and README edits. Never add `[skip ci]` to a release commit — it skips the release workflow too.
+- **Never add `[skip ci]` to a commit.** The pipeline is fast and cheap to run; a skipped commit is an unverified commit, and on a release commit `[skip ci]` also skips the release workflow.
 - **Never add `Co-Authored-By` lines** to commit messages. Project policy.
 
 ### Project Structure
