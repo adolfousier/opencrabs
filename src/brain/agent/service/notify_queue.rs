@@ -122,40 +122,6 @@ pub(crate) async fn redeliver_persisted() -> usize {
         ),
     }
 
-    // Reap rows older than MAX_ROW_AGE_SECS (72h) for unclaimed sessions (#182):
-    // Sessions that exist in DB but have no active channel route park pushes forever.
-    // At boot, reap them to halt table bloat and memory leaks, logging full audit telemetry.
-    let cutoff = now_unix().saturating_sub(MAX_ROW_AGE_SECS);
-    match repo.reap_stale_unclaimed(cutoff).await {
-        Ok(reaped) if !reaped.is_empty() => {
-            tracing::info!(
-                target: "background_task",
-                "Boot notify queue: reaped {} stale unclaimed push(es) older than {}h",
-                reaped.len(),
-                MAX_ROW_AGE_SECS / 3600
-            );
-            for row in reaped {
-                let age_h = now_unix().saturating_sub(row.created_at) / 3600;
-                let clean_text = row.context_text.replace(['\n', '\r'], " ");
-                let preview: String = clean_text.trim().chars().take(120).collect();
-                tracing::error!(
-                    target: "background_task",
-                    "Notify queue reaper: dropped undeliverable push {} for unclaimed session {} (age {}h > {}h, origin={:?}): {}",
-                    row.id,
-                    row.session_id,
-                    age_h,
-                    MAX_ROW_AGE_SECS / 3600,
-                    row.origin,
-                    preview
-                );
-            }
-        }
-        Ok(_) => {}
-        Err(e) => tracing::warn!(
-            target: "background_task",
-            "Could not reap stale unclaimed notify-queue rows: {e:#}"
-        ),
-    }
     let rows = match repo.all().await {
         Ok(rows) => rows,
         Err(e) => {
@@ -189,7 +155,61 @@ pub(crate) async fn redeliver_persisted() -> usize {
         }
         count += 1;
     }
+
+    // Only NOW reap by age (#182). A row is "unclaimed" because the pass
+    // above just offered it and `deliver_or_park` re-parked it; anything a
+    // live route could take was delivered and cleared moments ago. Reaping
+    // before the offer would delete pushes for perfectly live sessions after
+    // any long downtime (a sleeping laptop, a machine off over a holiday),
+    // which is the one outcome this module's contract forbids.
+    reap_stale_after_redelivery(&repo).await;
+
     count
+}
+
+/// Drop rows that survived the redelivery pass and are past the ceiling age.
+///
+/// Called at the END of [`redeliver_persisted`] so every row it sees has
+/// already been offered to a live route and re-parked. Sessions that still
+/// exist but have no channel route (headless/cron sessions, archived worker
+/// topics) park pushes forever; past [`MAX_ROW_AGE_SECS`] the row is dropped
+/// so the table does not grow without bound. Each drop is logged loudly: this
+/// is the one place in the module where a push is genuinely lost, so it never
+/// happens quietly.
+async fn reap_stale_after_redelivery(repo: &NotifyQueueRepository) {
+    let now = now_unix();
+    let cutoff = now.saturating_sub(MAX_ROW_AGE_SECS);
+    let max_age_hours = MAX_ROW_AGE_SECS / 3600;
+    match repo.reap_stale_unclaimed(cutoff).await {
+        Ok(reaped) if !reaped.is_empty() => {
+            tracing::info!(
+                target: "background_task",
+                "Boot notify queue: reaped {} stale unclaimed push(es) older than {}h",
+                reaped.len(),
+                max_age_hours
+            );
+            for row in reaped {
+                let age_h = now.saturating_sub(row.created_at) / 3600;
+                let clean_text = row.context_text.replace(['\n', '\r'], " ");
+                let preview: String = clean_text.trim().chars().take(120).collect();
+                tracing::error!(
+                    target: "background_task",
+                    "Notify queue reaper: dropped undeliverable push {} for unclaimed session {} (age {}h > {}h, origin={:?}): {}",
+                    row.id,
+                    row.session_id,
+                    age_h,
+                    max_age_hours,
+                    row.origin,
+                    preview
+                );
+            }
+        }
+        Ok(_) => {}
+        Err(e) => tracing::warn!(
+            target: "background_task",
+            "Could not reap stale unclaimed notify-queue rows: {e:#}"
+        ),
+    }
 }
 
 /// Clear the durable twin of a push that was just delivered.
