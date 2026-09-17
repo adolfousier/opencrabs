@@ -1,10 +1,10 @@
 //! #1160 tasks_list + detached status files + prompt rot-guard.
 
 use crate::brain::agent::service::work_status::{self, test_override};
-use crate::brain::tools::tasks_list::{
-    render_tasks, subagent_status_file, DetachedRow, SubagentRow, TasksListTool,
-};
 use crate::brain::tools::Tool;
+use crate::brain::tools::tasks_list::{
+    DetachedRow, SubagentRow, TasksListTool, render_tasks, subagent_status_file,
+};
 use tempfile::TempDir;
 use uuid::Uuid;
 
@@ -149,8 +149,8 @@ fn prompt_builder_keeps_subagent_background_contract() {
 /// caller built, so it cannot see a scope regression.
 #[tokio::test]
 async fn execute_lists_only_the_callers_subagents() {
-    use crate::brain::tools::subagent::{SubAgent, SubAgentManager};
     use crate::brain::tools::ToolExecutionContext;
+    use crate::brain::tools::subagent::{SubAgent, SubAgentManager};
     use std::sync::Arc;
 
     fn child(id: &str, label: &str, parent: Uuid) -> SubAgent {
