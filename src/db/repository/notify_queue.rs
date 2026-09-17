@@ -320,9 +320,33 @@ impl NotifyQueueRepository {
                             None
                         }
                     });
+                    // The row is already DELETED by the time we get here, so a
+                    // parse failure would erase it from the audit log too — the
+                    // one place in this module where a push is genuinely lost.
+                    // The bg_meta branch above already logs; these must too.
+                    let parsed_id = match Uuid::parse_str(&id) {
+                        Ok(v) => v,
+                        Err(e) => {
+                            tracing::warn!(
+                                "notify_queue: reaped row with unparseable id {id:?}, \
+                                 dropped without audit detail: {e}"
+                            );
+                            return None;
+                        }
+                    };
+                    let parsed_session = match Uuid::parse_str(&session_id) {
+                        Ok(v) => v,
+                        Err(e) => {
+                            tracing::warn!(
+                                "notify_queue: reaped row {parsed_id} carries an \
+                                 unparseable session_id {session_id:?}: {e}"
+                            );
+                            return None;
+                        }
+                    };
                     Some(NotifyQueueRow {
-                        id: Uuid::parse_str(&id).ok()?,
-                        session_id: Uuid::parse_str(&session_id).ok()?,
+                        id: parsed_id,
+                        session_id: parsed_session,
                         context_text,
                         display_text,
                         origin: origin_from_db_str(&origin),
