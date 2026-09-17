@@ -149,6 +149,8 @@ Most Rust users learned `check` before they met clippy, so the habit dies hard. 
 
 Even rustc admits its own gap: per the [cargo book](https://doc.rust-lang.org/stable/cargo/commands/cargo-check.html), some diagnostics are only emitted during code generation, which `cargo check` skips. That is why the CI gate is `cargo clippy ... -D warnings` (`.github/workflows/ci.yml`), and why this repo's own tests carry deliberate `#[allow(clippy::field_reassign_with_default)]` suppressions in `src/tests/onboarding_*_test.rs`: the lint fires here, and each allow is a conscious call, not an oversight.
 
+A codebase built with `cargo check` alone can report *thousands* of clippy findings on its first run, so the time to start is the first commit. If you're inheriting a backlog, `cargo clippy --fix` mechanically applies the machine-applicable suggestions, so the wall is smaller than it looks.
+
 ### Running the App While You Iterate
 
 **Use `cargo run`. Do NOT `cargo build --release` for normal development.**
