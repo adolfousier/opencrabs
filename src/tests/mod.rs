@@ -280,6 +280,7 @@ pub mod goal_budget_test;
 pub mod goal_command_test;
 pub mod goal_judge_test;
 pub mod goal_manage_test;
+pub mod group_history_test;
 pub mod headless_tool_surface_test;
 pub mod help_catalog_test;
 pub mod help_mode_entry_test;
