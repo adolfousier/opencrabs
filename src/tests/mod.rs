@@ -828,6 +828,7 @@ pub mod web_scrape_ssrf_test;
 pub mod web_scrape_tool_test;
 pub mod web_search_test;
 pub mod whatsapp_state_test;
+pub mod whatsapp_suggestion_poll_test;
 
 // Channel handler tests (moved from inline #[cfg(test)] modules)
 pub mod brain_tools_whatsapp_send_test;
