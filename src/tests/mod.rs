@@ -833,6 +833,7 @@ pub mod whatsapp_state_test;
 pub mod brain_tools_whatsapp_send_test;
 pub mod channel_commands_test;
 pub mod discord_handler_test;
+pub mod discord_history_dedup_test;
 pub mod discord_norm_key_test;
 pub mod discord_split_message_test;
 pub mod discord_table_convert_test;
