@@ -91,6 +91,17 @@ impl PollOptions {
     }
 }
 
+/// A decoded vote: the line the agent reads, plus the labels themselves.
+///
+/// The labels are kept apart from the rendered line rather than parsed back
+/// out of it. A suggestion poll has to match a vote against the session's
+/// pending follow-ups (#1616), and re-splitting the prose would break the
+/// moment the wording changes.
+pub(crate) struct Vote {
+    pub line: String,
+    pub chosen: Vec<String>,
+}
+
 /// Decode one inbound poll vote into a line for the agent (#1482).
 ///
 /// `None` covers every "nothing useful to say" case, and each one is logged
@@ -105,7 +116,7 @@ pub(crate) async fn decode_vote(
     chat_jid: &wacore_binary::jid::Jid,
     voter_jid: &wacore_binary::jid::Jid,
     voter_label: &str,
-) -> Option<String> {
+) -> Option<Vote> {
     let key = update.poll_creation_message_key.as_option()?;
     let poll_id = key.id.as_deref()?;
 
@@ -190,5 +201,7 @@ pub(crate) async fn decode_vote(
         }
     };
 
-    describe_vote(voter_label, &resolve_options(&selected, &options))
+    let chosen = resolve_options(&selected, &options);
+    let line = describe_vote(voter_label, &chosen)?;
+    Some(Vote { line, chosen })
 }

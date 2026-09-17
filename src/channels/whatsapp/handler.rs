@@ -921,11 +921,14 @@ pub(crate) async fn handle_message(
     }
 
     // Poll vote: a decoded line naming the voter and what they picked (#1482).
+    // The labels are kept for the follow-up selector below: a suggestion poll
+    // votes by label, and the numeric selector can never match one (#1616).
+    let voted_labels = poll_vote.as_ref().map(|v| v.chosen.clone());
     if let Some(vote) = poll_vote {
         if content.trim().is_empty() {
-            content = vote;
+            content = vote.line;
         } else {
-            content.push_str(&format!("\n\n{vote}"));
+            content.push_str(&format!("\n\n{}", vote.line));
         }
     }
 
@@ -1137,7 +1140,16 @@ pub(crate) async fn handle_message(
     // Optional follow-up suggestions (#600): a bare numeric reply selects the
     // matching suggestion — rewrite the turn text to it. Any other message
     // clears the stale set so an old number can't fire later.
-    if let Some(picked) = wa_state
+    // A poll vote names its option by label (#1616); a typed reply names it by
+    // number (#600). Try whichever this turn actually is, then fall through to
+    // clearing so a stale set cannot fire on a later message.
+    let voted_pick = match voted_labels.as_deref() {
+        Some([label]) => wa_state.take_followup_by_label(session_id, label).await,
+        _ => None,
+    };
+    if let Some(picked) = voted_pick {
+        content = picked;
+    } else if let Some(picked) = wa_state
         .take_followup_by_reply(session_id, content.trim())
         .await
     {
