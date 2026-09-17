@@ -30,7 +30,7 @@ fn render_lists_both_systems_with_states_and_pointers() {
     // Fixture path is deliberately NEUTRAL: it must not be the retired
     // pre-#26 layout (see `work_status::legacy_dir()`), which this test used
     // to enshrine as correct (#165). The real advertised path is pinned by
-    // `advertised_status_file_is_the_path_writers_use` below.
+    // `advertised_status_file_is_the_file_the_writer_creates` below.
     let subs = vec![SubagentRow {
         id: "agt-1".into(),
         label: "research".into(),
@@ -49,36 +49,51 @@ fn render_lists_both_systems_with_states_and_pointers() {
     assert!(out.contains("- cargo test (elapsed 42s)"), "was: {out}");
 }
 
-/// #165 regression pin: the advertised path MUST be the one writers use.
+/// The path `tasks_list` hands the model must be a file a writer really
+/// created.
 ///
-/// Pre-fix, `tasks_list` resolved through the pre-#26
-/// `subagent::status::status_dir()` — the retired `subagents` sibling of the
-/// live status dir, i.e. `work_status::legacy_dir()` — a directory nothing
-/// creates, so every advertised path read ENOENT. An empty read from a wrong
-/// path is indistinguishable from "the sub-agent never existed".
+/// Deliberately crosses the writer boundary instead of comparing
+/// `subagent_status_file()` to the resolver it delegates to: that comparison
+/// is a tautology, green on any build, including one whose resolver points at
+/// a directory nothing creates. Here a real `WorkStatus::new_agent` persists
+/// the record and the advertised STRING is what opens it, so the test fails
+/// on any drift between the two sides, retired `legacy_dir()` included.
 ///
-/// This asserts the RELATIONSHIP (advertised == writer's) rather than a
-/// literal string, so it holds under the `work_status` test override and
-/// still fails on the pre-fix builder, which returned the legacy path.
+/// An empty read from a wrong path is indistinguishable from "this sub-agent
+/// never existed", which is why this is pinned rather than assumed.
 #[test]
-fn advertised_status_file_is_the_path_writers_use() {
+fn advertised_status_file_is_the_file_the_writer_creates() {
     use crate::brain::agent::service::work_status;
 
-    let id = "agt-165";
-    let advertised = subagent_status_file(id);
-    let writer_side = work_status::status_path(id).display().to_string();
-    assert_eq!(
-        advertised, writer_side,
-        "tasks_list must advertise the same path subagent/spawn.rs writes"
-    );
+    let dir = TempDir::new().unwrap();
+    test_override::set(dir.path().join("detached"));
 
-    // And it must NOT sit under the retired dir. Derived from the same
-    // resolver, so it stays correct under the test override.
+    let id = Uuid::new_v4();
+    let session_id = Uuid::new_v4();
+    work_status::WorkStatus::new_agent(
+        &id.to_string(),
+        "research",
+        &session_id.to_string(),
+        "probe the advertised path",
+        None,
+    )
+    .unwrap();
+
+    let advertised = subagent_status_file(&id.to_string());
+    let raw = std::fs::read_to_string(&advertised)
+        .unwrap_or_else(|e| panic!("advertised path {advertised} is not readable: {e}"));
+    assert!(raw.contains("\"kind\": \"agent\""), "was: {raw}");
+    assert!(raw.contains(&session_id.to_string()), "was: {raw}");
+
+    // The retired pre-#26 sibling is a directory nothing creates; advertising
+    // through it is the failure mode this pins against.
     let retired = work_status::legacy_dir().display().to_string();
     assert!(
         !advertised.starts_with(&retired),
         "advertised path {advertised} must not live under the retired {retired}"
     );
+
+    test_override::clear();
 }
 
 /// Gap 2: a detached command's status file exists mid-run with spawn data,
