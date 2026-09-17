@@ -8,6 +8,7 @@
 
 use super::SlackState;
 use crate::brain::agent::AgentService;
+use crate::channels::group_history;
 use crate::config::{Config, RespondTo};
 use crate::db::ChannelMessageRepository;
 use crate::db::models::ChannelMessage as DbChannelMessage;
@@ -1575,14 +1576,24 @@ async fn handle_message(
         return;
     }
 
-    // For non-owner users, prepend sender identity so the agent knows who
-    // it's talking to and doesn't assume it's the owner.
-    let agent_input = if !is_owner {
-        if is_dm {
-            format!("[Slack DM from {user_name} ({user_id})]\n{content}")
-        } else {
-            format!("[Slack message from {user_name} ({user_id}) in {channel_name}]\n{content}")
-        }
+    // Name the current sender. In a channel this always runs — even for the
+    // owner — because the history block below carries other members' names, and
+    // without the label the model addresses the sender by one of those (#682).
+    // DMs keep the old shape: nobody else's name is in play there.
+    let agent_input = if !is_dm {
+        let role = if is_owner { "owner" } else { "user" };
+        format!(
+            "{}\n{content}",
+            group_history::current_sender_label(
+                "Slack channel",
+                &channel_name,
+                &user_name,
+                &format!(" ({user_id})"),
+                role,
+            )
+        )
+    } else if !is_owner {
+        format!("[Slack DM from {user_name} ({user_id})]\n{content}")
     } else {
         content
     };
@@ -1595,29 +1606,38 @@ async fn handle_message(
     };
 
     // Inject recent channel history so the agent has full conversation context.
+    // Deduped against the live session window: after a compaction the model
+    // still holds those turns, so re-sending all 30 every turn was pure waste
+    // (#1620, the Slack half of #133).
+    //
+    // Scoped to THIS thread, mirroring Telegram's forum topics (#226): a
+    // channel-wide fetch pulled every parallel thread's messages into context,
+    // so each thread saw all the others. A top-level message carries no
+    // thread_ts and keeps the channel-wide view.
     let agent_input = if !is_dm {
-        match state
+        let thread_id_str = thread_ts.as_ref().map(|ts| ts.to_string());
+        let fetched = state
             .channel_msg_repo
-            .recent(Some("slack"), &channel_id, 30, None, None)
+            .recent(
+                Some("slack"),
+                &channel_id,
+                30,
+                thread_id_str.as_deref(),
+                None,
+            )
             .await
+            .unwrap_or_default();
+        match group_history::build_preamble(
+            state.session_svc.pool(),
+            session_id,
+            fetched,
+            "channel",
+            "Slack",
+        )
+        .await
         {
-            Ok(messages) if !messages.is_empty() => {
-                let history: Vec<String> = messages
-                    .iter()
-                    .rev()
-                    .map(|m| {
-                        let ts = m.created_at.format("%H:%M");
-                        format!("[{}] {}: {}", ts, m.sender_name, m.content)
-                    })
-                    .collect();
-                format!(
-                    "[Recent channel history ({} messages):\n{}\n--- end history ---]\n{}",
-                    history.len(),
-                    history.join("\n"),
-                    agent_input
-                )
-            }
-            _ => agent_input,
+            Some(preamble) => format!("{preamble}\n{agent_input}"),
+            None => agent_input,
         }
     } else {
         agent_input
