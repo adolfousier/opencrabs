@@ -5,6 +5,7 @@
 
 use crate::brain::agent::AgentService;
 use crate::brain::agent::{ApprovalCallback, ProgressCallback, ProgressEvent};
+use crate::channels::group_history;
 use crate::channels::whatsapp::WhatsAppState;
 use crate::config::Config;
 use crate::db::ChannelMessageRepository;
@@ -1376,25 +1377,39 @@ pub(crate) async fn handle_message(
         format!("{sender}: {content}")
     };
 
-    // For non-owner contacts, prepend sender identity so the agent knows who
-    // it's talking to and doesn't assume it's the owner messaging themselves.
-    let agent_input = if !is_owner {
+    // Name the current sender. In a group this always runs — even for the owner
+    // — because the history block below carries other members' names, and
+    // without the label the model addresses the sender by one of those (#682).
+    // One-to-one chats keep the old shape: nobody else's name is in play.
+    let agent_input = if info.source.is_group {
+        let name = info.push_name.trim().to_string();
+        let display = if name.is_empty() {
+            format!("+{}", phone)
+        } else {
+            name
+        };
+        let group = info.source.chat.to_string();
+        let group_id = group.split('@').next().unwrap_or(&group).to_string();
+        let role = if is_owner { "owner" } else { "user" };
+        format!(
+            "{}\n{}",
+            group_history::current_sender_label(
+                "WhatsApp group",
+                &group_id,
+                &display,
+                &format!(" (+{phone})"),
+                role,
+            ),
+            content
+        )
+    } else if !is_owner {
         let name = info.push_name.trim().to_string();
         let from = if name.is_empty() {
             format!("+{}", phone)
         } else {
             format!("{} (+{})", name, phone)
         };
-        if info.source.is_group {
-            let group = info.source.chat.to_string();
-            let group_id = group.split('@').next().unwrap_or(&group);
-            format!(
-                "[WhatsApp group message from {} in group {}]\n{}",
-                from, group_id, content
-            )
-        } else {
-            format!("[WhatsApp message from {}]\n{}", from, content)
-        }
+        format!("[WhatsApp message from {}]\n{}", from, content)
     } else {
         content
     };
@@ -1407,29 +1422,26 @@ pub(crate) async fn handle_message(
     };
 
     // Inject recent group history so the agent has full conversation context.
+    // Deduped against the live session window: after a compaction the model
+    // still holds those turns, so re-sending all 30 every turn was pure waste
+    // (#1618, the WhatsApp half of #133).
     let agent_input = if info.source.is_group {
         let chat_id_str = info.source.chat.to_string();
-        match channel_msg_repo
+        let fetched = channel_msg_repo
             .recent(Some("whatsapp"), &chat_id_str, 30, None, None)
             .await
+            .unwrap_or_default();
+        match group_history::build_preamble(
+            session_svc.pool(),
+            session_id,
+            fetched,
+            "group",
+            "WhatsApp",
+        )
+        .await
         {
-            Ok(messages) if !messages.is_empty() => {
-                let history: Vec<String> = messages
-                    .iter()
-                    .rev()
-                    .map(|m| {
-                        let ts = m.created_at.format("%H:%M");
-                        format!("[{}] {}: {}", ts, m.sender_name, m.content)
-                    })
-                    .collect();
-                format!(
-                    "[Recent group history ({} messages):\n{}\n--- end history ---]\n{}",
-                    history.len(),
-                    history.join("\n"),
-                    agent_input
-                )
-            }
-            _ => agent_input,
+            Some(preamble) => format!("{preamble}\n{agent_input}"),
+            None => agent_input,
         }
     } else {
         agent_input
