@@ -371,7 +371,13 @@ pub(crate) async fn deliver_final_response(
                 // defect (#760) and belongs where it originates. Delivery must
                 // not delete a completion on suspicion, because that failure is
                 // silent and total while a leak is merely ugly.
-                if is_react_only(&text_only) {
+                //
+                // `!suppressed_final` (#1152, fork #293): a final suppressed by
+                // dedup was already delivered as intermediate bubbles. That is
+                // delivery, not a react-only turn — do not trigger the
+                // react-only early return or the spurious #546 incomplete-turn
+                // notice on top of delivered work.
+                if !suppressed_final && is_react_only(&text_only) {
                     // Never-silent guard (#353): a reaction-only turn whose
                     // reaction FAILED must degrade to text, not to nothing.
                     if react_result.is_err() {
@@ -1228,4 +1234,47 @@ fn normalize_title_line(line: &str) -> String {
     }
     s = s.trim_matches(['"', '\'', '*', '~', '_', ' ']);
     s.trim().to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_is_react_only() {
+        assert!(is_react_only(""));
+        assert!(is_react_only("   \n\t  "));
+        assert!(!is_react_only("Done, fixed!"));
+        assert!(!is_react_only("  some text  "));
+    }
+
+    #[test]
+    fn test_react_dedup_suppressed_not_react_only() {
+        // When dedup suppresses the final response because it already shipped
+        // via intermediates, text_only becomes empty, but suppressed_final is true.
+        // It must NOT be treated as react-only.
+        let text_only = "";
+        let suppressed_final = true;
+        let is_considered_react_only = !suppressed_final && is_react_only(text_only);
+        assert!(!is_considered_react_only);
+
+        // A genuine react-only turn has empty text_only and was not suppressed.
+        let text_only_genuine = "";
+        let suppressed_final_genuine = false;
+        let is_genuine_react_only =
+            !suppressed_final_genuine && is_react_only(text_only_genuine);
+        assert!(is_genuine_react_only);
+    }
+
+    #[test]
+    fn test_strip_echoed_plan_title() {
+        assert_eq!(
+            strip_echoed_plan_title("📋 Plan: \"Fix Bug\"\n\nHere is the fix", "Fix Bug"),
+            "Here is the fix"
+        );
+        assert_eq!(
+            strip_echoed_plan_title("No heading\nJust text", "Fix Bug"),
+            "No heading\nJust text"
+        );
+    }
 }
