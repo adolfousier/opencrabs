@@ -135,10 +135,20 @@ jobs:
             artifact_name: opencrabs
             asset_suffix: linux-amd64
 
+          # Thin LTO on this target only. The fat-LTO link of the whole binary
+          # takes a single rustc past 14.8 GB RSS on the hosted arm runner
+          # (16 GB, no real swap): memory hits 63 MB available, the VM
+          # freezes, and GitHub kills the runner with a shutdown signal and
+          # exit 143 after 25 to 30 silent minutes. Measured on a sampled
+          # build of v0.5.2; waproto 0.7.0 alone generates 164k lines that
+          # all land in the fat-LTO module. The amd64 runner squeaks through
+          # the same link, so every other target keeps the Cargo.toml
+          # profile.
           - os: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
             artifact_name: opencrabs
             asset_suffix: linux-arm64
+            release_lto: thin
 
           - os: windows-latest
             target: x86_64-pc-windows-msvc
@@ -224,6 +234,9 @@ jobs:
           CFLAGS: ${{ matrix.target == 'aarch64-apple-darwin' && '-march=armv8-a+crypto' || '' }}
           CXXFLAGS: ${{ matrix.target == 'aarch64-apple-darwin' && '-march=armv8-a+crypto' || '' }}
           AWS_LC_SYS_CMAKE_BUILDER: ${{ matrix.os == 'windows-latest' && '1' || '' }}
+          # Explicit `fat` everywhere else: it is the Cargo.toml value, and an
+          # empty string here would be parsed as an invalid lto setting.
+          CARGO_PROFILE_RELEASE_LTO: ${{ matrix.release_lto || 'fat' }}
         # --all-features on purpose: release binaries carry every optional
         # feature, including `eval` and `profiling`. That is what has always
         # shipped and nobody has wanted less. The README used to claim the
