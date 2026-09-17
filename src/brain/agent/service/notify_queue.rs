@@ -24,17 +24,18 @@ use super::types::QueuedUserMessage;
 use crate::db::NotifyQueueRepository;
 use uuid::Uuid;
 
-/// A row that keeps surviving boots has no clear path. Rows older than this
-/// are logged as defect candidates at boot (#111 follow-up, Part C). Age is a
-/// schema-free stand-in for a redelivery count, which would have needed a new
-/// column — and the shipped table is deliberately unchanged.
+/// One day, the unit the reap ceiling is expressed in. Age is a schema-free
+/// stand-in for a redelivery count, which would have needed a new column —
+/// and the shipped table is deliberately unchanged.
 const STALE_ROW_SECS: i64 = 24 * 60 * 60;
 
-/// Maximum age a row may survive in notify_queue before being reaped (#182).
-/// Rows older than STALE_ROW_SECS (24h) emit warnings; rows older than
-/// MAX_ROW_AGE_SECS (72h / 3 days) are dropped at boot so dead routes do not
-/// leak rows indefinitely.
-pub const MAX_ROW_AGE_SECS: i64 = 3 * STALE_ROW_SECS; // 72h (259,200s)
+/// How long a row may survive in `notify_queue` before it is reaped.
+///
+/// Three days of boots is long past the point where a route is coming back:
+/// each boot re-offers the row, so a row this old has been declined by every
+/// start since it was parked. Only [`reap_stale_after_redelivery`] reads it,
+/// and only after the current boot has made its own offer.
+pub(crate) const MAX_ROW_AGE_SECS: i64 = 3 * STALE_ROW_SECS; // 72h (259,200s)
 
 fn now_unix() -> i64 {
     chrono::Utc::now().timestamp()
