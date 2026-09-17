@@ -6,10 +6,11 @@
 use super::TelegramState;
 use super::session_resolve;
 use crate::brain::agent::{AgentService, ProgressCallback};
+use crate::channels::group_history;
 use crate::config::{Config, RespondTo};
+use crate::db::ChannelMessageRepository;
 use crate::db::SessionBindingRepository;
 use crate::db::models::ChannelMessage as DbChannelMessage;
-use crate::db::{ChannelMessageRepository, MessageRepository};
 use crate::services::SessionService;
 use crate::utils::sanitize::redact_secrets;
 use crate::utils::truncate_str;
@@ -273,35 +274,6 @@ pub(crate) fn forward_origin_label(msg: &Message) -> Option<String> {
         }
         MessageOrigin::Channel { chat, .. } => chat.title().unwrap_or("a channel").to_string(),
     })
-}
-
-/// The current-speaker label prepended to a group message's agent input (#682).
-/// Names WHO to reply to and states that the history lines above belong to OTHER
-/// people, so the model never addresses the current sender by a name that only
-/// appears in the injected recent-group-history (the bug: the owner was called
-/// "Adi" because a different member named Adi was in the history). `role` is
-/// "owner" or "user"; `handle` is `" (@name)"` or empty.
-pub(crate) fn group_current_sender_label(
-    chat_title: &str,
-    name: &str,
-    handle: &str,
-    role: &str,
-) -> String {
-    format!(
-        "[Telegram group \"{chat_title}\" — the message below is from {name}{handle} ({role}). \
-         Reply to {name}. Any names in the history above belong to OTHER people; never address \
-         {name} by a name that appears only in that history.]"
-    )
-}
-
-/// Frame the recent-group-history block (#682). Marks the lines as prior context
-/// from VARIOUS senders, so the model answers the trailing current message
-/// rather than replying to a history sender.
-pub(crate) fn frame_group_history(history_lines: &str, count: usize) -> String {
-    format!(
-        "[Recent group history ({count} messages) — prior context from various senders, NOT the \
-         person you are replying to now:\n{history_lines}\n--- end history ---]"
-    )
 }
 
 /// Build the channel-history record for a group message so it can be persisted
@@ -2137,17 +2109,9 @@ pub(crate) async fn handle_message(
         // Check if the replied-to full message is already present in active live session context.
         // If so, we prune redundant full-message tails (#133).
         let full_in_context = if !full_clean.is_empty() {
-            let msg_repo = MessageRepository::new(session_svc.pool());
-            let all_msgs = msg_repo
-                .find_by_session(session_id)
-                .await
-                .unwrap_or_default();
-            let live_msgs = AgentService::messages_from_last_compaction(all_msgs);
-            let live_haystacks: Vec<String> = live_msgs
-                .iter()
-                .map(|m| normalize_for_dedup(&m.content))
-                .collect();
-            is_content_in_live_context(&full_clean, &live_haystacks)
+            let live_haystacks =
+                group_history::live_context_haystacks(session_svc.pool(), session_id).await;
+            group_history::is_content_in_live_context(&full_clean, &live_haystacks)
         } else {
             false
         };
@@ -2273,7 +2237,13 @@ pub(crate) async fn handle_message(
             let role = if is_owner { "owner" } else { "user" };
             format!(
                 "{}\n{text}",
-                group_current_sender_label(chat_title, &name, &handle, role)
+                group_history::current_sender_label(
+                    "Telegram group",
+                    chat_title,
+                    &name,
+                    &handle,
+                    role,
+                )
             )
         }
     };
@@ -2299,7 +2269,11 @@ pub(crate) async fn handle_message(
         // (#226). Derive the thread_id exactly as the store path does
         // (`t.0.to_string()`) so the filter matches what was persisted.
         let thread_id_str = msg.thread_id.map(|t| t.0.to_string());
-        match channel_msg_repo
+        // Issue #133: skip re-injecting history already present in the active
+        // live session context (post-compaction). Shared with the other
+        // multi-party surfaces (#1618, #1619, #1620); a fetch failure degrades
+        // to "no history" rather than to a lost turn.
+        let fetched = channel_msg_repo
             .recent(
                 Some("telegram"),
                 &chat_id_str,
@@ -2308,53 +2282,18 @@ pub(crate) async fn handle_message(
                 None,
             )
             .await
+            .unwrap_or_default();
+        match group_history::build_preamble(
+            session_svc.pool(),
+            session_id,
+            fetched,
+            "group",
+            "Telegram",
+        )
+        .await
         {
-            Ok(messages) if !messages.is_empty() => {
-                // Issue #133: Skip re-injecting group history already present in the active
-                // live session context (post-compaction).
-                let msg_repo = MessageRepository::new(session_svc.pool());
-                let all_msgs = msg_repo
-                    .find_by_session(session_id)
-                    .await
-                    .unwrap_or_default();
-                let live_msgs = AgentService::messages_from_last_compaction(all_msgs);
-                let live_haystacks: Vec<String> = live_msgs
-                    .iter()
-                    .map(|m| normalize_for_dedup(&m.content))
-                    .collect();
-
-                let total_fetched = messages.len();
-                let filtered: Vec<_> = messages
-                    .into_iter()
-                    .filter(|m| !is_content_in_live_context(&m.content, &live_haystacks))
-                    .collect();
-
-                if filtered.is_empty() {
-                    tracing::info!(
-                        "Telegram: all {total_fetched} recent group history messages are already in live session context — skipping injection (#133)"
-                    );
-                    agent_input
-                } else {
-                    tracing::info!(
-                        "Telegram: injecting {} uncompacted group history messages (filtered from {total_fetched})",
-                        filtered.len()
-                    );
-                    let history: Vec<String> = filtered
-                        .iter()
-                        .rev() // oldest first
-                        .map(|m| {
-                            let ts = m.created_at.format("%H:%M");
-                            format!("[{}] {}: {}", ts, m.sender_name, m.content)
-                        })
-                        .collect();
-                    format!(
-                        "{}\n{}",
-                        frame_group_history(&history.join("\n"), history.len()),
-                        agent_input
-                    )
-                }
-            }
-            _ => agent_input,
+            Some(preamble) => format!("{preamble}\n{agent_input}"),
+            None => agent_input,
         }
     } else {
         agent_input
@@ -3306,28 +3245,6 @@ pub(crate) fn format_reply_context_pruned(
     } else {
         Some(format!("[Replying to {sender}: \"{full}\"]"))
     }
-}
-
-/// Helper function to normalize text for deduplication comparison.
-/// Collapses all whitespace sequences and converts to lowercase.
-pub(crate) fn normalize_for_dedup(s: &str) -> String {
-    s.split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
-        .to_lowercase()
-}
-
-/// Check whether `candidate` is present in `live_context_haystacks`.
-/// Each haystack in `live_context_haystacks` is assumed to already be normalized with `normalize_for_dedup`.
-pub(crate) fn is_content_in_live_context(
-    candidate: &str,
-    live_context_haystacks: &[String],
-) -> bool {
-    let norm = normalize_for_dedup(candidate);
-    if norm.is_empty() {
-        return false;
-    }
-    live_context_haystacks.iter().any(|h| h.contains(&norm))
 }
 
 /// Extract a short, status-line-friendly excerpt from the agent's

@@ -8,9 +8,9 @@
 //!    - without quote: emits `[Replying to {sender}'s message above]`.
 //! 4. When uncompacted / not in context, standard full-message behavior is preserved.
 
+use crate::channels::group_history::{is_content_in_live_context, normalize_for_dedup};
 use crate::channels::telegram::handler::{
-    format_reply_context_pruned, is_content_in_live_context, normalize_for_dedup,
-    resolve_reply_context_pruned,
+    format_reply_context_pruned, resolve_reply_context_pruned,
 };
 
 #[test]

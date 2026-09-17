@@ -6,6 +6,7 @@
 pub mod bg_resume;
 pub mod commands;
 mod factory;
+pub(crate) mod group_history;
 pub mod manager;
 pub(crate) mod model_menu;
 pub mod question_common;

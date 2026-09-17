@@ -6,7 +6,17 @@
 //! other people, and the history block must read as prior context from various
 //! senders, so history names can't bleed into who the agent addresses.
 
-use crate::channels::telegram::handler::{frame_group_history, group_current_sender_label};
+use crate::channels::group_history::{current_sender_label, frame_history};
+
+/// Telegram's own arguments, so the shared helpers are exercised exactly as the
+/// Telegram call site uses them.
+fn group_current_sender_label(chat_title: &str, name: &str, handle: &str, role: &str) -> String {
+    current_sender_label("Telegram group", chat_title, name, handle, role)
+}
+
+fn frame_group_history(history_lines: &str, count: usize) -> String {
+    frame_history(history_lines, count, "group")
+}
 
 #[test]
 fn current_sender_label_names_the_speaker_and_fences_off_history_names() {
