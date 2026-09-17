@@ -32,16 +32,13 @@ pub(crate) struct SubagentRow {
 
 /// Advertised status-file path for a sub-agent — the same path writers use.
 ///
-/// Resolved through [`crate::brain::agent::service::work_status`], which is
-/// where every writer persists (`subagent/spawn.rs` → `work_status::status_path`).
-/// The pre-#26 `subagent::status` helper resolves to `<home>/tmp/subagents`,
-/// a directory nothing creates, so advertising a path through it handed the
-/// model a file that always read ENOENT — and an empty read from a wrong path
-/// is indistinguishable from "this sub-agent never existed" (#165).
-///
-/// Extracted from `execute()` so the advertised path is unit-testable; while
-/// it was computed inline, no test could pin it and the wrong-path defect
-/// survived (#165).
+/// Resolved through [`crate::brain::agent::service::work_status`], the single
+/// entry point every writer persists through (`subagent/spawn.rs` →
+/// `work_status::status_path`). Extracted from `execute()` so that agreement
+/// is expressed once and can be pinned by a test, rather than recomputed
+/// inline where any drift in the resolver would silently hand the model a
+/// path that reads ENOENT. An empty read from a wrong path is
+/// indistinguishable from "this sub-agent never existed".
 pub(crate) fn subagent_status_file(id: &str) -> String {
     crate::brain::agent::service::work_status::status_path(id)
         .display()
