@@ -7,8 +7,8 @@
 //! mid-turn push for the same session.
 
 use crate::brain::agent::{BgTaskMeta, PushOrigin};
-use crate::db::repository::NotifyQueueRepository;
 use crate::db::Database;
+use crate::db::repository::NotifyQueueRepository;
 use uuid::Uuid;
 
 /// One shared pool for the repo under test AND out-of-band row surgery the

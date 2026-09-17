@@ -12,8 +12,8 @@
 //! parked at kill time still reaches its session on the next start.
 
 use crate::brain::agent::{BgTaskMeta, PushOrigin};
-use crate::db::database::interact_err;
 use crate::db::Pool;
+use crate::db::database::interact_err;
 use anyhow::{Context, Result};
 use rusqlite::params;
 use uuid::Uuid;
