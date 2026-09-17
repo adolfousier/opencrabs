@@ -1118,6 +1118,13 @@ pub(crate) async fn handle_message(
         .register_session_jid(session_id, reply_target.to_string())
         .await;
 
+    // A new inbound turn never edits the previous turn's message (#1614). The
+    // outbox entry has to outlive its own turn (the final edit and the
+    // completion reaction both run after the agent call), so the turn that
+    // starts is the one that releases it. Skipping this let a follow-up sent
+    // inside the 15-minute edit window overwrite the answer already on screen.
+    wa_state.begin_turn(session_id).await;
+
     // Claim this session's background-task completions for WhatsApp: a completion
     // must be delivered by the surface that OWNS the session, not by whichever
     // service happened to run the command (#940).

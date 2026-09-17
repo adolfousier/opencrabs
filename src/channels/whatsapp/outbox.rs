@@ -105,6 +105,27 @@ impl Outbox {
 }
 
 impl super::WhatsAppState {
+    /// Release whatever the previous turn left tracked, so this turn starts a
+    /// message of its own (#1614).
+    ///
+    /// The entry cannot be dropped when a turn *ends*: [`super::stream::finalize`]
+    /// edits it up to the finished answer and the completion reaction (#1409)
+    /// targets it, both after the agent call returns. So it is dropped when the
+    /// NEXT turn begins instead. Without this, a follow-up sent inside the
+    /// 15-minute [`EDIT_WINDOW`] finds the previous turn's entry still editable,
+    /// and the first streamed chunk edits the answer the user already read
+    /// instead of posting a new message.
+    pub(crate) async fn begin_turn(&self, session_id: Uuid) {
+        if let Some(entry) = self.outbox.clear(session_id).await {
+            tracing::debug!(
+                target: "whatsapp",
+                session = %session_id,
+                message_id = %entry.message_id,
+                "previous turn's message released; this turn starts a new one"
+            );
+        }
+    }
+
     /// Remember the message a session just sent, so the next streamed chunk
     /// can edit it in place instead of posting a new one.
     pub(crate) async fn record_outbound(&self, session_id: Uuid, entry: OutboxEntry) {
