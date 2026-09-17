@@ -152,6 +152,30 @@ cargo run --all-features -- -p hermes    # named profile
 
 **Brain files just work.** `cargo run` resolves `~/.opencrabs/` (or `~/.opencrabs/profiles/<name>/` with `-p`) the same way the installed binary does. Your existing config, brain files, sessions, and memory are all picked up — no copy step, no env var override needed.
 
+#### `target/` Grows Fast on the Debug Loop
+
+The `cargo run` loop is cheap in time and expensive in disk. Nothing in the toolchain prunes stale artifacts, so `target/` accumulates across every build, every feature combination, and every dependency bump. A maintainer checkout measured **33 GB** in September 2026: 29 GB in `target/debug`, 4.3 GB from a separate CI profile.
+
+`--all-features` is the multiplier. The local STT/TTS, `pdfium`, and browser dependency trees are large, and building them debug-mode with full debug info is what fills the volume.
+
+Keep it under control:
+
+```bash
+du -sh target                  # check before it surprises you
+cargo clean                    # nuke the whole tree (next build is a full rebuild)
+cargo clean -p opencrabs       # drop only this crate's artifacts, keep deps compiled
+```
+
+`cargo clean -p opencrabs` is the one you usually want: it keeps the dependency graph compiled, so the next `cargo run` recompiles our crate only and takes seconds instead of minutes.
+
+If your home volume is small, move the tree somewhere bigger instead of cleaning it constantly:
+
+```bash
+export CARGO_TARGET_DIR=/path/to/big/volume/opencrabs-target
+```
+
+Put that in your shell profile and every `cargo run` / `cargo test` in the repo writes there instead. Release builds deserve the same treatment: run `cargo clean` before `cargo build --release` so a stale debug tree is not sitting next to the release artifacts you are about to produce.
+
 #### When You Actually Want a Release Build
 
 Reach for `cargo build --release` only when:
