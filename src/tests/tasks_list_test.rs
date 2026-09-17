@@ -1,8 +1,10 @@
 //! #1160 tasks_list + detached status files + prompt rot-guard.
 
 use crate::brain::agent::service::work_status::{self, test_override};
+use crate::brain::tools::tasks_list::{
+    render_tasks, subagent_status_file, DetachedRow, SubagentRow, TasksListTool,
+};
 use crate::brain::tools::Tool;
-use crate::brain::tools::tasks_list::{DetachedRow, SubagentRow, TasksListTool, render_tasks};
 use tempfile::TempDir;
 use uuid::Uuid;
 
@@ -25,6 +27,10 @@ fn render_empty_roster_says_so_explicitly() {
 
 #[test]
 fn render_lists_both_systems_with_states_and_pointers() {
+    // Fixture path is deliberately NEUTRAL: it must not be the retired
+    // pre-#26 layout (see `work_status::legacy_dir()`), which this test used
+    // to enshrine as correct (#165). The real advertised path is pinned by
+    // `advertised_status_file_is_the_path_writers_use` below.
     let subs = vec![SubagentRow {
         id: "agt-1".into(),
         label: "research".into(),
@@ -41,6 +47,38 @@ fn render_lists_both_systems_with_states_and_pointers() {
     assert!(out.contains("status file: /tmp/detached/agt-1.json"));
     assert!(out.contains("Detached commands (1)"), "was: {out}");
     assert!(out.contains("- cargo test (elapsed 42s)"), "was: {out}");
+}
+
+/// #165 regression pin: the advertised path MUST be the one writers use.
+///
+/// Pre-fix, `tasks_list` resolved through the pre-#26
+/// `subagent::status::status_dir()` — the retired `subagents` sibling of the
+/// live status dir, i.e. `work_status::legacy_dir()` — a directory nothing
+/// creates, so every advertised path read ENOENT. An empty read from a wrong
+/// path is indistinguishable from "the sub-agent never existed".
+///
+/// This asserts the RELATIONSHIP (advertised == writer's) rather than a
+/// literal string, so it holds under the `work_status` test override and
+/// still fails on the pre-fix builder, which returned the legacy path.
+#[test]
+fn advertised_status_file_is_the_path_writers_use() {
+    use crate::brain::agent::service::work_status;
+
+    let id = "agt-165";
+    let advertised = subagent_status_file(id);
+    let writer_side = work_status::status_path(id).display().to_string();
+    assert_eq!(
+        advertised, writer_side,
+        "tasks_list must advertise the same path subagent/spawn.rs writes"
+    );
+
+    // And it must NOT sit under the retired dir. Derived from the same
+    // resolver, so it stays correct under the test override.
+    let retired = work_status::legacy_dir().display().to_string();
+    assert!(
+        !advertised.starts_with(&retired),
+        "advertised path {advertised} must not live under the retired {retired}"
+    );
 }
 
 /// Gap 2: a detached command's status file exists mid-run with spawn data,
@@ -111,8 +149,8 @@ fn prompt_builder_keeps_subagent_background_contract() {
 /// caller built, so it cannot see a scope regression.
 #[tokio::test]
 async fn execute_lists_only_the_callers_subagents() {
-    use crate::brain::tools::ToolExecutionContext;
     use crate::brain::tools::subagent::{SubAgent, SubAgentManager};
+    use crate::brain::tools::ToolExecutionContext;
     use std::sync::Arc;
 
     fn child(id: &str, label: &str, parent: Uuid) -> SubAgent {

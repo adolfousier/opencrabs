@@ -25,9 +25,27 @@ pub(crate) struct SubagentRow {
     pub id: String,
     pub label: String,
     pub state: String,
-    /// Path of the agent's JSON status file (unified `work_status.rs`
-    /// pattern, #26), so the model can read live progress directly.
+    /// Path of the agent's JSON status file, as built by
+    /// [`subagent_status_file`], so the model can read live progress directly.
     pub status_file: Option<String>,
+}
+
+/// Advertised status-file path for a sub-agent — the same path writers use.
+///
+/// Resolved through [`crate::brain::agent::service::work_status`], which is
+/// where every writer persists (`subagent/spawn.rs` → `work_status::status_path`).
+/// The pre-#26 `subagent::status` helper resolves to `<home>/tmp/subagents`,
+/// a directory nothing creates, so advertising a path through it handed the
+/// model a file that always read ENOENT — and an empty read from a wrong path
+/// is indistinguishable from "this sub-agent never existed" (#165).
+///
+/// Extracted from `execute()` so the advertised path is unit-testable; while
+/// it was computed inline, no test could pin it and the wrong-path defect
+/// survived (#165).
+pub(crate) fn subagent_status_file(id: &str) -> String {
+    crate::brain::agent::service::work_status::status_path(id)
+        .display()
+        .to_string()
 }
 
 /// One detached-command roster row.
@@ -119,13 +137,12 @@ impl Tool for TasksListTool {
             // spawn duplicates") makes that a silent suppressor, not just
             // noise. The detached half below is already scoped the same way.
             for (id, label, state) in mgr.list_for_parent(context.session_id) {
-                let sf = crate::brain::agent::service::work_status::status_dir()
-                    .join(format!("{id}.json"));
+                let status_file = subagent_status_file(&id);
                 subagents.push(SubagentRow {
                     id,
                     label,
                     state: state_label(&state).to_string(),
-                    status_file: Some(sf.display().to_string()),
+                    status_file: Some(status_file),
                 });
             }
         }
