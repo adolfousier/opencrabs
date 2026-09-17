@@ -1609,10 +1609,12 @@ pub(crate) async fn handle_message(
             }
             // Optional follow-up suggestions (#600): a native-flow card when
             // the owner opted into `interactive_buttons` and the set fits the
-            // 3-button cap; otherwise the numbered text list (#1411). A bare
-            // numeric reply selects one via the inbound router either way, and
-            // the card body carries the same instructions, so the typed path
-            // survives clients that do not render buttons. Anything else
+            // 3-button cap (#1411), a single-choice poll when the set is
+            // larger than that cap (#1616), and the numbered text list
+            // otherwise. The typed path survives all three: a bare numeric
+            // reply selects an option via the inbound router, the card body
+            // carries the same instructions, and the poll question does too,
+            // so a client that renders neither is never stuck. Anything else
             // clears the set.
             ProgressEvent::SuggestedOptions(options) if !options.is_empty() => {
                 let client = client_cb.clone();
@@ -1640,10 +1642,46 @@ pub(crate) async fn handle_message(
                             )
                         })
                         .collect();
-                    let card =
-                        interactive && super::interactive::suggestion_card_fits(raw_options.len());
-                    wa.set_pending_followups(session_id, raw_options).await;
-                    let msg = if card {
+                    use super::interactive::SuggestionSurface;
+                    // Over the button cap, a poll is the only one-tap surface
+                    // WhatsApp offers. A vote is matched back by label, so the
+                    // pending set has to be stashed before the send either way.
+                    let surface =
+                        super::interactive::suggestion_surface(raw_options.len(), interactive);
+                    wa.set_pending_followups(session_id, raw_options.clone())
+                        .await;
+
+                    if surface == SuggestionSurface::Poll {
+                        match client
+                            .polls()
+                            .create(
+                                jid.clone(),
+                                "\u{1f4a1} Suggested next: tap one, or reply with the number.",
+                                &raw_options,
+                                1,
+                            )
+                            .await
+                        {
+                            Ok((result, _secret)) => {
+                                // Votes name options by hash, so the poll's own
+                                // option list is the only way to read one back.
+                                wa.polls.remember(result.message_id, raw_options).await;
+                                return;
+                            }
+                            Err(e) => {
+                                // Not fatal: the numbered list below still
+                                // selects by number, so the turn degrades to
+                                // the text path rather than losing the
+                                // suggestions entirely.
+                                tracing::warn!(
+                                    error = %e,
+                                    "WhatsApp: suggestion poll failed, falling back to the numbered list"
+                                );
+                            }
+                        }
+                    }
+
+                    let msg = if surface == SuggestionSurface::Card {
                         super::interactive::build(
                             &body,
                             Some("Tap an option, or reply with the number."),

@@ -180,3 +180,49 @@ pub(crate) fn parse_suggestion_tap(id: &str) -> Option<usize> {
 pub(crate) fn suggestion_card_fits(count: usize) -> bool {
     (1..=MAX_BUTTONS).contains(&count)
 }
+
+/// WhatsApp's own cap on poll options. `suggest_options` tops out at 8, so
+/// this is headroom rather than a real boundary, but a poll built past it is
+/// rejected by the server.
+pub(crate) const MAX_POLL_OPTIONS: usize = 12;
+
+/// Whether a suggestion set may render as a single-choice poll (#1616).
+///
+/// The poll is the one-tap surface for sets too big for the button cap. A
+/// single option is not a choice and WhatsApp rejects a one-option poll. Sets
+/// that also fit a card are accepted here; [`suggestion_surface`] decides
+/// between them. Pure for the same reason as [`parse_suggestion_tap`].
+pub(crate) fn suggestion_poll_fits(count: usize) -> bool {
+    (2..=MAX_POLL_OPTIONS).contains(&count)
+}
+
+/// Where a suggestion set renders (#1411, #1616).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SuggestionSurface {
+    /// Native-flow card: one tap, up to [`MAX_BUTTONS`] options.
+    Card,
+    /// Single-choice poll: one tap, for sets past the button cap.
+    Poll,
+    /// Numbered list. Always selectable by typing a number, so it is the
+    /// fallback for an opted-out owner, an oversized set, or a failed send.
+    Text,
+}
+
+/// Pick the surface for `count` options.
+///
+/// Card first: it carries the body text and the instructions, so it degrades
+/// better on a client that renders neither. The poll only claims what the card
+/// cannot take. Kept pure and out of the handler so the routing is testable
+/// without a live socket.
+pub(crate) fn suggestion_surface(count: usize, interactive: bool) -> SuggestionSurface {
+    if !interactive {
+        return SuggestionSurface::Text;
+    }
+    if suggestion_card_fits(count) {
+        SuggestionSurface::Card
+    } else if suggestion_poll_fits(count) {
+        SuggestionSurface::Poll
+    } else {
+        SuggestionSurface::Text
+    }
+}
