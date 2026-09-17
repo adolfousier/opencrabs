@@ -248,6 +248,7 @@ pub enum DbCommands {
 }
 
 #[derive(Subcommand, Debug)]
+#[allow(clippy::large_enum_variant)]
 pub enum CronCommands {
     /// Add a new cron job
     Add {
@@ -263,9 +264,9 @@ pub enum CronCommands {
         #[arg(long, default_value = "UTC")]
         tz: String,
 
-        /// Prompt / instructions for the agent
-        #[arg(long, alias = "message")]
-        prompt: String,
+        /// Prompt / instructions for the agent (optional if --trigger-cmd is supplied)
+        #[arg(long, alias = "message", required_unless_present = "trigger_cmd")]
+        prompt: Option<String>,
 
         /// Override provider (e.g. anthropic, openai)
         #[arg(long)]
@@ -283,9 +284,25 @@ pub enum CronCommands {
         #[arg(long, default_value = "true")]
         auto_approve: bool,
 
-        /// Channel to deliver results (e.g. telegram:123456)
+        /// Delivery destination: passive channel output (e.g. 'oc://telegram/...', 'telegram:123456') or active session turn injection ('oc://session/<uuid>')
         #[arg(long, alias = "deliver")]
         deliver_to: Option<String>,
+
+        /// Optional pre-flight shell command to run before agent turn
+        #[arg(long)]
+        trigger_cmd: Option<String>,
+
+        /// Trigger condition: non_empty (default), exit_non_zero, always
+        #[arg(long)]
+        trigger_on: Option<String>,
+
+        /// Set active goal in destination session (requires deliver_to pointing to oc://session/<uuid> or session:<uuid>)
+        #[arg(long)]
+        set_goal: bool,
+
+        /// Goal formatting template (interpolates {output}, {stdout}, {stderr}, {exit_code})
+        #[arg(long)]
+        goal_template: Option<String>,
     },
 
     /// List all cron jobs

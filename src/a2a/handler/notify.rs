@@ -27,12 +27,12 @@
 
 use crate::a2a::types::*;
 use crate::brain::agent::service::notify_policy::{
-    CONFIRM_CAP, DeliveryMode, confirm_route, resolve_mode, validate_sender_label,
+    confirm_route, resolve_mode, validate_sender_label, DeliveryMode, CONFIRM_CAP,
 };
 use crate::brain::agent::service::notify_receipts;
 use crate::brain::agent::service::quiet_delivery;
-use crate::brain::agent::service::session_routes::Delivery;
 use crate::brain::agent::service::session_routes::deliver_to_session;
+use crate::brain::agent::service::session_routes::Delivery;
 use crate::brain::agent::{PushOrigin, QueuedUserMessage};
 use crate::services::{ServiceContext, SessionService};
 
@@ -141,7 +141,7 @@ pub async fn handle_session_notify(
     // longer exists. An ARCHIVED row passes: archived sessions auto-route
     // like anywhere else (#19 redirect to the successor occupying the
     // channel), so the gate checks existence only, never activity.
-    let session_svc = SessionService::new(service_context);
+    let session_svc = SessionService::new(service_context.clone());
     match session_svc.get_session(session_id).await {
         Ok(Some(_session)) => {}
         Ok(None) => {
@@ -180,6 +180,37 @@ pub async fn handle_session_notify(
         bg_meta: None,
     };
 
+    let goal = params
+        .get("goal")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    let goal_max_turns = params
+        .get("goal_max_turns")
+        .and_then(serde_json::Value::as_u64)
+        .map(|n| n as u32);
+
+    async fn maybe_set_a2a_goal(
+        target_id: uuid::Uuid,
+        goal: Option<&str>,
+        max_turns: Option<u32>,
+        ctx: &ServiceContext,
+    ) {
+        if let Some(goal_text) = goal {
+            let goal_mgr = crate::brain::goal::GoalManager::new(ctx.clone());
+            if let Err(e) = goal_mgr
+                .set_goal(target_id, goal_text.to_string(), None, None, max_turns)
+                .await
+            {
+                tracing::warn!(
+                    error = %e,
+                    session_id = %target_id,
+                    "failed to dispatch goal via a2a notify"
+                );
+            }
+        }
+    }
+
     // Quiet mode (fork #43/#50): bank the notice, return the id — accepted,
     // not yet delivered; the id is the status handle from birth.
     if let DeliveryMode::Quiet {
@@ -188,6 +219,7 @@ pub async fn handle_session_notify(
     } = mode
     {
         let id = quiet_delivery::defer_quiet(session_id, msg, quiet_for, max_delay);
+        maybe_set_a2a_goal(session_id, goal, goal_max_turns, &service_context).await;
         notify_receipts::record_queued(id, session_id);
         return JsonRpcResponse::success(
             req_id,
@@ -214,6 +246,7 @@ pub async fn handle_session_notify(
 
     let (outcome, detail, extra) = match deliver_to_session(session_id, msg, interrupt) {
         Delivery::Delivered => {
+            maybe_set_a2a_goal(session_id, goal, goal_max_turns, &service_context).await;
             notify_receipts::record_queued(notify_id, session_id);
             if confirm {
                 let (state, cdetail, reason) = confirm_route(session_id, CONFIRM_CAP).await;
@@ -235,6 +268,7 @@ pub async fn handle_session_notify(
             }
         }
         Delivery::Redirected { to } => {
+            maybe_set_a2a_goal(to, goal, goal_max_turns, &service_context).await;
             notify_receipts::record_queued(notify_id, to);
             if confirm {
                 let (state, cdetail, reason) = confirm_route(to, CONFIRM_CAP).await;
@@ -266,6 +300,7 @@ pub async fn handle_session_notify(
         // the last restart (#1206). Reporting this as a failure would be the
         // opposite of what happened — same reading as the agent tool.
         Delivery::Parked => {
+            maybe_set_a2a_goal(session_id, goal, goal_max_turns, &service_context).await;
             notify_receipts::record_queued(notify_id, session_id);
             (
                 "parked",

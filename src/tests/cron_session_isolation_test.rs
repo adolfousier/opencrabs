@@ -16,7 +16,7 @@
 
 use crate::config::profile::with_home_override_async;
 use crate::cron::scheduler::cron_session_title_suffix;
-use crate::db::{Database, models::CronJob};
+use crate::db::{models::CronJob, Database};
 use crate::services::{ServiceContext, SessionService};
 use uuid::Uuid;
 

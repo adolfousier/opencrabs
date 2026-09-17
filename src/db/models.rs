@@ -494,6 +494,14 @@ pub struct CronJob {
     /// profile, so the scheduler refuses to run them under another profile's
     /// brain/config/tools (#182).
     pub profile_name: Option<String>,
+    /// Optional shell command to run as a pre-flight probe.
+    pub trigger_cmd: Option<String>,
+    /// Condition for the trigger to fire: "non_empty" (default), "exit_non_zero", "always".
+    pub trigger_on: Option<String>,
+    /// If true and deliver_to resolves to a session, sets the active goal in that session.
+    pub set_goal: bool,
+    /// Template for formatting goal/notification from trigger output.
+    pub goal_template: Option<String>,
 }
 
 impl CronJob {
@@ -520,6 +528,14 @@ impl CronJob {
             created_at: rfc3339_col(row, "created_at")?,
             updated_at: rfc3339_col(row, "updated_at")?,
             profile_name: row.get("profile_name")?,
+            trigger_cmd: row.get("trigger_cmd").unwrap_or(None),
+            trigger_on: row.get("trigger_on").unwrap_or(None),
+            set_goal: row
+                .get::<_, Option<i32>>("set_goal")
+                .unwrap_or(None)
+                .unwrap_or(0)
+                != 0,
+            goal_template: row.get("goal_template").unwrap_or(None),
         })
     }
 
@@ -535,6 +551,41 @@ impl CronJob {
         auto_approve: bool,
         deliver_to: Option<String>,
         deliver_api_key: Option<String>,
+    ) -> Self {
+        Self::new_with_trigger(
+            name,
+            cron_expr,
+            timezone,
+            prompt,
+            provider,
+            model,
+            thinking,
+            auto_approve,
+            deliver_to,
+            deliver_api_key,
+            None,
+            None,
+            false,
+            None,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_with_trigger(
+        name: String,
+        cron_expr: String,
+        timezone: String,
+        prompt: String,
+        provider: Option<String>,
+        model: Option<String>,
+        thinking: String,
+        auto_approve: bool,
+        deliver_to: Option<String>,
+        deliver_api_key: Option<String>,
+        trigger_cmd: Option<String>,
+        trigger_on: Option<String>,
+        set_goal: bool,
+        goal_template: Option<String>,
     ) -> Self {
         let now = Utc::now();
         Self {
@@ -561,6 +612,10 @@ impl CronJob {
             // created while running inside a foreign profile's scope is
             // attributed to that profile, not the process global.
             profile_name: Some(crate::config::profile::current_profile_name()),
+            trigger_cmd,
+            trigger_on: trigger_on.or_else(|| Some("non_empty".to_string())),
+            set_goal,
+            goal_template,
         }
     }
 }

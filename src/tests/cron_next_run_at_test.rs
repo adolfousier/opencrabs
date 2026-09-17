@@ -11,7 +11,7 @@ use crate::services::ServiceContext;
 use crate::tests::agent_service_mocks::MockProvider;
 use std::path::PathBuf;
 use std::sync::Arc;
-use tokio::sync::{Mutex, watch};
+use tokio::sync::{watch, Mutex};
 
 async fn setup() -> (Database, CronJobRepository, CronManageTool) {
     let db = Database::connect_in_memory()
@@ -38,6 +38,33 @@ fn create_test_factory(service_ctx: ServiceContext) -> Arc<ChannelFactory> {
         Arc::new(Mutex::new(None)),
         config_rx,
     ))
+}
+
+#[tokio::test]
+async fn test_create_standalone_bash_job() {
+    let (_db, repo, tool) = setup().await;
+    let input = serde_json::json!({
+        "action": "create",
+        "name": "Standalone Bash Job",
+        "cron": "0 9 * * *",
+        "tz": "UTC",
+        "trigger_cmd": "echo 'running maintenance'",
+        "trigger_on": "exit_zero"
+    });
+    let res = tool.execute(input, &ctx()).await.unwrap();
+    assert!(res.success, "Tool execution failed: {}", res.output);
+
+    let job = repo
+        .find_by_name("Standalone Bash Job")
+        .await
+        .unwrap()
+        .expect("Job not found");
+    assert_eq!(job.prompt, "");
+    assert_eq!(
+        job.trigger_cmd.as_deref(),
+        Some("echo 'running maintenance'")
+    );
+    assert_eq!(job.trigger_on.as_deref(), Some("exit_zero"));
 }
 
 #[tokio::test]

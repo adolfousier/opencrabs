@@ -94,3 +94,54 @@ fn duplicate_rows_are_ambiguous() {
     let prefix = id.to_string()[..8].to_string();
     assert_eq!(resolve_session_target(&sessions, &prefix), None);
 }
+
+#[test]
+fn session_target_recognition_and_extraction() {
+    use crate::channels::target_resolver::{extract_session_target, is_session_target};
+
+    let full_uuid = "12345678-1234-1234-1234-123456789abc";
+    let url_target = format!("oc://session/{full_uuid}");
+    let legacy_target = format!("session:{full_uuid}");
+    let channel_target = "telegram:123456:78";
+    let url_channel = "oc://telegram/123456/78";
+
+    assert!(is_session_target(&url_target));
+    assert!(is_session_target(&legacy_target));
+    assert!(!is_session_target(channel_target));
+    assert!(!is_session_target(url_channel));
+
+    assert_eq!(extract_session_target(&url_target), Some(full_uuid));
+    assert_eq!(extract_session_target(&legacy_target), Some(full_uuid));
+    assert_eq!(extract_session_target(channel_target), None);
+    assert_eq!(extract_session_target(url_channel), None);
+}
+
+#[tokio::test]
+async fn bake_delivery_target_bakes_session_target_to_session_uuid() {
+    use crate::brain::tools::cron_manage::bake_delivery_target;
+    use crate::brain::tools::ToolExecutionContext;
+
+    let full_uuid = "12345678-1234-1234-1234-123456789abc";
+    let url_target = format!("oc://session/{full_uuid}");
+    let legacy_target = format!("session:{full_uuid}");
+    let ctx = ToolExecutionContext::new(Uuid::new_v4());
+
+    let baked_url = bake_delivery_target(&url_target, &ctx).await.unwrap();
+    let baked_legacy = bake_delivery_target(&legacy_target, &ctx).await.unwrap();
+
+    assert_eq!(baked_url, format!("session:{full_uuid}"));
+    assert_eq!(baked_legacy, format!("session:{full_uuid}"));
+}
+
+#[test]
+fn resolved_target_deliver_to_session_format() {
+    use crate::channels::target_resolver::{ResolvedTarget, TargetDestination};
+
+    let id = Uuid::new_v4();
+    let rt = ResolvedTarget {
+        session: Some(id),
+        destination: TargetDestination::Session(id),
+    };
+
+    assert_eq!(rt.deliver_to(), format!("session:{id}"));
+}

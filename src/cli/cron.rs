@@ -1,8 +1,8 @@
 //! Cron CLI subcommands — add, list, remove, enable, disable.
 
 use super::args::CronCommands;
-use crate::db::CronJobRepository;
 use crate::db::models::CronJob;
+use crate::db::CronJobRepository;
 use anyhow::Result;
 
 /// Cron job management CLI handler
@@ -27,6 +27,10 @@ pub(crate) async fn cmd_cron(
             thinking,
             auto_approve,
             deliver_to,
+            trigger_cmd,
+            trigger_on,
+            set_goal,
+            goal_template,
         } => {
             cmd_add(
                 &repo,
@@ -39,6 +43,10 @@ pub(crate) async fn cmd_cron(
                 thinking,
                 auto_approve,
                 deliver_to,
+                trigger_cmd,
+                trigger_on,
+                set_goal,
+                goal_template,
             )
             .await
         }
@@ -56,13 +64,23 @@ async fn cmd_add(
     name: String,
     cron: String,
     tz: String,
-    prompt: String,
+    prompt: Option<String>,
     provider: Option<String>,
     model: Option<String>,
     thinking: String,
     auto_approve: bool,
     deliver_to: Option<String>,
+    trigger_cmd: Option<String>,
+    trigger_on: Option<String>,
+    set_goal: bool,
+    goal_template: Option<String>,
 ) -> Result<()> {
+    // Prompt or trigger_cmd must be present
+    let prompt_str = prompt.unwrap_or_default();
+    if prompt_str.trim().is_empty() && trigger_cmd.as_deref().unwrap_or("").trim().is_empty() {
+        anyhow::bail!("Either --prompt or --trigger-cmd must be provided");
+    }
+
     // Validate cron expression (cron crate needs seconds prepended)
     let cron_with_secs = format!("0 {cron}");
     if let Err(e) = cron_with_secs.parse::<cron::Schedule>() {
@@ -80,21 +98,51 @@ async fn cmd_add(
         ),
     };
 
+    // Validate set_goal requires session delivery target
+    if set_goal {
+        let target_is_session = deliver_to
+            .as_deref()
+            .map(crate::channels::target_resolver::is_session_target)
+            .unwrap_or(false);
+        if !target_is_session {
+            anyhow::bail!(
+                "Cannot create job: --set-goal requires oc://session/<uuid> delivery target. \
+                 Channel deliveries (telegram, discord, etc.) are passive outputs and cannot set session goals."
+            );
+        }
+    }
+
     if (repo.find_by_name(&name).await?).is_some() {
         anyhow::bail!("A cron job named '{name}' already exists");
     }
 
-    let mut job = CronJob::new(
+    let deliver_to = if let Some(ref d) = deliver_to {
+        if crate::channels::target_resolver::is_session_target(d) {
+            let id_str =
+                crate::channels::target_resolver::extract_session_target(d).unwrap_or(d.as_str());
+            Some(format!("session:{id_str}"))
+        } else {
+            deliver_to
+        }
+    } else {
+        deliver_to
+    };
+
+    let mut job = CronJob::new_with_trigger(
         name.clone(),
         cron.clone(),
         tz.clone(),
-        prompt,
+        prompt_str,
         provider,
         model,
         thinking,
         auto_approve,
         deliver_to.clone(),
         None, // CLI doesn't support deliver_api_key yet
+        trigger_cmd.clone(),
+        trigger_on.clone(),
+        set_goal,
+        goal_template.clone(),
     );
     job.next_run_at = crate::cron::next_run_utc(&cron, parsed_tz, chrono::Utc::now());
 
@@ -107,6 +155,13 @@ async fn cmd_add(
     println!("   Schedule: {cron} ({tz})");
     if let Some(ref d) = deliver_to {
         println!("   Deliver to: {d}");
+    }
+    if let Some(ref cmd) = trigger_cmd {
+        let cond = trigger_on.as_deref().unwrap_or("non_empty");
+        println!("   Trigger: `{cmd}` ({cond})");
+    }
+    if set_goal {
+        println!("   Set goal: true");
     }
     println!("   Next runs:");
     println!(
@@ -147,10 +202,19 @@ async fn cmd_list(repo: &CronJobRepository) -> Result<()> {
 
         println!("{status} {} ({})", job.name, job.id);
         println!("   Schedule: {} ({})", job.cron_expr, job.timezone);
+        if let Some(ref cmd) = job.trigger_cmd {
+            let cond = job.trigger_on.as_deref().unwrap_or("non_empty");
+            println!("   Trigger: `{cmd}` ({cond})");
+        }
+        if job.set_goal {
+            println!("   Set goal: true");
+        }
         println!("   Deliver: {deliver}");
         println!("   Last run: {last}");
         println!("   Next run: {next}");
-        println!("   Prompt: {prompt_preview}");
+        if !job.prompt.is_empty() {
+            println!("   Prompt: {prompt_preview}");
+        }
         println!();
     }
     Ok(())
