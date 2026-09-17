@@ -884,6 +884,10 @@ async fn handle_message(
         let uid = user_id.clone();
         let uname = user_name.clone();
         let ch_name = channel_name.clone();
+        // Persist which thread the message belongs to. Without this every Slack
+        // row lands with thread_id NULL, and a thread-scoped recent() lookup
+        // matches nothing (SQL NULL never equals a value) (#1620).
+        let thread_id = msg.origin.thread_ts.as_ref().map(|ts| ts.to_string());
         async move {
             if text.is_empty() {
                 return;
@@ -897,7 +901,8 @@ async fn handle_message(
                 text,
                 "text".into(),
                 None,
-            );
+            )
+            .with_thread(thread_id, None);
             if let Err(e) = repo.insert(&cm).await {
                 tracing::warn!("Failed to store Slack channel message: {e}");
             }
@@ -2198,7 +2203,8 @@ async fn handle_message(
                         text_only.clone(),
                         "text".into(),
                         None,
-                    );
+                    )
+                    .with_thread(thread_ts.as_ref().map(|ts| ts.to_string()), None);
                     if let Err(e) = state.channel_msg_repo.insert(&cm).await {
                         tracing::warn!(
                             "Slack: failed to record bot reply in channel_messages: {}",
@@ -2358,7 +2364,8 @@ async fn handle_message(
                     text_only.clone(),
                     "text".into(),
                     None,
-                );
+                )
+                .with_thread(thread_ts.as_ref().map(|ts| ts.to_string()), None);
                 if let Err(e) = state.channel_msg_repo.insert(&cm).await {
                     tracing::warn!(
                         "Slack: failed to record bot reply in channel_messages: {}",
