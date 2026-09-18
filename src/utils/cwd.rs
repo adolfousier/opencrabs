@@ -29,10 +29,10 @@ pub fn launch_cwd() -> PathBuf {
 /// Pure form of [`launch_cwd`]: map `raw` to the directory to use, so the
 /// decision is testable without touching the process environment.
 pub fn sanitize_launch_cwd(raw: PathBuf) -> PathBuf {
-    if is_windows_system_dir(&raw) {
-        if let Some(home) = dirs::home_dir() {
-            return home;
-        }
+    if is_windows_system_dir(&raw)
+        && let Some(home) = dirs::home_dir()
+    {
+        return home;
     }
     raw
 }

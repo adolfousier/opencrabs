@@ -138,7 +138,7 @@ async fn plain_ascii_read_has_no_encoding_warning() {
     assert!(result.success);
     assert_eq!(result.output, "just text");
     assert!(
-        result.metadata.get("warning").is_none(),
+        !result.metadata.contains_key("warning"),
         "no warning for plain UTF-8: {:?}",
         result.metadata.get("warning")
     );
