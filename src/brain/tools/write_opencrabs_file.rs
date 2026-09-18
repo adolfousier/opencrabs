@@ -17,13 +17,47 @@ use serde_json::Value;
 
 pub struct WriteOpenCrabsFileTool;
 
-/// Validate that `path` is a safe relative path within `~/.opencrabs/`.
+/// True when `home` is itself a named-profile directory, i.e. `<base>/profiles/<name>`.
+///
+/// In that shape a leading `profiles/` segment in the caller-supplied path
+/// duplicates the home path; in the default-profile shape (`<base>`) the same
+/// spelling is a *sibling* profile's real home and must be accepted.
+pub(crate) fn home_is_named_profile(home: &std::path::Path) -> bool {
+    home.parent()
+        .and_then(std::path::Path::file_name)
+        .is_some_and(|name| name == std::ffi::OsStr::new("profiles"))
+}
+
+/// True when the first non-`CurDir` component of `path` is the literal
+/// `profiles` segment.
+///
+/// Component-based rather than a string prefix, so `./profiles/...` gets the
+/// same verdict as `profiles/...` — the string test this replaces was
+/// bypassable with a leading `./`.
+pub(crate) fn leading_profiles_segment(path: &str) -> bool {
+    std::path::Path::new(path)
+        .components()
+        .find(|component| !matches!(component, std::path::Component::CurDir))
+        .is_some_and(|component| {
+            component == std::path::Component::Normal(std::ffi::OsStr::new("profiles"))
+        })
+}
+
+/// Validate that `path` is a safe relative path within the active OpenCrabs home.
 /// Prevents path traversal outside the app home directory.
-pub(crate) fn validate_opencrabs_path(path: &str) -> std::result::Result<(), String> {
+///
+/// `home` is the resolved profile home (`crate::config::opencrabs_home()`), which
+/// is either `<base>` (default profile) or `<base>/profiles/<name>` (named
+/// profile). The leading-`profiles/` check needs it: the two shapes share the
+/// same spelling but demand opposite verdicts.
+pub(crate) fn validate_opencrabs_path(
+    home: &std::path::Path,
+    path: &str,
+) -> std::result::Result<(), String> {
     if path.is_empty() {
         return Err("path is required".into());
     }
-    // Reject absolute paths — must be relative to ~/.opencrabs/
+    // Reject absolute paths — must be relative to the OpenCrabs home
     if path.starts_with('/') || path.starts_with('~') {
         return Err(format!(
             "Use a relative path (e.g. \"MEMORY.md\" or \"memory/2026-03-02.md\"), \
@@ -42,17 +76,20 @@ pub(crate) fn validate_opencrabs_path(path: &str) -> std::result::Result<(), Str
     if path.contains('\0') {
         return Err("path contains null bytes".into());
     }
-    // Reject profiles/ prefix — the tool resolves paths from the agent's home directory,
-    // so including a directory prefix causes path doubling.
-    // Example: profiles/ops/TOOLS.md → <home>/profiles/ops/TOOLS.md (wrong if home is already profiles/ops/)
-    // Correct: just pass TOOLS.md or memory/note.md
-    if path.starts_with("profiles/") {
+    // Reject a leading `profiles/` segment only when the active home is itself a
+    // named profile (`<base>/profiles/<name>`). There the prefix duplicates the
+    // home path and the write lands one level too deep. For the default profile
+    // (`<base>`) `profiles/family/USER.md` is that sibling's real home and is
+    // accepted. Component-based, so `./profiles/...` cannot bypass the gate.
+    if home_is_named_profile(home) && leading_profiles_segment(path) {
         return Err(format!(
-            "Path '{}' starts with 'profiles/' which looks like you included a directory prefix. \
-             This tool expects a relative path from your home directory. \
-             For example: pass \"TOOLS.md\" not \"profiles/ops/TOOLS.md\", \
-             or \"memory/note.md\" not \"profiles/ops/memory/note.md\".",
-            path
+            "Path '{}' starts with a 'profiles/' segment, but this profile's home already lies \
+             under profiles/ ({}), so the prefix duplicates it. This tool expects a relative \
+             path from your home directory. For example: pass \"TOOLS.md\" not \
+             \"profiles/ops/TOOLS.md\", or \"memory/note.md\" not \
+             \"profiles/ops/memory/note.md\".",
+            path,
+            home.display()
         ));
     }
     Ok(())
@@ -274,7 +311,9 @@ impl Tool for WriteOpenCrabsFileTool {
             .unwrap_or("")
             .trim();
 
-        if let Err(e) = validate_opencrabs_path(path_str) {
+        let home = crate::config::opencrabs_home();
+
+        if let Err(e) = validate_opencrabs_path(&home, path_str) {
             return Ok(ToolResult::error(e));
         }
 
@@ -284,7 +323,6 @@ impl Tool for WriteOpenCrabsFileTool {
             .unwrap_or("")
             .trim();
 
-        let home = crate::config::opencrabs_home();
         let full_path = home.join(path_str);
 
         match operation {
