@@ -77,16 +77,18 @@ impl PushShellCommand for tokio::process::Command {
     }
 }
 
-/// Kill a process and its entire descendant tree (Windows only).
+/// Kill a process's descendant tree, best-effort, on the timeout path.
 ///
-/// tokio's `kill()`/`kill_on_drop` TerminateProcess()es only the DIRECT
-/// child — on Windows that's `cmd.exe`, so the actual work process spawned
-/// by the command (cargo, cmake, ping, …) survives as an orphan, still
-/// holding locks: a timed-out `cargo build` keeps the target-dir and
-/// package-cache locks taken for minutes afterwards. `taskkill /T /F`
-/// walks the whole tree and force-terminates it. Failure (pid already
-/// exited, taskkill missing) is ignored: this is a best-effort sweep on
-/// the timeout error path, never a reason to mask the Timeout itself.
+/// tokio's `kill()`/`kill_on_drop` terminates only the DIRECT child — the
+/// shell — so the actual work process spawned by the command (cargo,
+/// cmake, ping, …) survives as an orphan, still holding locks: a timed-out
+/// `cargo build` keeps the target-dir and package-cache locks taken for
+/// minutes afterwards. Failure (pid already exited, helper missing) is
+/// ignored: this is a best-effort sweep on the timeout error path, never a
+/// reason to mask the Timeout itself.
+///
+/// Windows: `taskkill /T /F` walks the whole tree including the shell pid
+/// and force-terminates it.
 #[cfg(windows)]
 pub fn kill_process_tree(pid: u32) {
     if pid == 0 {
@@ -94,5 +96,24 @@ pub fn kill_process_tree(pid: u32) {
     }
     let _ = std::process::Command::new("taskkill")
         .args(["/PID", &pid.to_string(), "/T", "/F"])
+        .output();
+}
+
+/// Unix counterpart: signal the work processes the shell spawned.
+///
+/// The shells here are not process-group leaders, so a group kill
+/// (`kill -pgid`) would signal the agent itself; instead `pkill -TERM -P`
+/// targets the direct children of `pid` while the caller's
+/// `kill_on_drop`/`kill()` reaps the shell. If the shell already exited,
+/// its children are re-parented and pkill finds nothing — same best-effort
+/// contract as the Windows path. pkill ships with procps on Linux and is
+/// standard on macOS; if absent, the failed spawn is ignored.
+#[cfg(not(windows))]
+pub fn kill_process_tree(pid: u32) {
+    if pid == 0 {
+        return;
+    }
+    let _ = std::process::Command::new("pkill")
+        .args(["-TERM", "-P", &pid.to_string()])
         .output();
 }
