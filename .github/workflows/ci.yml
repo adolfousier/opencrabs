@@ -202,7 +202,11 @@ jobs:
     needs: [lint, audit]
     if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
     runs-on: windows-latest
-    timeout-minutes: 40
+    # 60 min: a COLD windows-latest run needs ~48 (33 compile incl. llama's
+    # cmake C++ + ~15 for the thin-LTO link of a 4-vCPU runner); warm runs
+    # from rust-cache land near 10. The original 40 cap killed a build that
+    # was minutes from linking. Keep a cap so a true hang can't burn 360.
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v5
 
@@ -212,10 +216,13 @@ jobs:
           toolchain: stable
           components: rustfmt, clippy
 
+      # No `save-if` restriction: this job only runs on PRs and
+      # workflow_dispatch, so a `refs/heads/main`-only save-if never fires —
+      # the cache would stay cold forever. Saving in the run's own scope
+      # lets the 2nd..Nth push of a PR hit warm artifacts.
       - uses: swatinem/rust-cache@v2
         with:
           cache-on-failure: true
-          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install CMake (Windows)
         uses: lukka/get-cmake@latest
