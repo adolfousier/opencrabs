@@ -76,6 +76,14 @@ pub fn expand_tilde(path: &str) -> std::path::PathBuf {
     {
         return home.join(rest);
     }
+    // Windows backslash form: models routinely paste `~\.opencrabs\logs`
+    // with native separators. Without this the `~` stays literal, the path
+    // is relative, and it silently resolves against the working directory.
+    if let Some(rest) = path.strip_prefix("~\\")
+        && let Some(home) = dirs::home_dir()
+    {
+        return home.join(rest);
+    }
     if path == "~"
         && let Some(home) = dirs::home_dir()
     {
