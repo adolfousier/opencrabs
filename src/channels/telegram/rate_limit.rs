@@ -9,7 +9,15 @@
 //! The card is chrome. Skipping an update is strictly better than being
 //! throttled into a loop that also spams duplicates into the chat.
 
-use std::time::Duration;
+use std::sync::RwLock;
+use std::time::{Duration, Instant};
+
+/// Process-wide 429 cooldown deadline.
+///
+/// When any Telegram request receives HTTP 429, the deadline is set to
+/// `now + wait + margin`. All concurrent requests across all chats and topics
+/// pause until the cooldown expires, preventing penalty escalation loops.
+static GLOBAL_COOLDOWN: RwLock<Option<Instant>> = RwLock::new(None);
 
 /// Seconds Telegram asked us to wait, from an error string.
 ///
@@ -20,8 +28,9 @@ use std::time::Duration;
 /// Returns `None` for anything else, so ordinary failures (a deleted message,
 /// bad markup) are not mistaken for throttling and do not suppress writes.
 pub(crate) fn parse_retry_after(error: &str) -> Option<Duration> {
-    let idx = error.find("Retry after")?;
-    let rest = &error[idx + "Retry after".len()..];
+    let lower = error.to_lowercase();
+    let idx = lower.find("retry after")?;
+    let rest = &lower[idx + "retry after".len()..];
     let digits: String = rest
         .chars()
         .skip_while(|c| !c.is_ascii_digit())
@@ -67,6 +76,86 @@ pub(crate) fn clamp_inline_wait(requested: Duration) -> (Duration, bool) {
     }
 }
 
+/// Record a 429 cooldown globally across the entire process.
+///
+/// Extends the active cooldown deadline monotonically to `max(existing, now + wait + margin)`.
+pub(crate) fn record_global_429(retry_after: Duration) {
+    let (wait, capped) = clamp_inline_wait(retry_after);
+    let total_wait = wait + RETRY_MARGIN;
+    let now = super::governor::gate_now();
+    let new_deadline = now + total_wait;
+
+    let mut lock = GLOBAL_COOLDOWN.write().unwrap_or_else(|e| e.into_inner());
+    let active_deadline = match *lock {
+        Some(existing) if existing > new_deadline => existing,
+        _ => {
+            *lock = Some(new_deadline);
+            new_deadline
+        }
+    };
+
+    if capped {
+        tracing::warn!(
+            "Telegram: Global 429 cooldown activated: {}s requested exceeds {}s cap \
+             — cooling down for {}s (deadline {:?}); chat likely flood-banned",
+            retry_after.as_secs(),
+            MAX_INLINE_RATE_LIMIT_WAIT.as_secs(),
+            total_wait.as_secs(),
+            active_deadline
+        );
+    } else {
+        tracing::warn!(
+            "Telegram: Global 429 cooldown activated: cooling down for {}s (deadline {:?})",
+            total_wait.as_secs(),
+            active_deadline
+        );
+    }
+}
+
+/// Check if a global 429 cooldown is currently active.
+///
+/// Fast-path non-blocking check used by drop-eligible operations (typing indicators,
+/// intermediate clock/status flow edits) to drop immediately without holding.
+pub(crate) fn is_global_cooldown_active() -> bool {
+    let now = super::governor::gate_now();
+    let lock = GLOBAL_COOLDOWN.read().unwrap_or_else(|e| e.into_inner());
+    match *lock {
+        Some(deadline) => deadline > now,
+        None => false,
+    }
+}
+
+/// Await any active global 429 cooldown, sleeping until the deadline expires.
+///
+/// Returns the duration waited (if any).
+pub(crate) async fn wait_global_cooldown() -> Duration {
+    let now = super::governor::gate_now();
+    let remaining = {
+        let lock = GLOBAL_COOLDOWN.read().unwrap_or_else(|e| e.into_inner());
+        match *lock {
+            Some(deadline) if deadline > now => Some(deadline.duration_since(now)),
+            _ => None,
+        }
+    };
+
+    if let Some(wait) = remaining {
+        #[cfg(test)]
+        super::governor::test_support::advance(wait.as_millis() as u64);
+
+        tokio::time::sleep(wait).await;
+        wait
+    } else {
+        Duration::ZERO
+    }
+}
+
+/// Reset the global 429 cooldown (used for testing).
+#[cfg(test)]
+pub(crate) fn reset_global_cooldown() {
+    let mut lock = GLOBAL_COOLDOWN.write().unwrap_or_else(|e| e.into_inner());
+    *lock = None;
+}
+
 /// Clamp the requested 429 window and sleep it, logging one standardized
 /// line (#1085 P1b R1 — this warn+sleep block was copy-pasted at four send
 /// sites with drifting wording). `what` names the send ("HTML send",
@@ -75,6 +164,7 @@ pub(crate) fn clamp_inline_wait(requested: Duration) -> (Duration, bool) {
 /// forensic, do not soften it: a window over the cap means the chat is
 /// flood-banned, not merely throttled (#1064).
 pub(crate) async fn wait_out(what: &str, window: Duration, extra: &str) {
+    record_global_429(window);
     let (wait, capped) = clamp_inline_wait(window);
     if capped {
         tracing::warn!(
@@ -90,5 +180,9 @@ pub(crate) async fn wait_out(what: &str, window: Duration, extra: &str) {
             wait.as_secs()
         );
     }
+
+    #[cfg(test)]
+    super::governor::test_support::advance(wait.as_millis() as u64);
+
     tokio::time::sleep(wait).await;
 }
