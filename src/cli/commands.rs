@@ -720,7 +720,7 @@ pub(crate) async fn cmd_run(
         // info builder: don't leak username, save tokens, keep cache
         // keys stable across machines.
         working_directory: Some(crate::brain::tools::error::collapse_home(
-            &std::env::current_dir().unwrap_or_default(),
+            &crate::utils::cwd::launch_cwd(),
         )),
     };
     // Feedback/performance digest stays out of the LLM context — it's a
@@ -851,7 +851,7 @@ pub(crate) async fn cmd_acp(config: &crate::config::Config, model: Option<String
         model: Some(provider.default_model().to_string()),
         provider: Some(provider.name().to_string()),
         working_directory: Some(crate::brain::tools::error::collapse_home(
-            &std::env::current_dir().unwrap_or_default(),
+            &crate::utils::cwd::launch_cwd(),
         )),
     };
     let mut system_brain = brain_loader.build_system_brain(Some(&runtime_info));
@@ -1075,7 +1075,7 @@ pub(crate) async fn cmd_agent_interactive(
         model: Some(provider.default_model().to_string()),
         provider: Some(provider.name().to_string()),
         working_directory: Some(crate::brain::tools::error::collapse_home(
-            &std::env::current_dir().unwrap_or_default(),
+            &crate::utils::cwd::launch_cwd(),
         )),
     };
     // Feedback/performance digest stays out of the LLM context — it's a
