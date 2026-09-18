@@ -915,11 +915,14 @@ pub(crate) fn run_verification_command(cmd: &str, working_dir: &std::path::Path)
     // cwd, i.e. wherever the binary was launched, so a plan in one repo was
     // gated on build results from another (#921). Every other tool resolves
     // this per session; this path shelled out around ToolExecutionContext.
-    let output = std::process::Command::new("sh")
-        .arg("-c")
-        .arg(cmd)
-        .current_dir(working_dir)
-        .output();
+    let output = {
+        use crate::utils::shell::PushShellCommand;
+        let (shell, shell_arg) = crate::utils::shell::shell_pair();
+        std::process::Command::new(shell)
+            .push_shell_command(shell_arg, cmd)
+            .current_dir(working_dir)
+            .output()
+    };
 
     match output {
         Ok(out) => {

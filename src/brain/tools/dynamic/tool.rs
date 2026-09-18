@@ -495,10 +495,13 @@ impl DynamicTool {
         }
         // Detach stdin from the parent TTY so mouse-capture bytes don't
         // leak into captured stdout (same TUI-bleed issue as bash.rs).
-        let output = tokio::process::Command::new("sh")
+        // Platform shell pair (`cmd /C` on Windows) — a hardcoded `sh -c`
+        // here made every dynamic shell tool fail to spawn on Windows.
+        use crate::utils::shell::PushShellCommand;
+        let (shell, shell_arg) = crate::utils::shell::shell_pair();
+        let output = tokio::process::Command::new(shell)
             .kill_on_drop(true)
-            .arg("-c")
-            .arg(&cmd)
+            .push_shell_command(shell_arg, &cmd)
             .env("OPENCRABS_PARAMS", &params_path)
             .current_dir(context.working_dir())
             .stdin(std::process::Stdio::null())
