@@ -354,3 +354,50 @@ async fn test_trigger_runner_captures_stderr() {
     assert!(res.stdout.trim().is_empty());
     assert!(TriggerCondition::ExitNonZero.should_fire(&res));
 }
+
+/// A trigger that outruns its timeout is an error, and its shell is killed.
+///
+/// The second half is the part worth testing: on timeout the `wait_with_output`
+/// future is dropped, and a tokio `Child` does not kill on drop by default, so
+/// without `kill_on_drop(true)` the shell keeps running unsupervised — once per
+/// schedule tick, for the life of the daemon. Asserted by looking for the
+/// process, with a unique marker in the command line, not by reading the
+/// builder.
+///
+/// The `; :` matters: with a single command `sh` execs it directly and the
+/// marker vanishes from the surviving process, which made the first version of
+/// this test pass with `kill_on_drop` removed. The trailing no-op keeps `sh`
+/// itself alive and carrying the marker.
+///
+/// Scope is the direct child. `kill_on_drop` kills the shell, not its
+/// descendants, so the inner `sleep` outlives it either way — kept short for
+/// that reason. Reaping the whole tree would need a process group.
+#[cfg(unix)]
+#[tokio::test]
+async fn test_timed_out_trigger_kills_its_shell() {
+    use std::time::Duration;
+
+    let marker = format!("opencrabs_trigger_orphan_probe_{}", std::process::id());
+    let runner = TriggerRunner::new(Duration::from_millis(200));
+
+    let err = runner
+        .run(&format!("sleep 5; : # {marker}"))
+        .await
+        .expect_err("a 5s sleep must outrun a 200ms timeout");
+    assert!(err.contains("timed out"), "unexpected error: {err}");
+
+    // The kill is delivered as the dropped child is reaped; give it a moment.
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let survivors = std::process::Command::new("pgrep")
+        .arg("-f")
+        .arg(&marker)
+        .output()
+        .expect("pgrep");
+    let found = String::from_utf8_lossy(&survivors.stdout);
+    assert!(
+        found.trim().is_empty(),
+        "timed-out trigger left its shell running (pids: {})",
+        found.trim()
+    );
+}
