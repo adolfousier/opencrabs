@@ -187,6 +187,69 @@ jobs:
           CXXFLAGS: -march=armv8-a+crypto
         run: cargo build --locked --profile ci --target ${{ matrix.target }} ${{ matrix.features }}
 
+  # ── Stage 2b: Windows build (gated on lint, parallel with build) ─────────
+  # Windows is where platform-specific regressions actually ship: the `sh -c`
+  # hardcode in four child-spawn sites lived for months with CI green,
+  # because tests run on Linux (where `sh` exists) and Windows was never
+  # built here (#627 — the old job chronically hit the 40m cap with
+  # --all-features and cold caches). Build-only, no tests: the point is to
+  # catch spawn-path and cfg(windows) compile breakage at PR time. The
+  # release recipe (CMake + NASM) compiles the llama-cpp-sys-2 C++ wrapper;
+  # `--profile ci` (thin LTO, 16 codegen units) plus rust-cache keep the
+  # wall-clock inside the cap that killed the original job.
+  windows-build:
+    name: Build (windows)
+    needs: [lint, audit]
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+    runs-on: windows-latest
+    # 60 min: a COLD windows-latest run needs ~48 (33 compile incl. llama's
+    # cmake C++ + ~15 for the thin-LTO link of a 4-vCPU runner); warm runs
+    # from rust-cache land near 10. The original 40 cap killed a build that
+    # was minutes from linking. Keep a cap so a true hang can't burn 360.
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Rust (from rust-toolchain.toml)
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+
+      # No `save-if` restriction: this job only runs on PRs and
+      # workflow_dispatch, so a `refs/heads/main`-only save-if never fires —
+      # the cache would stay cold forever. Saving in the run's own scope
+      # lets the 2nd..Nth push of a PR hit warm artifacts.
+      - uses: swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+
+      - name: Install CMake (Windows)
+        uses: lukka/get-cmake@latest
+
+      - name: Install NASM (Windows)
+        uses: ilammy/setup-nasm@v1
+
+      - name: Build
+        shell: bash
+        env:
+          AWS_LC_SYS_CMAKE_BUILDER: '1'
+        # NOTE: local DEBUG-profile Windows builds hit LNK2038: esaxx-rs
+        # 0.1.10's default `cpp` feature compiles /MT (build.rs
+        # .static_crt(true)) while cmake-rs injects "-MD" into
+        # CMAKE_C/CXX_FLAGS (it skips that injection only when the build
+        # script already defines those vars). RUSTFLAGS
+        # crt-static does NOT fix this — it flips the cc crates but never
+        # reaches cmake-rs. Verified workaround for local debug builds
+        # (llama-cpp-sys-2 forwards every CMAKE_* env var as a -D define):
+        #   CMAKE_C_FLAGS=/O2 /DNDEBUG /Ob2 -nologo -MT -Brepro -W0
+        #   CMAKE_CXX_FLAGS=/O2 /DNDEBUG /Ob2 -nologo -MT -Brepro -W0
+        #   CMAKE_C_FLAGS_RELEASE=... (same, VS generator reads these)
+        #   CMAKE_CXX_FLAGS_RELEASE=... (same)
+        # This job uses the release-shaped profile, where the linker
+        # doesn't pull the esaxx object — the shape that ships releases.
+        run: cargo build --locked --profile ci --target x86_64-pc-windows-msvc --all-features
+
   # ── Stage 3: Test on Linux (gated on lint + audit, parallel with build) ──
   # Tests run on Linux only — macOS gets build verification via
   # the `build` job above. ZeroClaw uses the same split because the
@@ -447,7 +510,9 @@ jobs:
   ci-gate:
     name: CI Required Gate
     if: always()
-    needs: [lint, build, test, audit]
+    # windows-build is in the required set on purpose: a compile break on
+    # Windows must block a PR, not just show up as a red advisory job.
+    needs: [lint, build, test, audit, windows-build]
     runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork) && 'ubuntu-latest' || 'self-hosted' }}
     steps:
       - name: Check results

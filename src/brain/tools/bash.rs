@@ -297,9 +297,12 @@ impl Tool for BashTool {
          as this can modify system state. \
          \n\nGITHUB OPERATIONS: use the `gh` CLI via this tool for \
          everything GitHub — issues, PRs, releases, comments, file \
-         fetches, repo / code search, workflow runs, checks. `gh` is \
-         preinstalled and authenticated; it returns structured JSON \
-         (--json flag) and respects --jq for filtering. Never reach \
+         fetches, repo / code search, workflow runs, checks. When \
+         installed, `gh` returns structured JSON (--json flag) and \
+         respects --jq for filtering. Check availability first with \
+         `gh --version` if unsure — it is NOT preinstalled on stock \
+         Windows or macOS, so fall back to `http_request` against the \
+         GitHub REST API when it is missing. Never reach \
          for `browser_navigate` to inspect or act on a GitHub URL. \
          Examples: `gh pr view 123 --json title,body,comments`, \
          `gh issue list --label bug --json number,title`, \
@@ -434,12 +437,9 @@ impl Tool for BashTool {
             return Ok(ToolResult::error(hint.to_string()));
         }
 
-        // Prepare command for the current platform
-        let (shell, shell_arg) = if cfg!(target_os = "windows") {
-            ("cmd", "/C")
-        } else {
-            ("sh", "-c")
-        };
+        // Prepare command for the current platform (one shared source of
+        // truth — the same pair every detached/child spawn uses)
+        let (shell, shell_arg) = crate::utils::shell::shell_pair();
 
         // Determine timeout: use input override if provided, else context default, cap at 600s
         let effective_timeout = input.timeout_secs.unwrap_or(context.timeout_secs).min(600);
@@ -577,13 +577,18 @@ impl Tool for BashTool {
                 input.command.replacen("sudo ", "sudo -S -p \"\" ", 1)
             };
 
+            // Tree-kill anchor: capture the child pid so the timeout arm can
+            // taskkill /T the whole tree, not just the shell process (H-02).
+            let sudo_child_pid = std::sync::atomic::AtomicU32::new(0);
             let command_future = async {
+                use crate::utils::shell::PushShellCommand;
                 let mut cmd = Command::new(shell);
                 // Reap the child if this future is dropped. A timeout drops it, and
                 // tokio leaves the process running unless told otherwise (#1046).
                 cmd.kill_on_drop(true);
-                cmd.arg(shell_arg)
-                    .arg(&sudo_cmd)
+                // Verbatim command line: .arg()'s MSVC escaping corrupts quoted
+                // commands once cmd.exe re-parses them (H-05).
+                cmd.push_shell_command(shell_arg, &sudo_cmd)
                     .current_dir(&working_dir)
                     .stdin(std::process::Stdio::piped())
                     .stdout(std::process::Stdio::piped())
@@ -591,6 +596,7 @@ impl Tool for BashTool {
                 apply_context_env(&mut cmd, context);
                 detach_session_pre_exec(&mut cmd);
                 let mut child = cmd.spawn()?;
+                sudo_child_pid.store(child.id().unwrap_or(0), std::sync::atomic::Ordering::Relaxed);
 
                 // Write password to stdin and close it
                 if let Some(mut stdin) = child.stdin.take() {
@@ -612,6 +618,11 @@ impl Tool for BashTool {
                     )));
                 }
                 Err(_) => {
+                    // kill_on_drop reaped the shell; the grandchildren (the
+                    // actual work processes) survive it — sweep the tree (H-02).
+                    crate::utils::shell::kill_process_tree(
+                        sudo_child_pid.load(std::sync::atomic::Ordering::Relaxed),
+                    );
                     return Err(ToolError::Timeout(effective_timeout));
                 }
             }
@@ -622,18 +633,25 @@ impl Tool for BashTool {
             // BatchMode=yes first (key-only auth) and fall back to the
             // password callback + SSH_ASKPASS if the probe rejects auth.
             let probe_cmd = inject_batch_mode(&input.command);
+            // Tree-kill anchor for the timeout arm (H-02).
+            let probe_child_pid = std::sync::atomic::AtomicU32::new(0);
             let probe_future = async {
+                use crate::utils::shell::PushShellCommand;
                 let mut cmd = Command::new(shell);
                 // Reap the child if this future is dropped. A timeout drops it, and
                 // tokio leaves the process running unless told otherwise (#1046).
                 cmd.kill_on_drop(true);
-                cmd.arg(shell_arg)
-                    .arg(&probe_cmd)
+                // Verbatim command line (H-05).
+                cmd.push_shell_command(shell_arg, &probe_cmd)
                     .current_dir(&working_dir)
-                    .stdin(std::process::Stdio::null());
+                    .stdin(std::process::Stdio::null())
+                    .stdout(std::process::Stdio::piped())
+                    .stderr(std::process::Stdio::piped());
                 apply_context_env(&mut cmd, context);
                 detach_session_pre_exec(&mut cmd);
-                cmd.output().await
+                let child = cmd.spawn()?;
+                probe_child_pid.store(child.id().unwrap_or(0), std::sync::atomic::Ordering::Relaxed);
+                child.wait_with_output().await
             };
 
             let probe_output =
@@ -646,6 +664,10 @@ impl Tool for BashTool {
                         )));
                     }
                     Err(_) => {
+                        // Sweep the orphaned process tree (H-02).
+                        crate::utils::shell::kill_process_tree(
+                            probe_child_pid.load(std::sync::atomic::Ordering::Relaxed),
+                        );
                         return Err(ToolError::Timeout(effective_timeout));
                     }
                 };
@@ -690,15 +712,20 @@ impl Tool for BashTool {
                     }
                 };
 
+                // Tree-kill anchor for the timeout arm (H-02).
+                let retry_child_pid = std::sync::atomic::AtomicU32::new(0);
                 let retry_future = async {
+                    use crate::utils::shell::PushShellCommand;
                     let mut cmd = Command::new(shell);
                     // Reap the child if this future is dropped. A timeout drops it, and
                     // tokio leaves the process running unless told otherwise (#1046).
                     cmd.kill_on_drop(true);
-                    cmd.arg(shell_arg)
-                        .arg(&input.command)
+                    // Verbatim command line (H-05).
+                    cmd.push_shell_command(shell_arg, &input.command)
                         .current_dir(&working_dir)
                         .stdin(std::process::Stdio::null())
+                        .stdout(std::process::Stdio::piped())
+                        .stderr(std::process::Stdio::piped())
                         .env("SSH_ASKPASS", askpass.script_path())
                         .env("SSH_ASKPASS_REQUIRE", "force")
                         // SSH_ASKPASS_REQUIRE=force on modern OpenSSH ignores
@@ -707,7 +734,9 @@ impl Tool for BashTool {
                         .env("DISPLAY", ":0");
                     apply_context_env(&mut cmd, context);
                     detach_session_pre_exec(&mut cmd);
-                    cmd.output().await
+                    let child = cmd.spawn()?;
+                    retry_child_pid.store(child.id().unwrap_or(0), std::sync::atomic::Ordering::Relaxed);
+                    child.wait_with_output().await
                 };
 
                 match timeout(Duration::from_secs(effective_timeout), retry_future).await {
@@ -716,6 +745,10 @@ impl Tool for BashTool {
                         return Ok(ToolResult::error(format!("SSH retry failed: {}", e)));
                     }
                     Err(_) => {
+                        // Sweep the orphaned process tree (H-02).
+                        crate::utils::shell::kill_process_tree(
+                            retry_child_pid.load(std::sync::atomic::Ordering::Relaxed),
+                        );
                         return Err(ToolError::Timeout(effective_timeout));
                     }
                 }
@@ -762,18 +795,26 @@ impl Tool for BashTool {
             #[cfg(not(feature = "rtk"))]
             let execution_command = input.command.clone();
 
+            // Tree-kill anchor for the timeout arm (H-02).
+            let exec_child_pid = std::sync::atomic::AtomicU32::new(0);
             let command_future = async {
+                use crate::utils::shell::PushShellCommand;
                 let mut cmd = Command::new(shell);
                 // Reap the child if this future is dropped. A timeout drops it, and
                 // tokio leaves the process running unless told otherwise (#1046).
                 cmd.kill_on_drop(true);
-                cmd.arg(shell_arg)
-                    .arg(&execution_command)
+                // Verbatim command line (H-05). This is the main execution path:
+                // every quoted command the model sends flows through here.
+                cmd.push_shell_command(shell_arg, &execution_command)
                     .current_dir(&working_dir)
-                    .stdin(std::process::Stdio::null());
+                    .stdin(std::process::Stdio::null())
+                    .stdout(std::process::Stdio::piped())
+                    .stderr(std::process::Stdio::piped());
                 apply_context_env(&mut cmd, context);
                 detach_session_pre_exec(&mut cmd);
-                cmd.output().await
+                let child = cmd.spawn()?;
+                exec_child_pid.store(child.id().unwrap_or(0), std::sync::atomic::Ordering::Relaxed);
+                child.wait_with_output().await
             };
 
             match timeout(Duration::from_secs(effective_timeout), command_future).await {
@@ -785,6 +826,12 @@ impl Tool for BashTool {
                     )));
                 }
                 Err(_) => {
+                    // kill_on_drop reaped cmd.exe; cargo/cmake/clang-style
+                    // grandchildren survive it and keep holding file locks
+                    // (target/, .cargo cache) — sweep the tree (H-02).
+                    crate::utils::shell::kill_process_tree(
+                        exec_child_pid.load(std::sync::atomic::Ordering::Relaxed),
+                    );
                     return Err(ToolError::Timeout(effective_timeout));
                 }
             }
@@ -893,6 +940,10 @@ impl Tool for BashTool {
 /// line matches; that is a successful search with zero results, not an error
 /// (exit 2+ / stderr output is a genuine error). Counting these as failures
 /// inflated the bash failure rate with noise (#663).
+///
+/// On Windows the same contract holds for `findstr`: exit 1 with empty
+/// stderr is "no lines matched", and counting it as a tool failure made
+/// every no-match findstr a phantom bash failure in the ledger.
 pub(crate) fn is_search_no_match(command: &str, exit_code: i32, stderr: &str) -> bool {
     if exit_code != 1 || !stderr.trim().is_empty() {
         return false;
@@ -901,7 +952,7 @@ pub(crate) fn is_search_no_match(command: &str, exit_code: i32, stderr: &str) ->
     command.split(['|', ';', '&']).any(|segment| {
         let seg = segment.trim();
         let first = seg.split_whitespace().next().unwrap_or("");
-        matches!(first, "grep" | "egrep" | "fgrep" | "rg") || seg.starts_with("git grep")
+        matches!(first, "grep" | "egrep" | "fgrep" | "rg" | "findstr") || seg.starts_with("git grep")
     })
 }
 

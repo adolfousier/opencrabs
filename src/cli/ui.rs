@@ -517,7 +517,7 @@ async fn cmd_chat_inner(
     crate::rtk::warm_up();
 
     // Get working directory
-    let working_directory = std::env::current_dir().unwrap_or_default();
+    let working_directory = crate::utils::cwd::launch_cwd();
 
     // Build dynamic system brain from workspace files
     let brain_path = BrainLoader::resolve_path();

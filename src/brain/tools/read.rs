@@ -9,7 +9,6 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::fs;
-use tokio::io::{AsyncBufReadExt, BufReader};
 
 /// Maximum file size to read without warning (10MB)
 const LARGE_FILE_THRESHOLD: u64 = 10 * 1024 * 1024;
@@ -189,8 +188,13 @@ impl Tool for ReadTool {
             self.read_with_buffer(&path, input.start_line, input.line_count, is_large_file)
                 .await?
         } else {
-            // Small file: read entire contents directly
-            let contents = fs::read_to_string(&path).await.map_err(ToolError::Io)?;
+            // Small file: read entire contents. Byte-level read + BOM-aware
+            // decode: PowerShell `>` redirects and native Windows logs are
+            // routinely UTF-16, and stray binary must not hard-fail a read
+            // with "stream did not contain valid UTF-8" (the top read
+            // failure class on the Windows ledger).
+            let raw = fs::read(&path).await.map_err(ToolError::Io)?;
+            let (contents, encoding_warning) = decode_file_bytes(&raw);
             let line_count = contents.lines().count();
             // Remember what this session saw, so a later whole-file write
             // can tell its own output from another agent's change (#954).
@@ -234,7 +238,11 @@ impl Tool for ReadTool {
                     line_count,
                     emitted
                 );
-                (out, line_count, Some(warning), clamped)
+                let merged = match encoding_warning {
+                    Some(w) => format!("{w} {warning}"),
+                    None => warning,
+                };
+                (out, line_count, Some(merged), clamped)
             } else {
                 let mut clamped = 0usize;
                 let mut out = String::new();
@@ -248,7 +256,7 @@ impl Tool for ReadTool {
                     }
                     out.push_str(&cl);
                 }
-                (out, line_count, None, clamped)
+                (out, line_count, encoding_warning, clamped)
             }
         };
 
@@ -367,8 +375,10 @@ impl ReadTool {
         is_large_file: bool,
     ) -> Result<(String, usize, Option<String>, usize)> {
         let file = fs::File::open(path).await.map_err(ToolError::Io)?;
-        let reader = BufReader::new(file);
-        let mut lines = reader.lines();
+        // Line source that never hard-fails on encoding: plain files stream
+        // lossily per line; UTF-16 (BOM) files decode in memory when small
+        // enough. See LineSource for why.
+        let (mut lines, decode_note) = Self::line_source(file).await.map_err(ToolError::Io)?;
 
         let start = start_line.unwrap_or(0);
         let max_lines = line_count.unwrap_or(MAX_LINES).min(MAX_LINES);
@@ -465,7 +475,175 @@ impl ReadTool {
             None
         };
 
+        let warning = match (decode_note, warning) {
+            (Some(note), Some(w)) => Some(format!("{note} {w}")),
+            (Some(note), None) => Some(note),
+            (None, w) => w,
+        };
+
         Ok((output, total_lines, warning, clamped_lines))
+    }
+
+    /// Line source for [`read_with_buffer`] that never hard-fails on
+    /// encoding. UTF-16 (BOM) files decode in memory; anything else streams
+    /// raw bytes and converts each line lossily, so a stray invalid byte
+    /// degrades to U+FFFD instead of killing the read with
+    /// "stream did not contain valid UTF-8" — the top Windows read failure
+    /// class in the ledger.
+    async fn line_source(mut file: fs::File) -> std::io::Result<(LineSource, Option<String>)> {
+        use tokio::io::{AsyncReadExt, AsyncSeekExt};
+
+        // Sniff a UTF-16 BOM without committing: read two bytes, then rewind
+        // for the streaming path.
+        let mut bom = [0u8; 2];
+        let mut got = 0usize;
+        while got < 2 {
+            let n = file.read(&mut bom[got..]).await?;
+            if n == 0 {
+                break;
+            }
+            got += n;
+        }
+        if got == 2 && (bom == [0xFF, 0xFE] || bom == [0xFE, 0xFF]) {
+            let le = bom == [0xFF, 0xFE];
+            let mut rest = Vec::new();
+            file.read_to_end(&mut rest).await?;
+            let units: Vec<u16> = rest
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .map(|c| {
+                    if le {
+                        u16::from_le_bytes(*c)
+                    } else {
+                        u16::from_be_bytes(*c)
+                    }
+                })
+                .collect();
+            let text = String::from_utf16_lossy(&units);
+            let note = format!(
+                "file was UTF-16{} with BOM (typical PowerShell `>` output); decoded to UTF-8",
+                if le { "LE" } else { "BE" }
+            );
+            let lines: Vec<String> = text.lines().map(str::to_string).collect();
+            Ok((
+                LineSource::InMemory {
+                    lines: lines.into_iter(),
+                },
+                Some(note),
+            ))
+        } else {
+            file.seek(std::io::SeekFrom::Start(0)).await?;
+            Ok((
+                LineSource::LossyBytes {
+                    reader: tokio::io::BufReader::new(file),
+                    first: true,
+                },
+                None,
+            ))
+        }
+    }
+}
+
+/// Byte-oriented line reader that cannot fail on encoding. Streaming path
+/// reads raw bytes per line (invalid UTF-8 becomes U+FFFD, not an error);
+/// the in-memory path serves pre-decoded UTF-16 content.
+enum LineSource {
+    LossyBytes {
+        reader: tokio::io::BufReader<fs::File>,
+        first: bool,
+    },
+    InMemory {
+        lines: std::vec::IntoIter<String>,
+    },
+}
+
+impl LineSource {
+    async fn next_line(&mut self) -> std::io::Result<Option<String>> {
+        match self {
+            LineSource::InMemory { lines } => Ok(lines.next()),
+            LineSource::LossyBytes { reader, first } => {
+                use tokio::io::AsyncBufReadExt;
+                let mut buf = Vec::new();
+                let n = reader.read_until(b'\n', &mut buf).await?;
+                if n == 0 {
+                    return Ok(None);
+                }
+                if *first {
+                    *first = false;
+                    // A UTF-8 BOM on the first line would otherwise surface as
+                    // invisible characters in the first output line.
+                    if buf.starts_with(&[0xEF, 0xBB, 0xBF]) {
+                        buf.drain(0..3);
+                    }
+                }
+                if buf.last() == Some(&b'\n') {
+                    buf.pop();
+                }
+                if buf.last() == Some(&b'\r') {
+                    buf.pop();
+                }
+                Ok(Some(String::from_utf8_lossy(&buf).into_owned()))
+            }
+        }
+    }
+}
+
+/// Decode a whole small file with BOM awareness (the `read_file` small-file
+/// path). Returns the text plus a human-readable note when a transform was
+/// applied, so the model learns what it is looking at instead of guessing.
+fn decode_file_bytes(raw: &[u8]) -> (String, Option<String>) {
+    if raw.starts_with(&[0xFF, 0xFE]) || raw.starts_with(&[0xFE, 0xFF]) {
+        let le = raw[0] == 0xFF;
+        let units: Vec<u16> = raw[2..]
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|c| {
+                if le {
+                    u16::from_le_bytes(*c)
+                } else {
+                    u16::from_be_bytes(*c)
+                }
+            })
+            .collect();
+        let text = String::from_utf16_lossy(&units);
+        (
+            text,
+            Some(format!(
+                "file was UTF-16{} with BOM (typical PowerShell `>` output); decoded to UTF-8",
+                if le { "LE" } else { "BE" }
+            )),
+        )
+    } else if raw.starts_with(&[0xEF, 0xBB, 0xBF]) {
+        (
+            String::from_utf8_lossy(&raw[3..]).into_owned(),
+            Some("file had a UTF-8 BOM; stripped".to_string()),
+        )
+    } else {
+        let valid = std::str::from_utf8(raw).is_ok();
+        let text = String::from_utf8_lossy(raw).into_owned();
+        if valid {
+            (text, None)
+        } else if raw.contains(&0u8) {
+            (
+                text,
+                Some(
+                    "file looks binary (contains NUL bytes) and is not valid UTF-8; decoded \
+                     lossily — read_file no longer hard-fails here"
+                        .to_string(),
+                ),
+            )
+        } else {
+            (
+                text,
+                Some(
+                    "file contains invalid UTF-8; invalid bytes were replaced — read_file \
+                     no longer hard-fails here"
+                        .to_string(),
+                ),
+            )
+        }
     }
 }
 

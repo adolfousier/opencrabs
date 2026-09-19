@@ -157,7 +157,7 @@ impl ToolExecutionContext {
     pub fn new(session_id: Uuid) -> Self {
         Self {
             session_id,
-            working_directory: std::env::current_dir().unwrap_or_default(),
+            working_directory: crate::utils::cwd::launch_cwd(),
             env_vars: HashMap::new(),
             auto_approve: false,
             timeout_secs: 120,
