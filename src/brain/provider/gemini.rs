@@ -31,7 +31,7 @@ use std::time::Duration;
 use std::sync::Arc;
 
 const GEMINI_BASE_URL: &str = "https://generativelanguage.googleapis.com/v1beta";
-const DEFAULT_TIMEOUT: Duration = Duration::from_secs(300);
+pub(crate) const DEFAULT_TIMEOUT: Duration = Duration::from_secs(300);
 const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const DEFAULT_POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(90);
 // TCP keepalive: OS-level probes detect silent connection drops without
