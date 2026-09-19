@@ -650,6 +650,7 @@ pub mod tui_plan_tests_test;
 pub mod tui_process_commands_test;
 pub mod tui_render_utils_test;
 pub mod tui_session_switch_state_test;
+pub mod tui_theme_background_test;
 pub mod tui_theme_picker_test;
 pub mod tui_theme_presets_test;
 pub mod tui_user_themes_test;

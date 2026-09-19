@@ -219,6 +219,22 @@ fn set_and_reset_switch_active_theme() {
     assert_eq!(theme::role(Role::SurfacePanel), rgb(0xFDF6E3));
     theme::reset();
     assert_eq!(theme::role(Role::Accent), palette::ORANGE);
+
+    // The canvas rides the same active slot (#1634). Asserted here rather
+    // than in its own test on purpose: `set` mutates process-global state,
+    // so a second test doing it would race this one under the parallel
+    // harness. One mutator, one place.
+    assert_eq!(
+        theme::background(),
+        None,
+        "crab-dark declares no canvas, so the terminal's own shows through"
+    );
+    theme::set(&DRACULA);
+    assert_eq!(theme::background(), Some(rgb(0x282A36)));
+    theme::set(&SOLARIZED_LIGHT);
+    assert_eq!(theme::background(), Some(rgb(0xFDF6E3)));
+    theme::reset();
+    assert_eq!(theme::background(), None);
 }
 
 /// F1: RGB→ANSI-256 quantizer — the degraded-tier backbone.
