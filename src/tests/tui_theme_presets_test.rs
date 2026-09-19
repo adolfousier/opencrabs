@@ -235,6 +235,42 @@ fn set_and_reset_switch_active_theme() {
     assert_eq!(theme::background(), Some(rgb(0xFDF6E3)));
     theme::reset();
     assert_eq!(theme::background(), None);
+
+    // Body prose follows the active palette (#1634). Folded over a bare
+    // `Style::default()` this span shipped `fg: None` and rendered in the
+    // terminal's own foreground under every theme. Lives here for the same
+    // reason the canvas assertions do: one mutator of the global slot.
+    let prose = |markdown: &str| {
+        crate::tui::markdown::parse_markdown(markdown, 80)
+            .into_iter()
+            .flat_map(|l| l.spans)
+            .find(|s| s.content.contains("ordinary"))
+            .expect("prose span")
+            .style
+            .fg
+    };
+    theme::set(&DRACULA);
+    assert_eq!(prose("ordinary prose"), Some(rgb(0xF8F8F2)));
+    theme::set(&SOLARIZED_LIGHT);
+    assert_eq!(prose("ordinary prose"), Some(rgb(0x657B83)));
+    theme::reset();
+    assert_eq!(prose("ordinary prose"), Some(palette::TEXT_PRIMARY));
+
+    // Every switch bumps the generation the render cache stamps itself with.
+    // Only monotonicity is asserted: the counter is process-wide, so an
+    // absolute value would depend on how many tests ran before this one.
+    let before = theme::generation();
+    theme::set(&DRACULA);
+    let after_set = theme::generation();
+    assert!(
+        after_set > before,
+        "set did not bump the generation, so the render cache keeps stale colours"
+    );
+    theme::reset();
+    assert!(
+        theme::generation() > after_set,
+        "reset did not bump the generation"
+    );
 }
 
 /// F1: RGB→ANSI-256 quantizer — the degraded-tier backbone.
