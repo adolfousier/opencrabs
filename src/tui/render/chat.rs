@@ -489,6 +489,16 @@ struct TurnHeader {
 
 /// Render the chat messages
 pub(super) fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
+    // A theme switch invalidates every cached line: the cache holds spans whose
+    // colours are already resolved, so `/theme` would otherwise repaint only the
+    // chrome and leave the transcript on the previous palette (#1634).
+    let theme_gen = theme::generation();
+    if app.render_cache_theme_gen != theme_gen {
+        app.render_cache.clear();
+        app.streaming_render_cache = None;
+        app.render_cache_theme_gen = theme_gen;
+    }
+
     let mut lines: Vec<Line> = Vec::new();
     // Track which message index each rendered line belongs to (for click-to-copy)
     let mut line_to_msg: Vec<Option<usize>> = Vec::new();

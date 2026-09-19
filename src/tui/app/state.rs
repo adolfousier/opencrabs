@@ -776,8 +776,18 @@ pub struct App {
     pub resume_session_id: Option<Uuid>,
 
     /// Cache of rendered lines per message to avoid re-parsing markdown every frame.
-    /// Key: (message_id, content_width). Invalidated on terminal resize.
+    /// Key: (message_id, content_width). Invalidated on terminal resize, and on
+    /// a theme switch via [`render_cache_theme_gen`].
     pub render_cache: HashMap<(Uuid, u16), Vec<Line<'static>>>,
+
+    /// `theme::generation()` the cached lines above were styled under.
+    ///
+    /// The cache stores `Line`s whose spans already carry resolved colours, so
+    /// a live `/theme` switch cannot reach them: the widgets that call
+    /// `theme::role` every frame repaint, every already-rendered message keeps
+    /// the old palette. `render_chat` compares this against the live
+    /// generation and drops both caches when it moves (#1634).
+    pub render_cache_theme_gen: u64,
 
     /// Mapping from rendered line index → message index (for click-to-copy).
     /// Updated each frame by render_chat.
@@ -1025,6 +1035,7 @@ impl App {
             update_available_version: None,
             resume_session_id: None,
             render_cache: HashMap::new(),
+            render_cache_theme_gen: crate::tui::render::theme::generation(),
             chat_line_to_msg: Vec::new(),
             chat_line_to_turn: Vec::new(),
             turn_expanded: std::collections::HashMap::new(),

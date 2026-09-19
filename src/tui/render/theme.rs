@@ -39,6 +39,7 @@ pub fn configured_name(raw: &str) -> &str {
         .unwrap_or(trimmed)
 }
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{OnceLock, RwLock};
 
 use ratatui::style::Color;
@@ -472,6 +473,15 @@ pub static CRAB_DARK: Theme = Theme {
 /// const-eval constraints on the lock's initializer.
 static ACTIVE: RwLock<Option<&'static Theme>> = RwLock::new(None);
 
+/// Bumped by every [`set`] and [`reset`]. Consumers that cache pre-styled
+/// output (the chat render cache holds `Line`s whose spans already carry
+/// resolved colours) compare this against the generation they cached under
+/// and drop their entries when it moves. Without it a live `/theme` switch
+/// repaints only the widgets that call [`role`] every frame, and every
+/// already-rendered message keeps the previous theme's colours until an
+/// unrelated cache-busting event such as a terminal resize (#1634).
+static GENERATION: AtomicU64 = AtomicU64::new(0);
+
 /// Truecolor capability cache. `None` means not yet probed; defaults
 /// to true on first `role()` call if `init_capability()` wasn't invoked.
 static TRUECOLOR: OnceLock<bool> = OnceLock::new();
@@ -503,11 +513,13 @@ pub fn active() -> &'static Theme {
 /// name lives in `presets::by_name`).
 pub fn set(theme: &'static Theme) {
     *ACTIVE.write().unwrap_or_else(|e| e.into_inner()) = Some(theme);
+    GENERATION.fetch_add(1, Ordering::Relaxed);
 }
 
 /// Return to the default theme.
 pub fn reset() {
     *ACTIVE.write().unwrap_or_else(|e| e.into_inner()) = None;
+    GENERATION.fetch_add(1, Ordering::Relaxed);
 }
 
 /// Resolve a role against the active theme. The one call render sites
@@ -536,4 +548,11 @@ pub fn background() -> Option<Color> {
     } else {
         theme.colors.ansi.background.map(Color::Indexed)
     }
+}
+
+/// Monotonic counter of theme switches. Holders of pre-styled output cache
+/// the value they rendered under and invalidate when it changes; see
+/// [`GENERATION`].
+pub fn generation() -> u64 {
+    GENERATION.load(Ordering::Relaxed)
 }
