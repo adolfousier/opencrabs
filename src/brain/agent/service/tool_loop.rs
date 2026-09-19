@@ -3869,23 +3869,51 @@ impl AgentService {
             // added tool tokens and dropped the 20k system prompt baseline,
             // producing a ~20k undercount that made the UI ctx counter
             // display 7k when the real prompt was 23k+ (post-compaction).
-            let call_input_tokens = if response.usage.input_tokens > 0 {
-                // Real-time data only: use whatever the provider
-                // reported. No local-tokenizer calibration, no learned
-                // ratio. The ctx footer reads `response.context_tokens`
-                // downstream and shows the user the exact same number
-                // the API just told us about.
-                response.usage.input_tokens
-            } else {
+            //
+            // Two different numbers come out of one usage report and they must
+            // not be conflated (#1636):
+            //
+            //   * `call_input_tokens` is the BILLING input, non-cached only,
+            //     because `calculate_cost_with_cache` charges `cache_read` and
+            //     `cache_creation` on top of it.
+            //   * `call_context_tokens` is the PROMPT SIZE the model actually
+            //     saw, cached prefix included, which is what the ctx meter
+            //     displays and what the compaction budget anchors on.
+            //
+            // On a caching provider these differ by two orders of magnitude: a
+            // 98% hit rate makes the non-cached delta a few hundred tokens
+            // against a 35k prompt. Anchoring the budget on the billing figure
+            // would hold the context at ~2% forever and compaction would never
+            // fire.
+            //
+            // The "did the provider report anything" guard is `context_input()`,
+            // not `input_tokens`: a fully cached prefix is a legitimate zero in
+            // the billing field, and that is not the same as silence.
+            let reported_usage = response.usage.context_input() > 0;
+            let tiktoken_estimate = || {
                 let baseline = self.base_context_tokens();
                 let estimate = context.token_count as u32 + baseline;
                 tracing::debug!(
-                    "Provider reported 0 input tokens, using tiktoken estimate: {} ({} msg + {} baseline (system + tool schemas))",
+                    "Provider reported no usage, using tiktoken estimate: {} ({} msg + {} baseline (system + tool schemas))",
                     estimate,
                     context.token_count,
                     baseline
                 );
                 estimate
+            };
+            let call_input_tokens = if reported_usage {
+                response.usage.input_tokens
+            } else {
+                tiktoken_estimate()
+            };
+            // Real-time data only: whatever the provider reported, no
+            // local-tokenizer calibration and no learned ratio. The ctx footer
+            // reads `response.context_tokens` downstream and shows the user the
+            // exact same prompt size the API just told us about.
+            let call_context_tokens = if reported_usage {
+                response.usage.context_input()
+            } else {
+                tiktoken_estimate()
             };
             // Anchor the context budget on what the provider counted, so
             // compaction measures the request that will actually be sent
@@ -3894,17 +3922,17 @@ impl AgentService {
             // over-reporting check the ctx counter uses: an endpoint adding a
             // flat overhead to every call must not drag the budget up and
             // compact a context that was never close to full.
-            if response.usage.input_tokens > 0
+            if reported_usage
                 && !is_implausible_token_report(
                     context.token_count,
                     self.base_context_tokens() as usize,
-                    call_input_tokens as usize,
+                    call_context_tokens as usize,
                 )
             {
-                context.record_provider_reported_tokens(call_input_tokens as usize);
+                context.record_provider_reported_tokens(call_context_tokens as usize);
             }
             total_input_tokens += call_input_tokens;
-            last_iter_input_tokens = call_input_tokens;
+            last_iter_input_tokens = call_context_tokens;
             total_output_tokens += response.usage.output_tokens;
             if let Some(secs) = response.streaming_active_secs {
                 total_streaming_active_secs += secs;
@@ -3976,9 +4004,12 @@ impl AgentService {
                     response.usage.context_input(),
                 );
             } else {
-                let api_input = response.usage.input_tokens as usize;
-                // API input_tokens includes system prompt + tool schemas + messages.
-                // Subtract both to get the real message-only token count.
+                // The full prompt the API saw: system prompt + tool schemas +
+                // messages, cached prefix included. `input_tokens` alone is the
+                // non-cached remainder and would calibrate the context down to
+                // the last uncached block (#1636).
+                let api_input = response.usage.context_input() as usize;
+                // Subtract the overhead to get the real message-only token count.
                 let overhead = self.base_context_tokens() as usize;
                 let real_message_tokens = api_input.saturating_sub(overhead);
                 let tool_tokens = self.actual_tool_schema_tokens();
