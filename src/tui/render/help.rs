@@ -22,8 +22,8 @@ pub(super) fn render_help(f: &mut Frame, app: &mut App, area: Rect) {
                 format!(" {:<14}", key),
                 Style::default().fg(key_color).add_modifier(Modifier::BOLD),
             ),
-            Span::styled(" ", Style::default().fg(Color::DarkGray)),
-            Span::styled(desc, Style::default().fg(Color::Reset)),
+            Span::styled(" ", Style::default().fg(theme::role(Role::GrayDim))),
+            Span::styled(desc, Style::default().fg(theme::role(Role::TextPrimary))),
         ])
     }
 
@@ -43,7 +43,7 @@ pub(super) fn render_help(f: &mut Frame, app: &mut App, area: Rect) {
         .split(area);
 
     // ── LEFT COLUMN ──
-    let cyan = Color::Cyan;
+    let cyan = theme::role(Role::AccentTeal);
 
     let version_line = format!("v{}", env!("CARGO_PKG_VERSION"));
     // Session-aware: the global name lies when the loaded session runs a
@@ -131,24 +131,24 @@ pub(super) fn render_help(f: &mut Frame, app: &mut App, area: Rect) {
             Span::styled(
                 " [↑↓ PgUp/Dn]",
                 Style::default()
-                    .fg(Color::Cyan)
+                    .fg(theme::role(Role::AccentTeal))
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled(" Scroll  ", Style::default().fg(Color::DarkGray)),
+            Span::styled(" Scroll  ", Style::default().fg(theme::role(Role::GrayDim))),
             Span::styled(
                 "[/]",
                 Style::default()
-                    .fg(Color::Cyan)
+                    .fg(theme::role(Role::AccentTeal))
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled(" Search  ", Style::default().fg(Color::DarkGray)),
+            Span::styled(" Search  ", Style::default().fg(theme::role(Role::GrayDim))),
             Span::styled(
                 "[Esc]",
                 Style::default()
-                    .fg(Color::Cyan)
+                    .fg(theme::role(Role::AccentTeal))
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled(" Back", Style::default().fg(Color::DarkGray)),
+            Span::styled(" Back", Style::default().fg(theme::role(Role::GrayDim))),
         ]),
         Line::from(""),
         Line::from(vec![
@@ -156,12 +156,12 @@ pub(super) fn render_help(f: &mut Frame, app: &mut App, area: Rect) {
             Span::styled(
                 "docs.opencrabs.com",
                 Style::default()
-                    .fg(Color::Cyan)
+                    .fg(theme::role(Role::AccentTeal))
                     .add_modifier(Modifier::UNDERLINED),
             ),
             Span::styled(
                 "  Official documentation",
-                Style::default().fg(Color::DarkGray),
+                Style::default().fg(theme::role(Role::GrayDim)),
             ),
         ]),
         Line::from(""),
@@ -218,44 +218,53 @@ pub(super) fn render_help(f: &mut Frame, app: &mut App, area: Rect) {
         Line::from(""),
         section_header("FEATURES"),
         Line::from(vec![
-            Span::styled(" ✓ ", Style::default().fg(Color::Cyan)),
+            Span::styled(" ✓ ", Style::default().fg(theme::role(Role::AccentTeal))),
             Span::styled(
                 "Markdown & Syntax Highlighting",
-                Style::default().fg(Color::Reset),
+                Style::default().fg(theme::role(Role::TextPrimary)),
             ),
         ]),
         Line::from(vec![
-            Span::styled(" ✓ ", Style::default().fg(Color::Cyan)),
+            Span::styled(" ✓ ", Style::default().fg(theme::role(Role::AccentTeal))),
             Span::styled(
                 "Multi-line Input & Streaming",
-                Style::default().fg(Color::Reset),
+                Style::default().fg(theme::role(Role::TextPrimary)),
             ),
         ]),
         Line::from(vec![
-            Span::styled(" ✓ ", Style::default().fg(Color::Cyan)),
+            Span::styled(" ✓ ", Style::default().fg(theme::role(Role::AccentTeal))),
             Span::styled(
                 "Session Management & History",
-                Style::default().fg(Color::Reset),
+                Style::default().fg(theme::role(Role::TextPrimary)),
             ),
         ]),
         Line::from(vec![
-            Span::styled(" ✓ ", Style::default().fg(Color::Cyan)),
-            Span::styled("Token & Cost Tracking", Style::default().fg(Color::Reset)),
+            Span::styled(" ✓ ", Style::default().fg(theme::role(Role::AccentTeal))),
+            Span::styled(
+                "Token & Cost Tracking",
+                Style::default().fg(theme::role(Role::TextPrimary)),
+            ),
         ]),
         Line::from(vec![
-            Span::styled(" ✓ ", Style::default().fg(Color::Cyan)),
+            Span::styled(" ✓ ", Style::default().fg(theme::role(Role::AccentTeal))),
             Span::styled(
                 "Inline Tool Approval (3 policies)",
-                Style::default().fg(Color::Reset),
+                Style::default().fg(theme::role(Role::TextPrimary)),
             ),
         ]),
         Line::from(vec![
-            Span::styled(" ✓ ", Style::default().fg(Color::Cyan)),
-            Span::styled("Session File Tracking", Style::default().fg(Color::Reset)),
+            Span::styled(" ✓ ", Style::default().fg(theme::role(Role::AccentTeal))),
+            Span::styled(
+                "Session File Tracking",
+                Style::default().fg(theme::role(Role::TextPrimary)),
+            ),
         ]),
         Line::from(vec![
-            Span::styled(" ✓ ", Style::default().fg(Color::Cyan)),
-            Span::styled("Project Organization", Style::default().fg(Color::Reset)),
+            Span::styled(" ✓ ", Style::default().fg(theme::role(Role::AccentTeal))),
+            Span::styled(
+                "Project Organization",
+                Style::default().fg(theme::role(Role::TextPrimary)),
+            ),
         ]),
         Line::from(""),
     ];
@@ -324,15 +333,15 @@ pub(super) fn render_settings(f: &mut Frame, app: &mut App, area: Rect) {
                 format!("   {:<20}", key),
                 Style::default().fg(theme::role(Role::Accent)),
             ),
-            Span::styled(val, Style::default().fg(Color::Reset)),
+            Span::styled(val, Style::default().fg(theme::role(Role::TextPrimary))),
         ])
     }
 
     fn status_dot<'a>(label: &'a str, enabled: bool) -> Line<'a> {
         let (dot, color) = if enabled {
-            ("●", Color::Cyan)
+            ("●", theme::role(Role::AccentTeal))
         } else {
-            ("○", Color::DarkGray)
+            ("○", theme::role(Role::GrayDim))
         };
         Line::from(vec![
             Span::styled(
@@ -342,7 +351,7 @@ pub(super) fn render_settings(f: &mut Frame, app: &mut App, area: Rect) {
             Span::styled(dot, Style::default().fg(color)),
             Span::styled(
                 if enabled { " enabled" } else { " disabled" },
-                Style::default().fg(Color::DarkGray),
+                Style::default().fg(theme::role(Role::GrayDim)),
             ),
         ])
     }
@@ -418,14 +427,14 @@ pub(super) fn render_settings(f: &mut Frame, app: &mut App, area: Rect) {
                     .fg(theme::role(Role::BlueSlate))
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled(" Scroll  ", Style::default().fg(Color::DarkGray)),
+            Span::styled(" Scroll  ", Style::default().fg(theme::role(Role::GrayDim))),
             Span::styled(
                 "[Esc]",
                 Style::default()
                     .fg(theme::role(Role::Accent))
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled(" Back", Style::default().fg(Color::DarkGray)),
+            Span::styled(" Back", Style::default().fg(theme::role(Role::GrayDim))),
         ]),
         Line::from(""),
     ];
