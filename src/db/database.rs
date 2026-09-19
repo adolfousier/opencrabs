@@ -102,7 +102,9 @@ pub(crate) const MIGRATION_SQL: &[&str] = &[
     // #1529: per-newsletter poll cursors. Idempotent CREATE, so no heal
     // pass; appended last per the list invariant above.
     include_str!("../migrations/20260914000001_add_whatsapp_newsletter_cursors.sql"),
-    // FORK (#233): trigger-gated cron execution and goal dispatch columns.
+    // Trigger-gated cron execution: the probe command, its condition and the
+    // goal-dispatch flag. ALTER TABLE ADD COLUMN, so appended last per the
+    // list invariant above.
     include_str!("../migrations/20260915000001_add_cron_trigger_pipeline.sql"),
 ];
 
