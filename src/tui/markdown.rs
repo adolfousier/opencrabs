@@ -13,7 +13,19 @@ use unicode_width::UnicodeWidthStr;
 use super::highlight::highlight_code;
 use crate::tui::render::theme::{self, Role};
 
-const TABLE_BORDER: Color = Color::DarkGray;
+/// Chrome: table rules, code-fence borders, the horizontal rule, the dim URL
+/// suffix on a link, the `key: ` separator in a collapsed table card.
+///
+/// These were `Color::DarkGray`, an ANSI index the terminal resolves from its
+/// own 16-colour palette, so no theme could move them. That is why table
+/// borders rendered identically under every preset (#1634).
+fn chrome() -> Color {
+    theme::role(Role::GrayDim)
+}
+
+fn table_border() -> Color {
+    chrome()
+}
 fn table_header() -> Color {
     theme::role(Role::Gray)
 }
@@ -125,14 +137,14 @@ pub fn parse_markdown(markdown: &str, max_width: usize) -> Vec<Line<'static>> {
                             lines.push(Line::from(std::mem::take(&mut current_line)));
                         }
                         lines.push(Line::from(vec![
-                            Span::styled("╭─ ", Style::default().fg(Color::DarkGray)),
+                            Span::styled("╭─ ", Style::default().fg(chrome())),
                             Span::styled(
                                 code_language.clone(),
                                 Style::default()
                                     .fg(theme::role(Role::Gray))
                                     .add_modifier(Modifier::BOLD),
                             ),
-                            Span::styled(" ─", Style::default().fg(Color::DarkGray)),
+                            Span::styled(" ─", Style::default().fg(chrome())),
                         ]));
                     }
                 }
@@ -261,7 +273,7 @@ pub fn parse_markdown(markdown: &str, max_width: usize) -> Vec<Line<'static>> {
                             for line_str in code_content.lines() {
                                 lines.push(Line::from(Span::styled(
                                     format!("  {line_str}"),
-                                    Style::default().fg(Color::Gray),
+                                    Style::default().fg(theme::role(Role::Gray)),
                                 )));
                             }
                         } else {
@@ -269,7 +281,7 @@ pub fn parse_markdown(markdown: &str, max_width: usize) -> Vec<Line<'static>> {
                             lines.extend(highlighted_lines);
                             lines.push(Line::from(Span::styled(
                                 "╰────".to_string(),
-                                Style::default().fg(Color::DarkGray),
+                                Style::default().fg(chrome()),
                             )));
                         }
                     }
@@ -321,7 +333,7 @@ pub fn parse_markdown(markdown: &str, max_width: usize) -> Vec<Line<'static>> {
                         if !already_shown {
                             current_line.push(Span::styled(
                                 format!(" ({url})"),
-                                Style::default().fg(Color::DarkGray),
+                                Style::default().fg(chrome()),
                             ));
                         }
                     }
@@ -420,7 +432,7 @@ pub fn parse_markdown(markdown: &str, max_width: usize) -> Vec<Line<'static>> {
                 }
                 lines.push(Line::from(Span::styled(
                     "────────────────────────────────────────".to_string(),
-                    Style::default().fg(Color::DarkGray),
+                    Style::default().fg(chrome()),
                 )));
                 lines.push(Line::from(""));
             }
@@ -571,7 +583,7 @@ fn render_table(
     // But last col doesn't need trailing border counted separately
     let table_width: usize = 1 + col_widths.iter().map(|w| w + 3).sum::<usize>();
 
-    let border_style = Style::default().fg(TABLE_BORDER);
+    let border_style = Style::default().fg(table_border());
     let header_style = Style::default()
         .fg(table_header())
         .add_modifier(Modifier::BOLD);
@@ -652,7 +664,7 @@ fn render_table(
                         format!("{:<width$}", header, width = max_header_len),
                         header_style,
                     ),
-                    Span::styled(": ", Style::default().fg(Color::DarkGray)),
+                    Span::styled(": ", Style::default().fg(chrome())),
                     Span::raw(value.to_string()),
                 ]));
             }
