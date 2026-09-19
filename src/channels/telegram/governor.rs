@@ -66,13 +66,13 @@ static CLOCK_OFFSET_MS: AtomicU64 = AtomicU64::new(0);
 /// cadence). Production reads the real clock unchanged; test builds add the
 /// monotonic [`CLOCK_OFFSET_MS`] offset so time passage is fully scripted.
 #[cfg(not(test))]
-fn gate_now() -> Instant {
+pub(crate) fn gate_now() -> Instant {
     Instant::now()
 }
 
 /// [`gate_now`] — test build.
 #[cfg(test)]
-fn gate_now() -> Instant {
+pub(crate) fn gate_now() -> Instant {
     let off = CLOCK_OFFSET_MS.load(Ordering::Relaxed);
     Instant::now()
         .checked_add(Duration::from_millis(off))
@@ -99,6 +99,64 @@ const FINAL_MAX_ATTEMPTS: u32 = 8;
 /// Drain-loop spacing. One queued final per tick keeps drained edits roughly
 /// on the edit bucket's cadence without a dedicated wakeup channel.
 const DRAIN_TICK: Duration = Duration::from_millis(400);
+
+/// Process-wide token bucket pacer for all Telegram requests across all chats/topics.
+/// Enforces a ~25 req/s global ceiling with burst capacity of 25.
+static GLOBAL_PACER: Mutex<Option<Bucket>> = Mutex::new(None);
+
+/// Global pacer parameters.
+const GLOBAL_CAPACITY: u32 = 25;
+const GLOBAL_REFILL_PER_SEC: f64 = 25.0;
+
+/// Max duration a request may be held by the global pacer before failing open.
+const GLOBAL_MAX_HOLD: Duration = Duration::from_secs(5);
+
+/// Acquire a permit from the global rate limiter and wait out any active global 429 cooldown.
+///
+/// Returns `true` if a permit was cleanly acquired or successfully waited for,
+/// or `false` if the hold exceeded `GLOBAL_MAX_HOLD` and failed open to prevent deadlock.
+pub(crate) async fn acquire_global_permit() -> bool {
+    // 1. First, respect any active global 429 cooldown lock
+    super::rate_limit::wait_global_cooldown().await;
+
+    // 2. Proactive global token bucket pacing
+    let mut total_held = Duration::ZERO;
+    loop {
+        let now = gate_now();
+        let wait_res = {
+            let mut lock = GLOBAL_PACER.lock().unwrap_or_else(|e| e.into_inner());
+            let bucket = lock.get_or_insert_with(|| {
+                let mut b = Bucket::new(GLOBAL_CAPACITY, GLOBAL_REFILL_PER_SEC);
+                b.last_refill = now;
+                b
+            });
+            // Upstream's bucket has no interactive reserve floor, so `take`
+            // is the floor-free consume that fork `take_any` provided.
+            bucket.take(now)
+        };
+
+        match wait_res {
+            Ok(()) => {
+                return true;
+            }
+            Err(delay) => {
+                total_held += delay;
+                if total_held > GLOBAL_MAX_HOLD {
+                    tracing::warn!(
+                        "Telegram: Global pacer held for {:?} exceeding 5s limit — failing open to avoid hanging turns",
+                        total_held
+                    );
+                    return false;
+                }
+
+                #[cfg(test)]
+                test_support::advance(delay.as_millis() as u64);
+
+                tokio::time::sleep(delay).await;
+            }
+        }
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Config snapshot
@@ -429,6 +487,11 @@ enum Decision {
 /// still fits the hold budget sleeps for the refill window instead of
 /// retry-spinning into the same bucket, which is what amplified 429 storms.
 pub(crate) async fn admit_chat_action(chat: ChatId, thread_id: Option<i32>) -> bool {
+    // Fast-path: if a global 429 cooldown is active, drop cosmetic typing refreshes immediately
+    if super::rate_limit::is_global_cooldown_active() {
+        return false;
+    }
+
     let chat_id = chat.0;
     // Positive ids are DMs — untouched by construction, no matter what a
     // future call site passes. Cheap exit before touching config.
@@ -612,6 +675,14 @@ pub(crate) async fn edit_admission_media_kb(
     reply_markup: Option<serde_json::Value>,
     dialect: FinalDialect,
 ) -> bool {
+    // Fast-path: if a global 429 cooldown is active, drop intermediate cosmetic edits immediately
+    if super::rate_limit::is_global_cooldown_active()
+        && class != EditClass::Final
+        && class != EditClass::Interactive
+    {
+        return false;
+    }
+
     // DMs untouched (positive ids), matching the G1 scope guard.
     if chat_id.0 >= 0 {
         return true;
@@ -916,6 +987,10 @@ pub(crate) async fn pace_send(chat: ChatId) {
     if !lim.enabled {
         return;
     }
+
+    // Proactive global limiter & global 429 lock
+    acquire_global_permit().await;
+
     let mut waited = Duration::ZERO;
     loop {
         let verdict = {
@@ -1004,6 +1079,10 @@ pub(crate) async fn pace_rich(chat: ChatId, thread_id: Option<i32>) {
     if !lim.enabled {
         return;
     }
+
+    // Proactive global limiter & global 429 lock
+    acquire_global_permit().await;
+
     ensure_summary_task();
     let mut waited = Duration::ZERO;
     loop {
@@ -1109,6 +1188,8 @@ pub(crate) mod test_support {
     /// Wipe all peer state and pin the virtual clock at `offset_ms`.
     pub(crate) fn reset(offset_ms: u64) {
         peers().lock().unwrap_or_else(|e| e.into_inner()).clear();
+        *GLOBAL_PACER.lock().unwrap_or_else(|e| e.into_inner()) = None;
+        crate::channels::telegram::rate_limit::reset_global_cooldown();
         CLOCK_OFFSET_MS.store(offset_ms, Ordering::Relaxed);
     }
 

@@ -7,6 +7,8 @@
 
 use std::time::{Duration, Instant};
 
+use teloxide::types::ChatId;
+
 use crate::channels::telegram::governor::{
     Bucket, Counters, EditClass, FinalDialect, ensure_bucket, format_summary,
     is_permanent_edit_error,
@@ -125,4 +127,77 @@ fn rate_limiter_defaults_sized_below_group_limit() {
 fn final_dialect_defaults_to_html() {
     assert_eq!(FinalDialect::default(), FinalDialect::Html);
     assert_ne!(FinalDialect::Html, FinalDialect::Markdown);
+}
+
+/// Tests for the process-wide proactive pacer & global 429 cooldown lock (#262).
+#[tokio::test]
+async fn global_pacer_burst_smoothing_and_cooldown() {
+    let _guard = crate::channels::telegram::governor::test_support::registry_guard().await;
+    crate::channels::telegram::governor::test_support::reset(0);
+    crate::channels::telegram::rate_limit::reset_global_cooldown();
+
+    // 1. Initial 25 permits should be granted immediately (burst capacity 25)
+    for _ in 0..25 {
+        assert!(
+            crate::channels::telegram::governor::acquire_global_permit().await,
+            "burst permits must be immediately granted"
+        );
+    }
+
+    // 2. 26th permit requires waiting ~40ms (1 token at 25 req/s)
+    let acquired = crate::channels::telegram::governor::acquire_global_permit().await;
+    assert!(acquired, "26th permit must be granted after refill delay");
+
+    // 3. Global 429 lock causes acquire_global_permit to wait full cooldown
+    crate::channels::telegram::rate_limit::record_global_429(Duration::from_secs(5));
+    assert!(crate::channels::telegram::rate_limit::is_global_cooldown_active());
+
+    let waited = crate::channels::telegram::rate_limit::wait_global_cooldown().await;
+    assert!(
+        waited >= Duration::from_millis(6900) && waited <= Duration::from_millis(7100),
+        "waited {waited:?} expected ~7s (5s + 2s margin)"
+    );
+    assert!(!crate::channels::telegram::rate_limit::is_global_cooldown_active());
+
+    crate::channels::telegram::rate_limit::reset_global_cooldown();
+}
+
+#[tokio::test]
+async fn global_cooldown_suppresses_drop_eligible_gates() {
+    let _guard = crate::channels::telegram::governor::test_support::registry_guard().await;
+    crate::channels::telegram::governor::test_support::reset(0);
+    crate::channels::telegram::rate_limit::reset_global_cooldown();
+
+    let chat = ChatId(-100123456789);
+    crate::channels::telegram::governor::test_support::mark_forum(chat);
+
+    // When global cooldown is active:
+    crate::channels::telegram::rate_limit::record_global_429(Duration::from_secs(10));
+    assert!(crate::channels::telegram::rate_limit::is_global_cooldown_active());
+
+    // G1 typing must drop immediately without holding
+    let typing_admitted =
+        crate::channels::telegram::governor::admit_chat_action(chat, Some(1)).await;
+    assert!(
+        !typing_admitted,
+        "typing must be dropped during global 429 cooldown"
+    );
+
+    // G2 cosmetic edit must drop immediately without consuming tokens
+    let bot = teloxide::Bot::new("TESTTOKEN");
+    let edit_admitted = crate::channels::telegram::governor::edit_admission(
+        &bot,
+        chat,
+        teloxide::types::MessageId(100),
+        EditClass::BrainPreview,
+        "preview".to_string(),
+        false,
+    )
+    .await;
+    assert!(
+        !edit_admitted,
+        "cosmetic edit must be dropped during global 429 cooldown"
+    );
+
+    crate::channels::telegram::rate_limit::reset_global_cooldown();
 }
