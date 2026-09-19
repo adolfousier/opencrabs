@@ -477,7 +477,7 @@ pub fn render(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard) {
         lines.push(Line::from(Span::styled(
             "  Talk to me, literally",
             Style::default()
-                .fg(Color::DarkGray)
+                .fg(theme::role(Role::GrayDim))
                 .add_modifier(Modifier::ITALIC),
         )));
         lines.push(Line::from(""));
@@ -487,13 +487,13 @@ pub fn render(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard) {
     lines.push(Line::from(Span::styled(
         "  Speech-to-Text",
         Style::default()
-            .fg(Color::White)
+            .fg(theme::role(Role::AccentSoft))
             .add_modifier(Modifier::BOLD),
     )));
     lines.push(Line::from(Span::styled(
         "  Transcribes voice notes from channels",
         Style::default()
-            .fg(Color::DarkGray)
+            .fg(theme::role(Role::GrayDim))
             .add_modifier(Modifier::ITALIC),
     )));
     lines.push(Line::from(""));
@@ -515,13 +515,13 @@ pub fn render(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard) {
     lines.push(Line::from(Span::styled(
         "  Text-to-Speech",
         Style::default()
-            .fg(Color::White)
+            .fg(theme::role(Role::AccentSoft))
             .add_modifier(Modifier::BOLD),
     )));
     lines.push(Line::from(Span::styled(
         "  Reply with voice notes on channels",
         Style::default()
-            .fg(Color::DarkGray)
+            .fg(theme::role(Role::GrayDim))
             .add_modifier(Modifier::ITALIC),
     )));
     lines.push(Line::from(""));
@@ -551,21 +551,21 @@ pub fn render(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard) {
             Span::styled(
                 "Continue",
                 Style::default()
-                    .fg(Color::White)
+                    .fg(theme::role(Role::AccentSoft))
                     .add_modifier(Modifier::BOLD),
             ),
         ]));
     } else {
         lines.push(Line::from(Span::styled(
             "    Continue",
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(theme::role(Role::GrayDim)),
         )));
     }
 
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
         "  \u{2191}\u{2193}: select \u{b7} Tab: next field \u{b7} Esc: back \u{b7} Enter: confirm",
-        Style::default().fg(Color::DarkGray),
+        Style::default().fg(theme::role(Role::GrayDim)),
     )));
 }
 
@@ -611,17 +611,17 @@ fn render_groq_fields(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard)
             Style::default().fg(if focused {
                 brand_blue()
             } else {
-                Color::DarkGray
+                theme::role(Role::GrayDim)
             }),
         ),
         Span::styled(
             format!("{}{}", display, cursor),
             Style::default().fg(if wizard.has_existing_groq_key() {
-                Color::Cyan
+                theme::role(Role::AccentTeal)
             } else if focused {
-                Color::White
+                theme::role(Role::AccentSoft)
             } else {
-                Color::DarkGray
+                theme::role(Role::GrayDim)
             }),
         ),
     ]));
@@ -630,7 +630,7 @@ fn render_groq_fields(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard)
         lines.push(Line::from(Span::styled(
             format!("  {}", hint.trim()),
             Style::default()
-                .fg(Color::DarkGray)
+                .fg(theme::role(Role::GrayDim))
                 .add_modifier(Modifier::ITALIC),
         )));
     }
@@ -645,7 +645,7 @@ fn render_local_stt_fields(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWi
         Style::default().fg(if focused {
             brand_blue()
         } else {
-            Color::DarkGray
+            theme::role(Role::GrayDim)
         }),
     )));
 
@@ -668,7 +668,7 @@ fn render_local_stt_fields(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWi
     #[cfg(not(feature = "local-stt"))]
     lines.push(Line::from(Span::styled(
         "  Not available (build with --features local-stt)",
-        Style::default().fg(Color::Red),
+        Style::default().fg(theme::role(Role::Error)),
     )));
 
     if let Some(progress) = wizard.stt_model_download_progress {
@@ -676,17 +676,17 @@ fn render_local_stt_fields(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWi
     } else if wizard.stt_model_downloaded {
         lines.push(Line::from(Span::styled(
             "  Model ready \u{2014} press Enter to continue",
-            Style::default().fg(Color::Cyan),
+            Style::default().fg(theme::role(Role::AccentTeal)),
         )));
     } else if let Some(ref err) = wizard.stt_model_download_error {
         lines.push(Line::from(Span::styled(
             format!("  Download failed: {}", err),
-            Style::default().fg(Color::Red),
+            Style::default().fg(theme::role(Role::Error)),
         )));
     } else if focused {
         lines.push(Line::from(Span::styled(
             "  Press Enter to download",
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(theme::role(Role::GrayDim)),
         )));
     }
 }
@@ -755,7 +755,7 @@ fn render_local_tts_fields(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWi
         Style::default().fg(if focused {
             brand_blue()
         } else {
-            Color::DarkGray
+            theme::role(Role::GrayDim)
         }),
     )));
 
@@ -777,7 +777,7 @@ fn render_local_tts_fields(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWi
     #[cfg(not(feature = "local-tts"))]
     lines.push(Line::from(Span::styled(
         "  Not available (build with --features local-tts)",
-        Style::default().fg(Color::Red),
+        Style::default().fg(theme::role(Role::Error)),
     )));
 
     if let Some(progress) = wizard.tts_voice_download_progress {
@@ -785,17 +785,17 @@ fn render_local_tts_fields(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWi
     } else if wizard.tts_voice_downloaded {
         lines.push(Line::from(Span::styled(
             "  Voice ready \u{2014} press Enter to continue",
-            Style::default().fg(Color::Cyan),
+            Style::default().fg(theme::role(Role::AccentTeal)),
         )));
     } else if let Some(ref err) = wizard.tts_voice_download_error {
         lines.push(Line::from(Span::styled(
             format!("  Download failed: {}", err),
-            Style::default().fg(Color::Red),
+            Style::default().fg(theme::role(Role::Error)),
         )));
     } else if focused {
         lines.push(Line::from(Span::styled(
             "  Press Enter to download voice model",
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(theme::role(Role::GrayDim)),
         )));
     }
 }
@@ -806,9 +806,9 @@ fn render_tts_api_fields(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWiza
     lines.push(Line::from(Span::styled(
         "  Voice:",
         Style::default().fg(if voice_focused {
-            Color::White
+            theme::role(Role::AccentSoft)
         } else {
-            Color::DarkGray
+            theme::role(Role::GrayDim)
         }),
     )));
     for voice in OPENAI_TTS_VOICES {
@@ -822,11 +822,19 @@ fn render_tts_api_fields(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWiza
         lines.push(Line::from(vec![
             Span::styled(
                 format!("  {}{} ", prefix, marker),
-                Style::default().fg(if is_sel { accent_gold() } else { Color::Gray }),
+                Style::default().fg(if is_sel {
+                    accent_gold()
+                } else {
+                    theme::role(Role::Gray)
+                }),
             ),
             Span::styled(
                 voice.to_string(),
-                Style::default().fg(if is_sel { Color::White } else { Color::Gray }),
+                Style::default().fg(if is_sel {
+                    theme::role(Role::AccentSoft)
+                } else {
+                    theme::role(Role::Gray)
+                }),
             ),
         ]));
     }
@@ -924,16 +932,16 @@ fn render_radio(lines: &mut Vec<Line<'static>>, focused: bool, selected: bool, l
             Style::default().fg(if selected {
                 accent_gold()
             } else {
-                Color::DarkGray
+                theme::role(Role::GrayDim)
             }),
         ),
         Span::styled(
             format!(" {}", label),
             Style::default()
                 .fg(if focused && selected {
-                    Color::White
+                    theme::role(Role::AccentSoft)
                 } else {
-                    Color::DarkGray
+                    theme::role(Role::GrayDim)
                 })
                 .add_modifier(if focused && selected {
                     Modifier::BOLD
@@ -968,16 +976,16 @@ fn render_secret_field(
     let color = if focused {
         brand_blue()
     } else {
-        Color::DarkGray
+        theme::role(Role::GrayDim)
     };
     let text_color = if stored {
-        Color::Cyan
+        theme::role(Role::AccentTeal)
     } else if input.is_empty() {
-        Color::DarkGray
+        theme::role(Role::GrayDim)
     } else if focused {
-        Color::White
+        theme::role(Role::AccentSoft)
     } else {
-        Color::Gray
+        theme::role(Role::Gray)
     };
     let cursor = if focused && !stored && input.is_empty() {
         "\u{2588}"
@@ -997,7 +1005,7 @@ fn render_secret_field(
         lines.push(Line::from(Span::styled(
             "    (already configured)",
             Style::default()
-                .fg(Color::Cyan)
+                .fg(theme::role(Role::AccentTeal))
                 .add_modifier(Modifier::ITALIC),
         )));
     } else if let Some(hint) = empty_hint
@@ -1007,7 +1015,7 @@ fn render_secret_field(
         lines.push(Line::from(Span::styled(
             format!("    {}", hint),
             Style::default()
-                .fg(Color::DarkGray)
+                .fg(theme::role(Role::GrayDim))
                 .add_modifier(Modifier::ITALIC),
         )));
     }
@@ -1028,14 +1036,14 @@ fn render_text_field(
     let color = if focused {
         brand_blue()
     } else {
-        Color::DarkGray
+        theme::role(Role::GrayDim)
     };
     let text_color = if value.is_empty() {
-        Color::DarkGray
+        theme::role(Role::GrayDim)
     } else if focused {
-        Color::White
+        theme::role(Role::AccentSoft)
     } else {
-        Color::Gray
+        theme::role(Role::Gray)
     };
     let cursor = if focused && !value.is_empty() {
         "\u{2588}"
@@ -1065,8 +1073,11 @@ fn render_progress_bar(lines: &mut Vec<Line<'static>>, progress: f64) {
         ),
         Span::styled(
             "\u{2591}".repeat(empty),
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(theme::role(Role::GrayDim)),
         ),
-        Span::styled(format!(" {}%", pct), Style::default().fg(Color::White)),
+        Span::styled(
+            format!(" {}%", pct),
+            Style::default().fg(theme::role(Role::AccentSoft)),
+        ),
     ]));
 }
