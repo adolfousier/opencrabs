@@ -39,16 +39,6 @@ impl TriggerCondition {
         }
     }
 
-    pub fn as_str(&self) -> &str {
-        match self {
-            Self::NonEmpty => "non_empty",
-            Self::ExitNonZero => "exit_non_zero",
-            Self::ExitZero => "exit_zero",
-            Self::Regex(s) => s.as_str(),
-            Self::Always => "always",
-        }
-    }
-
     pub fn should_fire(&self, result: &TriggerResult) -> bool {
         match self {
             Self::NonEmpty => !result.combined_output().trim().is_empty(),
