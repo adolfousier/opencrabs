@@ -335,3 +335,22 @@ async fn test_cron_set_goal_requires_session() {
         res3.error
     );
 }
+
+// ── trigger process lifecycle ────────────────────────────────────────────────
+
+/// stderr is carried back alongside stdout and the exit code.
+///
+/// Came in with the inline block that used to live in `cron/trigger.rs`; the
+/// rest of that block duplicated assertions already above, this one did not.
+#[tokio::test]
+async fn test_trigger_runner_captures_stderr() {
+    let runner = TriggerRunner::default();
+    let res = runner
+        .run("echo 'err' >&2; exit 2")
+        .await
+        .expect("run stderr probe");
+    assert_eq!(res.exit_code, 2);
+    assert_eq!(res.stderr.trim(), "err");
+    assert!(res.stdout.trim().is_empty());
+    assert!(TriggerCondition::ExitNonZero.should_fire(&res));
+}
