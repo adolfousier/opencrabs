@@ -53,73 +53,104 @@ pub(super) fn render_sessions(f: &mut Frame, app: &App, area: Rect) {
                 .fg(theme::role(Role::Gray))
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled("Navigate  ", Style::default().fg(Color::Reset)),
+        Span::styled(
+            "Navigate  ",
+            Style::default().fg(theme::role(Role::TextPrimary)),
+        ),
         Span::styled(
             "[Enter] ",
             Style::default()
                 .fg(theme::role(Role::Gray))
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled("Select  ", Style::default().fg(Color::Reset)),
+        Span::styled(
+            "Select  ",
+            Style::default().fg(theme::role(Role::TextPrimary)),
+        ),
         Span::styled(
             "[N] ",
             Style::default()
-                .fg(Color::Cyan)
+                .fg(theme::role(Role::AccentTeal))
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled("New  ", Style::default().fg(Color::Reset)),
+        Span::styled("New  ", Style::default().fg(theme::role(Role::TextPrimary))),
         Span::styled(
             "[R] ",
             Style::default()
                 .fg(theme::role(Role::Accent))
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled("Rename  ", Style::default().fg(Color::Reset)),
+        Span::styled(
+            "Rename  ",
+            Style::default().fg(theme::role(Role::TextPrimary)),
+        ),
         Span::styled(
             "[D] ",
-            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(theme::role(Role::Error))
+                .add_modifier(Modifier::BOLD),
         ),
-        Span::styled("Delete  ", Style::default().fg(Color::Reset)),
+        Span::styled(
+            "Delete  ",
+            Style::default().fg(theme::role(Role::TextPrimary)),
+        ),
         Span::styled(
             "[F] ",
             Style::default()
-                .fg(Color::Cyan)
+                .fg(theme::role(Role::AccentTeal))
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled("Files  ", Style::default().fg(Color::Reset)),
+        Span::styled(
+            "Files  ",
+            Style::default().fg(theme::role(Role::TextPrimary)),
+        ),
         Span::styled(
             "[P] ",
             Style::default()
                 .fg(theme::role(Role::Gray))
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled("Projects  ", Style::default().fg(Color::Reset)),
+        Span::styled(
+            "Projects  ",
+            Style::default().fg(theme::role(Role::TextPrimary)),
+        ),
         Span::styled(
             "[|] ",
             Style::default()
                 .fg(theme::role(Role::Success))
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled("Split H  ", Style::default().fg(Color::Reset)),
+        Span::styled(
+            "Split H  ",
+            Style::default().fg(theme::role(Role::TextPrimary)),
+        ),
         Span::styled(
             "[_] ",
             Style::default()
                 .fg(theme::role(Role::Success))
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled("Split V  ", Style::default().fg(Color::Reset)),
+        Span::styled(
+            "Split V  ",
+            Style::default().fg(theme::role(Role::TextPrimary)),
+        ),
         Span::styled(
             "[/] ",
             Style::default()
-                .fg(Color::Cyan)
+                .fg(theme::role(Role::AccentTeal))
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled("Search  ", Style::default().fg(Color::Reset)),
+        Span::styled(
+            "Search  ",
+            Style::default().fg(theme::role(Role::TextPrimary)),
+        ),
         Span::styled(
             "[Esc] ",
-            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(theme::role(Role::Error))
+                .add_modifier(Modifier::BOLD),
         ),
-        Span::styled("Back", Style::default().fg(Color::Reset)),
+        Span::styled("Back", Style::default().fg(theme::role(Role::TextPrimary))),
     ]));
 
     // Show hint when a pane is waiting for session assignment (just split)
@@ -147,7 +178,7 @@ pub(super) fn render_sessions(f: &mut Frame, app: &App, area: Rect) {
             Span::styled(
                 format!("  ASSIGNING TO: {} ", project_name),
                 Style::default()
-                    .fg(Color::Yellow)
+                    .fg(theme::role(Role::Warning))
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(
@@ -161,16 +192,16 @@ pub(super) fn render_sessions(f: &mut Frame, app: &App, area: Rect) {
     // Search input line
     if app.session_search_active {
         lines.push(Line::from(vec![
-            Span::styled("  🔍 ", Style::default().fg(Color::Cyan)),
+            Span::styled("  🔍 ", Style::default().fg(theme::role(Role::AccentTeal))),
             Span::styled(
                 format!("{}█", app.session_search),
                 Style::default()
-                    .fg(Color::Reset)
+                    .fg(theme::role(Role::TextPrimary))
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(
                 "  [type to filter]  [Enter] open  [Esc] clear",
-                Style::default().fg(Color::DarkGray),
+                Style::default().fg(theme::role(Role::GrayDim)),
             ),
         ]));
         lines.push(Line::from(""));
@@ -182,7 +213,7 @@ pub(super) fn render_sessions(f: &mut Frame, app: &App, area: Rect) {
     if visible_indices.is_empty() && !app.session_search.is_empty() {
         lines.push(Line::from(Span::styled(
             "  No matching sessions",
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(theme::role(Role::GrayDim)),
         )));
     }
 
@@ -234,12 +265,12 @@ pub(super) fn render_sessions(f: &mut Frame, app: &App, area: Rect) {
                 Span::styled(
                     format!("{}█", app.session_rename_buffer),
                     Style::default()
-                        .fg(Color::Reset)
+                        .fg(theme::role(Role::TextPrimary))
                         .add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(
                     format!(" - {}", created),
-                    Style::default().fg(Color::DarkGray),
+                    Style::default().fg(theme::role(Role::GrayDim)),
                 ),
             ]));
         } else {
@@ -251,23 +282,23 @@ pub(super) fn render_sessions(f: &mut Frame, app: &App, area: Rect) {
 
             let name_style = if is_assigned_to_target {
                 Style::default()
-                    .fg(Color::Green)
+                    .fg(theme::role(Role::Success))
                     .add_modifier(Modifier::BOLD)
             } else if is_selected {
                 Style::default()
                     .fg(theme::role(Role::Accent))
                     .add_modifier(Modifier::BOLD)
             } else if is_current {
-                Style::default().fg(Color::Gray)
+                Style::default().fg(theme::role(Role::Gray))
             } else {
-                Style::default().fg(Color::Reset)
+                Style::default().fg(theme::role(Role::TextPrimary))
             };
 
             let mut spans = vec![
                 Span::styled(format!("{}{}", prefix, name), name_style),
                 Span::styled(
                     format!(" - {} ", created),
-                    Style::default().fg(Color::DarkGray),
+                    Style::default().fg(theme::role(Role::GrayDim)),
                 ),
             ];
 
@@ -313,7 +344,7 @@ pub(super) fn render_sessions(f: &mut Frame, app: &App, area: Rect) {
                 {
                     spans.push(Span::styled(
                         format!(" ({branch})"),
-                        Style::default().fg(Color::Cyan),
+                        Style::default().fg(theme::role(Role::AccentTeal)),
                     ));
                 }
             }
@@ -342,7 +373,10 @@ pub(super) fn render_sessions(f: &mut Frame, app: &App, area: Rect) {
                         .add_modifier(Modifier::BOLD),
                 ));
             } else if app.sessions_with_unread.contains(&session.id) {
-                spans.push(Span::styled(" ●", Style::default().fg(Color::Cyan)));
+                spans.push(Span::styled(
+                    " ●",
+                    Style::default().fg(theme::role(Role::AccentTeal)),
+                ));
             }
 
             // Context usage for current session
@@ -350,14 +384,14 @@ pub(super) fn render_sessions(f: &mut Frame, app: &App, area: Rect) {
                 let ctx_color = if app.last_input_tokens.is_some() {
                     let ctx_pct = app.context_usage_percent();
                     if ctx_pct > 80.0 {
-                        Color::Red
+                        theme::role(Role::Error)
                     } else if ctx_pct > 50.0 {
                         theme::role(Role::Accent)
                     } else {
-                        Color::Cyan
+                        theme::role(Role::AccentTeal)
                     }
                 } else {
-                    Color::DarkGray
+                    theme::role(Role::GrayDim)
                 };
                 spans.push(Span::styled(context_info, Style::default().fg(ctx_color)));
             }
