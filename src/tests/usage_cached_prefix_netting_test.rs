@@ -263,3 +263,53 @@ fn nonstream_compat_nets_the_cached_prefix() {
         .expect("a MessageDelta carried usage");
     assert_netted(&usage, "nonstream_compat");
 }
+
+/// The `[DONE]` fallback delta fires on every stream, after the real usage
+/// delta, carrying a LOCAL GROSS estimate of the prompt. The consumer
+/// reconciles usage across deltas with `max()`, so once `input_tokens` became
+/// the netted value that estimate would outrank it on every cached call and
+/// put the whole prefix back into the bill through a different door.
+///
+/// The invariant, asserted over the raw event sequence rather than by
+/// replaying the consumer's own reconciliation: no delta in the stream may
+/// report more input than the provider actually reported uncached.
+#[tokio::test]
+async fn done_fallback_estimate_never_outranks_reported_usage() {
+    let chunk = format!(
+        r#"{{"id":"c6","object":"chat.completion.chunk","model":"glm-5.3-flash","choices":[{{"index":0,"delta":{{"content":"ok"}},"finish_reason":"stop"}}],"usage":{{"prompt_tokens":{CALL_GROSS_INPUT},"completion_tokens":{CALL_OUTPUT},"prompt_tokens_details":{{"cached_tokens":{CALL_CACHE_READ}}}}}}}"#
+    );
+    let sse = format!("data: {chunk}\n\ndata: [DONE]\n\n");
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+    let port = listener.local_addr().unwrap().port();
+    tokio::spawn(serve_once(listener, "text/event-stream", sse));
+    let provider = OpenAIProvider::local(format!("http://127.0.0.1:{port}/chat/completions"));
+
+    // The prompt must be genuinely large, because the fallback's estimate is
+    // computed from the request we sent. A one-word prompt estimates below the
+    // netted input and the assertion would hold with or without the guard.
+    let big = "the quick brown fox jumps over the lazy dog. ".repeat(400);
+    let req = LLMRequest::new("glm-5.3-flash", vec![Message::user(&big)]);
+    let mut stream = provider.stream(req).await.expect("stream opens");
+    let mut deltas = Vec::new();
+    // Drain to the END of the stream, past the first MessageStop — the
+    // fallback delta is emitted after it.
+    while let Some(ev) = futures::StreamExt::next(&mut stream).await {
+        if let StreamEvent::MessageDelta { usage, .. } = ev.expect("event ok") {
+            deltas.push(usage);
+        }
+    }
+
+    assert!(
+        deltas.len() >= 2,
+        "expected the real delta AND the [DONE] fallback, got {}",
+        deltas.len()
+    );
+    let reconciled = deltas.iter().map(|u| u.input_tokens).max().unwrap();
+    assert_eq!(
+        reconciled,
+        CALL_NET_INPUT,
+        "the [DONE] estimate outranked the reported usage: {:?}",
+        deltas.iter().map(|u| u.input_tokens).collect::<Vec<_>>()
+    );
+}
