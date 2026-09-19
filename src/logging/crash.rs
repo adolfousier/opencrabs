@@ -645,6 +645,17 @@ mod handler {
 
         EXE_BASE.store(exe_base(), Ordering::Relaxed);
 
+        // Warm the unwinder. `backtrace` is the one call the handler makes
+        // that is not async-signal-safe: glibc resolves libgcc lazily on first
+        // use, so a cold first call can `dlopen` and allocate inside a context
+        // documented as allocation-free. Calling it once here, in ordinary
+        // thread context, leaves the signal-time call a pure stack walk.
+        // Result deliberately unused: this is the side effect, not the frames.
+        {
+            let mut warm = [core::ptr::null_mut::<c_void>(); 2];
+            unsafe { libc::backtrace(warm.as_mut_ptr(), warm.len() as c_int) };
+        }
+
         let mut sa: libc::sigaction = unsafe { core::mem::zeroed() };
         let entry: unsafe extern "C" fn(c_int, *mut libc::siginfo_t, *mut c_void) = handle;
         sa.sa_sigaction = entry as usize;
