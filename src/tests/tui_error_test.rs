@@ -180,12 +180,18 @@ fn from_str() {
 
 #[test]
 fn test_error_severity_color() {
-    use ratatui::style::Color;
-
+    // All four resolve through the theme. Error and Critical were the raw
+    // Color::Red and Color::Magenta, ANSI indices the terminal resolved from
+    // its own palette, so an error banner looked the same under every theme
+    // (#1634). Asserted against `role` rather than literals so the test states
+    // the contract (severity maps to a role) instead of re-pinning a constant.
     assert_eq!(ErrorSeverity::Info.color(), theme::role(Role::Gray));
     assert_eq!(ErrorSeverity::Warning.color(), theme::role(Role::Accent));
-    assert_eq!(ErrorSeverity::Error.color(), Color::Red);
-    assert_eq!(ErrorSeverity::Critical.color(), Color::Magenta);
+    assert_eq!(ErrorSeverity::Error.color(), theme::role(Role::Error));
+    assert_eq!(
+        ErrorSeverity::Critical.color(),
+        theme::role(Role::PurpleSoft)
+    );
 }
 
 #[test]

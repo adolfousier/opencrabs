@@ -21,12 +21,11 @@ pub enum ErrorSeverity {
 impl ErrorSeverity {
     /// Get display color for this severity
     pub fn color(&self) -> ratatui::style::Color {
-        use ratatui::style::Color;
         match self {
             ErrorSeverity::Info => theme::role(Role::Gray),
             ErrorSeverity::Warning => theme::role(Role::Accent),
-            ErrorSeverity::Error => Color::Red,
-            ErrorSeverity::Critical => Color::Magenta,
+            ErrorSeverity::Error => theme::role(Role::Error),
+            ErrorSeverity::Critical => theme::role(Role::PurpleSoft),
         }
     }
 
