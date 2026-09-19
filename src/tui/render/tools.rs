@@ -4,7 +4,7 @@
 
 use super::theme::{self, Role};
 use ratatui::{
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
 };
 
@@ -38,7 +38,7 @@ pub(super) fn render_tool_group<'a>(
     let mut header_spans = vec![Span::styled(
         format!("  {} {}", dot, header),
         Style::default()
-            .fg(Color::Cyan)
+            .fg(theme::role(Role::AccentTeal))
             .add_modifier(Modifier::BOLD),
     )];
     header_spans.push(Span::styled(
@@ -61,18 +61,18 @@ pub(super) fn render_tool_group<'a>(
 
             let header_style = if call.success || in_flight {
                 Style::default()
-                    .fg(Color::DarkGray)
+                    .fg(theme::role(Role::GrayDim))
                     .add_modifier(Modifier::ITALIC)
             } else {
                 Style::default()
-                    .fg(Color::Red)
+                    .fg(theme::role(Role::Error))
                     .add_modifier(Modifier::ITALIC)
             };
             {
                 let desc_line = Line::from(vec![
                     Span::styled(
                         format!("    {} ", connector),
-                        Style::default().fg(Color::DarkGray),
+                        Style::default().fg(theme::role(Role::GrayDim)),
                     ),
                     Span::styled(call.description.clone(), header_style),
                 ]);
@@ -93,7 +93,7 @@ pub(super) fn render_tool_group<'a>(
                     lines.push(Line::from(vec![
                         Span::styled(
                             format!("    {}  ", continuation),
-                            Style::default().fg(Color::DarkGray),
+                            Style::default().fg(theme::role(Role::GrayDim)),
                         ),
                         Span::styled(
                             format!("{}:", key),
@@ -132,7 +132,7 @@ pub(super) fn render_tool_group<'a>(
                         let full_line = Line::from(vec![
                             Span::styled(
                                 format!("    {}    ", continuation),
-                                Style::default().fg(Color::DarkGray),
+                                Style::default().fg(theme::role(Role::GrayDim)),
                             ),
                             Span::styled(
                                 vline.clone(),
@@ -149,7 +149,7 @@ pub(super) fn render_tool_group<'a>(
                         lines.push(Line::from(vec![
                             Span::styled(
                                 format!("    {}    ", continuation),
-                                Style::default().fg(Color::DarkGray),
+                                Style::default().fg(theme::role(Role::GrayDim)),
                             ),
                             Span::styled(
                                 format!("... ({} more lines)", total - 200),
@@ -185,14 +185,14 @@ pub(super) fn render_tool_group<'a>(
                         } else if detail_line.starts_with("- ") {
                             Style::default().fg(theme::role(Role::Error))
                         } else if detail_line.starts_with("@@ ") {
-                            Style::default().fg(Color::Cyan)
+                            Style::default().fg(theme::role(Role::AccentTeal))
                         } else {
                             default_detail_style
                         };
                         let full_line = Line::from(vec![
                             Span::styled(
                                 format!("    {}  ", continuation),
-                                Style::default().fg(Color::DarkGray),
+                                Style::default().fg(theme::role(Role::GrayDim)),
                             ),
                             Span::styled(detail_line.clone(), line_style),
                         ]);
@@ -206,7 +206,7 @@ pub(super) fn render_tool_group<'a>(
                         lines.push(Line::from(vec![
                             Span::styled(
                                 format!("    {}  ", continuation),
-                                Style::default().fg(Color::DarkGray),
+                                Style::default().fg(theme::role(Role::GrayDim)),
                             ),
                             Span::styled(
                                 format!("... ({} more lines)", detail_lines.len() - 200),
@@ -224,16 +224,19 @@ pub(super) fn render_tool_group<'a>(
         if let Some(last) = group.calls.last() {
             let style = if last.success {
                 Style::default()
-                    .fg(Color::DarkGray)
+                    .fg(theme::role(Role::GrayDim))
                     .add_modifier(Modifier::ITALIC)
             } else {
                 Style::default()
-                    .fg(Color::Red)
+                    .fg(theme::role(Role::Error))
                     .add_modifier(Modifier::ITALIC)
             };
             {
                 let desc_line = Line::from(vec![
-                    Span::styled("    └─ ".to_string(), Style::default().fg(Color::DarkGray)),
+                    Span::styled(
+                        "    └─ ".to_string(),
+                        Style::default().fg(theme::role(Role::GrayDim)),
+                    ),
                     Span::styled(last.description.clone(), style),
                 ]);
                 for wrapped in
@@ -266,7 +269,7 @@ pub(super) fn render_inline_approval<'a>(
                 Span::styled(
                     desc,
                     Style::default()
-                        .fg(Color::Reset)
+                        .fg(theme::role(Role::TextPrimary))
                         .add_modifier(Modifier::BOLD),
                 ),
             ]));
@@ -289,7 +292,7 @@ pub(super) fn render_inline_approval<'a>(
                         lines.push(Line::from(vec![Span::styled(
                             format!("    {}:", key),
                             Style::default()
-                                .fg(Color::DarkGray)
+                                .fg(theme::role(Role::GrayDim))
                                 .add_modifier(Modifier::BOLD),
                         )]));
                         // Build owned lines so there are no borrow conflicts
@@ -332,7 +335,7 @@ pub(super) fn render_inline_approval<'a>(
                     lines.push(Line::from(vec![Span::styled(
                         "    capabilities:",
                         Style::default()
-                            .fg(Color::DarkGray)
+                            .fg(theme::role(Role::GrayDim))
                             .add_modifier(Modifier::BOLD),
                     )]));
                     lines.push(Line::from(vec![
@@ -350,12 +353,12 @@ pub(super) fn render_inline_approval<'a>(
             // Order: Yes(0), Always(1), No(2)
             lines.push(Line::from(vec![Span::styled(
                 "  Do you approve?",
-                Style::default().fg(Color::DarkGray),
+                Style::default().fg(theme::role(Role::GrayDim)),
             )]));
             let options = [
-                ("Yes", Color::Cyan),
+                ("Yes", theme::role(Role::AccentTeal)),
                 ("Always", theme::role(Role::Accent)),
-                ("No", Color::Red),
+                ("No", theme::role(Role::Error)),
             ];
             for (i, (label, color)) in options.iter().enumerate() {
                 if i == approval.selected_option {
@@ -372,7 +375,10 @@ pub(super) fn render_inline_approval<'a>(
                 } else {
                     lines.push(Line::from(vec![
                         Span::styled("    ", Style::default()),
-                        Span::styled(label.to_string(), Style::default().fg(Color::DarkGray)),
+                        Span::styled(
+                            label.to_string(),
+                            Style::default().fg(theme::role(Role::GrayDim)),
+                        ),
                     ]));
                 }
             }
@@ -393,7 +399,7 @@ pub(super) fn render_inline_approval<'a>(
             lines.push(Line::from(vec![Span::styled(
                 format!("  {} -- denied{}", desc, suffix),
                 Style::default()
-                    .fg(Color::Red)
+                    .fg(theme::role(Role::Error))
                     .add_modifier(Modifier::ITALIC),
             )]));
         }
@@ -498,7 +504,7 @@ pub(super) fn render_approve_menu<'a>(
 
             lines.push(Line::from(Span::styled(
                 "  Select a policy:",
-                Style::default().fg(Color::Gray),
+                Style::default().fg(theme::role(Role::Gray)),
             )));
             lines.push(Line::from(""));
 
@@ -508,10 +514,10 @@ pub(super) fn render_approve_menu<'a>(
 
                 let style = if is_selected {
                     Style::default()
-                        .fg(Color::Cyan)
+                        .fg(theme::role(Role::AccentTeal))
                         .add_modifier(Modifier::BOLD)
                 } else {
-                    Style::default().fg(Color::Reset)
+                    Style::default().fg(theme::role(Role::TextPrimary))
                 };
 
                 lines.push(Line::from(vec![
@@ -525,7 +531,7 @@ pub(super) fn render_approve_menu<'a>(
                         Span::styled(
                             *desc,
                             Style::default()
-                                .fg(Color::DarkGray)
+                                .fg(theme::role(Role::GrayDim))
                                 .add_modifier(Modifier::ITALIC),
                         ),
                     ]));
@@ -535,15 +541,15 @@ pub(super) fn render_approve_menu<'a>(
             lines.push(Line::from(""));
             lines.push(Line::from(Span::styled(
                 "  [\u{2191}\u{2193}] Navigate  [Enter] Confirm  [Esc] Cancel",
-                Style::default().fg(Color::DarkGray),
+                Style::default().fg(theme::role(Role::GrayDim)),
             )));
         }
         ApproveMenuState::Selected(choice) => {
             let (label, color) = match choice {
-                0 => ("Approve-only", Color::Cyan),
+                0 => ("Approve-only", theme::role(Role::AccentTeal)),
                 1 => ("Allow all (session)", theme::role(Role::Accent)),
-                2 => ("Yolo mode", Color::Red),
-                _ => ("Cancelled", Color::DarkGray),
+                2 => ("Yolo mode", theme::role(Role::Error)),
+                _ => ("Cancelled", theme::role(Role::GrayDim)),
             };
             lines.push(Line::from(vec![Span::styled(
                 format!("  Policy set: {}", label),
