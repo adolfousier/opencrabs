@@ -11,7 +11,8 @@ use uuid::Uuid;
 
 use crate::brain::tools::OriginTarget;
 use crate::channels::target_resolver::{
-    TargetResolution, decode_segment, encode_segment, resolve_target,
+    ResolvedTarget, TargetDestination, TargetResolution, decode_segment, encode_segment,
+    extract_session_target, resolve_target,
 };
 use crate::channels::telegram::session_resolve::GENERAL_TOPIC_ID;
 
@@ -203,4 +204,42 @@ fn encoding_roundtrip() {
     assert_eq!(decode_segment(&enc).unwrap(), raw);
     assert!(decode_segment("%zz").is_err());
     assert!(decode_segment("%4").is_err());
+}
+
+// ── session targets (#1629) ─────────────────────────────────────────────────
+
+/// `oc://session/<id>` and the legacy `session:<id>` both name a session, and
+/// nothing else does.
+#[test]
+fn extract_session_target_handles_url_and_legacy() {
+    assert_eq!(
+        extract_session_target("oc://session/12345678-1234-1234-1234-123456789abc"),
+        Some("12345678-1234-1234-1234-123456789abc")
+    );
+    assert_eq!(
+        extract_session_target("oc://session/12345678"),
+        Some("12345678")
+    );
+    assert_eq!(
+        extract_session_target("oc://session/12345678/extra"),
+        Some("12345678")
+    );
+    assert_eq!(
+        extract_session_target("session:12345678-1234-1234-1234-123456789abc"),
+        Some("12345678-1234-1234-1234-123456789abc")
+    );
+    assert_eq!(extract_session_target("telegram:123456"), None);
+    assert_eq!(extract_session_target("oc://telegram/123456"), None);
+}
+
+/// A session destination renders back as the `session:<uuid>` spelling the
+/// extractor accepts, so a resolved target round-trips.
+#[test]
+fn session_target_deliver_to_format() {
+    let u = Uuid::new_v4();
+    let rt = ResolvedTarget {
+        session: Some(u),
+        destination: TargetDestination::Session(u),
+    };
+    assert_eq!(rt.deliver_to(), format!("session:{u}"));
 }
