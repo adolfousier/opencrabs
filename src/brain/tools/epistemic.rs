@@ -65,7 +65,11 @@ pub struct Source {
     pub last_verified: DateTime<Utc>,
 }
 
-/// A single belief with confidence and source tracking.
+/// A single belief with confidence, source tracking, and usage metrics.
+///
+/// `hits` and `last_used` track how often and how recently a belief was
+/// accessed. These drive the cold-facts deletion pass (#1641): beliefs
+/// with 0 hits older than 90 days are candidates for removal.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Belief {
     /// Unique key for this belief (e.g. "memory:truelens:staging_ip")
@@ -79,6 +83,14 @@ pub struct Belief {
     /// Optional notes or context
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notes: Option<String>,
+    /// Number of times this belief was accessed (recall injection or explicit get).
+    #[serde(default)]
+    pub hits: u64,
+    /// Last time this belief was accessed. `None` means never used since
+    /// tracking was added; decay and cold-facts logic falls back to
+    /// `source.recorded_at`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_used: Option<DateTime<Utc>>,
 }
 
 /// The epistemic store — all tracked beliefs.
@@ -155,6 +167,8 @@ impl EpistemicStore {
                     last_verified: now,
                 },
                 notes: None,
+                hits: 0,
+                last_used: None,
             };
             self.beliefs.insert(key.to_string(), belief);
 
@@ -175,6 +189,8 @@ impl EpistemicStore {
                 last_verified: now,
             },
             notes: None,
+            hits: 0,
+            last_used: None,
         };
         self.beliefs.insert(key.to_string(), belief);
 
@@ -197,6 +213,21 @@ impl EpistemicStore {
         }
     }
 
+    /// Record a usage hit on a belief: increment `hits` and set `last_used`
+    /// to now. Returns true if the belief existed, false otherwise.
+    ///
+    /// Called from `memory_recall.rs` when a belief's section is injected
+    /// into context (#1641).
+    pub fn touch_belief(&mut self, key: &str) -> bool {
+        if let Some(belief) = self.beliefs.get_mut(key) {
+            belief.hits += 1;
+            belief.last_used = Some(Utc::now());
+            true
+        } else {
+            false
+        }
+    }
+
     /// Apply decay logic: beliefs not verified within `decay_days` drop
     /// one confidence level. Verified beliefs are immune.
     pub fn apply_decay(&mut self, decay_days: i64) -> Vec<String> {
@@ -208,13 +239,18 @@ impl EpistemicStore {
                 continue; // Verified beliefs don't decay
             }
 
-            let age_days = (now - belief.source.last_verified).num_days();
+            // Use last_used as the clock (fall back to recorded_at for
+            // beliefs never touched since tracking was added). This is the
+            // right clock: a belief used recently shouldn't decay even if
+            // it was never explicitly re-verified (#1641).
+            let last_seen = belief.last_used.unwrap_or(belief.source.recorded_at);
+            let age_days = (now - last_seen).num_days();
             if age_days >= decay_days {
                 let old = belief.confidence;
                 belief.confidence = belief.confidence.decay();
                 if belief.confidence != old {
                     decayed.push(format!(
-                        "{}: {} → {} ({} days since verification)",
+                        "{}: {} → {} ({} days since last use)",
                         belief.key,
                         old.label(),
                         belief.confidence.label(),
@@ -333,6 +369,22 @@ pub fn verify_belief(key: &str) -> bool {
     let store = get_store();
     let mut guard = store.lock().expect("epistemic store lock poisoned");
     let result = guard.verify_belief(key);
+
+    if result
+        && let Some(path) = epistemic_store_path()
+        && let Err(e) = guard.save(&path)
+    {
+        tracing::warn!("Failed to save epistemic store: {}", e);
+    }
+
+    result
+}
+
+/// Touch a belief in the global store (increment hits, update last_used).
+pub fn touch_belief(key: &str) -> bool {
+    let store = get_store();
+    let mut guard = store.lock().expect("epistemic store lock poisoned");
+    let result = guard.touch_belief(key);
 
     if result
         && let Some(path) = epistemic_store_path()

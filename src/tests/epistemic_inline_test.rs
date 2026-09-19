@@ -72,6 +72,8 @@ fn test_decay_logic() {
             last_verified: Utc::now() - chrono::Duration::days(45),
         },
         notes: None,
+        hits: 0,
+        last_used: None,
     };
     store.beliefs.insert("test:old".to_string(), belief.clone());
 
@@ -111,6 +113,8 @@ fn test_verified_beliefs_dont_decay() {
             last_verified: Utc::now() - chrono::Duration::days(100),
         },
         notes: None,
+        hits: 0,
+        last_used: None,
     };
     store.beliefs.insert("test:verified".to_string(), belief);
 
@@ -163,4 +167,82 @@ fn test_list_by_key_prefix() {
 
     let empty = store.list_by_key_prefix("nonexistent:");
     assert!(empty.is_empty());
+}
+
+/// #1641: touch_belief increments hits and sets last_used.
+#[test]
+fn test_touch_belief() {
+    let mut store = EpistemicStore::new();
+    store.add_belief("test:key", "value", Confidence::Inferred, "test");
+
+    let belief = store.get_belief("test:key").unwrap();
+    assert_eq!(belief.hits, 0);
+    assert!(belief.last_used.is_none());
+
+    // First touch
+    assert!(store.touch_belief("test:key"));
+    let belief = store.get_belief("test:key").unwrap();
+    assert_eq!(belief.hits, 1);
+    assert!(belief.last_used.is_some());
+
+    // Second touch
+    assert!(store.touch_belief("test:key"));
+    let belief = store.get_belief("test:key").unwrap();
+    assert_eq!(belief.hits, 2);
+
+    // Non-existent key
+    assert!(!store.touch_belief("nonexistent"));
+}
+
+/// #1641: recently-used beliefs don't decay even if never re-verified.
+/// The decay clock uses last_used (falling back to recorded_at), not
+/// last_verified.
+#[test]
+fn test_decay_uses_last_used_not_last_verified() {
+    let mut store = EpistemicStore::new();
+
+    // Old belief that was recently touched — should NOT decay
+    let mut belief = Belief {
+        key: "test:old_but_used".to_string(),
+        value: "still_valid".to_string(),
+        confidence: Confidence::Inferred,
+        source: Source {
+            origin: "test".to_string(),
+            recorded_at: Utc::now() - chrono::Duration::days(60),
+            last_verified: Utc::now() - chrono::Duration::days(60),
+        },
+        notes: None,
+        hits: 5,
+        last_used: Some(Utc::now() - chrono::Duration::days(2)),
+    };
+    store
+        .beliefs
+        .insert("test:old_but_used".to_string(), belief.clone());
+
+    // Old belief never touched — SHOULD decay
+    belief.key = "test:old_unused".to_string();
+    belief.value = "stale".to_string();
+    belief.hits = 0;
+    belief.last_used = None;
+    store
+        .beliefs
+        .insert("test:old_unused".to_string(), belief);
+
+    let decayed = store.apply_decay(30);
+
+    // Only the unused one decayed
+    assert_eq!(decayed.len(), 1);
+    assert!(decayed[0].contains("test:old_unused"));
+
+    // The recently-used one is still Inferred
+    assert_eq!(
+        store.get_belief("test:old_but_used").unwrap().confidence,
+        Confidence::Inferred
+    );
+
+    // The unused one dropped to Uncertain
+    assert_eq!(
+        store.get_belief("test:old_unused").unwrap().confidence,
+        Confidence::Uncertain
+    );
 }
