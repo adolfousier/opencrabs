@@ -112,6 +112,11 @@ impl TriggerRunner {
             .arg(cmd)
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
+            // On timeout the future below is dropped, and a tokio Child does
+            // not kill its process on drop. Without this a trigger that hangs
+            // leaves the shell running unsupervised, once per schedule tick,
+            // for as long as the daemon lives.
+            .kill_on_drop(true)
             .spawn()
             .map_err(|e| format!("Failed to spawn trigger process: {e}"))?;
 
