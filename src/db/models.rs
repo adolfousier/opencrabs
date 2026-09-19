@@ -573,7 +573,7 @@ pub struct CronJobRun {
     pub id: Uuid,
     pub job_id: Uuid,
     pub job_name: String,
-    pub status: String, // "running", "success", "error", "delivery_failed", "interrupted"
+    pub status: String, // "running", "success", "error", "interrupted"
     pub content: Option<String>,
     pub error: Option<String>,
     pub input_tokens: i64,

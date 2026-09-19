@@ -78,11 +78,17 @@ impl CronJobRunRepository {
 
     /// Mark a run as failed with error.
     ///
-    /// Terminal statuses for cron job runs include:
-    /// - `success`: execution finished and delivery succeeded (if configured)
-    /// - `delivery_failed`: execution finished but delivery failed
-    /// - `error`: job execution failed with error
-    /// - `interrupted`: aged running execution cleared by watchdog/doctor sweep
+    /// Every status this table ever holds, and the single writer of each:
+    /// - `running`: set by [`Self::insert`] when the run starts
+    /// - `success`: set by [`Self::complete_success`] when execution finished
+    /// - `error`: set here, when execution failed
+    /// - `interrupted`: set by `doctor --fix`, for an aged `running` row whose
+    ///   process is gone, so a watchdog sweep is never mistaken for a failure
+    ///
+    /// Delivery outcome is deliberately absent: the scheduler discards the
+    /// result of `deliver_result` at both call sites, so a run whose execution
+    /// succeeded and whose delivery failed is still stored as `success`. Do not
+    /// document a `delivery_failed` status until something writes one.
     pub async fn complete_error(&self, run_id: &str, error: &str) -> Result<()> {
         let id = run_id.to_string();
         let error = error.to_string();
