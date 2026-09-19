@@ -2,6 +2,7 @@
 //!
 //! Provides syntax highlighting for code blocks using syntect.
 
+use crate::tui::render::theme::{self, Role};
 use once_cell::sync::Lazy;
 use ratatui::{
     style::{Color, Style},
@@ -80,9 +81,12 @@ pub fn highlight_code(code: &str, language: &str) -> Vec<Line<'static>> {
                     Line::from(vec![
                         Span::styled(
                             format!("{:3} ", idx + 1),
-                            Style::default().fg(Color::DarkGray),
+                            Style::default().fg(theme::role(Role::GrayDim)),
                         ),
-                        Span::styled(format!("│ {}", line), Style::default().fg(Color::Gray)),
+                        Span::styled(
+                            format!("│ {}", line),
+                            Style::default().fg(theme::role(Role::Gray)),
+                        ),
                     ])
                 })
                 .collect();
@@ -101,11 +105,11 @@ pub fn highlight_code(code: &str, language: &str) -> Vec<Line<'static>> {
                 lines.push(Line::from(vec![
                     Span::styled(
                         format!("{:3} ", line_num + 1),
-                        Style::default().fg(Color::DarkGray),
+                        Style::default().fg(theme::role(Role::GrayDim)),
                     ),
                     Span::styled(
                         format!("│ {}", line.trim_end()),
-                        Style::default().fg(Color::Gray),
+                        Style::default().fg(theme::role(Role::Gray)),
                     ),
                 ]));
                 continue;
@@ -114,10 +118,13 @@ pub fn highlight_code(code: &str, language: &str) -> Vec<Line<'static>> {
 
         let mut styled_line = vec![Span::styled(
             format!("{:3} ", line_num + 1),
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(theme::role(Role::GrayDim)),
         )];
 
-        styled_line.push(Span::styled("│ ", Style::default().fg(Color::DarkGray)));
+        styled_line.push(Span::styled(
+            "│ ",
+            Style::default().fg(theme::role(Role::GrayDim)),
+        ));
 
         for (style, text) in ranges {
             styled_line.push(Span::styled(
