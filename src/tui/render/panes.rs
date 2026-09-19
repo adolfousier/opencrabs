@@ -7,7 +7,7 @@ use crate::tui::pane::PaneId;
 use ratatui::{
     Frame,
     layout::Rect,
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Padding, Paragraph},
 };
@@ -61,11 +61,11 @@ pub(super) fn render_inactive_pane(f: &mut Frame, app: &App, pane_id: PaneId, ar
 
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::DarkGray))
+        .border_style(Style::default().fg(theme::role(Role::GrayDim)))
         .title(Span::styled(
             format!(" {}{} ", session_label, status),
             Style::default()
-                .fg(Color::DarkGray)
+                .fg(theme::role(Role::GrayDim))
                 .add_modifier(Modifier::BOLD),
         ))
         .padding(Padding::horizontal(1));
@@ -112,11 +112,11 @@ pub(super) fn render_inactive_pane(f: &mut Frame, app: &App, pane_id: PaneId, ar
             let all_done = group.calls.iter().all(|c| c.completed);
             let any_failed = group.calls.iter().any(|c| c.completed && !c.success);
             let (icon, color) = if !all_done {
-                ("⚙", Color::Yellow)
+                ("⚙", theme::role(Role::Warning))
             } else if any_failed {
-                ("●", Color::Red)
+                ("●", theme::role(Role::Error))
             } else {
-                ("●", Color::DarkGray)
+                ("●", theme::role(Role::GrayDim))
             };
             lines.push(Line::from(Span::styled(
                 format!(
@@ -137,16 +137,16 @@ pub(super) fn render_inactive_pane(f: &mut Frame, app: &App, pane_id: PaneId, ar
             if start > 0 {
                 lines.push(Line::from(Span::styled(
                     format!("    … {} earlier", start),
-                    Style::default().fg(Color::DarkGray),
+                    Style::default().fg(theme::role(Role::GrayDim)),
                 )));
             }
             for call in &group.calls[start..] {
                 let (c_icon, c_color) = if !call.completed {
-                    ("⚙", Color::Yellow)
+                    ("⚙", theme::role(Role::Warning))
                 } else if call.success {
-                    ("✓", Color::Green)
+                    ("✓", theme::role(Role::Success))
                 } else {
-                    ("✗", Color::Red)
+                    ("✗", theme::role(Role::Error))
                 };
                 let desc: String = call.description.chars().take(58).collect();
                 lines.push(Line::from(Span::styled(
@@ -159,7 +159,7 @@ pub(super) fn render_inactive_pane(f: &mut Frame, app: &App, pane_id: PaneId, ar
             lines.push(Line::from(Span::styled(
                 "  ▸ Thinking",
                 Style::default()
-                    .fg(Color::DarkGray)
+                    .fg(theme::role(Role::GrayDim))
                     .add_modifier(Modifier::ITALIC),
             )));
         }
@@ -180,7 +180,7 @@ pub(super) fn render_inactive_pane(f: &mut Frame, app: &App, pane_id: PaneId, ar
                     .collect();
                 lines.push(Line::from(Span::styled(
                     preview,
-                    Style::default().fg(Color::Reset),
+                    Style::default().fg(theme::role(Role::TextPrimary)),
                 )));
             }
         }
@@ -189,7 +189,7 @@ pub(super) fn render_inactive_pane(f: &mut Frame, app: &App, pane_id: PaneId, ar
     if lines.is_empty() {
         lines.push(Line::from(Span::styled(
             "Tab to switch focus",
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(theme::role(Role::GrayDim)),
         )));
     }
 
@@ -219,11 +219,11 @@ pub(crate) fn render_simple_message(
             let all_done = group.calls.iter().all(|c| c.completed);
             let any_failed = group.calls.iter().any(|c| c.completed && !c.success);
             let (icon, color) = if !all_done {
-                ("⚙", Color::Yellow)
+                ("⚙", theme::role(Role::Warning))
             } else if any_failed {
-                ("●", Color::Red)
+                ("●", theme::role(Role::Error))
             } else {
-                ("●", Color::DarkGray)
+                ("●", theme::role(Role::GrayDim))
             };
             lines.push(Line::from(Span::styled(
                 format!(
@@ -268,7 +268,7 @@ pub(crate) fn render_simple_message(
         lines.push(Line::from(Span::styled(
             "  ▸ Thinking",
             Style::default()
-                .fg(Color::DarkGray)
+                .fg(theme::role(Role::GrayDim))
                 .add_modifier(Modifier::ITALIC),
         )));
     }
@@ -295,7 +295,7 @@ pub(crate) fn render_simple_message(
             let prefix = if i == 0 { "> " } else { "" };
             let line = Line::from(Span::styled(
                 format!("{}{}", prefix, raw),
-                Style::default().fg(Color::Cyan),
+                Style::default().fg(theme::role(Role::AccentTeal)),
             ));
             for wrapped in wrap_line_with_padding(line, width, "  ") {
                 lines.push(wrapped);
