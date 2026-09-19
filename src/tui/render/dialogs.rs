@@ -7,7 +7,7 @@ use super::theme::{self, Role};
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Rect},
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph, Wrap},
 };
@@ -24,7 +24,7 @@ pub(super) fn render_file_picker(f: &mut Frame, app: &App, area: Rect) {
                 .fg(theme::role(Role::Gray))
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled("  │  ", Style::default().fg(Color::DarkGray)),
+        Span::styled("  │  ", Style::default().fg(theme::role(Role::GrayDim))),
         Span::styled(
             app.file_picker_current_dir.to_string_lossy().to_string(),
             Style::default().fg(theme::role(Role::Accent)),
@@ -35,11 +35,11 @@ pub(super) fn render_file_picker(f: &mut Frame, app: &App, area: Rect) {
     if app.file_picker_search.is_empty() {
         lines.push(Line::from(vec![Span::styled(
             "  Type to filter...",
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(theme::role(Role::GrayDim)),
         )]));
     } else {
         lines.push(Line::from(vec![
-            Span::styled("  🔍 ", Style::default().fg(Color::DarkGray)),
+            Span::styled("  🔍 ", Style::default().fg(theme::role(Role::GrayDim))),
             Span::styled(
                 &app.file_picker_search,
                 Style::default().fg(theme::role(Role::Accent)),
@@ -90,13 +90,13 @@ pub(super) fn render_file_picker(f: &mut Frame, app: &App, area: Rect) {
 
         let style = if is_selected {
             Style::default()
-                .fg(Color::Black)
+                .fg(theme::role(Role::Ink))
                 .bg(theme::role(Role::Gray))
                 .add_modifier(Modifier::BOLD)
         } else if is_dir {
             Style::default().fg(theme::role(Role::Gray))
         } else {
-            Style::default().fg(Color::Reset)
+            Style::default().fg(theme::role(Role::TextPrimary))
         };
 
         let prefix = if is_selected { "▶ " } else { "  " };
@@ -112,7 +112,7 @@ pub(super) fn render_file_picker(f: &mut Frame, app: &App, area: Rect) {
         lines.push(Line::from(""));
         lines.push(Line::from(vec![Span::styled(
             format!("Showing {}-{} of {} files", start + 1, end, filtered.len()),
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(theme::role(Role::GrayDim)),
         )]));
     }
 
@@ -125,19 +125,30 @@ pub(super) fn render_file_picker(f: &mut Frame, app: &App, area: Rect) {
                 .fg(theme::role(Role::Gray))
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled(" Navigate  ", Style::default().fg(Color::Reset)),
+        Span::styled(
+            " Navigate  ",
+            Style::default().fg(theme::role(Role::TextPrimary)),
+        ),
         Span::styled(
             "[Enter]",
             Style::default()
-                .fg(Color::Gray)
+                .fg(theme::role(Role::Gray))
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled(" Select  ", Style::default().fg(Color::Reset)),
+        Span::styled(
+            " Select  ",
+            Style::default().fg(theme::role(Role::TextPrimary)),
+        ),
         Span::styled(
             "[Esc]",
-            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(theme::role(Role::Error))
+                .add_modifier(Modifier::BOLD),
         ),
-        Span::styled(" Cancel", Style::default().fg(Color::Reset)),
+        Span::styled(
+            " Cancel",
+            Style::default().fg(theme::role(Role::TextPrimary)),
+        ),
     ]));
 
     let widget = Paragraph::new(lines)
@@ -169,7 +180,7 @@ pub(super) fn render_directory_picker(f: &mut Frame, app: &App, area: Rect) {
                 .fg(theme::role(Role::Gray))
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled("  │  ", Style::default().fg(Color::DarkGray)),
+        Span::styled("  │  ", Style::default().fg(theme::role(Role::GrayDim))),
         Span::styled(
             app.file_picker_current_dir.to_string_lossy().to_string(),
             Style::default().fg(theme::role(Role::Accent)),
@@ -204,7 +215,7 @@ pub(super) fn render_directory_picker(f: &mut Frame, app: &App, area: Rect) {
 
         let style = if is_selected {
             Style::default()
-                .fg(Color::Black)
+                .fg(theme::role(Role::Ink))
                 .bg(theme::role(Role::Gray))
                 .add_modifier(Modifier::BOLD)
         } else {
@@ -234,7 +245,7 @@ pub(super) fn render_directory_picker(f: &mut Frame, app: &App, area: Rect) {
                 end,
                 app.file_picker_files.len()
             ),
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(theme::role(Role::GrayDim)),
         )]));
     }
 
@@ -247,21 +258,30 @@ pub(super) fn render_directory_picker(f: &mut Frame, app: &App, area: Rect) {
                 .fg(theme::role(Role::Gray))
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled(" Navigate  ", Style::default().fg(Color::Reset)),
+        Span::styled(
+            " Navigate  ",
+            Style::default().fg(theme::role(Role::TextPrimary)),
+        ),
         Span::styled(
             "[Enter]",
             Style::default()
-                .fg(Color::Gray)
+                .fg(theme::role(Role::Gray))
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled(" Open  ", Style::default().fg(Color::Reset)),
+        Span::styled(
+            " Open  ",
+            Style::default().fg(theme::role(Role::TextPrimary)),
+        ),
         Span::styled(
             "[Space/Tab]",
             Style::default()
                 .fg(theme::role(Role::TealBright))
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled(" Select here  ", Style::default().fg(Color::Reset)),
+        Span::styled(
+            " Select here  ",
+            Style::default().fg(theme::role(Role::TextPrimary)),
+        ),
         Span::styled(
             "[.]",
             Style::default()
@@ -277,13 +297,18 @@ pub(super) fn render_directory_picker(f: &mut Frame, app: &App, area: Rect) {
                     "Show"
                 }
             ),
-            Style::default().fg(Color::Reset),
+            Style::default().fg(theme::role(Role::TextPrimary)),
         ),
         Span::styled(
             "[Esc]",
-            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(theme::role(Role::Error))
+                .add_modifier(Modifier::BOLD),
         ),
-        Span::styled(" Cancel", Style::default().fg(Color::Reset)),
+        Span::styled(
+            " Cancel",
+            Style::default().fg(theme::role(Role::TextPrimary)),
+        ),
     ]));
 
     let widget = Paragraph::new(lines)
@@ -336,7 +361,7 @@ pub(super) fn render_restart_dialog(f: &mut Frame, app: &App, area: Rect) {
         Line::from(Span::styled(
             format!("  {}", status),
             Style::default()
-                .fg(Color::Cyan)
+                .fg(theme::role(Role::AccentTeal))
                 .add_modifier(Modifier::BOLD),
         )),
         Line::from(""),
@@ -346,13 +371,15 @@ pub(super) fn render_restart_dialog(f: &mut Frame, app: &App, area: Rect) {
             Span::styled(
                 "  [Enter] ",
                 Style::default()
-                    .fg(Color::Cyan)
+                    .fg(theme::role(Role::AccentTeal))
                     .add_modifier(Modifier::BOLD),
             ),
             Span::raw("Restart  "),
             Span::styled(
                 "[Esc] ",
-                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(theme::role(Role::Error))
+                    .add_modifier(Modifier::BOLD),
             ),
             Span::raw("Cancel"),
         ]),
@@ -362,7 +389,7 @@ pub(super) fn render_restart_dialog(f: &mut Frame, app: &App, area: Rect) {
         Block::default()
             .title(" Rebuild Complete ")
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Cyan)),
+            .border_style(Style::default().fg(theme::role(Role::AccentTeal))),
     );
     f.render_widget(dialog, dialog_area);
 }
@@ -400,7 +427,7 @@ pub(super) fn render_update_dialog(f: &mut Frame, app: &App, area: Rect) {
         Line::from(Span::styled(
             format!("  v{} -> v{}", crate::VERSION, version),
             Style::default()
-                .fg(Color::Cyan)
+                .fg(theme::role(Role::AccentTeal))
                 .add_modifier(Modifier::BOLD),
         )),
         Line::from(""),
@@ -410,13 +437,15 @@ pub(super) fn render_update_dialog(f: &mut Frame, app: &App, area: Rect) {
             Span::styled(
                 "  [Enter] ",
                 Style::default()
-                    .fg(Color::Cyan)
+                    .fg(theme::role(Role::AccentTeal))
                     .add_modifier(Modifier::BOLD),
             ),
             Span::raw("Update  "),
             Span::styled(
                 "[Esc] ",
-                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(theme::role(Role::Error))
+                    .add_modifier(Modifier::BOLD),
             ),
             Span::raw("Skip"),
         ]),
@@ -426,7 +455,7 @@ pub(super) fn render_update_dialog(f: &mut Frame, app: &App, area: Rect) {
         Block::default()
             .title(" Update Available ")
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Cyan)),
+            .border_style(Style::default().fg(theme::role(Role::AccentTeal))),
     );
     f.render_widget(dialog, dialog_area);
 }
