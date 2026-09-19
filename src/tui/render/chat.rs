@@ -937,23 +937,7 @@ pub(super) fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
                     let mut spans: Vec<Span> = wrapped
                         .spans
                         .into_iter()
-                        .map(|s| {
-                            let style = if is_user {
-                                // Keep the span's own markdown colour when it has
-                                // one (inline code, headings, links, coloured bold);
-                                // only force white on default-fg text so it stays
-                                // readable on the dark user-message bg for light
-                                // terminal themes.
-                                if s.style.fg.is_some() {
-                                    s.style.bg(bg)
-                                } else {
-                                    s.style.bg(bg).fg(Color::White)
-                                }
-                            } else {
-                                s.style.bg(bg)
-                            };
-                            Span::styled(s.content, style)
-                        })
+                        .map(|s| Span::styled(s.content, s.style.bg(bg)))
                         .collect();
                     let line_width: usize = spans.iter().map(|s| s.content.width()).sum();
                     let remaining = content_width.saturating_sub(line_width);

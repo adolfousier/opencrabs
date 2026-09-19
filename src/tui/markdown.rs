@@ -48,11 +48,28 @@ fn inline_code() -> Color {
     theme::role(Role::BlueCode)
 }
 
+/// Body prose.
+///
+/// Seeding the emphasis fold with an explicit foreground is what makes plain
+/// paragraphs themeable at all. Folding over a bare `Style::default()` shipped
+/// every unemphasised span with `fg: None`, which the terminal resolves against
+/// its own default foreground, so body text rendered identically under every
+/// theme no matter what the palette declared (#1634).
+///
+/// `patch` keeps this recessive: any inner tag that sets its own colour (links,
+/// inline code, headings) still wins, and tags that only set a modifier inherit
+/// the prose colour instead of falling back to the terminal's.
+fn body_text() -> Color {
+    theme::role(Role::TextPrimary)
+}
+
 /// Fold an emphasis style stack (bold/italic/strikethrough/link) into a single
 /// `Style`. Inner tags `patch` over outer ones so nesting composes (bold inside
 /// a link keeps both the underline and the weight).
 fn folded_style(stack: &[Style]) -> Style {
-    stack.iter().fold(Style::default(), |acc, s| acc.patch(*s))
+    stack
+        .iter()
+        .fold(Style::default().fg(body_text()), |acc, s| acc.patch(*s))
 }
 
 /// Parse markdown and convert to styled lines for Ratatui.
@@ -415,7 +432,7 @@ pub fn parse_markdown(markdown: &str, max_width: usize) -> Vec<Line<'static>> {
                 if in_code_block {
                     code_content.push_str(&html_str);
                 } else {
-                    current_line.push(Span::styled(html_str, Style::default()));
+                    current_line.push(Span::styled(html_str, Style::default().fg(body_text())));
                 }
             }
 
