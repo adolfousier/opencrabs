@@ -58,7 +58,16 @@ impl PipelineExecutor {
         }
     }
 
-    /// Record a skipped trigger run in the database (0 tokens, status="skipped").
+    /// Record a skipped trigger run in the database: a 0-token row so the
+    /// job's history shows it ran and decided not to fire.
+    ///
+    /// Stored with status `success`, not `skipped`. There is no `skipped`
+    /// writer on [`CronJobRunRepository`], and the status inventory on
+    /// `complete_error` is explicit that a status is documented only once
+    /// something writes it. The distinction currently lives in the content
+    /// string, which a human can read and a query cannot. Giving skips their
+    /// own status is worth doing and is a change to the status set, not a
+    /// line in a merge.
     pub async fn record_skipped_run(
         job: &CronJob,
         result: &TriggerResult,
