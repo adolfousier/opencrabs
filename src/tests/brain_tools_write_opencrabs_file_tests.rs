@@ -35,51 +35,114 @@ fn test_input_schema_required_fields() {
 
 // ── path validation ───────────────────────────────────────────────────────────
 
+/// A named-profile home shape: `<tmp>/.opencrabs/profiles/<name>`.
+fn named_profile_home(dir: &TempDir, name: &str) -> std::path::PathBuf {
+    dir.path().join(".opencrabs").join("profiles").join(name)
+}
+
+/// The default-profile home shape: `<tmp>/.opencrabs`.
+fn default_home(dir: &TempDir) -> std::path::PathBuf {
+    dir.path().join(".opencrabs")
+}
+
+#[test]
+fn test_home_is_named_profile_predicate() {
+    let dir = TempDir::new().unwrap();
+
+    assert!(
+        home_is_named_profile(&named_profile_home(&dir, "ops")),
+        "base/profiles/ops is a named-profile home"
+    );
+    assert!(
+        home_is_named_profile(&named_profile_home(&dir, "family")),
+        "base/profiles/family is a named-profile home"
+    );
+    assert!(
+        !home_is_named_profile(&default_home(&dir)),
+        "base is NOT a named-profile home"
+    );
+    assert!(
+        !home_is_named_profile(&dir.path().join("profiles")),
+        "a directory merely named profiles (no name segment under it) is not a profile home"
+    );
+}
+
+#[test]
+fn test_leading_profiles_segment_predicate() {
+    assert!(leading_profiles_segment("profiles/ops/TOOLS.md"));
+    assert!(
+        leading_profiles_segment("./profiles/ops/TOOLS.md"),
+        "a leading CurDir must be skipped, not treated as the first segment"
+    );
+    assert!(leading_profiles_segment("profiles"));
+    assert!(!leading_profiles_segment("MEMORY.md"));
+    assert!(!leading_profiles_segment("memory/profiles/note.md"));
+    assert!(!leading_profiles_segment(""));
+}
+
 #[test]
 fn test_empty_path_rejected() {
-    assert!(validate_opencrabs_path("").is_err());
+    let dir = TempDir::new().unwrap();
+    let home = named_profile_home(&dir, "ops");
+    assert!(validate_opencrabs_path(&home, "").is_err());
 }
 
 #[test]
 fn test_absolute_path_rejected() {
-    assert!(validate_opencrabs_path("/etc/passwd").is_err());
-    assert!(validate_opencrabs_path("~/MEMORY.md").is_err());
+    let dir = TempDir::new().unwrap();
+    let home = named_profile_home(&dir, "ops");
+    assert!(validate_opencrabs_path(&home, "/etc/passwd").is_err());
+    assert!(validate_opencrabs_path(&home, "~/MEMORY.md").is_err());
 }
 
 #[test]
 fn test_path_traversal_rejected() {
-    assert!(validate_opencrabs_path("../etc/passwd").is_err());
-    assert!(validate_opencrabs_path("../../secrets").is_err());
-    assert!(validate_opencrabs_path("subdir/../../etc/passwd").is_err());
+    let dir = TempDir::new().unwrap();
+    let home = named_profile_home(&dir, "ops");
+    assert!(validate_opencrabs_path(&home, "../etc/passwd").is_err());
+    assert!(validate_opencrabs_path(&home, "../../secrets").is_err());
+    assert!(validate_opencrabs_path(&home, "subdir/../../etc/passwd").is_err());
 }
 
 #[test]
 fn test_valid_brain_files_accepted() {
-    assert!(validate_opencrabs_path("MEMORY.md").is_ok());
-    assert!(validate_opencrabs_path("USER.md").is_ok());
-    assert!(validate_opencrabs_path("SOUL.md").is_ok());
+    let dir = TempDir::new().unwrap();
+    let home = named_profile_home(&dir, "ops");
+    assert!(validate_opencrabs_path(&home, "MEMORY.md").is_ok());
+    assert!(validate_opencrabs_path(&home, "USER.md").is_ok());
+    assert!(validate_opencrabs_path(&home, "SOUL.md").is_ok());
 }
 
 #[test]
 fn test_valid_config_files_accepted() {
-    assert!(validate_opencrabs_path("commands.toml").is_ok());
-    assert!(validate_opencrabs_path("config.toml").is_ok());
+    let dir = TempDir::new().unwrap();
+    let home = named_profile_home(&dir, "ops");
+    assert!(validate_opencrabs_path(&home, "commands.toml").is_ok());
+    assert!(validate_opencrabs_path(&home, "config.toml").is_ok());
 }
 
 #[test]
 fn test_valid_subdirectory_paths_accepted() {
-    assert!(validate_opencrabs_path("memory/2026-03-02.md").is_ok());
-    assert!(validate_opencrabs_path("agents/session/context.json").is_ok());
+    let dir = TempDir::new().unwrap();
+    let home = named_profile_home(&dir, "ops");
+    assert!(validate_opencrabs_path(&home, "memory/2026-03-02.md").is_ok());
+    assert!(validate_opencrabs_path(&home, "agents/session/context.json").is_ok());
 }
 
+/// A leading `profiles/` segment duplicates a NAMED profile's home path, so it
+/// is refused in BOTH spellings — the plain one and the `./`-prefixed one that
+/// used to slip past the string test (issue #350).
 #[test]
-fn test_profiles_prefix_rejected() {
-    let result = validate_opencrabs_path("profiles/ops/TOOLS.md");
+fn test_profiles_prefix_duplication_rejected() {
+    let dir = TempDir::new().unwrap();
+    let home = named_profile_home(&dir, "ops");
+
+    let result = validate_opencrabs_path(&home, "profiles/ops/TOOLS.md");
     assert!(result.is_err());
     let err = result.unwrap_err();
     assert!(
-        err.contains("directory prefix"),
-        "Error message should mention directory prefix: {err}"
+        err.contains("duplicates it"),
+        "Error message should name the real rule: {err}"
     );
     assert!(
         err.contains("profiles/ops/TOOLS.md"),
@@ -87,8 +150,47 @@ fn test_profiles_prefix_rejected() {
     );
 
     // Also reject just "profiles/" with nothing after
-    let result2 = validate_opencrabs_path("profiles/ops/MEMORY.md");
-    assert!(result2.is_err());
+    assert!(validate_opencrabs_path(&home, "profiles/ops/MEMORY.md").is_err());
+
+    // The bypass spelling must get the SAME verdict, not be accepted.
+    assert!(
+        validate_opencrabs_path(&home, "./profiles/ops/TOOLS.md").is_err(),
+        "the leading './' spelling must not bypass the gate"
+    );
+}
+
+/// Issue #350: for the DEFAULT profile (`<base>`), `profiles/<name>/...` is a
+/// sibling profile's real home, not a duplicated prefix — it must be accepted,
+/// in both spellings.
+#[test]
+fn test_profiles_sibling_path_accepted_for_default_home() {
+    let dir = TempDir::new().unwrap();
+    let home = default_home(&dir);
+
+    assert!(
+        validate_opencrabs_path(&home, "profiles/family/USER.md").is_ok(),
+        "profiles/family/USER.md is the sibling profile's real home"
+    );
+    assert!(
+        validate_opencrabs_path(&home, "profiles/ops/TOOLS.md").is_ok(),
+        "profiles/ops/TOOLS.md is the sibling profile's real home"
+    );
+    assert!(
+        validate_opencrabs_path(&home, "./profiles/family/USER.md").is_ok(),
+        "identical target, identical verdict — the ./ spelling is accepted too"
+    );
+}
+
+/// The default home keeps every traversal refusal it had before #350.
+#[test]
+fn test_default_home_still_rejects_traversal() {
+    let dir = TempDir::new().unwrap();
+    let home = default_home(&dir);
+
+    assert!(validate_opencrabs_path(&home, "../etc/passwd").is_err());
+    assert!(validate_opencrabs_path(&home, "/etc/passwd").is_err());
+    assert!(validate_opencrabs_path(&home, "~/MEMORY.md").is_err());
+    assert!(validate_opencrabs_path(&home, "").is_err());
 }
 
 // ── operation validation ──────────────────────────────────────────────────────
@@ -315,4 +417,87 @@ fn test_replace_unicode_symbols_via_nfc() {
         result
     );
     assert!(result.contains("—"), "em-dash preserved: {:?}", result);
+}
+
+// ── cross-boundary: the tool's real execute() path ───────────────────────────
+//
+// The predicate tests above call the validator directly. These two drive the
+// ACTUAL tool boundary — `WriteOpenCrabsFileTool::execute` under a temp home
+// override — so the call-site wiring (home hoisted above validation, the
+// two-argument invocation) is exercised, not merely the function it delegates
+// to. Nothing is asserted against a helper's own delegate: the file either
+// exists on disk afterwards or it does not.
+
+#[tokio::test]
+async fn test_execute_writes_real_file_under_temp_home() {
+    use crate::config::profile::with_home_override_async;
+
+    let dir = TempDir::new().unwrap();
+    let home = default_home(&dir);
+    std::fs::create_dir_all(&home).unwrap();
+
+    let ctx = ctx();
+    let t = tool();
+    let result = with_home_override_async(home.clone(), async {
+        t.execute(
+            serde_json::json!({
+                "path": "memory/2026-03-02.md",
+                "operation": "overwrite",
+                "content": "hello from the boundary test",
+            }),
+            &ctx,
+        )
+        .await
+    })
+    .await
+    .unwrap();
+
+    assert!(result.success, "write should succeed: {:?}", result.error);
+
+    // Read back through the filesystem — the real cross-boundary assertion.
+    let landed = std::fs::read_to_string(home.join("memory/2026-03-02.md")).unwrap();
+    assert_eq!(landed, "hello from the boundary test");
+}
+
+#[tokio::test]
+async fn test_execute_rejects_profiles_prefix_and_writes_nothing() {
+    use crate::config::profile::with_home_override_async;
+
+    let dir = TempDir::new().unwrap();
+    let home = named_profile_home(&dir, "ops");
+    std::fs::create_dir_all(&home).unwrap();
+
+    let ctx = ctx();
+    let t = tool();
+    for spelling in ["profiles/ops/TOOLS.md", "./profiles/ops/TOOLS.md"] {
+        let result = with_home_override_async(home.clone(), async {
+            t.execute(
+                serde_json::json!({
+                    "path": spelling,
+                    "operation": "overwrite",
+                    "content": "must never land",
+                }),
+                &ctx,
+            )
+            .await
+        })
+        .await
+        .unwrap();
+
+        assert!(!result.success, "{spelling} must be rejected");
+        assert!(
+            result
+                .error
+                .as_deref()
+                .unwrap_or("")
+                .contains("duplicates it"),
+            "{spelling}: error should explain the duplication, got {:?}",
+            result.error
+        );
+        // The real boundary check: nothing was created one level too deep.
+        assert!(
+            !home.join(spelling).exists(),
+            "{spelling} must not exist on disk"
+        );
+    }
 }
