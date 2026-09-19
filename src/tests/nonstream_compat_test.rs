@@ -88,8 +88,17 @@ fn nonstream_with_cache_usage() {
     let json = r#"{"id":"gen-cache","object":"chat.completion","created":0,"model":"test","choices":[{"index":0,"finish_reason":"stop","message":{"role":"assistant","content":"cached"}}],"usage":{"prompt_tokens":1000,"completion_tokens":5,"prompt_tokens_details":{"cached_tokens":900}}}"#;
     let events = synthesize_stream_events(json).unwrap();
     if let Ok(StreamEvent::MessageDelta { ref usage, .. }) = events[events.len() - 2] {
-        assert_eq!(usage.input_tokens, 1000);
+        // `prompt_tokens` is the GROSS prompt, cached prefix included, so the
+        // non-cached input is 1000 - 900. This test asserted 1000 until #1636:
+        // the cached prefix was landing in `input_tokens` AND in
+        // `cache_read_tokens`, and the pricing table bills both.
+        assert_eq!(usage.input_tokens, 100);
         assert_eq!(usage.cache_read_tokens, 900);
+        assert_eq!(
+            usage.billable_input(),
+            1000,
+            "net + cache = the gross prompt"
+        );
     } else {
         panic!("expected MessageDelta with cache usage");
     }
