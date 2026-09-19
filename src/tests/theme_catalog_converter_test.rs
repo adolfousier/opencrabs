@@ -140,9 +140,10 @@ fn opencode_light_variant_resolves_light_defs() {
     assert_eq!(theme.colors.accent, rgb("#b15c00"), "accent = lightOrange");
 }
 
-/// Emission shape: provenance header, exactly 43 unique keys, all hex.
+/// Emission shape: provenance header, the 43 role keys plus the canvas
+/// `background` the source declares (#1634), all unique and all hex.
 #[test]
-fn emitted_toml_has_provenance_and_exactly_43_keys() {
+fn emitted_toml_has_provenance_and_exactly_44_keys() {
     let text = convert_alacritty_toml(
         "emit-shape-check",
         ALCRITTY_TOKYO_NIGHT,
@@ -158,7 +159,11 @@ fn emitted_toml_has_provenance_and_exactly_43_keys() {
         .lines()
         .filter(|l| !l.starts_with('#') && l.contains(" = \"#"))
         .collect();
-    assert_eq!(key_lines.len(), 43, "exactly the 43 schema keys");
+    assert_eq!(
+        key_lines.len(),
+        44,
+        "the 43 role keys plus the canvas background"
+    );
     let mut keys: Vec<&str> = key_lines
         .iter()
         .map(|l| l.split(" = ").next().unwrap())
@@ -167,6 +172,10 @@ fn emitted_toml_has_provenance_and_exactly_43_keys() {
     keys.sort_unstable();
     keys.dedup();
     assert_eq!(keys.len(), before, "keys unique");
+    assert!(
+        keys.contains(&"background"),
+        "the canvas background travels with the emitted theme"
+    );
 }
 
 /// defs references, variant objects, ANSI integers and "none" all resolve

@@ -44,7 +44,7 @@ pub fn convert_opencode_json(
 fn convert(name: &str, pal: &SourcePalette, provenance: &str) -> Result<String, String> {
     let mut roles = map_roles(pal);
     repair_contrast(&mut roles)?;
-    let text = emit(provenance, &roles);
+    let text = emit(provenance, &roles, pal.bg);
     // Certify under a shadow stem: once the pack ships as built-ins,
     // `build_theme(name, ...)` would reject the pack's own names as
     // collisions and regeneration would break. The stem feeds only the
@@ -181,7 +181,7 @@ fn set(roles: &mut [(Role, Color); 43], role: Role, color: Color) {
 /// Emit the flat 43-key TOML, keys in canonical schema order, with the
 /// provenance header. TOML comments survive parsing (the validator only
 /// rejects unknown *keys*), so provenance rides inside the shipped file.
-fn emit(provenance: &str, roles: &[(Role, Color); 43]) -> String {
+fn emit(provenance: &str, roles: &[(Role, Color); 43], background: Color) -> String {
     let mut out = String::with_capacity(1400);
     for line in provenance.lines() {
         out.push_str("# ");
@@ -194,6 +194,12 @@ fn emit(provenance: &str, roles: &[(Role, Color); 43]) -> String {
             continue; // unreachable: every derivation produces Rgb
         };
         out.push_str(&format!("{} = \"#{r:02x}{g:02x}{b:02x}\"\n", key_of(*role)));
+    }
+    // The canvas (#1634). Not a `Role` and so not in the 43-role array:
+    // it is the source's own declared background, emitted verbatim rather
+    // than derived, and a theme may decline to declare one.
+    if let Color::Rgb(r, g, b) = background {
+        out.push_str(&format!("background = \"#{r:02x}{g:02x}{b:02x}\"\n"));
     }
     out
 }
