@@ -10,13 +10,13 @@
 //! channel-ownership harvest.)
 
 use crate::a2a::handler::notify::{
-    handle_session_notify, CLI_SENDER_PREFIX, DEFAULT_CLI_SENDER_LABEL,
+    CLI_SENDER_PREFIX, DEFAULT_CLI_SENDER_LABEL, handle_session_notify,
 };
 use crate::a2a::test_helpers::helpers::placeholder_service_context;
-use crate::a2a::types::{error_codes, JsonRpcResponse};
+use crate::a2a::types::{JsonRpcResponse, error_codes};
+use crate::brain::agent::QueuedUserMessage;
 use crate::brain::agent::service::restart_recovery::test_guard;
 use crate::brain::agent::service::session_routes::register_session_route;
-use crate::brain::agent::QueuedUserMessage;
 use crate::services::SessionService;
 use std::sync::{Arc, Mutex};
 use uuid::Uuid;

@@ -309,10 +309,10 @@ mod cli {
 // --- DB Repository Tests ---
 
 mod repository {
-    use crate::db::models::CronJob;
-    use crate::db::repository::CronJobPatch;
     use crate::db::CronJobRepository;
     use crate::db::Database;
+    use crate::db::models::CronJob;
+    use crate::db::repository::CronJobPatch;
 
     async fn setup() -> (Database, CronJobRepository) {
         let db = Database::connect_in_memory()
@@ -1193,9 +1193,9 @@ mod tool {
 // --- Scheduler Logic Tests ---
 
 mod scheduler {
-    use crate::db::models::CronJob;
     use crate::db::CronJobRepository;
     use crate::db::Database;
+    use crate::db::models::CronJob;
     use chrono::{Duration, Utc};
 
     async fn setup() -> (Database, CronJobRepository) {
@@ -1331,7 +1331,7 @@ mod scheduler {
     /// scheduling again REPLACES it rather than stacking a second build.
     #[tokio::test]
     async fn schedule_background_rebuild_queues_one_shot_resumable_job() {
-        use crate::cron::{schedule_background_rebuild, REBUILD_JOB_NAME};
+        use crate::cron::{REBUILD_JOB_NAME, schedule_background_rebuild};
 
         let (db, repo) = setup().await;
         let sid = uuid::Uuid::new_v4();

@@ -9,7 +9,7 @@
 //! from=<uuid>]` header prepended to every delivery.
 
 use crate::brain::agent::service::notify_policy::{
-    confirm_route, resolve_mode, DeliveryMode, CONFIRM_CAP,
+    CONFIRM_CAP, DeliveryMode, confirm_route, resolve_mode,
 };
 use crate::brain::tools::error::{Result, ToolError};
 use crate::brain::tools::r#trait::{Tool, ToolCapability, ToolExecutionContext, ToolResult};
@@ -281,7 +281,7 @@ impl Tool for SessionNotifyTool {
 
         use crate::brain::agent::service::notify_receipts;
         use crate::brain::agent::service::quiet_delivery;
-        use crate::brain::agent::service::session_routes::{deliver_to_session, Delivery};
+        use crate::brain::agent::service::session_routes::{Delivery, deliver_to_session};
 
         let goal = input
             .get("goal")

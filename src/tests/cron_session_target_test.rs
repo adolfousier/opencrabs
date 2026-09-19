@@ -118,8 +118,8 @@ fn session_target_recognition_and_extraction() {
 
 #[tokio::test]
 async fn bake_delivery_target_bakes_session_target_to_session_uuid() {
-    use crate::brain::tools::cron_manage::bake_delivery_target;
     use crate::brain::tools::ToolExecutionContext;
+    use crate::brain::tools::cron_manage::bake_delivery_target;
 
     let full_uuid = "12345678-1234-1234-1234-123456789abc";
     let url_target = format!("oc://session/{full_uuid}");

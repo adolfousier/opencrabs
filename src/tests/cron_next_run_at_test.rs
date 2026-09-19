@@ -11,7 +11,7 @@ use crate::services::ServiceContext;
 use crate::tests::agent_service_mocks::MockProvider;
 use std::path::PathBuf;
 use std::sync::Arc;
-use tokio::sync::{watch, Mutex};
+use tokio::sync::{Mutex, watch};
 
 async fn setup() -> (Database, CronJobRepository, CronManageTool) {
     let db = Database::connect_in_memory()

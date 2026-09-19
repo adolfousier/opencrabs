@@ -1,6 +1,6 @@
 //! Tests for trigger-gated cron pipeline with mechanical pre-flight and goal dispatch (issue #233).
 
-use crate::cron::pipeline::{interpolate_template, PipelineExecutor, TriggerOutcome};
+use crate::cron::pipeline::{PipelineExecutor, TriggerOutcome, interpolate_template};
 use crate::cron::trigger::{TriggerCondition, TriggerResult, TriggerRunner};
 use crate::db::models::CronJob;
 
