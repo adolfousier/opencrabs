@@ -1,10 +1,7 @@
-use crate::brain::tools::Tool;
 // Tests for `write_opencrabs_file` tool.
 
 use crate::brain::tools::write_opencrabs_file::*;
-
-use crate::brain::tools::ToolExecutionContext;
-use crate::brain::tools::write_opencrabs_file::validate_opencrabs_path;
+use crate::brain::tools::{Tool, ToolExecutionContext};
 use tempfile::TempDir;
 use uuid::Uuid;
 
@@ -149,7 +146,8 @@ fn test_profiles_prefix_duplication_rejected() {
         "Error should echo the bad path: {err}"
     );
 
-    // Also reject just "profiles/" with nothing after
+    // A second duplicating path, to show the refusal is not specific to one file.
+    // The bare `profiles` segment is covered in the predicate test above.
     assert!(validate_opencrabs_path(&home, "profiles/ops/MEMORY.md").is_err());
 
     // The bypass spelling must get the SAME verdict, not be accepted.
