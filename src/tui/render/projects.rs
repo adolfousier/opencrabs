@@ -7,7 +7,7 @@ use super::theme::{self, Role};
 use ratatui::{
     Frame,
     layout::Rect,
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph, Wrap},
 };
@@ -33,38 +33,54 @@ fn render_project_list(f: &mut Frame, app: &App, area: Rect) {
                 .fg(theme::role(Role::Gray))
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled("Navigate  ", Style::default().fg(Color::Reset)),
+        Span::styled(
+            "Navigate  ",
+            Style::default().fg(theme::role(Role::TextPrimary)),
+        ),
         Span::styled(
             "[Enter] ",
             Style::default()
                 .fg(theme::role(Role::Gray))
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled("View  ", Style::default().fg(Color::Reset)),
+        Span::styled(
+            "View  ",
+            Style::default().fg(theme::role(Role::TextPrimary)),
+        ),
         Span::styled(
             "[N] ",
             Style::default()
                 .fg(theme::role(Role::Success))
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled("New  ", Style::default().fg(Color::Reset)),
+        Span::styled("New  ", Style::default().fg(theme::role(Role::TextPrimary))),
         Span::styled(
             "[A] ",
             Style::default()
                 .fg(theme::role(Role::BlueSky))
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled("Assign  ", Style::default().fg(Color::Reset)),
+        Span::styled(
+            "Assign  ",
+            Style::default().fg(theme::role(Role::TextPrimary)),
+        ),
         Span::styled(
             "[D] ",
-            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(theme::role(Role::Error))
+                .add_modifier(Modifier::BOLD),
         ),
-        Span::styled("Delete  ", Style::default().fg(Color::Reset)),
+        Span::styled(
+            "Delete  ",
+            Style::default().fg(theme::role(Role::TextPrimary)),
+        ),
         Span::styled(
             "[Esc] ",
-            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(theme::role(Role::Error))
+                .add_modifier(Modifier::BOLD),
         ),
-        Span::styled("Back", Style::default().fg(Color::Reset)),
+        Span::styled("Back", Style::default().fg(theme::role(Role::TextPrimary))),
     ]));
 
     lines.push(Line::from(""));
@@ -79,7 +95,7 @@ fn render_project_list(f: &mut Frame, app: &App, area: Rect) {
         )));
         lines.push(Line::from(Span::styled(
             "  [Enter] Confirm  [Esc] Cancel",
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(theme::role(Role::GrayDim)),
         )));
         lines.push(Line::from(""));
     }
@@ -87,24 +103,24 @@ fn render_project_list(f: &mut Frame, app: &App, area: Rect) {
     if app.projects.is_empty() {
         lines.push(Line::from(Span::styled(
             "  No projects yet.",
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(theme::role(Role::GrayDim)),
         )));
         lines.push(Line::from(""));
         lines.push(Line::from(Span::styled(
             "  Press [N] to create a project and organize your sessions.",
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(theme::role(Role::GrayDim)),
         )));
         lines.push(Line::from(""));
         lines.push(Line::from(Span::styled(
             "  Projects group related sessions and their tracked files.",
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(theme::role(Role::GrayDim)),
         )));
         lines.push(Line::from(Span::styled(
             format!(
                 "  Default directory: {}",
                 crate::services::ProjectService::projects_dir().display()
             ),
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(theme::role(Role::GrayDim)),
         )));
     } else {
         let count = app.projects.len();
@@ -124,7 +140,7 @@ fn render_project_list(f: &mut Frame, app: &App, area: Rect) {
                     .fg(theme::role(Role::Success))
                     .add_modifier(Modifier::BOLD)
             } else {
-                Style::default().fg(Color::Reset)
+                Style::default().fg(theme::role(Role::TextPrimary))
             };
 
             let mut spans = vec![Span::styled(
@@ -135,7 +151,7 @@ fn render_project_list(f: &mut Frame, app: &App, area: Rect) {
             if let Some(ref desc) = project.description {
                 spans.push(Span::styled(
                     format!(" — {}", desc),
-                    Style::default().fg(Color::DarkGray),
+                    Style::default().fg(theme::role(Role::GrayDim)),
                 ));
             }
 
@@ -143,7 +159,7 @@ fn render_project_list(f: &mut Frame, app: &App, area: Rect) {
             let created = project.created_at.format("%Y-%m-%d");
             spans.push(Span::styled(
                 format!("  {}", created),
-                Style::default().fg(Color::DarkGray),
+                Style::default().fg(theme::role(Role::GrayDim)),
             ));
 
             lines.push(Line::from(spans));
@@ -179,26 +195,37 @@ fn render_project_detail(f: &mut Frame, app: &App, area: Rect) {
                 .fg(theme::role(Role::Gray))
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled("Navigate  ", Style::default().fg(Color::Reset)),
+        Span::styled(
+            "Navigate  ",
+            Style::default().fg(theme::role(Role::TextPrimary)),
+        ),
         Span::styled(
             "[Enter] ",
             Style::default()
                 .fg(theme::role(Role::Gray))
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled("Open  ", Style::default().fg(Color::Reset)),
+        Span::styled(
+            "Open  ",
+            Style::default().fg(theme::role(Role::TextPrimary)),
+        ),
         Span::styled(
             "[U] ",
             Style::default()
                 .fg(theme::role(Role::Accent))
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled("Unassign  ", Style::default().fg(Color::Reset)),
+        Span::styled(
+            "Unassign  ",
+            Style::default().fg(theme::role(Role::TextPrimary)),
+        ),
         Span::styled(
             "[Esc] ",
-            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(theme::role(Role::Error))
+                .add_modifier(Modifier::BOLD),
         ),
-        Span::styled("Back", Style::default().fg(Color::Reset)),
+        Span::styled("Back", Style::default().fg(theme::role(Role::TextPrimary))),
     ]));
 
     lines.push(Line::from(""));
@@ -214,7 +241,7 @@ fn render_project_detail(f: &mut Frame, app: &App, area: Rect) {
         if let Some(ref desc) = project.description {
             lines.push(Line::from(Span::styled(
                 format!("  {}", desc),
-                Style::default().fg(Color::DarkGray),
+                Style::default().fg(theme::role(Role::GrayDim)),
             )));
         }
         lines.push(Line::from(""));
@@ -223,12 +250,12 @@ fn render_project_detail(f: &mut Frame, app: &App, area: Rect) {
     if app.project_sessions.is_empty() {
         lines.push(Line::from(Span::styled(
             "  No sessions in this project.",
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(theme::role(Role::GrayDim)),
         )));
         lines.push(Line::from(""));
         lines.push(Line::from(Span::styled(
             "  Go back to /sessions, select a session, then press [A] to assign it.",
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(theme::role(Role::GrayDim)),
         )));
     } else {
         let count = app.project_sessions.len();
@@ -248,7 +275,7 @@ fn render_project_detail(f: &mut Frame, app: &App, area: Rect) {
                     .fg(theme::role(Role::Success))
                     .add_modifier(Modifier::BOLD)
             } else {
-                Style::default().fg(Color::Reset)
+                Style::default().fg(theme::role(Role::TextPrimary))
             };
 
             let title = session.title.as_deref().unwrap_or("Untitled Session");
@@ -259,7 +286,7 @@ fn render_project_detail(f: &mut Frame, app: &App, area: Rect) {
             if let Some(ref model) = session.model {
                 spans.push(Span::styled(
                     format!("  [{}]", model),
-                    Style::default().fg(Color::DarkGray),
+                    Style::default().fg(theme::role(Role::GrayDim)),
                 ));
             }
 
@@ -267,7 +294,7 @@ fn render_project_detail(f: &mut Frame, app: &App, area: Rect) {
             let updated = session.updated_at.format("%Y-%m-%d %H:%M");
             spans.push(Span::styled(
                 format!("  {}", updated),
-                Style::default().fg(Color::DarkGray),
+                Style::default().fg(theme::role(Role::GrayDim)),
             ));
 
             // Token count
