@@ -102,6 +102,11 @@ const DRAIN_TICK: Duration = Duration::from_millis(400);
 
 /// Process-wide token bucket pacer for all Telegram requests across all chats/topics.
 /// Enforces a ~25 req/s global ceiling with burst capacity of 25.
+///
+/// A `std::sync::Mutex` taken from async code: correct only because every
+/// path drops the guard before it awaits. Never hold this across an `.await`
+/// — a blocking guard parked on a suspended future stalls every outbound
+/// Telegram send in the process, which is the one lock where that is fatal.
 static GLOBAL_PACER: Mutex<Option<Bucket>> = Mutex::new(None);
 
 /// Global pacer parameters.
