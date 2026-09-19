@@ -733,6 +733,13 @@ pub(crate) struct RalphLoopConfig {
     pub(crate) forward: RalphForward,
     #[serde(default)]
     verification: RalphVerification,
+    /// Epistemic layer config (#1640). The `[epistemic]` section in
+    /// ralph_loop.toml was silently dropped before this field existed —
+    /// users edited `decay_enabled` or `decay_interval_hours` and got
+    /// no error and no effect.
+    #[serde(default)]
+    #[allow(dead_code)] // consumed by #1641 epistemic engine wiring
+    pub(crate) epistemic: EpistemicConfig,
 }
 
 #[derive(Debug, Deserialize)]
@@ -867,6 +874,60 @@ fn default_max_iterations() -> u32 {
 
 fn default_true() -> bool {
     true
+}
+
+/// Epistemic layer configuration (#1640).
+///
+/// Maps the `[epistemic]` section of `ralph_loop.toml`. Before this struct
+/// existed, serde silently dropped every key in that section, so users could
+/// edit `decay_enabled` or `decay_interval_hours` and get no error and no
+/// effect.
+// Allow dead_code: fields are deserialized here but consumed by the epistemic
+// engine wired in #1641. Removing the lint now would require deleting the
+// struct, which defeats the purpose of fixing the silent config drop.
+#[allow(dead_code)]
+#[derive(Debug, Deserialize)]
+pub(crate) struct EpistemicConfig {
+    /// Master switch for the epistemic layer.
+    #[serde(default = "default_true")]
+    pub(crate) enabled: bool,
+    /// Human-readable confidence level names (documentation, not consumed at runtime).
+    #[serde(default)]
+    pub(crate) confidence_levels: Vec<String>,
+    /// Whether unverified beliefs decay over time.
+    #[serde(default = "default_true")]
+    pub(crate) decay_enabled: bool,
+    /// Hours before an unverified belief decays one confidence level.
+    #[serde(default = "default_decay_interval_hours")]
+    pub(crate) decay_interval_hours: u64,
+    /// Whether to detect contradictions when a new belief conflicts an existing one.
+    #[serde(default = "default_true")]
+    pub(crate) contradiction_detection: bool,
+    /// Whether all beliefs require source attribution.
+    #[serde(default = "default_true")]
+    pub(crate) source_required: bool,
+}
+
+impl Default for EpistemicConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            confidence_levels: vec![
+                "verified".into(),
+                "inferred".into(),
+                "uncertain".into(),
+                "contradicted".into(),
+            ],
+            decay_enabled: true,
+            decay_interval_hours: default_decay_interval_hours(),
+            contradiction_detection: true,
+            source_required: true,
+        }
+    }
+}
+
+fn default_decay_interval_hours() -> u64 {
+    720 // 30 days
 }
 
 /// Which `ralph_loop.toml` governs a session (#947): the project's own file

@@ -96,3 +96,54 @@ fn broken_project_file_yields_none_not_the_global_leak() {
     // project, never a silent slide back onto the machine-wide config.
     assert!(ralph_loop_config(dir.path()).is_none());
 }
+
+/// #1640: the `[epistemic]` section was silently dropped because
+/// `RalphLoopConfig` had no `epistemic` field. Users could edit
+/// `decay_enabled` or `decay_interval_hours` and get no error and no
+/// effect. Pin that the section is now deserialized correctly.
+#[test]
+fn epistemic_section_is_deserialized_not_silently_dropped() {
+    let dir = scratch("epistemic_1640");
+    fs::write(
+        dir.path().join("ralph_loop.toml"),
+        r#"
+[forward]
+max_iterations = 5
+
+[epistemic]
+enabled = true
+decay_enabled = false
+decay_interval_hours = 48
+contradiction_detection = true
+source_required = false
+"#,
+    )
+    .unwrap();
+
+    let config = ralph_loop_config(dir.path()).expect("file present");
+    assert_eq!(config.forward.max_iterations, 5);
+    assert!(config.epistemic.enabled);
+    assert!(!config.epistemic.decay_enabled);
+    assert_eq!(config.epistemic.decay_interval_hours, 48);
+    assert!(config.epistemic.contradiction_detection);
+    assert!(!config.epistemic.source_required);
+}
+
+/// #1640: a `ralph_loop.toml` with no `[epistemic]` section still parses
+/// (defaults kick in via `#[serde(default)]`).
+#[test]
+fn missing_epistemic_section_uses_defaults() {
+    let dir = scratch("epistemic_defaults");
+    fs::write(
+        dir.path().join("ralph_loop.toml"),
+        "[forward]\nmax_iterations = 10\n",
+    )
+    .unwrap();
+
+    let config = ralph_loop_config(dir.path()).expect("file present");
+    assert!(config.epistemic.enabled);
+    assert!(config.epistemic.decay_enabled);
+    assert_eq!(config.epistemic.decay_interval_hours, 720); // 30 days
+    assert!(config.epistemic.contradiction_detection);
+    assert!(config.epistemic.source_required);
+}
