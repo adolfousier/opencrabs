@@ -4,7 +4,7 @@ use super::theme::{self, Role};
 use ratatui::{
     Frame,
     layout::Rect,
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
     widgets::Paragraph,
 };
@@ -42,7 +42,7 @@ pub(super) fn render_app_title(f: &mut Frame, area: Rect) {
         ),
         Span::styled(
             format!("  v{}", env!("CARGO_PKG_VERSION")),
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(theme::role(Role::GrayDim)),
         ),
     ])]);
     f.render_widget(para, area);
