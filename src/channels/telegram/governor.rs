@@ -983,13 +983,17 @@ pub(crate) async fn pace_send(chat: ChatId) {
     if chat_id >= 0 {
         return;
     }
+    // Proactive global limiter & global 429 lock. Above the per-chat gate on
+    // purpose: `limits.enabled` is a per-chat pacing policy, while the global
+    // permit is the process-wide ceiling and the shared 429 cooldown. Below
+    // the gate, switching the per-chat pacer off would also delete the safety
+    // floor and let every chat keep firing straight through a live cooldown.
+    acquire_global_permit().await;
+
     let lim = Limits::from_config();
     if !lim.enabled {
         return;
     }
-
-    // Proactive global limiter & global 429 lock
-    acquire_global_permit().await;
 
     let mut waited = Duration::ZERO;
     loop {
@@ -1075,13 +1079,17 @@ pub(crate) async fn pace_rich(chat: ChatId, thread_id: Option<i32>) {
     if chat_id >= 0 {
         return;
     }
+    // Proactive global limiter & global 429 lock. Above the per-chat gate on
+    // purpose: `limits.enabled` is a per-chat pacing policy, while the global
+    // permit is the process-wide ceiling and the shared 429 cooldown. Below
+    // the gate, switching the per-chat pacer off would also delete the safety
+    // floor and let every chat keep firing straight through a live cooldown.
+    acquire_global_permit().await;
+
     let lim = Limits::from_config();
     if !lim.enabled {
         return;
     }
-
-    // Proactive global limiter & global 429 lock
-    acquire_global_permit().await;
 
     ensure_summary_task();
     let mut waited = Duration::ZERO;
