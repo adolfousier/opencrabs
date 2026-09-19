@@ -100,6 +100,11 @@ struct UserThemeFile {
     surface_code_alt: String,
     ink: String,
     purple_soft: String,
+    /// Canvas background (#1634). Optional so every theme file written
+    /// before the canvas existed stays valid: absent means the theme
+    /// declares none and the terminal's own background shows through.
+    #[serde(default)]
+    background: Option<String>,
 }
 
 /// A preset file that failed validation, with the reason.
@@ -262,6 +267,13 @@ pub(crate) fn build_theme(stem: &str, text: &str) -> Result<Theme, String> {
     let surface_code_alt = hx!(surface_code_alt);
     let ink = hx!(ink);
     let purple_soft = hx!(purple_soft);
+    let background = match f.background.as_deref() {
+        Some(raw) => Some(
+            parse_hex(raw)
+                .ok_or_else(|| format!("background: invalid hex {raw:?} (expected \"#RRGGBB\")"))?,
+        ),
+        None => None,
+    };
     let ansi = AnsiColors {
         accent: quant(accent),
         accent_teal: quant(accent_teal),
@@ -306,6 +318,7 @@ pub(crate) fn build_theme(stem: &str, text: &str) -> Result<Theme, String> {
         surface_code_alt: quant(surface_code_alt),
         ink: quant(ink),
         purple_soft: quant(purple_soft),
+        background: background.map(quant),
     };
     let rgb = ThemeColors {
         accent,
@@ -351,6 +364,7 @@ pub(crate) fn build_theme(stem: &str, text: &str) -> Result<Theme, String> {
         surface_code_alt,
         ink,
         purple_soft,
+        background,
         ansi,
     };
 

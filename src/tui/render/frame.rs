@@ -7,7 +7,8 @@ use super::super::onboarding_render;
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Rect},
-    widgets::Clear,
+    style::Style,
+    widgets::{Block, Clear},
 };
 use unicode_width::UnicodeWidthStr;
 
@@ -24,11 +25,29 @@ use super::plan_widget::render_plan_checklist;
 use super::projects::render_projects;
 use super::session_files::render_session_files;
 use super::sessions::render_sessions;
+use super::theme;
 use super::title::{render_app_title, split_title_area};
 use super::{mission_control, panes, plan_overlay, profiles_dialog, skills_dialog};
 
+/// Paint the canvas the rest of the frame draws on, when the active theme
+/// declares one (#1634).
+///
+/// Themes that declare no background (`crab-dark`, and every user file
+/// written before the canvas existed) are a no-op here, so the terminal's
+/// own background keeps showing and transparency or blur still works. A
+/// full-area `Block` rather than `Clear`: `Clear` resets cells to the
+/// terminal default, which is the behaviour this exists to override.
+fn paint_canvas(f: &mut Frame) {
+    let Some(bg) = theme::background() else {
+        return;
+    };
+    f.render_widget(Block::default().style(Style::default().bg(bg)), f.area());
+}
+
 /// Render the entire UI
 pub fn render(f: &mut Frame, app: &mut App) {
+    paint_canvas(f);
+
     if app.mode == AppMode::Onboarding {
         if let Some(ref wizard) = app.onboarding {
             onboarding_render::render_onboarding(f, wizard);

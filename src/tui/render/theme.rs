@@ -142,6 +142,9 @@ pub struct AnsiColors {
     pub surface_code_alt: u8,
     pub ink: u8,
     pub purple_soft: u8,
+    /// Canvas background, quantized. `None` when the theme declares no
+    /// background (see [`ThemeColors::background`]).
+    pub background: Option<u8>,
 }
 
 /// A complete role-to-color mapping for one theme.
@@ -190,6 +193,15 @@ pub struct ThemeColors {
     pub surface_code_alt: Color,
     pub ink: Color,
     pub purple_soft: Color,
+    /// The canvas the whole UI is drawn on, when the theme declares one
+    /// (#1634).
+    ///
+    /// Deliberately NOT a [`Role`]: [`ThemeColors::get`] returns a plain
+    /// `Color`, and "no background" has to stay expressible. A theme that
+    /// declares none leaves the terminal's own background showing, which
+    /// is what `crab-dark` does and what keeps terminal transparency and
+    /// blur working for anyone relying on them.
+    pub background: Option<Color>,
     pub ansi: AnsiColors,
 }
 
@@ -404,6 +416,9 @@ pub static CRAB_DARK: Theme = Theme {
         surface_code_alt: palette::SURFACE_CODE_ALT,
         ink: palette::INK,
         purple_soft: palette::PURPLE_SOFT,
+        // No canvas: the default theme leaves the terminal's own
+        // background showing, exactly as it did before #1634.
+        background: None,
         ansi: AnsiColors {
             accent: 166,
             accent_teal: 14,
@@ -448,6 +463,7 @@ pub static CRAB_DARK: Theme = Theme {
             surface_code_alt: 236,
             ink: 234,
             purple_soft: 140,
+            background: None,
         },
     },
 };
@@ -504,5 +520,20 @@ pub fn role(role: Role) -> Color {
         theme.colors.get(role)
     } else {
         theme.colors.get_ansi(role)
+    }
+}
+
+/// The active theme's canvas background, or `None` when it declares none.
+///
+/// Separate from [`role`] because the answer is optional: a theme that
+/// declares no background must leave the terminal's cells untouched so a
+/// transparent or blurred terminal keeps working. Callers paint only on
+/// `Some`; see `render::frame`.
+pub fn background() -> Option<Color> {
+    let theme = active();
+    if is_truecolor() {
+        theme.colors.background
+    } else {
+        theme.colors.ansi.background.map(Color::Indexed)
     }
 }

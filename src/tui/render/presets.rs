@@ -77,6 +77,7 @@ pub static DRACULA: Theme = Theme {
         surface_code_alt: rgb(0x44475A),
         ink: rgb(0x282A36),
         purple_soft: rgb(0xBD93F9),
+        background: Some(rgb(0x282A36)), // spec bg
         ansi: AnsiColors {
             accent: 215,
             accent_teal: 117,
@@ -121,6 +122,7 @@ pub static DRACULA: Theme = Theme {
             surface_code_alt: 59,
             ink: 17,
             purple_soft: 141,
+            background: Some(236),
         },
     },
 };
@@ -176,6 +178,7 @@ pub static ALUCARD: Theme = Theme {
         surface_code_alt: rgb(0xCECCC0),
         ink: rgb(0x1F1F1F),
         purple_soft: rgb(0x644AC9),
+        background: Some(rgb(0xFFFBEB)), // spec bg
         ansi: AnsiColors {
             accent: 130,
             accent_teal: 62,
@@ -220,6 +223,7 @@ pub static ALUCARD: Theme = Theme {
             surface_code_alt: 187,
             ink: 235,
             purple_soft: 62,
+            background: Some(230),
         },
     },
 };
@@ -274,6 +278,7 @@ pub static MONOKAI: Theme = Theme {
         surface_code_alt: rgb(0x3E3D32),
         ink: rgb(0x272822),
         purple_soft: rgb(0xAE81FF),
+        background: Some(rgb(0x272822)), // classic bg
         ansi: AnsiColors {
             accent: 208,
             accent_teal: 81,
@@ -318,6 +323,7 @@ pub static MONOKAI: Theme = Theme {
             surface_code_alt: 59,
             ink: 16,
             purple_soft: 141,
+            background: Some(235),
         },
     },
 };
@@ -375,6 +381,7 @@ pub static CATPPUCCIN_MOCHA: Theme = Theme {
         surface_code_alt: rgb(0x45475A),
         ink: rgb(0x1E1E2E),
         purple_soft: rgb(0xCBA6F7),
+        background: Some(rgb(0x1E1E2E)), // base
         ansi: AnsiColors {
             accent: 216,
             accent_teal: 116,
@@ -419,6 +426,7 @@ pub static CATPPUCCIN_MOCHA: Theme = Theme {
             surface_code_alt: 59,
             ink: 16,
             purple_soft: 183,
+            background: Some(235),
         },
     },
 };
@@ -475,6 +483,7 @@ pub static CATPPUCCIN_LATTE: Theme = Theme {
         surface_code_alt: rgb(0xBCC0CC),
         ink: rgb(0x4C4F69),
         purple_soft: rgb(0x8839EF),
+        background: Some(rgb(0xEFF1F5)), // base
         ansi: AnsiColors {
             accent: 202,
             accent_teal: 30,
@@ -519,6 +528,7 @@ pub static CATPPUCCIN_LATTE: Theme = Theme {
             surface_code_alt: 146,
             ink: 59,
             purple_soft: 99,
+            background: Some(255),
         },
     },
 };
@@ -625,6 +635,7 @@ pub static SOLARIZED_LIGHT: Theme = Theme {
         surface_code_alt: rgb(0xEEE8D5),
         ink: rgb(0x073642),
         purple_soft: rgb(0x6C71C4),
+        background: Some(rgb(0xFDF6E3)), // base3
         ansi: AnsiColors {
             accent: 166,
             accent_teal: 36,
@@ -669,6 +680,7 @@ pub static SOLARIZED_LIGHT: Theme = Theme {
             surface_code_alt: 224,
             ink: 23,
             purple_soft: 62,
+            background: Some(230),
         },
     },
 };
@@ -719,6 +731,7 @@ pub static SOLARIZED_DARK: Theme = Theme {
         surface_code_alt: rgb(0x073642),
         ink: rgb(0x002B36),
         purple_soft: rgb(0x6C71C4),
+        background: Some(rgb(0x002B36)), // base03
         ansi: AnsiColors {
             accent: 166,
             accent_teal: 36,
@@ -763,6 +776,7 @@ pub static SOLARIZED_DARK: Theme = Theme {
             surface_code_alt: 23,
             ink: 17,
             purple_soft: 62,
+            background: Some(234),
         },
     },
 };
