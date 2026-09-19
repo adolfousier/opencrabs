@@ -7,7 +7,7 @@ use super::theme::{self, Role};
 use ratatui::{
     Frame,
     layout::Rect,
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph, Wrap},
 };
@@ -24,31 +24,47 @@ pub(super) fn render_session_files(f: &mut Frame, app: &App, area: Rect) {
                 .fg(theme::role(Role::Gray))
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled("Navigate  ", Style::default().fg(Color::Reset)),
+        Span::styled(
+            "Navigate  ",
+            Style::default().fg(theme::role(Role::TextPrimary)),
+        ),
         Span::styled(
             "[Enter] ",
             Style::default()
                 .fg(theme::role(Role::Gray))
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled("Open  ", Style::default().fg(Color::Reset)),
+        Span::styled(
+            "Open  ",
+            Style::default().fg(theme::role(Role::TextPrimary)),
+        ),
         Span::styled(
             "[D] ",
-            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(theme::role(Role::Error))
+                .add_modifier(Modifier::BOLD),
         ),
-        Span::styled("Remove  ", Style::default().fg(Color::Reset)),
+        Span::styled(
+            "Remove  ",
+            Style::default().fg(theme::role(Role::TextPrimary)),
+        ),
         Span::styled(
             "[O] ",
             Style::default()
                 .fg(theme::role(Role::Accent))
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled("Folder  ", Style::default().fg(Color::Reset)),
+        Span::styled(
+            "Folder  ",
+            Style::default().fg(theme::role(Role::TextPrimary)),
+        ),
         Span::styled(
             "[Esc] ",
-            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(theme::role(Role::Error))
+                .add_modifier(Modifier::BOLD),
         ),
-        Span::styled("Back", Style::default().fg(Color::Reset)),
+        Span::styled("Back", Style::default().fg(theme::role(Role::TextPrimary))),
     ]));
 
     lines.push(Line::from(""));
@@ -56,16 +72,16 @@ pub(super) fn render_session_files(f: &mut Frame, app: &App, area: Rect) {
     if app.session_files.is_empty() {
         lines.push(Line::from(Span::styled(
             "  No files tracked for this session.",
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(theme::role(Role::GrayDim)),
         )));
         lines.push(Line::from(""));
         lines.push(Line::from(Span::styled(
             "  Files are auto-tracked when the agent writes or edits them,",
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(theme::role(Role::GrayDim)),
         )));
         lines.push(Line::from(Span::styled(
             "  or when you paste images from the clipboard.",
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(theme::role(Role::GrayDim)),
         )));
     } else {
         let count = app.session_files.len();
@@ -100,7 +116,7 @@ pub(super) fn render_session_files(f: &mut Frame, app: &App, area: Rect) {
                     .fg(theme::role(Role::Accent))
                     .add_modifier(Modifier::BOLD)
             } else {
-                Style::default().fg(Color::Reset)
+                Style::default().fg(theme::role(Role::TextPrimary))
             };
 
             let mut spans = vec![Span::styled(
@@ -121,12 +137,15 @@ pub(super) fn render_session_files(f: &mut Frame, app: &App, area: Rect) {
             let created = file.created_at.format("%Y-%m-%d %H:%M");
             spans.push(Span::styled(
                 format!(" {}", created),
-                Style::default().fg(Color::DarkGray),
+                Style::default().fg(theme::role(Role::GrayDim)),
             ));
 
             // Content indicator
             if file.content.is_some() {
-                spans.push(Span::styled(" [stored]", Style::default().fg(Color::Cyan)));
+                spans.push(Span::styled(
+                    " [stored]",
+                    Style::default().fg(theme::role(Role::AccentTeal)),
+                ));
             }
 
             lines.push(Line::from(spans));
