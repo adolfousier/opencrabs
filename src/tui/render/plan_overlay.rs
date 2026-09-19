@@ -7,11 +7,12 @@
 
 use ratatui::Frame;
 use ratatui::layout::Rect;
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
 
 use crate::tui::app::App;
+use crate::tui::render::theme::{self, Role};
 use crate::utils::plan_files::{self, PlanModeState};
 
 pub(super) fn render_plan_overlay(f: &mut Frame, app: &App, area: Rect) {
@@ -47,23 +48,23 @@ pub(super) fn render_plan_overlay(f: &mut Frame, app: &App, area: Rect) {
         state
     };
     let (badge, badge_style) = match state {
-        PlanModeState::NoPlan => ("no plan", Style::default().fg(Color::DarkGray)),
+        PlanModeState::NoPlan => ("no plan", Style::default().fg(theme::role(Role::GrayDim))),
         PlanModeState::PreInitEditing => (
             "Editing · pre-init",
             Style::default()
-                .fg(Color::Yellow)
+                .fg(theme::role(Role::Warning))
                 .add_modifier(Modifier::BOLD),
         ),
         PlanModeState::PostInitEditing => (
             "Editing",
             Style::default()
-                .fg(Color::Yellow)
+                .fg(theme::role(Role::Warning))
                 .add_modifier(Modifier::BOLD),
         ),
         PlanModeState::Active => (
             "Active",
             Style::default()
-                .fg(Color::Green)
+                .fg(theme::role(Role::Success))
                 .add_modifier(Modifier::BOLD),
         ),
     };
@@ -109,7 +110,7 @@ pub(super) fn render_plan_overlay(f: &mut Frame, app: &App, area: Rect) {
         .title(title)
         .title_bottom(Line::from(Span::styled(
             footer,
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(theme::role(Role::GrayDim)),
         )));
 
     let paragraph = Paragraph::new(body)

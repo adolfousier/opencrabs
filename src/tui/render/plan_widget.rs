@@ -9,7 +9,7 @@ use crate::tui::plan::TaskStatus;
 use ratatui::{
     Frame,
     layout::Rect,
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph},
 };
@@ -33,12 +33,12 @@ pub(super) fn render_plan_checklist(f: &mut Frame, app: &App, area: Rect) {
         let (text, style) = if app.is_processing {
             (
                 "⏳ Building checklist…".to_string(),
-                Style::default().fg(Color::Yellow),
+                Style::default().fg(theme::role(Role::Warning)),
             )
         } else {
             (
                 "⚠️ Checklist seed incomplete. Retry with /execute, or /discard.".to_string(),
-                Style::default().fg(Color::Red),
+                Style::default().fg(theme::role(Role::Error)),
             )
         };
         let title = format!(" 📋 {} · Active ", plan.title);
@@ -107,7 +107,7 @@ pub(super) fn render_plan_checklist(f: &mut Frame, app: &App, area: Rect) {
     if hidden_before > 0 {
         lines.push(Line::from(Span::styled(
             format!("  … ({} above)", hidden_before),
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(theme::role(Role::GrayDim)),
         )));
     }
 
@@ -116,8 +116,8 @@ pub(super) fn render_plan_checklist(f: &mut Frame, app: &App, area: Rect) {
         let color = match &task.status {
             TaskStatus::Completed | TaskStatus::Skipped => theme::role(Role::TealMuted),
             TaskStatus::InProgress => theme::role(Role::Accent),
-            TaskStatus::Failed => Color::Red,
-            TaskStatus::Blocked(_) | TaskStatus::Pending => Color::DarkGray,
+            TaskStatus::Failed => theme::role(Role::Error),
+            TaskStatus::Blocked(_) | TaskStatus::Pending => theme::role(Role::GrayDim),
         };
 
         // Truncate task title to 60 chars
@@ -139,7 +139,7 @@ pub(super) fn render_plan_checklist(f: &mut Frame, app: &App, area: Rect) {
     if hidden_after > 0 {
         lines.push(Line::from(Span::styled(
             format!("  … ({} below)", hidden_after),
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(theme::role(Role::GrayDim)),
         )));
     }
 
