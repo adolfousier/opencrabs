@@ -247,3 +247,170 @@ fn test_decay_uses_last_used_not_last_verified() {
         Confidence::Uncertain
     );
 }
+
+/// #1641: backfill indexes MEMORY.md sections into section-anchored beliefs.
+#[test]
+fn test_backfill_from_content() {
+    let mut store = EpistemicStore::new();
+
+    let markdown = r#"# MEMORY.md - Long-Term Memory
+
+Some preamble text that should be skipped.
+
+## Rules
+
+- NEVER push without explicit user approval
+- Use cargo clippy --all-features, NEVER cargo check
+
+## Integrations
+
+- Telegram bot connected via @opencrabs_bot
+- Discord server linked
+
+## Short
+
+tiny
+
+## Another Rule
+
+This section has enough content to be indexed as a belief.
+It contains important operational context for the agent.
+"#;
+
+    let added = store.backfill_from_content(markdown);
+
+    // Preamble (no heading) and "Short" (body < 20 chars) are skipped
+    assert_eq!(added, 3);
+
+    // Section-anchored keys
+    assert!(store.get_belief("MEMORY.md##Rules").is_some());
+    assert!(store.get_belief("MEMORY.md##Integrations").is_some());
+    assert!(store.get_belief("MEMORY.md##Another Rule").is_some());
+
+    // Skipped sections
+    assert!(store.get_belief("MEMORY.md##Short").is_none());
+
+    // Beliefs have correct confidence and zero hits
+    let rules = store.get_belief("MEMORY.md##Rules").unwrap();
+    assert_eq!(rules.confidence, Confidence::Inferred);
+    assert_eq!(rules.hits, 0);
+    assert!(rules.last_used.is_none());
+}
+
+/// #1641: backfill does not overwrite existing beliefs.
+#[test]
+fn test_backfill_no_overwrite() {
+    let mut store = EpistemicStore::new();
+
+    // Pre-existing verified belief
+    store.add_belief("MEMORY.md##Rules", "custom value", Confidence::Verified, "user");
+
+    let markdown = r#"## Rules
+
+- Some rule that would conflict with the existing belief
+
+## New Section
+
+This is a brand new section with enough content to be indexed.
+"#;
+
+    let added = store.backfill_from_content(markdown);
+
+    // Only "New Section" was added; "Rules" was skipped (already exists)
+    assert_eq!(added, 1);
+
+    // Original belief preserved
+    let rules = store.get_belief("MEMORY.md##Rules").unwrap();
+    assert_eq!(rules.value, "custom value");
+    assert_eq!(rules.confidence, Confidence::Verified);
+}
+
+/// #1641: cold facts (0 hits, 90+ days) are deleted.
+#[test]
+fn test_delete_cold_beliefs() {
+    let mut store = EpistemicStore::new();
+
+    // Cold: 0 hits, 100 days old
+    let cold = Belief {
+        key: "test:cold".to_string(),
+        value: "unused".to_string(),
+        confidence: Confidence::Inferred,
+        source: Source {
+            origin: "test".to_string(),
+            recorded_at: Utc::now() - chrono::Duration::days(100),
+            last_verified: Utc::now() - chrono::Duration::days(100),
+        },
+        notes: None,
+        hits: 0,
+        last_used: None,
+    };
+    store.beliefs.insert("test:cold".to_string(), cold);
+
+    // Warm: has hits, old
+    let warm = Belief {
+        key: "test:warm".to_string(),
+        value: "used".to_string(),
+        confidence: Confidence::Inferred,
+        source: Source {
+            origin: "test".to_string(),
+            recorded_at: Utc::now() - chrono::Duration::days(100),
+            last_verified: Utc::now() - chrono::Duration::days(100),
+        },
+        notes: None,
+        hits: 3,
+        last_used: Some(Utc::now() - chrono::Duration::days(100)),
+    };
+    store.beliefs.insert("test:warm".to_string(), warm);
+
+    // Recent: 0 hits, but only 10 days old
+    let recent = Belief {
+        key: "test:recent".to_string(),
+        value: "new".to_string(),
+        confidence: Confidence::Inferred,
+        source: Source {
+            origin: "test".to_string(),
+            recorded_at: Utc::now() - chrono::Duration::days(10),
+            last_verified: Utc::now() - chrono::Duration::days(10),
+        },
+        notes: None,
+        hits: 0,
+        last_used: None,
+    };
+    store.beliefs.insert("test:recent".to_string(), recent);
+
+    let deleted = store.delete_cold_beliefs(90);
+
+    assert_eq!(deleted.len(), 1);
+    assert_eq!(deleted[0], "test:cold");
+    assert!(store.get_belief("test:cold").is_none());
+    assert!(store.get_belief("test:warm").is_some());
+    assert!(store.get_belief("test:recent").is_some());
+}
+
+/// #1641: list_cold_beliefs returns candidates without deleting.
+#[test]
+fn test_list_cold_beliefs_dry_run() {
+    let mut store = EpistemicStore::new();
+
+    let cold = Belief {
+        key: "test:cold".to_string(),
+        value: "unused".to_string(),
+        confidence: Confidence::Inferred,
+        source: Source {
+            origin: "test".to_string(),
+            recorded_at: Utc::now() - chrono::Duration::days(100),
+            last_verified: Utc::now() - chrono::Duration::days(100),
+        },
+        notes: None,
+        hits: 0,
+        last_used: None,
+    };
+    store.beliefs.insert("test:cold".to_string(), cold);
+
+    let candidates = store.list_cold_beliefs(90);
+    assert_eq!(candidates.len(), 1);
+    assert_eq!(candidates[0].key, "test:cold");
+
+    // Still exists — dry run didn't delete
+    assert!(store.get_belief("test:cold").is_some());
+}

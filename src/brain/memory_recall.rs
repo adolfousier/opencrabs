@@ -76,6 +76,21 @@ struct Cached {
 
 static CACHE: std::sync::RwLock<Option<Cached>> = std::sync::RwLock::new(None);
 
+/// Touch the epistemic beliefs for recalled sections (#1641).
+///
+/// When a section is injected into context via recall, its corresponding
+/// belief gets a hit. Uses the same key format as `backfill_from_content`:
+/// `"MEMORY.md##<heading>"`.
+fn touch_recalled(matches: &brain_sections::Matches) {
+    for section in &matches.sections {
+        let heading = section.heading.trim().trim_start_matches('#').trim();
+        if !heading.is_empty() {
+            let key = format!("MEMORY.md##{}", heading);
+            crate::brain::tools::epistemic::touch_belief(&key);
+        }
+    }
+}
+
 /// Recall relevant to `user_message` from MEMORY.md on disk.
 ///
 /// `None` when the message cannot match, the file is absent or unreadable, or
@@ -99,12 +114,14 @@ pub async fn recall_for(user_message: &str) -> Option<String> {
         if let Some(c) = cache.as_ref()
             && c.stamp == stamp
         {
-            return render(c.indexed.find_relevant(
+            let matches = c.indexed.find_relevant(
                 user_message,
                 RECALL_MAX_SECTIONS,
                 RECALL_MAX_CHARS,
                 RECALL_MIN_SCORE,
-            ));
+            );
+            touch_recalled(&matches);
+            return render(matches);
         }
     }
 
@@ -129,6 +146,7 @@ pub async fn recall_for(user_message: &str) -> Option<String> {
         *cache = Some(Cached { stamp, indexed });
     }
 
+    touch_recalled(&matches);
     render(matches)
 }
 

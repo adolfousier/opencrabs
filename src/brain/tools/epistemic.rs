@@ -306,6 +306,105 @@ impl EpistemicStore {
             Err(_) => Self::new(),
         }
     }
+
+    /// Index MEMORY.md sections into beliefs from raw content (#1641).
+    ///
+    /// Each section becomes a belief keyed on its heading (e.g.
+    /// `"MEMORY.md##Rules"`). Only sections with substantial body content
+    /// (>20 chars) are indexed; stub headings and the preamble (no heading)
+    /// are skipped. Existing beliefs are never overwritten, so verified
+    /// beliefs survive a re-backfill.
+    ///
+    /// Returns the number of new beliefs added.
+    pub fn backfill_from_content(&mut self, content: &str) -> usize {
+        let sections = crate::brain::brain_sections::split_sections(content);
+        let now = Utc::now();
+        let mut added = 0usize;
+
+        for section in &sections {
+            let trimmed_heading = section.heading.trim();
+            // Skip the preamble (no heading) and H1 document titles —
+            // only H2+ sections carry operational content worth indexing.
+            if trimmed_heading.is_empty()
+                || (trimmed_heading.starts_with('#')
+                    && !trimmed_heading.starts_with("##"))
+            {
+                continue;
+            }
+            // Skip stub sections with negligible body content.
+            if section.body.trim().len() < 20 {
+                continue;
+            }
+
+            let heading = section.heading.trim().trim_start_matches('#').trim();
+            let key = format!("MEMORY.md##{}", heading);
+
+            // Don't overwrite existing beliefs — verified beliefs survive re-backfill.
+            if self.beliefs.contains_key(&key) {
+                continue;
+            }
+
+            let belief = Belief {
+                key: key.clone(),
+                value: section.body.trim().chars().take(200).collect(),
+                confidence: Confidence::Inferred,
+                source: Source {
+                    origin: format!("MEMORY.md backfill ({})", now.format("%Y-%m-%d")),
+                    recorded_at: now,
+                    last_verified: now,
+                },
+                notes: None,
+                hits: 0,
+                last_used: None,
+            };
+            self.beliefs.insert(key, belief);
+            added += 1;
+        }
+
+        added
+    }
+
+    /// Delete beliefs with 0 hits older than `max_age_days` (#1641).
+    ///
+    /// Cold facts are beliefs nobody ever recalled and that have been
+    /// sitting untouched for 90+ days. Deleting them keeps the belief
+    /// store from accumulating noise. Returns the keys of deleted beliefs.
+    pub fn delete_cold_beliefs(&mut self, max_age_days: i64) -> Vec<String> {
+        let now = Utc::now();
+        let cold_keys: Vec<String> = self
+            .beliefs
+            .iter()
+            .filter(|(_, b)| {
+                b.hits == 0
+                    && {
+                        let last_seen = b.last_used.unwrap_or(b.source.recorded_at);
+                        (now - last_seen).num_days() >= max_age_days
+                    }
+            })
+            .map(|(k, _)| k.clone())
+            .collect();
+
+        for key in &cold_keys {
+            self.beliefs.remove(key);
+        }
+
+        cold_keys
+    }
+
+    /// List beliefs that WOULD be deleted by `delete_cold_beliefs` (dry-run).
+    pub fn list_cold_beliefs(&self, max_age_days: i64) -> Vec<&Belief> {
+        let now = Utc::now();
+        self.beliefs
+            .values()
+            .filter(|b| {
+                b.hits == 0
+                    && {
+                        let last_seen = b.last_used.unwrap_or(b.source.recorded_at);
+                        (now - last_seen).num_days() >= max_age_days
+                    }
+            })
+            .collect()
+    }
 }
 
 /// Result of adding a belief — indicates if a contradiction was detected.
@@ -332,7 +431,36 @@ static STORE: OnceLock<std::sync::Mutex<EpistemicStore>> = OnceLock::new();
 fn get_store() -> &'static std::sync::Mutex<EpistemicStore> {
     STORE.get_or_init(|| {
         let path = epistemic_store_path().expect("home dir must exist");
-        std::sync::Mutex::new(EpistemicStore::load(&path))
+        let mut store = EpistemicStore::load(&path);
+
+        // Session start maintenance: decay stale beliefs + backfill MEMORY.md (#1641).
+        let decayed = store.apply_decay(30);
+        if !decayed.is_empty() {
+            tracing::info!(
+                "Epistemic session start: {} beliefs decayed",
+                decayed.len()
+            );
+        }
+
+        let memory_path = path.parent().unwrap_or(&path).parent().unwrap_or(&path).join("MEMORY.md");
+        if let Ok(content) = std::fs::read_to_string(&memory_path) {
+            let added = store.backfill_from_content(&content);
+            if added > 0 {
+                tracing::info!(
+                    "Epistemic session start: {} new beliefs backfilled from MEMORY.md",
+                    added
+                );
+            }
+        }
+
+        // Save if anything changed
+        if !decayed.is_empty()
+            && let Err(e) = store.save(&path)
+        {
+            tracing::warn!("Failed to save epistemic store after session start: {}", e);
+        }
+
+        std::sync::Mutex::new(store)
     })
 }
 
@@ -428,4 +556,79 @@ pub fn list_by_prefix(prefix: &str) -> Vec<Belief> {
         .into_iter()
         .cloned()
         .collect()
+}
+
+/// Index existing MEMORY.md sections into beliefs (#1641).
+///
+/// Reads MEMORY.md from the profile home and delegates to
+/// [`EpistemicStore::backfill_from_content`]. Returns the number of new
+/// beliefs added.
+pub fn backfill_beliefs() -> usize {
+    let home = crate::config::profile::resolve_profile_home();
+    let memory_path = home.join("MEMORY.md");
+    let content = match std::fs::read_to_string(&memory_path) {
+        Ok(c) => c,
+        Err(_) => return 0,
+    };
+
+    let store = get_store();
+    let mut guard = store.lock().expect("epistemic store lock poisoned");
+    let added = guard.backfill_from_content(&content);
+
+    if added > 0
+        && let Some(path) = epistemic_store_path()
+        && let Err(e) = guard.save(&path)
+    {
+        tracing::warn!("Failed to save epistemic store after backfill: {}", e);
+    }
+
+    added
+}
+
+/// Delete cold beliefs (0 hits, 90+ days) from the global store (#1641).
+/// Returns the keys of deleted beliefs.
+pub fn delete_cold_beliefs(max_age_days: i64) -> Vec<String> {
+    let store = get_store();
+    let mut guard = store.lock().expect("epistemic store lock poisoned");
+    let deleted = guard.delete_cold_beliefs(max_age_days);
+
+    if !deleted.is_empty()
+        && let Some(path) = epistemic_store_path()
+        && let Err(e) = guard.save(&path)
+    {
+        tracing::warn!("Failed to save epistemic store after cold delete: {}", e);
+    }
+
+    deleted
+}
+
+/// List cold beliefs (dry-run for `/memory prune`) from the global store.
+pub fn list_cold_beliefs(max_age_days: i64) -> Vec<Belief> {
+    let store = get_store();
+    let guard = store.lock().expect("epistemic store lock poisoned");
+    guard.list_cold_beliefs(max_age_days).into_iter().cloned().collect()
+}
+
+/// Run epistemic maintenance at session start: decay + backfill (#1641).
+///
+/// Called once when the store is first loaded. Applies 30-day decay to
+/// stale beliefs, indexes any new MEMORY.md sections, and logs results.
+pub fn session_start_maintenance() {
+    // Apply decay (30-day threshold)
+    let decayed = apply_decay(30);
+    if !decayed.is_empty() {
+        tracing::info!(
+            "Epistemic session start: {} beliefs decayed",
+            decayed.len()
+        );
+    }
+
+    // Backfill any new MEMORY.md sections
+    let added = backfill_beliefs();
+    if added > 0 {
+        tracing::info!(
+            "Epistemic session start: {} new beliefs backfilled from MEMORY.md",
+            added
+        );
+    }
 }
