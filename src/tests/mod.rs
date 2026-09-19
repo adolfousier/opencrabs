@@ -895,6 +895,7 @@ pub mod telegram_command_sanitize_test;
 pub mod telegram_flow_chrome_test;
 pub mod telegram_followup_midturn_queue_test;
 pub mod telegram_followup_pick_test;
+pub mod telegram_global_429_propagation_test;
 pub mod telegram_group_history_capture_test;
 pub mod telegram_group_migration_test;
 pub mod telegram_group_name_test;

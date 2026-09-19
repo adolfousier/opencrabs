@@ -254,7 +254,7 @@ pub(crate) async fn render_plan_card_rich_html(
 }
 
 /// Result of a plan card edit attempt.
-enum EditOutcome {
+pub(crate) enum EditOutcome {
     /// Card saved successfully (or content unchanged).
     Saved,
     /// Rate-limited: card writes suppressed for a duration.
@@ -266,7 +266,7 @@ enum EditOutcome {
 /// Classify a plan card edit failure and take the appropriate state action.
 /// Handles "message is not modified" (silent success) and rate-limiting
 /// (suppress future writes). Returns `Gone` when the card needs recreating.
-async fn handle_edit_failure(
+pub(crate) async fn handle_edit_failure(
     error: &str,
     state: &TelegramState,
     session_id: Uuid,
@@ -303,7 +303,7 @@ async fn handle_edit_failure(
 
 /// Classify a plan card create failure. Suppresses future writes on rate-limit,
 /// warns on other errors.
-async fn handle_create_failure(error: &str, state: &TelegramState, session_id: Uuid) {
+pub(crate) async fn handle_create_failure(error: &str, state: &TelegramState, session_id: Uuid) {
     if let Some(wait) = super::rate_limit::parse_retry_after(error) {
         // Same as the edit path: record it globally before suppressing locally.
         super::rate_limit::record_global_429(wait);
