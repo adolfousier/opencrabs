@@ -606,8 +606,14 @@ mod handler {
     ///
     /// A failure here is reported to the caller and never aborts startup.
     pub fn install_crash_handler() -> std::io::Result<()> {
-        // A dedicated signal stack, so a stack-overflow SIGSEGV is still
-        // diagnosable. Leaked deliberately: it must outlive every signal.
+        // A dedicated signal stack for THIS thread. `sigaltstack` is a
+        // per-thread attribute and threads do not inherit it, so a
+        // stack-overflow SIGSEGV is diagnosable on the installing thread (for
+        // the daemon, main) and not on any tokio worker, which takes the fault
+        // on its own exhausted stack. Covering workers would need a runtime
+        // thread hook; the fault signals this exists for (SIGBUS, ordinary
+        // SIGSEGV) are handled on every thread regardless.
+        // Leaked deliberately: it must outlive every signal.
         let mut alt_stack = vec![0u8; ALT_STACK_SIZE].into_boxed_slice();
         let ss = libc::stack_t {
             ss_sp: alt_stack.as_mut_ptr().cast::<c_void>(),
