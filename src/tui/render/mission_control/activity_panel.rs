@@ -94,7 +94,7 @@ fn level_color(level: McActivityLevel) -> Color {
     match level {
         McActivityLevel::Success => theme::teal(),
         McActivityLevel::Warn => theme::orange(),
-        McActivityLevel::Error => Color::Red,
+        McActivityLevel::Error => render_theme::role(Role::Error),
         McActivityLevel::Info => theme::white(),
     }
 }

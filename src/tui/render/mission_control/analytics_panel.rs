@@ -17,6 +17,7 @@
 //! per-model ✓/⚠/✗ status glyph), Flakiest, Phantoms, RSI applied, Brain
 //! files, Top tools.
 
+use super::super::theme::{self as render_theme, Role};
 use super::theme;
 use crate::brain::mission_control::{McAnalytics, McToolStat, TimeWindow};
 use crate::tui::app::App;
@@ -407,7 +408,7 @@ fn model_row(model: &str, fail_rate: f64, phantom_rate: f64, w: usize) -> Line<'
 /// or any phantoms; healthy otherwise.
 fn model_status(fail_rate: f64, phantom_rate: f64) -> (&'static str, Color) {
     if fail_rate >= 15.0 || phantom_rate >= 10.0 {
-        ("✗", Color::Red)
+        ("✗", render_theme::role(Role::Error))
     } else if fail_rate >= 5.0 || phantom_rate > 0.0 {
         ("⚠", theme::orange())
     } else {
@@ -471,7 +472,7 @@ fn window_label(window: TimeWindow) -> &'static str {
 
 fn fail_color(rate: f64) -> Color {
     if rate >= 25.0 {
-        Color::Red
+        render_theme::role(Role::Error)
     } else if rate >= 10.0 {
         theme::orange()
     } else {
