@@ -39,6 +39,20 @@ pub(crate) fn is_react_only(text_after_directive: &str) -> bool {
     text_after_directive.trim().is_empty()
 }
 
+/// Whether the turn is genuinely react-only, as opposed to merely text-empty.
+///
+/// Emptiness alone does not answer it. A final suppressed by dedup (#1152) is
+/// also text-empty at this point, but it was already delivered as intermediate
+/// bubbles, so treating it as react-only fires the early return and the #546
+/// incomplete-turn notice on top of work the user already received.
+///
+/// Named rather than inlined at the call site so the distinction has one
+/// definition and a test can exercise it: asserting the expression by
+/// rebuilding it in a test body proves nothing about the delivery path.
+pub(crate) fn is_react_only_turn(suppressed_final: bool, text_after_directive: &str) -> bool {
+    !suppressed_final && is_react_only(text_after_directive)
+}
+
 /// Whether the turn ends on a suggest_options surface (#1226 K): the
 /// progress handler stashes the options mid-turn (progress.rs), so by
 /// delivery time a Some here means an option surface is armed and the
@@ -377,7 +391,7 @@ pub(crate) async fn deliver_final_response(
                 // delivery, not a react-only turn — do not trigger the
                 // react-only early return or the spurious #546 incomplete-turn
                 // notice on top of delivered work.
-                if !suppressed_final && is_react_only(&text_only) {
+                if is_react_only_turn(suppressed_final, &text_only) {
                     // Never-silent guard (#353): a reaction-only turn whose
                     // reaction FAILED must degrade to text, not to nothing.
                     if react_result.is_err() {
@@ -1261,8 +1275,7 @@ mod tests {
         // A genuine react-only turn has empty text_only and was not suppressed.
         let text_only_genuine = "";
         let suppressed_final_genuine = false;
-        let is_genuine_react_only =
-            !suppressed_final_genuine && is_react_only(text_only_genuine);
+        let is_genuine_react_only = !suppressed_final_genuine && is_react_only(text_only_genuine);
         assert!(is_genuine_react_only);
     }
 
