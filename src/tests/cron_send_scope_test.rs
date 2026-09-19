@@ -8,7 +8,7 @@
 //! whose members had asked for nothing.
 
 use crate::cron::send_scope::{
-    PermittedTarget, SendPermission, may_send_to, permission, with_send_target,
+    may_send_to, permission, with_send_target, PermittedTarget, SendPermission,
 };
 
 const CONFIGURED: i64 = -1004252074515;

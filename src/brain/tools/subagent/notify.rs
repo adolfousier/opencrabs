@@ -9,7 +9,7 @@
 //! from=<uuid>]` header prepended to every delivery.
 
 use crate::brain::agent::service::notify_policy::{
-    CONFIRM_CAP, DeliveryMode, confirm_route, resolve_mode,
+    confirm_route, resolve_mode, DeliveryMode, CONFIRM_CAP,
 };
 use crate::brain::tools::error::{Result, ToolError};
 use crate::brain::tools::r#trait::{Tool, ToolCapability, ToolExecutionContext, ToolResult};
@@ -184,6 +184,14 @@ impl Tool for SessionNotifyTool {
                     "type": "boolean",
                     "description": "Verify end-to-end instead of reporting the route alone: after a successful route, spend up to ~10s watching the receiving machinery. The verdict then reports 'woke' (the idle target actually started a turn), 'queued_pending_drain' (the target was already mid-turn; the message injects at its next tool-loop boundary), or 'delivered' (routed, but no wake was observed within the cap). Applies to the 'delivered' and 'redirected' states only."
                 },
+                "goal": {
+                    "type": "string",
+                    "description": "Optional goal to set on the target session via GoalManager. When set, establishes the active goal for the target's autonomous convergence loop."
+                },
+                "goal_max_turns": {
+                    "type": "integer",
+                    "description": "Optional max turn budget for the goal (default: agent.goal_max_turns or 20)."
+                },
                 "interrupt": {
                     "type": "boolean",
                     "description": "Deprecated alias for delivery.mode: true = 'turn-end', false/unset = 'now'. Prefer delivery.mode; passing both is allowed only when they agree."
@@ -273,7 +281,38 @@ impl Tool for SessionNotifyTool {
 
         use crate::brain::agent::service::notify_receipts;
         use crate::brain::agent::service::quiet_delivery;
-        use crate::brain::agent::service::session_routes::{Delivery, deliver_to_session};
+        use crate::brain::agent::service::session_routes::{deliver_to_session, Delivery};
+
+        let goal = input
+            .get("goal")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty());
+        let goal_max_turns = input
+            .get("goal_max_turns")
+            .and_then(Value::as_u64)
+            .map(|n| n as u32);
+
+        async fn maybe_set_goal(
+            target_id: uuid::Uuid,
+            goal: Option<&str>,
+            max_turns: Option<u32>,
+            context: &ToolExecutionContext,
+        ) {
+            if let (Some(goal_text), Some(svc)) = (goal, &context.service_context) {
+                let goal_mgr = crate::brain::goal::GoalManager::new(svc.clone());
+                if let Err(e) = goal_mgr
+                    .set_goal(target_id, goal_text.to_string(), None, None, max_turns)
+                    .await
+                {
+                    tracing::warn!(
+                        error = %e,
+                        session_id = %target_id,
+                        "failed to dispatch goal via session_notify"
+                    );
+                }
+            }
+        }
 
         // Quiet mode (fork #43/#50): bank the notice, return the id. The
         // deferred verdict is success-by-contract — accepted, not yet
@@ -284,6 +323,7 @@ impl Tool for SessionNotifyTool {
         } = mode
         {
             let id = quiet_delivery::defer_quiet(target, msg, quiet_for, max_delay);
+            maybe_set_goal(target, goal, goal_max_turns, context).await;
             // The deferred id is a first-class notification id: status-checkable
             // like any send receipt (stamped injected when the release drains).
             notify_receipts::record_queued(id, target);
@@ -316,6 +356,7 @@ impl Tool for SessionNotifyTool {
         let notify_id = uuid::Uuid::new_v4();
         match deliver_to_session(target, msg, interrupt) {
             Delivery::Delivered => {
+                maybe_set_goal(target, goal, goal_max_turns, context).await;
                 notify_receipts::record_queued(notify_id, target);
                 if confirm {
                     let (state, detail, reason) = confirm_route(target, CONFIRM_CAP).await;
@@ -347,6 +388,7 @@ impl Tool for SessionNotifyTool {
             // claimed it since the last restart (#1206). Reporting this as a
             // failure would be the opposite of what happened.
             Delivery::Parked => {
+                maybe_set_goal(target, goal, goal_max_turns, context).await;
                 notify_receipts::record_queued(notify_id, target);
                 Ok(verdict(
                     true,
@@ -407,6 +449,7 @@ impl Tool for SessionNotifyTool {
             // was redirected to the session that owns it NOW (fork #19) — a
             // success, not a refusal, and the reply names where it went.
             Delivery::Redirected { to } => {
+                maybe_set_goal(to, goal, goal_max_turns, context).await;
                 notify_receipts::record_queued(notify_id, to);
                 if confirm {
                     let (state, detail, reason) = confirm_route(to, CONFIRM_CAP).await;

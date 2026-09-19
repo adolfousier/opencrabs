@@ -67,6 +67,10 @@ pub struct CronJobPatch {
     /// the next fire time from the (possibly changed) schedule on the next
     /// tick. Set this whenever `cron_expr` or `timezone` changes.
     pub reset_next_run: bool,
+    pub trigger_cmd: Option<Option<String>>,
+    pub trigger_on: Option<Option<String>>,
+    pub set_goal: Option<bool>,
+    pub goal_template: Option<Option<String>>,
 }
 
 impl CronJobPatch {
@@ -85,6 +89,10 @@ impl CronJobPatch {
             && self.enabled.is_none()
             && self.next_run_at.is_none()
             && !self.reset_next_run
+            && self.trigger_cmd.is_none()
+            && self.trigger_on.is_none()
+            && self.set_goal.is_none()
+            && self.goal_template.is_none()
     }
 }
 
@@ -106,8 +114,8 @@ impl CronJobRepository {
             .context("Failed to get connection")?
             .interact(move |conn| {
                 conn.execute(
-                    "INSERT INTO cron_jobs (id, name, cron_expr, timezone, prompt, provider, model, thinking, auto_approve, deliver_to, deliver_api_key, enabled, next_run_at, created_at, updated_at, profile_name)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
+                    "INSERT INTO cron_jobs (id, name, cron_expr, timezone, prompt, provider, model, thinking, auto_approve, deliver_to, deliver_api_key, enabled, next_run_at, created_at, updated_at, profile_name, trigger_cmd, trigger_on, set_goal, goal_template)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)",
                     params![
                         j.id.to_string(),
                         j.name,
@@ -125,6 +133,10 @@ impl CronJobRepository {
                         j.created_at.to_rfc3339(),
                         j.updated_at.to_rfc3339(),
                         j.profile_name,
+                        j.trigger_cmd,
+                        j.trigger_on,
+                        j.set_goal as i32,
+                        j.goal_template,
                     ],
                 )
             })
@@ -345,6 +357,12 @@ impl CronJobRepository {
                 if let Some(v) = patch.enabled {
                     push(&mut sets, &mut vals, "enabled", SqlVal::Int(i32::from(v)));
                 }
+                push_opt(&mut sets, &mut vals, "trigger_cmd", patch.trigger_cmd);
+                push_opt(&mut sets, &mut vals, "trigger_on", patch.trigger_on);
+                if let Some(v) = patch.set_goal {
+                    push(&mut sets, &mut vals, "set_goal", SqlVal::Int(i32::from(v)));
+                }
+                push_opt(&mut sets, &mut vals, "goal_template", patch.goal_template);
                 match patch.next_run_at {
                     Some(Some(dt)) => {
                         push(

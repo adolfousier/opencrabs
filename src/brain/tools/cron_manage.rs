@@ -5,7 +5,9 @@
 
 use super::error::Result;
 use super::r#trait::{Tool, ToolCapability, ToolExecutionContext, ToolResult};
-use crate::channels::target_resolver::{is_target_url, resolve_target};
+use crate::channels::target_resolver::{
+    extract_session_target, is_session_target, is_target_url, resolve_target,
+};
 use crate::db::models::CronJob;
 use crate::db::{CronJobPatch, CronJobRepository};
 use async_trait::async_trait;
@@ -79,7 +81,7 @@ impl Tool for CronManageTool {
                 },
                 "deliver_to": {
                     "type": "string",
-                    "description": "Where to deliver results. Formats: an oc:// target URL ('oc://telegram/<chat>[/<thread>]', 'oc://discord/<channel>', 'oc://slack/<channel>', 'oc://whatsapp/<phone|jid>', 'oc://session/<uuid-or-prefix>') or 'here' (deliver to this conversation's channel; refused on headless surfaces) — URLs are resolved ONCE at create/update time and the concrete channel target is baked into the job; or legacy 'telegram:chat_id', 'telegram:chat_id:thread_id' (opt-in delivery into that forum topic; the chat must be a forum and the topic must exist — invalid thread targets are rejected loudly at fire time, never re-routed to the default topic), 'discord:channel_id', 'slack:channel_id', or an HTTP(S) URL for webhook delivery. On update, pass an empty string to clear delivery."
+                    "description": "Where to deliver results. Channel deliveries ('oc://telegram/...', 'oc://discord/...', 'oc://slack/...', 'oc://whatsapp/...', or legacy 'telegram:<chat>[:<thread>]') are PASSIVE output messages only and do not start an agent turn. Session deliveries ('oc://session/<uuid-or-prefix>' or legacy 'session:<uuid>') inject into the target session's message queue and trigger an ACTIVE TURN. Formats: an oc:// target URL or 'here' (deliver to this conversation's channel; refused on headless surfaces) — URLs are resolved ONCE at create/update time and the concrete target is baked into the job; or an HTTP(S) URL for webhook delivery. On update, pass an empty string to clear delivery."
                 },
                 "deliver_api_key": {
                     "type": "string",
@@ -96,6 +98,22 @@ impl Tool for CronManageTool {
                 "confirm": {
                     "type": "boolean",
                     "description": "Must be true to actually delete a job. Without it, delete only shows job details as a safety check."
+                },
+                "trigger_cmd": {
+                    "type": "string",
+                    "description": "Optional pre-flight shell command. If output is empty / non-zero based on trigger_on, job execution is short-circuited (0 tokens)."
+                },
+                "trigger_on": {
+                    "type": "string",
+                    "description": "Trigger condition: 'non_empty' (default, fires if stdout/stderr non-empty), 'exit_non_zero', 'exit_zero', 'regex:<pattern>', 'always'."
+                },
+                "set_goal": {
+                    "type": "boolean",
+                    "description": "If true, sets the active goal in the destination session when trigger condition fires. REQUIRES deliver_to to point to a session target ('oc://session/<uuid>' or 'session:<uuid>'). Refused for passive channel deliveries."
+                },
+                "goal_template": {
+                    "type": "string",
+                    "description": "Template formatting trigger output into goal/notification text. Interpolates {output}, {stdout}, {stderr}, {exit_code}."
                 }
             },
             "required": ["action"]
@@ -169,14 +187,23 @@ impl CronManageTool {
             )));
         }
 
-        let prompt = match input.get("prompt").and_then(|v| v.as_str()) {
-            Some(p) if !p.is_empty() => p,
-            _ => {
-                return Ok(ToolResult::error(
-                    "'prompt' is required for create".to_string(),
-                ));
-            }
-        };
+        let prompt_input = input
+            .get("prompt")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim();
+        let trigger_cmd_input = input
+            .get("trigger_cmd")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim();
+
+        if prompt_input.is_empty() && trigger_cmd_input.is_empty() {
+            return Ok(ToolResult::error(
+                "Either 'prompt' or 'trigger_cmd' is required for create".to_string(),
+            ));
+        }
+        let prompt = prompt_input;
 
         // Check for duplicate name
         if let Ok(Some(_)) = self.repo.find_by_name(name).await {
@@ -240,7 +267,38 @@ impl CronManageTool {
             },
             None => None,
         };
-        let mut job = CronJob::new(
+        let trigger_cmd = input
+            .get("trigger_cmd")
+            .and_then(|v| v.as_str())
+            .map(String::from);
+        let trigger_on = input
+            .get("trigger_on")
+            .and_then(|v| v.as_str())
+            .map(String::from);
+        let set_goal = input
+            .get("set_goal")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let goal_template = input
+            .get("goal_template")
+            .and_then(|v| v.as_str())
+            .map(String::from);
+
+        if set_goal {
+            let target_is_session = deliver_to
+                .as_deref()
+                .map(crate::channels::target_resolver::is_session_target)
+                .unwrap_or(false);
+            if !target_is_session {
+                return Ok(ToolResult::error(
+                    "Cannot create job: set_goal requires oc://session/<uuid> delivery target. \
+                     Channel deliveries (telegram, discord, etc.) are passive outputs and cannot set session goals."
+                        .to_string(),
+                ));
+            }
+        }
+
+        let mut job = CronJob::new_with_trigger(
             name.to_string(),
             cron_expr.to_string(),
             tz,
@@ -251,6 +309,10 @@ impl CronManageTool {
             auto_approve,
             deliver_to.clone(),
             deliver_api_key,
+            trigger_cmd,
+            trigger_on,
+            set_goal,
+            goal_template,
         );
         job.next_run_at = crate::cron::next_run_utc(cron_expr, parsed_tz, chrono::Utc::now());
 
@@ -466,10 +528,69 @@ impl CronManageTool {
             }
         }
 
+        if let Some(val) = input.get("trigger_cmd") {
+            provided += 1;
+            let val_opt = val.as_str().filter(|s| !s.is_empty()).map(String::from);
+            if val_opt != job.trigger_cmd {
+                let desc = val_opt.as_deref().unwrap_or("none");
+                changed.push(format!("trigger_cmd -> {desc}"));
+                patch.trigger_cmd = Some(val_opt);
+            }
+        }
+
+        if let Some(val) = input.get("trigger_on") {
+            provided += 1;
+            let val_opt = val.as_str().filter(|s| !s.is_empty()).map(String::from);
+            if val_opt != job.trigger_on {
+                let desc = val_opt.as_deref().unwrap_or("non_empty");
+                changed.push(format!("trigger_on -> {desc}"));
+                patch.trigger_on = Some(val_opt);
+            }
+        }
+
+        if let Some(goal) = input.get("set_goal").and_then(|v| v.as_bool()) {
+            provided += 1;
+            if goal != job.set_goal {
+                patch.set_goal = Some(goal);
+                changed.push(format!("set_goal -> {goal}"));
+            }
+        }
+
+        // Validate set_goal against effective deliver_to on update
+        let effective_set_goal = patch.set_goal.unwrap_or(job.set_goal);
+        if effective_set_goal {
+            let effective_deliver_to = match &patch.deliver_to {
+                Some(Some(target)) => Some(target.as_str()),
+                Some(None) => None,
+                None => job.deliver_to.as_deref(),
+            };
+            let target_is_session = effective_deliver_to
+                .map(crate::channels::target_resolver::is_session_target)
+                .unwrap_or(false);
+            if !target_is_session {
+                return Ok(ToolResult::error(
+                    "Cannot update job: set_goal requires oc://session/<uuid> delivery target. \
+                     Channel deliveries (telegram, discord, etc.) are passive outputs and cannot set session goals."
+                        .to_string(),
+                ));
+            }
+        }
+
+        if let Some(val) = input.get("goal_template") {
+            provided += 1;
+            let val_opt = val.as_str().filter(|s| !s.is_empty()).map(String::from);
+            if val_opt != job.goal_template {
+                let desc = val_opt.as_deref().unwrap_or("none");
+                changed.push(format!("goal_template -> {desc}"));
+                patch.goal_template = Some(val_opt);
+            }
+        }
+
         if provided == 0 {
             return Ok(ToolResult::error(
                 "Nothing to update: provide at least one field to change (name, cron, tz, prompt, \
-                 provider, model, thinking, auto_approve, deliver_to, deliver_api_key, enabled)."
+                 provider, model, thinking, auto_approve, deliver_to, deliver_api_key, enabled, \
+                 trigger_cmd, trigger_on, set_goal, goal_template)."
                     .to_string(),
             ));
         }
@@ -496,10 +617,12 @@ impl CronManageTool {
         } else if patch.enabled == Some(true)
             && !job.enabled
             && job.next_run_at.is_none_or(|t| t <= chrono::Utc::now())
-            && let Some(tz) = crate::cron::parse_timezone(&effective_tz)
         {
-            let next = crate::cron::next_run_utc(&job.cron_expr, tz, chrono::Utc::now());
-            patch.next_run_at = Some(next);
+            let tz_opt = crate::cron::parse_timezone(&effective_tz);
+            if let Some(tz) = tz_opt {
+                let next = crate::cron::next_run_utc(&job.cron_expr, tz, chrono::Utc::now());
+                patch.next_run_at = Some(next);
+            }
         }
 
         let updated = self
@@ -842,6 +965,35 @@ pub(crate) async fn bake_delivery_target(
     raw: &str,
     context: &ToolExecutionContext,
 ) -> std::result::Result<String, String> {
+    if is_session_target(raw) {
+        let Some(id_str) = extract_session_target(raw) else {
+            return Ok(raw.to_string());
+        };
+        if let Ok(u) = uuid::Uuid::parse_str(id_str) {
+            return Ok(format!("session:{u}"));
+        }
+        if let Some(sc) = &context.service_context {
+            let service = crate::services::SessionService::new(sc.clone());
+            let list_res = service
+                .list_sessions(crate::db::repository::SessionListOptions {
+                    include_archived: false,
+                    limit: None,
+                    offset: 0,
+                    query: None,
+                    include_subagents: false,
+                })
+                .await;
+            if let Ok(sessions) = list_res {
+                let resolved =
+                    crate::cli::session_resolve::resolve_one_by_prefix(&sessions, id_str);
+                if let Ok(session) = resolved {
+                    return Ok(format!("session:{session}"));
+                }
+            }
+        }
+        return Ok(format!("session:{id_str}"));
+    }
+
     if !is_target_url(raw) {
         return Ok(raw.to_string()); // legacy grammar or webhook — untouched
     }
