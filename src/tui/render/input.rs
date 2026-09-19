@@ -8,7 +8,7 @@ use super::utils::format_token_count_raw;
 use ratatui::{
     Frame,
     layout::{Alignment, Rect},
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph},
 };
@@ -54,7 +54,7 @@ fn spans_with_selection(
             Span::styled(
                 ch.to_string(),
                 Style::default()
-                    .fg(Color::White)
+                    .fg(theme::role(Role::AccentSoft))
                     .bg(theme::role(Role::SelectionBg)),
             )
         } else {
@@ -168,11 +168,11 @@ pub(super) fn render_input(f: &mut Frame, app: &App, area: Rect) {
         .unwrap_or(false);
 
     let cursor_style = Style::default()
-        .fg(Color::Black)
+        .fg(theme::role(Role::Ink))
         .bg(theme::role(Role::Gray));
     let selection_style = Style::default()
         .bg(theme::role(Role::SelectionBg))
-        .fg(Color::White);
+        .fg(theme::role(Role::AccentSoft));
 
     // Compute selection byte range from drag coordinates
     let sel_from_to: Option<(usize, usize)> = if app.input_drag_selecting {
@@ -433,11 +433,11 @@ pub(super) fn render_input(f: &mut Frame, app: &App, area: Rect) {
     let context_title = if let Some(input_tok) = app.last_input_tokens {
         let pct = app.context_usage_percent();
         let context_color = if pct > 80.0 {
-            Color::Red
+            theme::role(Role::Error)
         } else if pct > 60.0 {
             theme::role(Role::Accent)
         } else {
-            Color::Cyan
+            theme::role(Role::AccentTeal)
         };
         let ctx_label = format_token_count_raw(input_tok as i64);
         let max_label = format_token_count_raw(app.context_max_tokens as i64);
@@ -453,7 +453,7 @@ pub(super) fn render_input(f: &mut Frame, app: &App, area: Rect) {
         Line::from(Span::styled(
             " Context: – ",
             Style::default()
-                .fg(Color::DarkGray)
+                .fg(theme::role(Role::GrayDim))
                 .add_modifier(Modifier::BOLD),
         ))
         .alignment(Alignment::Right)
@@ -472,7 +472,7 @@ pub(super) fn render_input(f: &mut Frame, app: &App, area: Rect) {
                 let style = if focused {
                     // Highlight focused attachment — inverted colors
                     Style::default()
-                        .fg(Color::Black)
+                        .fg(theme::role(Role::Ink))
                         .bg(theme::role(Role::TealVivid))
                         .add_modifier(Modifier::BOLD)
                 } else {
@@ -588,7 +588,7 @@ pub(super) fn render_input(f: &mut Frame, app: &App, area: Rect) {
     };
 
     let input = Paragraph::new(input_lines)
-        .style(Style::default().fg(Color::Reset))
+        .style(Style::default().fg(theme::role(Role::TextPrimary)))
         .scroll((scroll_y, 0))
         .block(block);
 
@@ -789,17 +789,19 @@ pub(super) fn render_slash_autocomplete(f: &mut Frame, app: &App, input_area: Re
 
             let style = if is_selected {
                 Style::default()
-                    .fg(Color::Black)
-                    .bg(Color::Gray)
+                    .fg(theme::role(Role::Ink))
+                    .bg(theme::role(Role::Gray))
                     .add_modifier(Modifier::BOLD)
             } else {
-                Style::default().fg(Color::Reset)
+                Style::default().fg(theme::role(Role::TextPrimary))
             };
 
             let desc_style = if is_selected {
-                Style::default().fg(Color::Black).bg(Color::Gray)
+                Style::default()
+                    .fg(theme::role(Role::Ink))
+                    .bg(theme::role(Role::Gray))
             } else {
-                Style::default().fg(Color::DarkGray)
+                Style::default().fg(theme::role(Role::GrayDim))
             };
 
             // Pad the name column to `name_col_chars` so descriptions
@@ -878,11 +880,11 @@ pub(super) fn render_followup(f: &mut Frame, app: &App, input_area: Rect) {
             let text = truncate_to_chars(opt, text_budget.saturating_sub(2));
             let style = if is_selected {
                 Style::default()
-                    .fg(Color::Black)
-                    .bg(Color::Gray)
+                    .fg(theme::role(Role::Ink))
+                    .bg(theme::role(Role::Gray))
                     .add_modifier(Modifier::BOLD)
             } else {
-                Style::default().fg(Color::Reset)
+                Style::default().fg(theme::role(Role::TextPrimary))
             };
             Line::from(vec![Span::styled(
                 format!("{}{}", marker, text.as_ref()),
@@ -892,7 +894,7 @@ pub(super) fn render_followup(f: &mut Frame, app: &App, input_area: Rect) {
         .collect();
     lines.push(Line::from(Span::styled(
         format!("  {hint}"),
-        Style::default().fg(Color::DarkGray),
+        Style::default().fg(theme::role(Role::GrayDim)),
     )));
 
     let mut padded_lines = Vec::with_capacity(lines.len() + 2);
@@ -944,16 +946,18 @@ pub(super) fn render_emoji_picker(f: &mut Frame, app: &App, input_area: Rect) {
             let is_selected = (scroll_offset + i) == app.emoji_selected_index;
             let style = if is_selected {
                 Style::default()
-                    .fg(Color::Black)
-                    .bg(Color::Gray)
+                    .fg(theme::role(Role::Ink))
+                    .bg(theme::role(Role::Gray))
                     .add_modifier(Modifier::BOLD)
             } else {
-                Style::default().fg(Color::Reset)
+                Style::default().fg(theme::role(Role::TextPrimary))
             };
             let sc_style = if is_selected {
-                Style::default().fg(Color::Black).bg(Color::Gray)
+                Style::default()
+                    .fg(theme::role(Role::Ink))
+                    .bg(theme::role(Role::Gray))
             } else {
-                Style::default().fg(Color::DarkGray)
+                Style::default().fg(theme::role(Role::GrayDim))
             };
             Line::from(vec![
                 Span::styled(format!("  {} ", emoji), style),
@@ -1061,11 +1065,11 @@ pub(super) fn render_status_bar(f: &mut Frame, app: &App, area: Rect) {
 
     // --- Approval policy (centre-left) ---
     let (policy_text, policy_color) = if app.approval_auto_always {
-        ("⚡ yolo", Color::Red)
+        ("⚡ yolo", theme::role(Role::Error))
     } else if app.approval_auto_session {
         ("⚡ auto (session)", orange)
     } else {
-        ("🔒 approve", Color::DarkGray)
+        ("🔒 approve", theme::role(Role::GrayDim))
     };
 
     let mut spans = vec![
@@ -1082,7 +1086,7 @@ pub(super) fn render_status_bar(f: &mut Frame, app: &App, area: Rect) {
     if let Some(ref branch) = git_branch {
         spans.push(Span::styled(
             format!(" ({branch})"),
-            Style::default().fg(Color::Cyan),
+            Style::default().fg(theme::role(Role::AccentTeal)),
         ));
     }
 
@@ -1108,14 +1112,20 @@ pub(super) fn render_status_bar(f: &mut Frame, app: &App, area: Rect) {
     };
     let display_tps = live_tps.or(app.last_tps());
     if let Some(tps) = display_tps {
-        spans.push(Span::styled("  ·  ", Style::default().fg(Color::DarkGray)));
+        spans.push(Span::styled(
+            "  ·  ",
+            Style::default().fg(theme::role(Role::GrayDim)),
+        ));
         spans.push(Span::styled(
             format!("{:.0} tok/s", tps),
             Style::default().fg(theme::role(Role::Success)),
         ));
     }
 
-    spans.push(Span::styled(sep_text, Style::default().fg(Color::DarkGray)));
+    spans.push(Span::styled(
+        sep_text,
+        Style::default().fg(theme::role(Role::GrayDim)),
+    ));
     spans.push(Span::styled(policy_text, Style::default().fg(policy_color)));
 
     // Split pane indicator
@@ -1128,7 +1138,10 @@ pub(super) fn render_status_bar(f: &mut Frame, app: &App, area: Rect) {
             .position(|id| *id == app.pane_manager.focused)
             .map(|i| i + 1)
             .unwrap_or(1);
-        spans.push(Span::styled("  ·  ", Style::default().fg(Color::DarkGray)));
+        spans.push(Span::styled(
+            "  ·  ",
+            Style::default().fg(theme::role(Role::GrayDim)),
+        ));
         spans.push(Span::styled(
             format!("[{}/{}]", focused_idx, pane_count),
             Style::default().fg(theme::role(Role::Success)),
