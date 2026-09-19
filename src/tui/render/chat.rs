@@ -598,7 +598,7 @@ pub(super) fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
                 Span::styled(
                     format!("  {}", header.base),
                     Style::default()
-                        .fg(Color::Cyan)
+                        .fg(theme::role(Role::AccentTeal))
                         .add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(
@@ -618,15 +618,15 @@ pub(super) fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
             if let Some((description, success)) = &header.preview {
                 let style = if *success {
                     Style::default()
-                        .fg(Color::DarkGray)
+                        .fg(theme::role(Role::GrayDim))
                         .add_modifier(Modifier::ITALIC)
                 } else {
                     Style::default()
-                        .fg(Color::Red)
+                        .fg(theme::role(Role::Error))
                         .add_modifier(Modifier::ITALIC)
                 };
                 lines.push(Line::from(vec![
-                    Span::styled("    └─ ", Style::default().fg(Color::DarkGray)),
+                    Span::styled("    └─ ", Style::default().fg(theme::role(Role::GrayDim))),
                     Span::styled(description.clone(), style),
                 ]));
                 line_to_msg.resize(lines.len(), None);
@@ -674,7 +674,7 @@ pub(super) fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
             lines.push(Line::from(Span::styled(
                 app.messages[msg_idx].content.clone(),
                 Style::default()
-                    .fg(Color::DarkGray)
+                    .fg(theme::role(Role::GrayDim))
                     .add_modifier(Modifier::ITALIC),
             )));
             lines.push(Line::from(""));
@@ -703,7 +703,7 @@ pub(super) fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
                 let mut header_spans = vec![Span::styled(
                     format!("  {} {}", dot, header),
                     Style::default()
-                        .fg(Color::Cyan)
+                        .fg(theme::role(Role::AccentTeal))
                         .add_modifier(Modifier::BOLD),
                 )];
                 header_spans.push(Span::styled(
@@ -729,17 +729,17 @@ pub(super) fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
                             if let Some(last) = g.calls.last() {
                                 let style = if last.success {
                                     Style::default()
-                                        .fg(Color::DarkGray)
+                                        .fg(theme::role(Role::GrayDim))
                                         .add_modifier(Modifier::ITALIC)
                                 } else {
                                     Style::default()
-                                        .fg(Color::Red)
+                                        .fg(theme::role(Role::Error))
                                         .add_modifier(Modifier::ITALIC)
                                 };
                                 lines.push(Line::from(vec![
                                     Span::styled(
                                         format!("    {} ", connector),
-                                        Style::default().fg(Color::DarkGray),
+                                        Style::default().fg(theme::role(Role::GrayDim)),
                                     ),
                                     Span::styled(last.description.clone(), style),
                                 ]));
@@ -752,17 +752,17 @@ pub(super) fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
                     if let Some(last) = group.calls.last() {
                         let style = if last.success {
                             Style::default()
-                                .fg(Color::DarkGray)
+                                .fg(theme::role(Role::GrayDim))
                                 .add_modifier(Modifier::ITALIC)
                         } else {
                             Style::default()
-                                .fg(Color::Red)
+                                .fg(theme::role(Role::Error))
                                 .add_modifier(Modifier::ITALIC)
                         };
                         lines.push(Line::from(vec![
                             Span::styled(
                                 "    └─ ".to_string(),
-                                Style::default().fg(Color::DarkGray),
+                                Style::default().fg(theme::role(Role::GrayDim)),
                             ),
                             Span::styled(last.description.clone(), style),
                         ]));
@@ -830,11 +830,11 @@ pub(super) fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
                     // Check for diff lines (+/-) and color accordingly
                     let (style, line_text): (Style, &str) =
                         if let Some(stripped) = detail_line.strip_prefix("+ ") {
-                            (Style::default().fg(Color::Green), stripped)
+                            (Style::default().fg(theme::role(Role::Success)), stripped)
                         } else if let Some(stripped) = detail_line.strip_prefix("- ") {
-                            (Style::default().fg(Color::Red), stripped)
+                            (Style::default().fg(theme::role(Role::Error)), stripped)
                         } else {
-                            (Style::default().fg(Color::DarkGray), detail_line)
+                            (Style::default().fg(theme::role(Role::GrayDim)), detail_line)
                         };
 
                     lines.push(Line::from(vec![
@@ -974,7 +974,7 @@ pub(super) fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
             let hint_span = Span::styled(
                 hint_text.to_string(),
                 Style::default()
-                    .fg(Color::DarkGray)
+                    .fg(theme::role(Role::GrayDim))
                     .add_modifier(Modifier::ITALIC),
             );
             lines.push(Line::from(vec![hint_span]));
@@ -991,7 +991,7 @@ pub(super) fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
                 let inner_width = content_width.saturating_sub(2);
                 let reasoning_lines = reasoning_to_lines(details, inner_width);
                 let reasoning_style = Style::default()
-                    .fg(Color::DarkGray)
+                    .fg(theme::role(Role::GrayDim))
                     .add_modifier(Modifier::ITALIC);
                 // Capped state: show only the first REASONING_CAP lines so a
                 // 2-page thinking block never floods the viewport (#727). Full
@@ -1048,7 +1048,7 @@ pub(super) fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
                 Span::styled(
                     "Thinking...",
                     Style::default()
-                        .fg(Color::DarkGray)
+                        .fg(theme::role(Role::GrayDim))
                         .add_modifier(Modifier::ITALIC | Modifier::BOLD),
                 ),
             ]));
@@ -1059,13 +1059,13 @@ pub(super) fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
             let inner_width = content_width.saturating_sub(2);
             let reasoning_lines = reasoning_to_lines(reasoning, inner_width);
             let reasoning_style = Style::default()
-                .fg(Color::DarkGray)
+                .fg(theme::role(Role::GrayDim))
                 .add_modifier(Modifier::ITALIC);
             let start_idx = reasoning_lines.len().saturating_sub(MAX_THINKING_LINES);
             if start_idx > 0 {
                 lines.push(Line::from(Span::styled(
                     format!("  ⋯ {} more lines", start_idx),
-                    Style::default().fg(Color::DarkGray),
+                    Style::default().fg(theme::role(Role::GrayDim)),
                 )));
             }
             for line in reasoning_lines.into_iter().skip(start_idx) {
@@ -1132,7 +1132,7 @@ pub(super) fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
                 Span::styled(
                     "🦀 OpenCrabs ",
                     Style::default()
-                        .fg(Color::Gray)
+                        .fg(theme::role(Role::Gray))
                         .add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(
@@ -1141,7 +1141,10 @@ pub(super) fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
                 ),
             ];
             if let Some(meta) = format_turn_spinner_meta(elapsed, app.streaming_output_tokens) {
-                spans.push(Span::styled(meta, Style::default().fg(Color::DarkGray)));
+                spans.push(Span::styled(
+                    meta,
+                    Style::default().fg(theme::role(Role::GrayDim)),
+                ));
             }
             lines.push(Line::from(spans));
         }
@@ -1170,7 +1173,7 @@ pub(super) fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
         // off mid-thought; the ceiling is what keeps this a status line and not
         // the scrolling window #742 replaced.
         let style = Style::default()
-            .fg(Color::DarkGray)
+            .fg(theme::role(Role::GrayDim))
             .add_modifier(Modifier::ITALIC);
         let wrapped = wrap_line_with_padding(
             Line::from(Span::styled(excerpt, style)),
@@ -1181,7 +1184,10 @@ pub(super) fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
         for (i, wrapped_line) in wrapped.into_iter().take(THINKING_EXCERPT_LINES).enumerate() {
             // Continuations align under the first line's text, past the emoji.
             let prefix = if i == 0 { "  🧠 " } else { "     " };
-            let mut spans = vec![Span::styled(prefix, Style::default().fg(Color::DarkGray))];
+            let mut spans = vec![Span::styled(
+                prefix,
+                Style::default().fg(theme::role(Role::GrayDim)),
+            )];
             spans.extend(wrapped_line.spans);
             if overflows && i == THINKING_EXCERPT_LINES - 1 {
                 spans.push(Span::styled("…", style));
@@ -1209,7 +1215,7 @@ pub(super) fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
             Span::styled(
                 "🦀 OpenCrabs ",
                 Style::default()
-                    .fg(Color::Gray)
+                    .fg(theme::role(Role::Gray))
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(
@@ -1218,7 +1224,10 @@ pub(super) fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
             ),
         ];
         if let Some(meta) = format_turn_spinner_meta(elapsed, app.streaming_output_tokens) {
-            header_spans.push(Span::styled(meta, Style::default().fg(Color::DarkGray)));
+            header_spans.push(Span::styled(
+                meta,
+                Style::default().fg(theme::role(Role::GrayDim)),
+            ));
         }
         lines.push(Line::from(header_spans));
     }
@@ -1298,14 +1307,23 @@ pub(super) fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
             ssh_req.target.clone()
         };
         lines.push(Line::from(vec![
-            Span::styled("  Target:   ", Style::default().fg(Color::DarkGray)),
-            Span::styled(target_display, Style::default().fg(Color::Reset)),
+            Span::styled(
+                "  Target:   ",
+                Style::default().fg(theme::role(Role::GrayDim)),
+            ),
+            Span::styled(
+                target_display,
+                Style::default().fg(theme::role(Role::TextPrimary)),
+            ),
         ]));
         lines.push(Line::from(vec![
-            Span::styled("  Password: ", Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                "  Password: ",
+                Style::default().fg(theme::role(Role::GrayDim)),
+            ),
             Span::styled(
                 "\u{2022}".repeat(app.ssh_input.len()),
-                Style::default().fg(Color::Reset),
+                Style::default().fg(theme::role(Role::TextPrimary)),
             ),
             Span::styled("\u{2588}", Style::default().fg(theme::role(Role::Gray))),
         ]));
@@ -1313,17 +1331,17 @@ pub(super) fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
             Span::styled(
                 "  [Enter] ",
                 Style::default()
-                    .fg(Color::Cyan)
+                    .fg(theme::role(Role::AccentTeal))
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled("Submit  ", Style::default().fg(Color::DarkGray)),
+            Span::styled("Submit  ", Style::default().fg(theme::role(Role::GrayDim))),
             Span::styled(
                 "[Esc] ",
                 Style::default()
-                    .fg(Color::Cyan)
+                    .fg(theme::role(Role::AccentTeal))
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled("Cancel", Style::default().fg(Color::DarkGray)),
+            Span::styled("Cancel", Style::default().fg(theme::role(Role::GrayDim))),
         ]));
         lines.push(Line::from(""));
     }
@@ -1353,15 +1371,24 @@ pub(super) fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
             sudo_req.command.clone()
         };
         lines.push(Line::from(vec![
-            Span::styled("  Command: ", Style::default().fg(Color::DarkGray)),
-            Span::styled(cmd_display, Style::default().fg(Color::Reset)),
+            Span::styled(
+                "  Command: ",
+                Style::default().fg(theme::role(Role::GrayDim)),
+            ),
+            Span::styled(
+                cmd_display,
+                Style::default().fg(theme::role(Role::TextPrimary)),
+            ),
         ]));
         // Password input (masked with dots)
         lines.push(Line::from(vec![
-            Span::styled("  Password: ", Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                "  Password: ",
+                Style::default().fg(theme::role(Role::GrayDim)),
+            ),
             Span::styled(
                 "\u{2022}".repeat(app.sudo_input.len()),
-                Style::default().fg(Color::Reset),
+                Style::default().fg(theme::role(Role::TextPrimary)),
             ),
             Span::styled("\u{2588}", Style::default().fg(theme::role(Role::Gray))),
         ]));
@@ -1370,15 +1397,17 @@ pub(super) fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
             Span::styled(
                 "  [Enter] ",
                 Style::default()
-                    .fg(Color::Cyan)
+                    .fg(theme::role(Role::AccentTeal))
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled("Submit  ", Style::default().fg(Color::DarkGray)),
+            Span::styled("Submit  ", Style::default().fg(theme::role(Role::GrayDim))),
             Span::styled(
                 "[Esc] ",
-                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(theme::role(Role::Error))
+                    .add_modifier(Modifier::BOLD),
             ),
-            Span::styled("Cancel", Style::default().fg(Color::DarkGray)),
+            Span::styled("Cancel", Style::default().fg(theme::role(Role::GrayDim))),
         ]));
         lines.push(Line::from(""));
     }
