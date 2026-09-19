@@ -19,7 +19,13 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::Duration;
 const DEFAULT_OPENAI_API_URL: &str = "https://api.openai.com/v1/chat/completions";
-const DEFAULT_TIMEOUT: Duration = Duration::from_secs(60);
+// Total request timeout (including streaming). reqwest's `.timeout()` covers
+// the response body read, so this is a hard wall-clock ceiling on an SSE
+// stream no matter how healthy it is. At 60s it guillotined thinking-heavy
+// models mid-stream and the retries re-sent into the same wall. Matches the
+// Anthropic and Gemini providers; the 20s inter-chunk idle timeout stays the
+// fast detector for genuinely dead streams.
+const DEFAULT_TIMEOUT: Duration = Duration::from_secs(300);
 const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const DEFAULT_POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(90);
 // TCP keepalive: OS-level probes detect silent connection drops without
