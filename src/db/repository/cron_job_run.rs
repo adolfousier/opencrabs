@@ -77,6 +77,12 @@ impl CronJobRunRepository {
     }
 
     /// Mark a run as failed with error.
+    ///
+    /// Terminal statuses for cron job runs include:
+    /// - `success`: execution finished and delivery succeeded (if configured)
+    /// - `delivery_failed`: execution finished but delivery failed
+    /// - `error`: job execution failed with error
+    /// - `interrupted`: aged running execution cleared by watchdog/doctor sweep
     pub async fn complete_error(&self, run_id: &str, error: &str) -> Result<()> {
         let id = run_id.to_string();
         let error = error.to_string();
