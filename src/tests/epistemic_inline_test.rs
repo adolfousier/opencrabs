@@ -80,6 +80,7 @@ fn test_decay_logic() {
     // Add a recent belief
     belief.key = "test:recent".to_string();
     belief.confidence = Confidence::Inferred;
+    belief.source.recorded_at = Utc::now();
     belief.source.last_verified = Utc::now();
     store.beliefs.insert("test:recent".to_string(), belief);
 
