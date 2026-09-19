@@ -3939,6 +3939,13 @@ impl Provider for OpenAIProvider {
             /// a terminal path means the provider never said why the
             /// stream ended.
             saw_finish_reason: bool,
+            /// True once a MessageDelta carrying the provider's own token
+            /// counts has been emitted. The `[DONE]` fallback below then
+            /// stops re-asserting its local estimate: the consumer
+            /// reconciles usage with `max()`, and a gross estimate would
+            /// otherwise outrank the netted real input on every cached
+            /// call and put the prefix back into the bill (#1636).
+            reported_usage: bool,
         }
 
         // Tool-call marker filtering runs for ALL OpenAI-compatible providers.
@@ -3969,6 +3976,7 @@ impl Provider for OpenAIProvider {
             reasoning_chars: 0,
             reasoning_delta_count: 0,
             saw_finish_reason: false,
+            reported_usage: false,
         }));
 
         // Incremental UTF-8 carry: SSE chunks can split a multi-byte char in
@@ -4064,14 +4072,26 @@ impl Provider for OpenAIProvider {
                                         total_input_tokens,
                                         reconc_tail
                                     );
-                                    tracing::info!("[STREAM_USAGE] Final usage (fallback on DONE): input={}, output=0, stop_reason={:?}", total_input_tokens, stop_reason);
+                                    // The estimate is a last resort, not a second
+                                    // opinion. Once the provider has reported real
+                                    // counts this delta exists only to carry
+                                    // stop_reason, so it reports zero tokens (#1636).
+                                    let fallback_input = if st.reported_usage {
+                                        0
+                                    } else {
+                                        total_input_tokens as u32
+                                    };
+                                    tracing::info!(
+                                        "[STREAM_USAGE] Final usage (fallback on DONE): input={}, output=0, stop_reason={:?}, provider_already_reported={}",
+                                        fallback_input, stop_reason, st.reported_usage
+                                    );
                                     events.push(Ok(StreamEvent::MessageDelta {
                                         delta: crate::brain::provider::types::MessageDelta {
                                             stop_reason: Some(stop_reason),
                                             stop_sequence: None,
                                         },
                                         usage: crate::brain::provider::types::TokenUsage {
-                                            input_tokens: total_input_tokens as u32,
+                                            input_tokens: fallback_input,
                                             output_tokens: 0, ..Default::default() },
                                     }));
                                     events.push(Ok(StreamEvent::MessageStop));
@@ -4790,6 +4810,7 @@ impl Provider for OpenAIProvider {
                                                     },
                                                 }));
                                                 events.push(Ok(StreamEvent::MessageStop));
+                                                st.reported_usage = true;
                                             } else {
                                                 // Stash stop_reason — we'll emit the final MessageDelta
                                                 // with real usage once the usage-only chunk arrives.
@@ -4856,6 +4877,7 @@ impl Provider for OpenAIProvider {
                                                         },
                                                     }));
                                                     events.push(Ok(StreamEvent::MessageStop));
+                                                    st.reported_usage = true;
                                                 }
                                         }
                                     }
