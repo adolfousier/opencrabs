@@ -228,6 +228,8 @@ pub mod core_tool_names_test;
 pub mod corrupted_tool_call_test;
 #[cfg(feature = "telegram")]
 pub mod cowork_connect_test;
+#[cfg(unix)]
+pub mod crash_signal_test;
 pub mod cron_deliver_to_thread_test;
 pub mod cron_next_run_at_test;
 pub mod cron_profile_isolation_test;

@@ -33,6 +33,18 @@ async fn main() -> Result<()> {
     let _guard = logging::init_logging(log_config)
         .map_err(|e| anyhow::anyhow!("Failed to initialize logging: {}", e))?;
 
+    // Install the crash-signal diagnostic handler (#352). Without it a fatal
+    // fault signal (SIGBUS/SIGSEGV/…) is delivered to the kernel's default
+    // disposition and the daemon dies silently, recording neither the signal
+    // nor the faulting address. A failure here is logged and never fatal: a box
+    // where the handler cannot be installed must still start.
+    #[cfg(unix)]
+    {
+        if let Err(e) = logging::install_crash_handler() {
+            tracing::warn!("crash-signal handler not installed: {}", e);
+        }
+    }
+
     // Clean up old log files (keep last 7 days)
     if cli_args.debug
         && let Ok(removed) = logging::cleanup_old_logs(7)
