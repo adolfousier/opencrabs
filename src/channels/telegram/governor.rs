@@ -851,6 +851,12 @@ async fn deliver_final(chat_id: i64, msg_id: i32, mut pending: PendingFinal) {
         Err(e) => super::rate_limit::parse_retry_after(e),
         Ok(()) => None,
     };
+    // A queued final that came back 429 is the same process-wide signal as any
+    // other: record it before the per-peer requeue maths, so other chats pause
+    // instead of walking into the same throttle.
+    if let Some(wait) = retry_after {
+        super::rate_limit::record_global_429(wait);
+    }
     let verdict = {
         let mut map = peers().lock().unwrap_or_else(|e| e.into_inner());
         let Some(peer) = map.get_mut(&chat_id) else {

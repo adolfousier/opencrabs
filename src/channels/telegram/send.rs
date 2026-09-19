@@ -700,7 +700,11 @@ pub(crate) async fn send_buttons_raw(
                 .and_then(serde_json::Value::as_u64)
                 .unwrap_or(5)
                 .min(15);
-            tokio::time::sleep(std::time::Duration::from_secs(wait)).await;
+            let wait = std::time::Duration::from_secs(wait);
+            // This path sleeps on its own rather than going through `wait_out`,
+            // so without this the 429 stays private to one send.
+            super::rate_limit::record_global_429(wait);
+            tokio::time::sleep(wait).await;
             continue;
         }
         if status.is_success()
