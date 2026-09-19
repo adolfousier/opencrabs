@@ -900,6 +900,142 @@ Multiple profiles can run as simultaneous daemon services with full isolation.
 
 ---
 
+## 🧠 Epistemic Engine
+
+OpenCrabs treats every fact in `MEMORY.md` as a **belief** — a structured record with confidence, source attribution, usage tracking, and automatic decay. The epistemic engine runs transparently: beliefs are indexed on session start, tracked on recall, decayed when stale, and cleaned up when cold.
+
+### Beliefs
+
+Each section in `MEMORY.md` becomes a `Belief` with:
+
+| Field | Type | Purpose |
+|-------|------|---------|
+| `key` | `String` | Section heading (e.g. `"MEMORY.md##Integrations"`) |
+| `value` | `String` | Section body text |
+| `confidence` | enum | `verified` → `inferred` → `uncertain` → `contradicted` |
+| `source` | struct | Origin, recorded-at timestamp, last-verified timestamp |
+| `hits` | `u64` | How many times this section was recalled and injected into context |
+| `last_used` | `Option<DateTime>` | Last time the section was touched (recall or explicit load); `None` = never used |
+
+Beliefs are stored in `~/.opencrabs/safety/beliefs.toml` and loaded once per session via a `OnceLock`.
+
+### Touch — usage tracking
+
+When a MEMORY.md section is **recalled** (injected into the prompt via `memory_search` or `recall_for`), the epistemic engine calls `touch_belief(key)` which:
+
+1. Increments `hits` by 1
+2. Sets `last_used` to `Utc::now()`
+
+This happens in both recall paths (fast cache hit and slow disk read). A section that's frequently recalled accumulates hits; a section that's never recalled stays at 0.
+
+### Decay — stale knowledge fades
+
+On session start, `apply_decay(30)` runs automatically. Beliefs that haven't been used in 30+ days drop one confidence level:
+
+```
+verified → inferred → uncertain → contradicted
+```
+
+The decay clock uses `last_used` (falling back to `recorded_at` for beliefs that were never touched). This means a belief that's recalled regularly **never decays**, even if it was recorded years ago. Only genuinely unused knowledge fades.
+
+### Backfill — indexing existing MEMORY.md
+
+On session start, `backfill_beliefs()` parses `MEMORY.md` and indexes any sections that aren't already tracked. This catches new sections added between sessions. The indexer:
+
+- Skips H1 headings (document titles like `# MEMORY.md - Long-Term Memory`)
+- Skips sections with body text shorter than 20 characters
+- Never overwrites existing beliefs (preserves hits, last_used, confidence)
+
+### Cold facts deletion
+
+Beliefs with **0 hits AND 90+ days** since last use are **deleted** (not archived). This keeps the belief store lean — if a section was never recalled in 3 months, it's not providing value.
+
+Run `/memory-prune` to see what would be deleted (dry-run) without actually removing anything.
+
+### Configuration
+
+The epistemic engine is configured in `~/.opencrabs/safety/ralph_loop.toml`:
+
+```toml
+[epistemic]
+enabled = true
+decay_enabled = true
+decay_interval_hours = 720        # 30 days
+contradiction_detection = true
+source_required = true
+```
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `enabled` | `true` | Master switch for the epistemic layer |
+| `decay_enabled` | `true` | Whether unverified beliefs decay over time |
+| `decay_interval_hours` | `720` | Hours before an unused belief decays one level |
+| `contradiction_detection` | `true` | Flag conflicts when a new belief contradicts an existing one |
+| `source_required` | `true` | Require source attribution on all beliefs |
+
+### Session start sequence
+
+When OpenCrabs starts (or the daemon first loads the epistemic store):
+
+1. **Load** `beliefs.toml` from disk
+2. **Decay** — apply 30-day decay to stale beliefs (save if changed)
+3. **Backfill** — index any new MEMORY.md sections (save if changed)
+4. **Ready** — the store is available for `memory_search` and `recall_for`
+
+The entire sequence runs once per process lifetime via `OnceLock`.
+
+---
+
+## 🧠 Brain System & 3-Tier Memory
+
+OpenCrabs has three layers of memory, each serving a different purpose:
+
+### Tier 1: Brain Files (curated, durable)
+
+The brain files in `~/.opencrabs/` are the agent's **curated knowledge** — rules, preferences, lessons, and identity. They persist across sessions and are the source of truth for how the agent behaves.
+
+| File | Purpose | Loaded |
+|------|---------|--------|
+| `SOUL.md` | Personality and voice | Always |
+| `USER.md` | Facts about the human | Always |
+| `AGENTS.md` | Hard rules and safety gates | Always |
+| `MEMORY.md` | Learned facts, corrections, lessons | On demand (main session) |
+| `CODE.md` | Coding standards | On demand |
+| `TOOLS.md` | Tool usage and skills | On demand |
+| `SECURITY.md` | Security policy | On demand |
+| `BOOT.md` | Startup and service config | On demand |
+
+### Tier 2: Daily Logs (auto-compaction summaries)
+
+When a session's context approaches the model's window limit, OpenCrabs auto-compacts — summarizing older turns into a daily log at `~/.opencrabs/memory/YYYY-MM-DD.md`. These logs capture:
+
+- What happened in the session
+- Decisions made and why
+- Files modified and commits created
+- Errors encountered and fixes applied
+
+Daily logs are searchable via `memory_search` and provide historical context without loading full session history.
+
+### Tier 3: Hybrid Memory Search (FTS5 + Vector Embeddings)
+
+The search layer combines **FTS5 keyword search** with **vector embeddings** via Reciprocal Rank Fusion (RRF). Three embedding backends:
+
+| Backend | Model | Cost | Notes |
+|---------|-------|------|-------|
+| **Local** | embeddinggemma-300M (768-dim) | Free | Runs offline, no API key |
+| **API** | Any OpenAI-compatible `/v1/embeddings` | Per-token | OpenAI, Ollama, Jina, etc. |
+| **FTS5-only** | None | Free | No embeddings, VPS-friendly |
+
+Search modes:
+- `scope="memory"` — daily logs and session documents (historical context)
+- `scope="brain"` — brain files only (rules and policy)
+- `scope="external"` — indexed code paths (structural queries: callers, definitions)
+- `scope="all"` — everything combined
+
+The epistemic engine (above) sits on top of Tier 1, tracking which MEMORY.md sections are actually used and decaying the ones that aren't.
+
+---
+
 ## 🔄 Migrating from Other Tools
 
 Switching to OpenCrabs from another AI agent tool? There are two ways to do it.
