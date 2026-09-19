@@ -3254,7 +3254,7 @@ impl OpenAIProvider {
             content: content_blocks,
             stop_reason,
             usage: TokenUsage {
-                input_tokens: response.usage.prompt_tokens.unwrap_or(0),
+                input_tokens: response.usage.net_input_tokens(),
                 output_tokens: response.usage.completion_tokens.unwrap_or(0),
                 cache_creation_tokens: response.usage.cache_creation_input_tokens.unwrap_or(0),
                 cache_read_tokens: response.usage.effective_cache_read(),
@@ -4724,15 +4724,20 @@ impl Provider for OpenAIProvider {
                                                 events.push(Ok(StreamEvent::ContentBlockStop { index: 0 }));
                                                 st.emitted_content_stop = true;
                                             }
-                                            let (raw_input, raw_output, raw_cache_read, raw_cache_create) = if let Some(ref usage) = chunk.usage {
+                                            // `raw_input` stays GROSS: it is what the provider
+                                            // reported and what the [STREAM_USAGE] receipt line
+                                            // has always carried. `net_input` is what the ledger
+                                            // gets, cached prefix removed (#1636).
+                                            let (raw_input, raw_output, raw_cache_read, raw_cache_create, net_input) = if let Some(ref usage) = chunk.usage {
                                                 (
                                                     usage.prompt_tokens.unwrap_or(0),
                                                     usage.completion_tokens.unwrap_or(0),
                                                     usage.effective_cache_read(),
                                                     usage.cache_creation_input_tokens.unwrap_or(0),
+                                                    usage.net_input_tokens(),
                                                 )
                                             } else {
-                                                (0, 0, 0, 0)
+                                                (0, 0, 0, 0, 0)
                                             };
                                             let raw_reasoning = chunk
                                                 .usage
@@ -4767,8 +4772,8 @@ impl Provider for OpenAIProvider {
                                                     reconc_tail
                                                 );
                                                 tracing::info!(
-                                                    "[STREAM_USAGE] Final usage (inline): input={}, output={}, cache_read={}, cache_create={}",
-                                                    raw_input, raw_output, raw_cache_read, raw_cache_create
+                                                    "[STREAM_USAGE] Final usage (inline): input={}, output={}, cache_read={}, cache_create={}, input_net={}",
+                                                    raw_input, raw_output, raw_cache_read, raw_cache_create, net_input
                                                 );
                                                 events.push(Ok(StreamEvent::MessageDelta {
                                                     delta: crate::brain::provider::types::MessageDelta {
@@ -4776,7 +4781,7 @@ impl Provider for OpenAIProvider {
                                                         stop_sequence: None,
                                                     },
                                                     usage: crate::brain::provider::types::TokenUsage {
-                                                        input_tokens: raw_input,
+                                                        input_tokens: net_input,
                                                         output_tokens: raw_output,
                                                         reasoning_tokens: raw_reasoning,
                                                         cache_creation_tokens: raw_cache_create,
@@ -4797,7 +4802,11 @@ impl Provider for OpenAIProvider {
                                         // the final chunk when stream_options.include_usage=true.
                                         if chunk.choices.is_empty()
                                             && let Some(ref usage) = chunk.usage {
+                                                // `input` stays GROSS for the guard and the
+                                                // receipt line; `net_input` is what the ledger
+                                                // gets, cached prefix removed (#1636).
                                                 let input = usage.prompt_tokens.unwrap_or(0);
+                                                let net_input = usage.net_input_tokens();
                                                 let output = usage.completion_tokens.unwrap_or(0);
                                                 let cache_read = usage.effective_cache_read();
                                                 let cache_create = usage.cache_creation_input_tokens.unwrap_or(0);
@@ -4829,8 +4838,8 @@ impl Provider for OpenAIProvider {
                                                         reconc_tail
                                                     );
                                                     tracing::info!(
-                                                        "[STREAM_USAGE] Final usage: input={}, output={}, cache_read={}, cache_create={}, reasoning={}",
-                                                        input, output, cache_read, cache_create, reasoning
+                                                        "[STREAM_USAGE] Final usage: input={}, output={}, cache_read={}, cache_create={}, reasoning={}, input_net={}",
+                                                        input, output, cache_read, cache_create, reasoning, net_input
                                                     );
                                                     events.push(Ok(StreamEvent::MessageDelta {
                                                         delta: crate::brain::provider::types::MessageDelta {
@@ -4838,7 +4847,7 @@ impl Provider for OpenAIProvider {
                                                             stop_sequence: None,
                                                         },
                                                         usage: crate::brain::provider::types::TokenUsage {
-                                                            input_tokens: input,
+                                                            input_tokens: net_input,
                                                             output_tokens: output,
                                                             reasoning_tokens: reasoning,
                                                             cache_creation_tokens: cache_create,
@@ -5279,6 +5288,26 @@ impl OpenAIUsage {
                     .and_then(|d| d.cached_tokens)
             })
             .unwrap_or(0)
+    }
+
+    /// Non-cached prompt tokens, the value [`TokenUsage::input_tokens`] is
+    /// documented to hold.
+    ///
+    /// `prompt_tokens` on an OpenAI-compatible API is the GROSS prompt, cached
+    /// prefix included, while the pricing table bills `cache_read_tokens`
+    /// separately on top. Assigning the gross value charges every cached token
+    /// twice, once at the full input rate and once at the cache-read rate, and
+    /// counts it twice in the token total (#1636). Net it out here, at the
+    /// provider boundary, so everything downstream sees the documented
+    /// contract.
+    ///
+    /// Only the cache-READ prefix is subtracted. No receipt shows a compat
+    /// provider folding `cache_creation_input_tokens` into `prompt_tokens`,
+    /// and subtracting it on a guess would under-count instead.
+    fn net_input_tokens(&self) -> u32 {
+        self.prompt_tokens
+            .unwrap_or(0)
+            .saturating_sub(self.effective_cache_read())
     }
 
     /// Reasoning tokens from `completion_tokens_details.reasoning_tokens`.

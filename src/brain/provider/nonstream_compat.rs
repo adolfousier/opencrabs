@@ -181,16 +181,21 @@ pub(crate) fn synthesize_stream_events(
     // ── Usage ──
     let mut token_usage = TokenUsage::default();
     if let Some(ref usage) = resp.usage {
-        token_usage.input_tokens = usage.prompt_tokens.unwrap_or(0);
+        let cached = usage
+            .prompt_details
+            .as_ref()
+            .and_then(|d| d.cached_tokens)
+            .unwrap_or(0);
+        // `prompt_tokens` is the GROSS prompt, cached prefix included, while
+        // `input_tokens` is documented non-cached and `cache_read_tokens` is
+        // billed on top of it. Net the prefix out or every cached token is
+        // charged twice (#1636).
+        token_usage.input_tokens = usage.prompt_tokens.unwrap_or(0).saturating_sub(cached);
         token_usage.output_tokens = usage.completion_tokens.unwrap_or(0);
         if let Some(cache_create) = usage.cache_creation_input_tokens {
             token_usage.cache_creation_tokens = cache_create;
         }
-        if let Some(ref details) = usage.prompt_details
-            && let Some(cached) = details.cached_tokens
-        {
-            token_usage.cache_read_tokens = cached;
-        }
+        token_usage.cache_read_tokens = cached;
     }
 
     events.push(Ok(StreamEvent::MessageDelta {
