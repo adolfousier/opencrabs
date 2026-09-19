@@ -347,7 +347,6 @@ pub fn render_backtrace(base: usize, offsets: &[usize], buf: &mut [u8]) -> usize
 /// caller logs the absence rather than believing a handler is installed.
 pub use handler::install_crash_handler;
 
-#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 mod handler {
     use super::{
         BACKTRACE_BUF_LEN, CrashFacts, HEADER_BUF_LEN, MAX_FRAMES, render_backtrace, render_header,
@@ -653,35 +652,5 @@ mod handler {
         }
 
         Ok(())
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Fallback — every other target
-// ---------------------------------------------------------------------------
-
-/// Stub for targets with no implemented fault handler.
-///
-/// macOS, Windows and non-x86_64 Linux are built by this crate's release
-/// workflow, so the symbol must exist for them to link — but the register and
-/// `ucontext_t` layout the real handler reads is architecture- and OS-specific,
-/// and a wrong read there would report a garbage fault address as fact. This
-/// returns an error so the absence stays visible to the caller instead of the
-/// daemon believing it is covered.
-#[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
-mod handler {
-    use std::io::{Error, ErrorKind};
-
-    /// Always fails.
-    ///
-    /// # Errors
-    ///
-    /// Always returns [`ErrorKind::Unsupported`]: the fault handler is
-    /// implemented for x86_64 Linux only.
-    pub fn install_crash_handler() -> std::io::Result<()> {
-        Err(Error::new(
-            ErrorKind::Unsupported,
-            "crash-signal handler is implemented for x86_64 Linux only",
-        ))
     }
 }
