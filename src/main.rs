@@ -41,7 +41,16 @@ async fn main() -> Result<()> {
     #[cfg(unix)]
     {
         if let Err(e) = logging::install_crash_handler() {
-            tracing::warn!("crash-signal handler not installed: {}", e);
+            // Unsupported is not a failure: it is the handler saying it was
+            // never implemented for this target (everything but x86_64 Linux,
+            // which is three of the five release targets). Warning on that
+            // means a warning at every single boot for a condition nothing can
+            // act on. `warn!` stays for an install that should have worked.
+            if e.kind() == std::io::ErrorKind::Unsupported {
+                tracing::debug!("crash-signal handler unavailable on this target: {}", e);
+            } else {
+                tracing::warn!("crash-signal handler not installed: {}", e);
+            }
         }
     }
 
