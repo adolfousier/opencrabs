@@ -39,10 +39,7 @@ const BANNED_IMPORTED_DOC: &[&str] = &[
 /// Commands that exist only in the imported doc. Banned in OPENCRABS.md
 /// itself; GETTING_STARTED.md and WIZARD.md still carry related fiction
 /// tracked in #1650 (follow-up), so the tree-wide sweep must skip them.
-const BANNED_IN_OPENCRABS_MD: &[&str] = &[
-    "opencrabs gateway",
-    "opencrabs dashboard",
-];
+const BANNED_IN_OPENCRABS_MD: &[&str] = &["opencrabs gateway", "opencrabs dashboard"];
 
 fn scanned_docs() -> Vec<(String, String)> {
     let mut out = vec![(

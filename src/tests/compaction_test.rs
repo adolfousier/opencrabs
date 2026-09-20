@@ -115,7 +115,11 @@ mod compaction_e2e {
             })
             .collect();
         assert!(texts.iter().any(|t| t.contains("Deploy the app")));
-        assert!(texts.iter().any(|t| t.contains("Build complete, deploying now")));
+        assert!(
+            texts
+                .iter()
+                .any(|t| t.contains("Build complete, deploying now"))
+        );
         assert!(context.messages[1..].iter().any(|m| {
             m.content
                 .iter()

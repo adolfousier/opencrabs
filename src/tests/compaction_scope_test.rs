@@ -13,7 +13,7 @@
 //!    stream is byte-identical to the old loader behaviour.
 
 use crate::brain::agent::context::{
-    AgentContext, CompactionScope, COMPACTION_MARKER_PREFIX, SEGMENT_SENTINEL,
+    AgentContext, COMPACTION_MARKER_PREFIX, CompactionScope, SEGMENT_SENTINEL,
 };
 use crate::brain::agent::service::AgentService;
 use crate::brain::provider::{ContentBlock, Message};
@@ -189,8 +189,7 @@ fn first_compaction_is_full_window_with_the_classic_prompt() {
         AgentService::compaction_scope_prelude(CompactionScope::FullWindow),
         ""
     );
-    let delta_prelude =
-        AgentService::compaction_scope_prelude(CompactionScope::DeltaSinceMarker);
+    let delta_prelude = AgentService::compaction_scope_prelude(CompactionScope::DeltaSinceMarker);
     assert!(delta_prelude.starts_with("SCOPE:") && delta_prelude.contains('\n'));
 }
 
@@ -217,10 +216,12 @@ fn sync_and_background_paths_share_the_input_seam() {
     let scope = marked.compaction_scope();
     assert_eq!(scope, CompactionScope::DeltaSinceMarker);
     AgentService::apply_scoped_compaction_summary(&mut marked, scope, "SEGMENT TWO");
-    assert!(marked
-        .messages
-        .iter()
-        .any(|m| text_of(m).contains("SUMMARY ONE")));
+    assert!(
+        marked
+            .messages
+            .iter()
+            .any(|m| text_of(m).contains("SUMMARY ONE"))
+    );
 }
 
 #[test]
