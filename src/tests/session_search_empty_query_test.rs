@@ -41,8 +41,7 @@ async fn missing_query_returns_list_not_error() {
         result.output
     );
     assert!(
-        result.output.contains("operation='tail'")
-            || result.output.contains("operation='list'"),
+        result.output.contains("operation='tail'") || result.output.contains("operation='list'"),
         "banner must teach the correct operations: {}",
         result.output
     );
@@ -67,7 +66,10 @@ async fn whitespace_query_is_treated_as_empty() {
 async fn real_query_still_searches() {
     let tool = setup().await;
     let result = tool
-        .execute(json!({"operation": "search", "query": "definitely-no-such-session"}), &ctx())
+        .execute(
+            json!({"operation": "search", "query": "definitely-no-such-session"}),
+            &ctx(),
+        )
         .await
         .unwrap();
     // A real (non-empty) query must NOT hit the fallback banner.

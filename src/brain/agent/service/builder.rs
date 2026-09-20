@@ -515,9 +515,7 @@ impl AgentService {
             sudo_callback: None,
             ssh_callback: None,
             session_working_dirs: std::sync::RwLock::new(HashMap::new()),
-            working_directory: Arc::new(std::sync::RwLock::new(
-                crate::utils::cwd::launch_cwd(),
-            )),
+            working_directory: Arc::new(std::sync::RwLock::new(crate::utils::cwd::launch_cwd())),
             brain_path: None,
             session_updated_tx: None,
             fallback_providers: std::sync::RwLock::new(

@@ -68,7 +68,11 @@ fn findstr_no_match_is_success() {
     // contract as grep/rg. Counting it as failure turned every no-match
     // findstr into a phantom bash failure on Windows.
     assert!(is_search_no_match("findstr /i pattern file.txt", 1, ""));
-    assert!(is_search_no_match("type log.txt | findstr ERROR", 1, "  \n"));
+    assert!(is_search_no_match(
+        "type log.txt | findstr ERROR",
+        1,
+        "  \n"
+    ));
 }
 
 #[test]
@@ -79,7 +83,11 @@ fn findstr_real_error_is_failure() {
         2,
         "FINDSTR: Cannot open file.txt"
     ));
-    assert!(!is_search_no_match("findstr /f pattern", 1, "FINDSTR: Bad command line"));
+    assert!(!is_search_no_match(
+        "findstr /f pattern",
+        1,
+        "FINDSTR: Bad command line"
+    ));
 }
 
 #[test]

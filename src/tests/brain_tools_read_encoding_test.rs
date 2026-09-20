@@ -14,12 +14,9 @@ use uuid::Uuid;
 async fn read(path: &std::path::Path) -> crate::brain::tools::ToolResult {
     let tool = ReadTool;
     let ctx = ToolExecutionContext::new(Uuid::new_v4());
-    tool.execute(
-        serde_json::json!({ "path": path.to_string_lossy() }),
-        &ctx,
-    )
-    .await
-    .unwrap()
+    tool.execute(serde_json::json!({ "path": path.to_string_lossy() }), &ctx)
+        .await
+        .unwrap()
 }
 
 async fn read_ranged(
@@ -57,13 +54,21 @@ async fn utf16le_file_with_bom_decodes() {
     write_utf16le(&p, "line one\nline two wörld\n");
 
     let result = read(&p).await;
-    assert!(result.success, "UTF-16LE read must succeed: {}", result.output);
+    assert!(
+        result.success,
+        "UTF-16LE read must succeed: {}",
+        result.output
+    );
     assert!(
         result.output.contains("line two wörld"),
         "content must decode correctly: {}",
         result.output
     );
-    let warning = result.metadata.get("warning").map(String::as_str).unwrap_or("");
+    let warning = result
+        .metadata
+        .get("warning")
+        .map(String::as_str)
+        .unwrap_or("");
     assert!(
         warning.contains("UTF-16LE"),
         "warning must name the decode: {}",
@@ -78,7 +83,11 @@ async fn ranged_read_of_utf16le_file_works() {
     write_utf16le(&p, "alpha\nbeta\ngamma\n");
 
     let result = read_ranged(&p, 1, 1).await;
-    assert!(result.success, "ranged UTF-16 read must succeed: {}", result.output);
+    assert!(
+        result.success,
+        "ranged UTF-16 read must succeed: {}",
+        result.output
+    );
     assert!(
         result.output.contains("beta") && !result.output.contains("alpha"),
         "range window must be exact: {}",
@@ -120,7 +129,11 @@ async fn invalid_utf8_falls_back_lossy_with_warning() {
         "readable lines must survive: {}",
         result.output
     );
-    let warning = result.metadata.get("warning").map(String::as_str).unwrap_or("");
+    let warning = result
+        .metadata
+        .get("warning")
+        .map(String::as_str)
+        .unwrap_or("");
     assert!(
         warning.contains("invalid UTF-8"),
         "warning must name the fallback: {}",
@@ -152,7 +165,11 @@ async fn binary_file_read_is_lossy_not_fatal() {
 
     let result = read(&p).await;
     assert!(result.success, "binary read must not be fatal");
-    let warning = result.metadata.get("warning").map(String::as_str).unwrap_or("");
+    let warning = result
+        .metadata
+        .get("warning")
+        .map(String::as_str)
+        .unwrap_or("");
     assert!(
         warning.contains("binary"),
         "binary hint expected: {}",

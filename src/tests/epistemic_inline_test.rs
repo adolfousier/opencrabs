@@ -225,9 +225,7 @@ fn test_decay_uses_last_used_not_last_verified() {
     belief.value = "stale".to_string();
     belief.hits = 0;
     belief.last_used = None;
-    store
-        .beliefs
-        .insert("test:old_unused".to_string(), belief);
+    store.beliefs.insert("test:old_unused".to_string(), belief);
 
     let decayed = store.apply_decay(30);
 
@@ -303,7 +301,12 @@ fn test_backfill_no_overwrite() {
     let mut store = EpistemicStore::new();
 
     // Pre-existing verified belief
-    store.add_belief("MEMORY.md##Rules", "custom value", Confidence::Verified, "user");
+    store.add_belief(
+        "MEMORY.md##Rules",
+        "custom value",
+        Confidence::Verified,
+        "user",
+    );
 
     let markdown = r#"## Rules
 

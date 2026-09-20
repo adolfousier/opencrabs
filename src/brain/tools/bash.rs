@@ -596,7 +596,10 @@ impl Tool for BashTool {
                 apply_context_env(&mut cmd, context);
                 detach_session_pre_exec(&mut cmd);
                 let mut child = cmd.spawn()?;
-                sudo_child_pid.store(child.id().unwrap_or(0), std::sync::atomic::Ordering::Relaxed);
+                sudo_child_pid.store(
+                    child.id().unwrap_or(0),
+                    std::sync::atomic::Ordering::Relaxed,
+                );
 
                 // Write password to stdin and close it
                 if let Some(mut stdin) = child.stdin.take() {
@@ -650,7 +653,10 @@ impl Tool for BashTool {
                 apply_context_env(&mut cmd, context);
                 detach_session_pre_exec(&mut cmd);
                 let child = cmd.spawn()?;
-                probe_child_pid.store(child.id().unwrap_or(0), std::sync::atomic::Ordering::Relaxed);
+                probe_child_pid.store(
+                    child.id().unwrap_or(0),
+                    std::sync::atomic::Ordering::Relaxed,
+                );
                 child.wait_with_output().await
             };
 
@@ -735,7 +741,10 @@ impl Tool for BashTool {
                     apply_context_env(&mut cmd, context);
                     detach_session_pre_exec(&mut cmd);
                     let child = cmd.spawn()?;
-                    retry_child_pid.store(child.id().unwrap_or(0), std::sync::atomic::Ordering::Relaxed);
+                    retry_child_pid.store(
+                        child.id().unwrap_or(0),
+                        std::sync::atomic::Ordering::Relaxed,
+                    );
                     child.wait_with_output().await
                 };
 
@@ -813,7 +822,10 @@ impl Tool for BashTool {
                 apply_context_env(&mut cmd, context);
                 detach_session_pre_exec(&mut cmd);
                 let child = cmd.spawn()?;
-                exec_child_pid.store(child.id().unwrap_or(0), std::sync::atomic::Ordering::Relaxed);
+                exec_child_pid.store(
+                    child.id().unwrap_or(0),
+                    std::sync::atomic::Ordering::Relaxed,
+                );
                 child.wait_with_output().await
             };
 
@@ -952,7 +964,8 @@ pub(crate) fn is_search_no_match(command: &str, exit_code: i32, stderr: &str) ->
     command.split(['|', ';', '&']).any(|segment| {
         let seg = segment.trim();
         let first = seg.split_whitespace().next().unwrap_or("");
-        matches!(first, "grep" | "egrep" | "fgrep" | "rg" | "findstr") || seg.starts_with("git grep")
+        matches!(first, "grep" | "egrep" | "fgrep" | "rg" | "findstr")
+            || seg.starts_with("git grep")
     })
 }
 

@@ -7333,12 +7333,10 @@ impl AgentService {
                         // model, and a different one usually emits the call.
                         let model = self.provider_model_for_session(session_id);
                         return Err(AgentError::Provider(
-                            crate::brain::provider::ProviderError::AnnouncementLoop(
-                                format!(
-                                    "near-identical announcements repeated within the turn \
+                            crate::brain::provider::ProviderError::AnnouncementLoop(format!(
+                                "near-identical announcements repeated within the turn \
                                      [diagnostics:model={model},retries={phantom_retries_used},swaps={phantom_swaps_done},rolls={phantom_rolls}]"
-                                ),
-                            ),
+                            )),
                         ));
                     }
                     super::announcement_loop::TextLoopAction::Nudge => {
@@ -7668,12 +7666,10 @@ impl AgentService {
                     );
                     let model = self.provider_model_for_session(session_id);
                     return Err(AgentError::Provider(
-                        crate::brain::provider::ProviderError::AnnouncementLoop(
-                            format!(
-                                "near-identical announcements repeated across turns \
+                        crate::brain::provider::ProviderError::AnnouncementLoop(format!(
+                            "near-identical announcements repeated across turns \
                                  [diagnostics:model={model},retries={phantom_retries_used},swaps={phantom_swaps_done},rolls={phantom_rolls}]"
-                            ),
-                        ),
+                        )),
                     ));
                 }
                 Some(super::announcement_loop::TextLoopAction::Nudge) => {

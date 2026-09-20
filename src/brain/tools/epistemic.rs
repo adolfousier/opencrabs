@@ -326,8 +326,7 @@ impl EpistemicStore {
             // Skip the preamble (no heading) and H1 document titles —
             // only H2+ sections carry operational content worth indexing.
             if trimmed_heading.is_empty()
-                || (trimmed_heading.starts_with('#')
-                    && !trimmed_heading.starts_with("##"))
+                || (trimmed_heading.starts_with('#') && !trimmed_heading.starts_with("##"))
             {
                 continue;
             }
@@ -375,11 +374,10 @@ impl EpistemicStore {
             .beliefs
             .iter()
             .filter(|(_, b)| {
-                b.hits == 0
-                    && {
-                        let last_seen = b.last_used.unwrap_or(b.source.recorded_at);
-                        (now - last_seen).num_days() >= max_age_days
-                    }
+                b.hits == 0 && {
+                    let last_seen = b.last_used.unwrap_or(b.source.recorded_at);
+                    (now - last_seen).num_days() >= max_age_days
+                }
             })
             .map(|(k, _)| k.clone())
             .collect();
@@ -397,11 +395,10 @@ impl EpistemicStore {
         self.beliefs
             .values()
             .filter(|b| {
-                b.hits == 0
-                    && {
-                        let last_seen = b.last_used.unwrap_or(b.source.recorded_at);
-                        (now - last_seen).num_days() >= max_age_days
-                    }
+                b.hits == 0 && {
+                    let last_seen = b.last_used.unwrap_or(b.source.recorded_at);
+                    (now - last_seen).num_days() >= max_age_days
+                }
             })
             .collect()
     }
@@ -436,13 +433,15 @@ fn get_store() -> &'static std::sync::Mutex<EpistemicStore> {
         // Session start maintenance: decay stale beliefs + backfill MEMORY.md (#1641).
         let decayed = store.apply_decay(30);
         if !decayed.is_empty() {
-            tracing::info!(
-                "Epistemic session start: {} beliefs decayed",
-                decayed.len()
-            );
+            tracing::info!("Epistemic session start: {} beliefs decayed", decayed.len());
         }
 
-        let memory_path = path.parent().unwrap_or(&path).parent().unwrap_or(&path).join("MEMORY.md");
+        let memory_path = path
+            .parent()
+            .unwrap_or(&path)
+            .parent()
+            .unwrap_or(&path)
+            .join("MEMORY.md");
         if let Ok(content) = std::fs::read_to_string(&memory_path) {
             let added = store.backfill_from_content(&content);
             if added > 0 {
@@ -606,7 +605,11 @@ pub fn delete_cold_beliefs(max_age_days: i64) -> Vec<String> {
 pub fn list_cold_beliefs(max_age_days: i64) -> Vec<Belief> {
     let store = get_store();
     let guard = store.lock().expect("epistemic store lock poisoned");
-    guard.list_cold_beliefs(max_age_days).into_iter().cloned().collect()
+    guard
+        .list_cold_beliefs(max_age_days)
+        .into_iter()
+        .cloned()
+        .collect()
 }
 
 /// Run epistemic maintenance at session start: decay + backfill (#1641).
@@ -617,10 +620,7 @@ pub fn session_start_maintenance() {
     // Apply decay (30-day threshold)
     let decayed = apply_decay(30);
     if !decayed.is_empty() {
-        tracing::info!(
-            "Epistemic session start: {} beliefs decayed",
-            decayed.len()
-        );
+        tracing::info!("Epistemic session start: {} beliefs decayed", decayed.len());
     }
 
     // Backfill any new MEMORY.md sections
