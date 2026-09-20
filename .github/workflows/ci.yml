@@ -208,7 +208,10 @@ jobs:
     # was minutes from linking. Keep a cap so a true hang can't burn 360.
     timeout-minutes: 60
     steps:
+      # fetch-depth 0: the path filter below diffs against the PR base sha.
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
 
       - name: Install Rust (from rust-toolchain.toml)
         uses: dtolnay/rust-toolchain@master
@@ -224,13 +227,59 @@ jobs:
         with:
           cache-on-failure: true
 
+      # Path filter, fail-open. A 51-minute GitHub-hosted build on every push
+      # to every PR is the cost that got the original job deleted (#627), and
+      # most PRs here cannot break Windows. Fire on the paths that have
+      # actually produced Windows-only breakage: the dependency graph and
+      # toolchain, the platform abstraction, the spawn and read paths, and
+      # this workflow itself. Anything we cannot determine builds anyway, and
+      # a `windows` label forces a build for the cases this list misses.
+      # Deliberate gap: a new cfg(windows) block in an unlisted file is not
+      # caught here. release.yml's matrix still builds Windows before any tag
+      # ships, which is the coverage #627 relied on; this job only moves that
+      # signal earlier for the paths where it pays for itself.
+      - name: Windows-relevant changes?
+        id: relevant
+        shell: bash
+        run: |
+          set -u
+          if [[ "${{ github.event_name }}" != "pull_request" ]]; then
+            echo "not a pull_request, building"
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [[ "${{ contains(github.event.pull_request.labels.*.name, 'windows') }}" == "true" ]]; then
+            echo "windows label present, building"
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          base="${{ github.event.pull_request.base.sha }}"
+          if ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
+            echo "base sha ${base} not in this clone, building (fail open)"
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          files=$(git diff --name-only "$base" HEAD)
+          echo "changed files:"
+          echo "$files"
+          pattern='^(Cargo\.toml|Cargo\.lock|rust-toolchain\.toml|build\.rs|\.github/workflows/ci\.yml|src/utils/(shell|cwd)\.rs|src/brain/tools/(bash|read)\.rs)$'
+          if echo "$files" | grep -qE "$pattern"; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "no Windows-relevant paths touched, skipping the build"
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Install CMake (Windows)
+        if: steps.relevant.outputs.run == 'true'
         uses: lukka/get-cmake@latest
 
       - name: Install NASM (Windows)
+        if: steps.relevant.outputs.run == 'true'
         uses: ilammy/setup-nasm@v1
 
       - name: Build
+        if: steps.relevant.outputs.run == 'true'
         shell: bash
         env:
           AWS_LC_SYS_CMAKE_BUILDER: '1'
@@ -510,9 +559,14 @@ jobs:
   ci-gate:
     name: CI Required Gate
     if: always()
-    # windows-build is in the required set on purpose: a compile break on
-    # Windows must block a PR, not just show up as a red advisory job.
-    needs: [lint, build, test, audit, windows-build]
+    # windows-build is deliberately NOT in the required set. It is the only
+    # GitHub-hosted job here (everything else runs on the self-hosted Mac),
+    # it measured 51m09s cold, and at ~160 PR runs a fortnight that is ~136h
+    # of 2x-billed runner time against the 3 Windows builds release.yml
+    # actually ran in the same window. #627 removed the original job from the
+    # gate for exactly that reason. It stays as an advisory signal; Windows
+    # remains release-blocking via release.yml's build matrix before any tag.
+    needs: [lint, build, test, audit]
     runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork) && 'ubuntu-latest' || 'self-hosted' }}
     steps:
       - name: Check results
