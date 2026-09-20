@@ -91,3 +91,54 @@ fn kill_process_tree_terminates_the_tree() {
         "pid {pid} (or its tree) survived kill_process_tree: {listing}"
     );
 }
+
+/// The Unix half of the tree kill, which shipped with no rig behind it: the
+/// existing regression above is `cfg(windows)`, so `pkill -TERM -P` reached
+/// every macOS and Linux bash timeout untested. Spawns a shell that keeps a
+/// backgrounded `sleep` as a real child (a bare `sh -c "sleep"` execs into
+/// sleep and leaves no child to sweep), asserts the child exists first so a
+/// vacuous pass is impossible, then asserts the sweep took it.
+#[cfg(not(windows))]
+#[test]
+fn kill_process_tree_sweeps_the_children_on_unix() {
+    fn children_of(pid: u32) -> String {
+        let out = std::process::Command::new("pgrep")
+            .args(["-P", &pid.to_string()])
+            .output()
+            .expect("run pgrep");
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
+    }
+
+    use crate::utils::shell::PushShellCommand;
+    let (shell, flag) = shell_pair();
+    let mut cmd = std::process::Command::new(shell);
+    cmd.push_shell_command(flag, "sleep 37 & wait");
+    let mut child = cmd.spawn().expect("spawn sleep tree");
+    let pid = child.id();
+
+    // Let the shell fork its grandchild before sweeping.
+    std::thread::sleep(std::time::Duration::from_millis(500));
+    let before = children_of(pid);
+    assert!(
+        !before.is_empty(),
+        "precondition: the shell should own a child to sweep, found none"
+    );
+
+    crate::utils::shell::kill_process_tree(pid);
+    std::thread::sleep(std::time::Duration::from_millis(500));
+    let after = children_of(pid);
+
+    // Reap the shell itself regardless of the outcome: a failed assertion
+    // must not leave a 37-second sleep on the developer's machine.
+    if let Err(e) = child.kill() {
+        eprintln!("could not kill the test shell pid {pid}: {e}");
+    }
+    if let Err(e) = child.wait() {
+        eprintln!("could not reap the test shell pid {pid}: {e}");
+    }
+
+    assert!(
+        after.is_empty(),
+        "children of pid {pid} survived kill_process_tree: before={before:?} after={after:?}"
+    );
+}
