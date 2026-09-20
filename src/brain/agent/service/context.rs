@@ -1,5 +1,5 @@
 use super::builder::AgentService;
-use crate::brain::agent::context::AgentContext;
+use crate::brain::agent::context::{AgentContext, CompactionScope};
 use crate::brain::agent::error::{AgentError, Result};
 use crate::brain::provider::{ContentBlock, LLMRequest, Message, Provider};
 use crate::services::{MessageService, SessionService};
@@ -261,12 +261,16 @@ impl AgentService {
         Some(out)
     }
 
-    /// Load messages from the last compaction point forward.
+    /// Load messages from the compaction boundary forward.
     ///
-    /// Finds the last message that IS a compaction marker and returns only
-    /// messages from that point onward. If no compaction marker exists,
-    /// returns all messages. This ensures restarts pick up exactly where
-    /// compaction left off — no arbitrary trimming.
+    /// #1649 frozen segments: delta-segment markers EXTEND the window (the
+    /// earlier segments stay in force), so they are not boundaries. The
+    /// boundary is the LAST marker that does NOT carry the segment sentinel
+    /// — a full-window compaction, a hard truncate, a consolidation, the RSI
+    /// seal, a cron boundary or a user clear, all of which restart history.
+    /// Result: `[boundary][segments…][tail]` reconstructs the live window
+    /// exactly; a session with no segment markers reloads byte-identically
+    /// to the classic last-marker behaviour.
     ///
     /// Anchored on `role == "user" && starts_with(..)`, NOT a substring match
     /// (#175). Every marker is written as a `user` row whose content BEGINS
@@ -282,19 +286,23 @@ impl AgentService {
     pub fn messages_from_last_compaction(
         all_messages: Vec<crate::db::models::Message>,
     ) -> Vec<crate::db::models::Message> {
+        use crate::brain::agent::context::SEGMENT_SENTINEL;
         const COMPACTION_MARKER: &str = "[CONTEXT COMPACTION";
 
-        // Walk backward to find the last real compaction marker. A marker is
-        // a `user` row that STARTS with the prefix — matching the substring
-        // anywhere let a merely-quoting message masquerade as one (#175).
-        let compaction_idx = all_messages
-            .iter()
-            .rposition(|msg| msg.role == "user" && msg.content.starts_with(COMPACTION_MARKER));
+        // Walk backward to the last marker that RESTARTS history. Segment
+        // markers (sentinel-tagged, #175 anchored prefix) are skipped: the
+        // boundary they extend from is what the reload anchors on.
+        let boundary_idx = all_messages.iter().rposition(|msg| {
+            msg.role == "user"
+                && msg.content.starts_with(COMPACTION_MARKER)
+                && !msg.content.contains(SEGMENT_SENTINEL)
+        });
 
-        if let Some(idx) = compaction_idx {
+        if let Some(idx) = boundary_idx {
             let kept = all_messages.len() - idx;
             tracing::info!(
-                "Found compaction marker at message {}/{} — loading {} messages from compaction point",
+                "Found compaction boundary at message {}/{} — loading {} messages \
+                 (boundary + segments + tail)",
                 idx,
                 all_messages.len(),
                 kept,
@@ -397,6 +405,10 @@ impl AgentService {
             provider,
             self.fallback_chain_snapshot(),
             session_id,
+            // Manual `/compact` and emergency recovery are full-window by
+            // definition: the caller wants everything re-derived into one
+            // marker now (#1649 scoping only applies to the background path).
+            CompactionScope::FullWindow,
             context.messages.clone(),
             context.token_count,
             context.max_tokens,
@@ -655,6 +667,32 @@ impl AgentService {
         )))
     }
 
+    /// #1649: the scope header prepended to the summariser prompt. Empty for
+    /// `FullWindow` — the first-compaction prompt stays byte-identical to the
+    /// classic one (the parity probe pins this). Delta and consolidation get
+    /// a short prelude that re-aims the same exhaustive body at their
+    /// narrower input instead of duplicating the whole prompt per scope.
+    pub(crate) fn compaction_scope_prelude(scope: CompactionScope) -> String {
+        match scope {
+            CompactionScope::FullWindow => String::new(),
+            CompactionScope::DeltaSinceMarker => concat!(
+                "SCOPE: The messages below are ONLY the conversation since the last ",
+                "compaction marker. Earlier history is already preserved in frozen ",
+                "summary segments that are NOT part of this input — do not restate, ",
+                "re-derive, or merge them; document only what is present below.\n\n"
+            )
+            .to_string(),
+            CompactionScope::SegmentConsolidation => concat!(
+                "SCOPE: The input below is a set of prior compaction segment summaries ",
+                "separated by --- markers. Merge them into ONE comprehensive continuation ",
+                "document that supersedes them all. Preserve section 0 (IMMEDIATE TASK) ",
+                "from the MOST RECENT segment near-verbatim — it is the live task. Do not ",
+                "invent content that is not in the segments.\n\n"
+            )
+            .to_string(),
+        }
+    }
+
     /// Compute a compaction summary from a snapshot of messages.
     ///
     /// This is the LLM-facing half of compaction. It does not touch any live
@@ -669,6 +707,7 @@ impl AgentService {
         provider: Arc<dyn Provider>,
         fallbacks: Vec<Arc<dyn Provider>>,
         session_id: Uuid,
+        scope: CompactionScope,
         snapshot_messages: Vec<Message>,
         snapshot_token_count: usize,
         snapshot_max_tokens: usize,
@@ -735,7 +774,7 @@ impl AgentService {
 
         let mut summary_messages: Vec<Message> = msgs_to_include.into_iter().cloned().collect();
 
-        let compaction_prompt = format!(
+        let base_prompt = format!(
             "CRITICAL: The context window is at {:.0}% capacity ({} / {} tokens, {} tokens remaining). \
              The conversation must be compacted NOW.\n\n\
              You are creating a COMPREHENSIVE CONTINUATION DOCUMENT. After compaction, a fresh agent \
@@ -833,6 +872,14 @@ impl AgentService {
             },
         );
 
+        // #1649: the scope prelude rides in front of the unchanged body;
+        // FullWindow gets an empty prelude, so the first-compaction prompt is
+        // byte-identical to the classic one.
+        let compaction_prompt = format!(
+            "{}{}",
+            Self::compaction_scope_prelude(scope),
+            base_prompt
+        );
         summary_messages.push(Message::user(compaction_prompt));
 
         // Never send a {provider, model} pair the user didn't configure.
@@ -920,6 +967,7 @@ impl AgentService {
     /// delete the most recent thing the agent did.
     pub(crate) fn apply_compaction_summary_after(
         context: &mut AgentContext,
+        scope: CompactionScope,
         summary: &str,
         snapshot_len: usize,
     ) {
@@ -934,14 +982,16 @@ impl AgentService {
                  applying the summary without a delta",
                 context.messages.len(),
             );
-            Self::apply_compaction_summary(context, summary);
+            Self::apply_scoped_compaction_summary(context, scope, summary);
             return;
         }
 
         let mut delta = context.messages.split_off(snapshot_len);
         // The summary replaces everything the snapshot covered, so it is
-        // computed against exactly what it summarises.
-        Self::apply_compaction_summary(context, summary);
+        // computed against exactly what it summarises — scoped (#1649): a
+        // delta segment replaces only what followed the last marker, a
+        // consolidation replaces the segment run, full window clears all.
+        Self::apply_scoped_compaction_summary(context, scope, summary);
 
         // The summary lands as a user message. A delta opening with tool
         // results has lost the assistant tool_use that authorised them, and
@@ -963,108 +1013,65 @@ impl AgentService {
     }
 
     pub(super) fn apply_compaction_summary(context: &mut AgentContext, summary: &str) {
-        let recent_snapshot = Self::format_recent_messages(&context.messages, 8);
-        let brain_context = Self::build_recovered_brain_context();
-        let summary_with_context = if recent_snapshot.is_empty() {
-            format!("{}\n\n{}", brain_context, summary)
-        } else {
-            format!(
-                "{}\n\n{}\n\n## Recent Message Pairs (pre-compaction snapshot)\n\
-                 CRITICAL: These are the messages from RIGHT BEFORE compaction. You MUST \
-                 continue from where you left off. Read these messages, identify what was \
-                 in progress, and continue that exact work. Do NOT start a new topic. \
-                 Do NOT ask the user what to do — the answer is in these messages.\n\n{}",
-                brain_context, summary, recent_snapshot
-            )
-        };
+        // The synchronous path (`/compact`, the two emergency recoveries):
+        // full-window by definition — the summary was computed against the
+        // whole window, so the apply clears everything and prepends one
+        // marker. The background path goes through
+        // `apply_compaction_summary_after` with the scope it spawned with.
+        Self::apply_scoped_compaction_summary(context, CompactionScope::FullWindow, summary);
+    }
 
-        // After compaction, the summary IS the conversation — it's prepended
-        // as a single user message and the agent picks up from there. We do
-        // NOT preserve a raw pre-compaction tail: the summary already embeds
-        // the recent-snapshot prose, so keeping the raw tail on top would
-        // just duplicate ~half the window and defeat the whole purpose of
-        // compacting. Pass 0 so `compact_with_summary` clears everything
-        // and prepends just the summary.
-        context.compact_with_summary(summary_with_context, 0);
+    /// Scope-aware apply (#1649). Welds the recovered brain context onto the
+    /// summary, then: full window clears all and prepends one marker
+    /// (classic behaviour); delta appends a frozen segment after the existing
+    /// markers; consolidation replaces the segment run with one superseding
+    /// marker.
+    pub(crate) fn apply_scoped_compaction_summary(
+        context: &mut AgentContext,
+        scope: CompactionScope,
+        summary: &str,
+    ) {
+        // No verbatim recent-pairs snapshot is welded onto the marker: the
+        // summary prompt's "IMMEDIATE TASK" section already quotes the last
+        // exchange from the history, so a second copy duplicated it inside
+        // the marker and re-billed it on every subsequent compaction (#1649).
+        // The raw tail a background compaction keeps
+        // (`apply_compaction_summary_after`) covers continuation mechanically.
+        let brain_context = Self::build_recovered_brain_context();
+        let summary_with_context = format!("{}\n\n{}", brain_context, summary);
+
+        match scope {
+            CompactionScope::FullWindow => {
+                // After compaction, the summary IS the conversation — it's
+                // prepended as a single user message and the agent picks up
+                // from there. We do NOT preserve a raw pre-compaction tail:
+                // the summary already embeds the recent-snapshot prose, so
+                // keeping the raw tail on top would just duplicate ~half the
+                // window and defeat the whole purpose of compacting. Pass 0
+                // so `compact_with_summary` clears everything and prepends
+                // just the summary.
+                context.compact_with_summary(summary_with_context, 0);
+            }
+            CompactionScope::DeltaSinceMarker => {
+                // The prior frozen segments stay in force verbatim; only the
+                // messages the delta summary described are replaced by this
+                // new segment marker.
+                context.compact_with_delta_summary(summary_with_context);
+            }
+            CompactionScope::SegmentConsolidation => {
+                // The segments merge into ONE superseding marker; the tail
+                // after the segment run is untouched.
+                context.consolidate_segments(summary_with_context);
+            }
+        }
 
         tracing::info!(
-            "Context compacted: now at {:.0}% ({} tokens)",
+            "Context compacted ({scope:?}): now at {:.0}% ({} tokens)",
             context.usage_percentage(),
             context.token_count
         );
     }
 
-    /// Format the last N messages into a human-readable snapshot for post-compaction context.
-    /// Truncates long tool results to keep the snapshot concise.
-    pub(crate) fn format_recent_messages(messages: &[Message], n: usize) -> String {
-        use crate::brain::provider::{ContentBlock, Role};
-
-        let start = messages.len().saturating_sub(n);
-        let mut lines = Vec::new();
-
-        for msg in &messages[start..] {
-            let role_label = match msg.role {
-                Role::User => "**User**",
-                Role::Assistant => "**Assistant**",
-                Role::System => "**System**",
-            };
-
-            for block in &msg.content {
-                match block {
-                    ContentBlock::Text { text } => {
-                        // Truncate very long text blocks to ~500 bytes
-                        let display = if text.len() > 500 {
-                            let end = text.floor_char_boundary(500);
-                            format!("{}… [truncated]", &text[..end])
-                        } else {
-                            text.clone()
-                        };
-                        lines.push(format!("{}: {}", role_label, display));
-                    }
-                    ContentBlock::ToolUse { name, input, .. } => {
-                        let input_preview = {
-                            let s = input.to_string();
-                            if s.len() > 200 {
-                                let end = s.floor_char_boundary(200);
-                                format!("{}…", &s[..end])
-                            } else {
-                                s
-                            }
-                        };
-                        lines.push(format!(
-                            "{}: [tool_use: {}({})]",
-                            role_label, name, input_preview
-                        ));
-                    }
-                    ContentBlock::ToolResult { content, .. } => {
-                        let display = if content.len() > 300 {
-                            let end = content.floor_char_boundary(300);
-                            format!("{}… [truncated]", &content[..end])
-                        } else {
-                            content.clone()
-                        };
-                        lines.push(format!("{}: [tool_result: {}]", role_label, display));
-                    }
-                    ContentBlock::Image { .. } => {
-                        lines.push(format!("{}: [image]", role_label));
-                    }
-                    ContentBlock::Thinking { thinking, .. } => {
-                        if !thinking.is_empty() {
-                            let display = if thinking.len() > 300 {
-                                let end = thinking.floor_char_boundary(300);
-                                format!("{}… [truncated]", &thinking[..end])
-                            } else {
-                                thinking.clone()
-                            };
-                            lines.push(format!("{}: [thinking: {}]", role_label, display));
-                        }
-                    }
-                }
-            }
-        }
-
-        lines.join("\n")
-    }
 
     /// Save a compaction summary to a daily memory log at `~/.opencrabs/memory/YYYY-MM-DD.md`.
     ///

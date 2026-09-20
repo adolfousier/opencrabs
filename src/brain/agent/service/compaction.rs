@@ -16,7 +16,7 @@
 use super::builder::AgentService;
 use super::compaction_notice::CompactionNotifier;
 use super::types::{ProgressCallback, ProgressEvent};
-use crate::brain::agent::context::AgentContext;
+use crate::brain::agent::context::{AgentContext, CompactionScope};
 use uuid::Uuid;
 
 /// What `enforce_context_budget` did to the context on this visit.
@@ -72,6 +72,11 @@ pub(crate) struct PendingCompaction {
     /// after this index arrived while the summariser was thinking and is not
     /// described by the summary, so the swap re-appends it.
     snapshot_len: usize,
+    /// What the summariser was pointed at (#1649): the whole window, the
+    /// delta since the last marker, or the frozen segments. The apply path
+    /// dispatches on this — a delta lands as a new frozen segment, a
+    /// consolidation replaces the segments, a full window swaps everything.
+    scope: CompactionScope,
     /// Fill level at spawn time, reported as the "before" on the receipt so
     /// the number reflects the context that was actually summarised.
     snapshot_usage_pct: f64,
@@ -570,13 +575,14 @@ impl AgentService {
         let PendingCompaction {
             handle,
             snapshot_len,
+            scope,
             snapshot_usage_pct,
             started,
         } = pending;
 
         match handle.await {
             Ok(Ok(summary)) => {
-                Self::apply_compaction_summary_after(context, &summary, snapshot_len);
+                Self::apply_compaction_summary_after(context, scope, &summary, snapshot_len);
                 self.note_compaction_success(
                     session_id,
                     context,
@@ -628,15 +634,18 @@ impl AgentService {
         usage_pct: f64,
     ) {
         let snapshot_len = context.messages.len();
+        // #1649: scope-aware input. A session's first compaction summarises
+        // the whole window; every later one summarises only the delta since
+        // the last marker (frozen segments never re-enter the input), or the
+        // segments themselves when they crowd the window past half.
+        let (scope, messages, token_count) = context.compaction_input();
         tracing::info!(
-            "Spawning background compaction at {:.0}% ({snapshot_len} messages)",
+            "Spawning background compaction at {:.0}% ({snapshot_len} messages, {scope:?} scope)",
             usage_pct,
         );
 
         let provider = self.provider_for_session(session_id);
         let fallbacks = self.fallback_chain_snapshot();
-        let messages = context.messages.clone();
-        let token_count = context.token_count;
         let max_tokens = context.max_tokens;
         let model = model_name.to_string();
         let max_output = self.request_max_tokens_for_session(session_id);
@@ -653,6 +662,7 @@ impl AgentService {
                 provider,
                 fallbacks,
                 session_id,
+                scope,
                 messages,
                 token_count,
                 max_tokens,
@@ -675,6 +685,7 @@ impl AgentService {
                 PendingCompaction {
                     handle,
                     snapshot_len,
+                    scope,
                     snapshot_usage_pct: usage_pct,
                     started: std::time::Instant::now(),
                 },

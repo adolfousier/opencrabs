@@ -195,6 +195,7 @@ pub mod compaction_notice_test;
 pub mod compaction_prompts_test;
 pub mod compaction_signal_test;
 pub mod compaction_single_continuation_path_test;
+mod compaction_scope_test;
 pub mod compaction_stream_collect_test;
 pub mod compaction_test;
 mod compaction_truncation_marker_test;
