@@ -20,6 +20,30 @@ const BANNED: &[&str] = &[
     "agents.defaults",
 ];
 
+/// Fiction tokens from the imported OPENCRABS.md doc (#1650): CLI commands
+/// the binary never had, JSON5 config keys, invented media syntax, and
+/// wrong log paths. Banned tree-wide (README + src/docs/).
+const BANNED_IMPORTED_DOC: &[&str] = &[
+    "Pi agent",
+    "gateway.auth",
+    "allowFrom",
+    "{{MediaPath}}",
+    "MEDIA:",
+    "/tmp/opencrabs",
+    "resetTriggers",
+    "thinkingDefault",
+    "health --json",
+    "opencrabs setup",
+];
+
+/// Commands that exist only in the imported doc. Banned in OPENCRABS.md
+/// itself; GETTING_STARTED.md and WIZARD.md still carry related fiction
+/// tracked in #1650 (follow-up), so the tree-wide sweep must skip them.
+const BANNED_IN_OPENCRABS_MD: &[&str] = &[
+    "opencrabs gateway",
+    "opencrabs dashboard",
+];
+
 fn scanned_docs() -> Vec<(String, String)> {
     let mut out = vec![(
         "README.md".to_string(),
@@ -59,6 +83,30 @@ fn docs_never_advertise_the_phantom_heartbeat_subsystem() {
                  path (see #1621). Periodic checks are cron jobs reading \
                  HEARTBEAT.md."
             );
+        }
+    }
+}
+
+#[test]
+fn docs_never_carry_the_imported_doc_fiction() {
+    let docs = scanned_docs();
+    for (name, content) in &docs {
+        for banned in BANNED_IMPORTED_DOC {
+            assert!(
+                !content.contains(banned),
+                "{name} contains '{banned}' — imported-doc fiction from another \
+                 product (see #1650). The binary has no such command, config key, \
+                 media syntax, or log path."
+            );
+        }
+        if name.ends_with("OPENCRABS.md") {
+            for banned in BANNED_IN_OPENCRABS_MD {
+                assert!(
+                    !content.contains(banned),
+                    "OPENCRABS.md advertises '{banned}' — no such CLI command \
+                     exists (see #1650)."
+                );
+            }
         }
     }
 }
