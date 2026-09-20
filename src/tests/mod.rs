@@ -270,6 +270,7 @@ pub mod doc_gen_docx_test;
 pub mod doc_gen_pdf_test;
 pub mod doc_gen_pptx_test;
 pub mod doc_gen_xlsx_test;
+pub mod docs_heartbeat_witness_test;
 pub mod doctor_fix_test;
 pub mod duplicate_submit_test;
 pub mod edit_retry_test;

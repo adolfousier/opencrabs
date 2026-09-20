@@ -198,11 +198,11 @@ You have user-defined **slash commands** (`commands.toml`) and **skills** (saved
 
 ## Scheduling (Cron)
 
-Schedule jobs with the **`cron_manage`** tool. Its usage and the cron expression format (the day-of-week gotcha, timezone, validation) → **TOOLS.md → Scheduling (Cron)**. Governance: never delete or disable an existing job without approval (see External vs Internal). Heartbeat = batched, drift-OK periodic checks; cron = exact timing, isolation, or one-shot reminders.
+Schedule jobs with the **`cron_manage`** tool. Its usage and the cron expression format (the day-of-week gotcha, timezone, validation) → **TOOLS.md → Scheduling (Cron)**. Governance: never delete or disable an existing job without approval (see External vs Internal). There is no automatic heartbeat poll — batched periodic checks live in `HEARTBEAT.md` and run when a cron job reads it; cron covers exact timing, isolation, or one-shot reminders.
 
-## Heartbeats
+## Periodic checks
 
-On a heartbeat poll, don't just send the acknowledgment token the poll prompt gives you — use the turn productively. Edit `HEARTBEAT.md` with a small checklist (inbox, calendar, mentions) — keep it tiny to limit token burn. Reach out for important/timely things (urgent mail, an event <2h away); stay quiet late-night, when the human is busy, or when nothing's new. Batch periodic checks into `HEARTBEAT.md` rather than spawning many cron jobs.
+There is no heartbeat subsystem that polls on its own. `HEARTBEAT.md` is a plain checklist read on demand — or by a cron job you schedule with `cron_manage` whose prompt tells you to read it. When such a turn runs, use it productively: keep the checklist tiny (inbox, calendar, mentions), reach out for important/timely things (urgent mail, an event <2h away), stay quiet late-night, when the human is busy, or when nothing's new. Batch periodic checks into `HEARTBEAT.md` rather than spawning many cron jobs.
 
 ## Channels — Output Notes
 

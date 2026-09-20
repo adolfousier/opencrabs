@@ -63,7 +63,7 @@
 - [🔍 Debug and Logging](#-debug-and-logging)
 - [🧠 Brain System & 3-Tier Memory](#-brain-system--3-tier-memory)
 - [🎯 /goal — Autonomous Goal Loop](#-goal--autonomous-goal-loop)
-- [⏰ Cron Jobs & Heartbeats](#-cron-jobs--heartbeats)
+- [⏰ Cron Jobs](#-cron-jobs)
 - [🏗️ Architecture](#-architecture)
 - [📁 Project Structure](#-project-structure)
 - [🛠️ Development](#-development)
@@ -106,7 +106,7 @@ The docs and the landing at [opencrabs.com](https://opencrabs.com) are available
 - [SECURITY.md](src/docs/reference/templates/SECURITY.md) — security policies the agent follows (not the repo's vulnerability-disclosure policy, which is [/SECURITY.md](SECURITY.md))
 - [BOOT.md](src/docs/reference/templates/BOOT.md) — startup and service config
 - [USER.md](src/docs/reference/templates/USER.md) — user profile template
-- [HEARTBEAT.md](src/docs/reference/templates/HEARTBEAT.md) — heartbeat configuration
+- [HEARTBEAT.md](src/docs/reference/templates/HEARTBEAT.md) — periodic checklist, read on demand or by a cron job
 
 ### Skills
 - [Security Audit](src/docs/reference/templates/skills/security-audit/SKILL.md)
@@ -3818,7 +3818,7 @@ The brain reads markdown files from `~/.opencrabs/`:
 ├── MEMORY.md                  # Long-term curated context (never touched by auto-compaction)
 ├── SECURITY.md                # Security policies and access controls
 ├── BOOT.md                    # Startup checklist (optional, runs on launch)
-├── HEARTBEAT.md               # Periodic task definitions (optional)
+├── HEARTBEAT.md               # Periodic checklist for cron jobs (optional)
 ├── config.toml                # App configuration (provider, model, approval policy)
 ├── keys.toml                  # API keys (provider, channel, STT/TTS)
 ├── commands.toml              # User-defined slash commands
@@ -4076,7 +4076,7 @@ Goal state is persisted in the database (`goal_state` table) and survives restar
 
 ---
 
-## ⏰ Cron Jobs & Heartbeats
+## ⏰ Cron Jobs
 
 OpenCrabs runs as a daemon on your machine — a persistent terminal agent that's always on. This makes scheduled tasks and background jobs native and trivial.
 
@@ -4145,32 +4145,20 @@ default_provider = "minimax"
 default_model = "MiniMax-M3"
 ```
 
-### Heartbeats — Proactive Background Checks
+### Periodic checks — HEARTBEAT.md + cron
 
-When running as a daemon, OpenCrabs can perform periodic heartbeat checks. Configure `HEARTBEAT.md` in your workspace (`~/.opencrabs/HEARTBEAT.md`) with a checklist of things to monitor:
+There is no built-in heartbeat timer. Periodic checks are a cron job whose prompt tells the agent to read `HEARTBEAT.md` (a plain checklist brain file in your workspace, empty by default):
 
 ```markdown
 # Heartbeat Checklist
 - Check for urgent unread emails
 - Check calendar for events in the next 2 hours
 - If anything needs attention, message me on Telegram
-- Otherwise, reply HEARTBEAT_OK
 ```
 
-The heartbeat prompt is loaded into the agent's brain every turn. When the heartbeat fires, the agent reads `HEARTBEAT.md` and acts on it — checking email, calendar, notifications, or whatever you've configured.
+> "Every 30 minutes, read HEARTBEAT.md and act on anything that needs attention. If nothing does, stay quiet."
 
-### Heartbeat vs Cron
-
-| | Heartbeat | Cron Job |
-|---|-----------|----------|
-| **Timing** | Periodic (every N minutes) | Exact schedule (cron expression) |
-| **Session** | Main session (shared context) | Isolated session (independent) |
-| **Context** | Has conversation history | Fresh context each run |
-| **Use case** | Batch periodic checks | Standalone scheduled tasks |
-| **Model** | Current session model | Configurable per job |
-| **Cost** | Single turn per cycle | Full session per run |
-
-**Rule of thumb:** Use heartbeats for lightweight monitoring that benefits from conversation context. Use cron jobs for standalone tasks that need exact timing, different models, or isolation.
+The checklist keeps the batched checks in one editable place; the cron job decides when they run and where results are delivered (`--deliver telegram:...`). Keep the checklist tiny — it is loaded into the turn that reads it.
 
 ### Autostart on Boot
 
@@ -4273,7 +4261,7 @@ $settings = New-ScheduledTaskSettingsSet -RestartCount 3 -RestartInterval (New-T
 Register-ScheduledTask -TaskName "OpenCrabs" -Action $action -Trigger $trigger -Settings $settings -Description "OpenCrabs AI Agent"
 ```
 
-> All platforms: cron jobs, heartbeats, and channel listeners (Telegram, Discord, Slack, WhatsApp) work in daemon mode. The TUI is not needed for background operation.
+> All platforms: cron jobs and channel listeners (Telegram, Discord, Slack, WhatsApp) work in daemon mode. The TUI is not needed for background operation.
 
 ---
 

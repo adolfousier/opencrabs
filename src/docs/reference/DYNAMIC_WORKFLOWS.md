@@ -155,7 +155,7 @@ Two different tools, pick by semantics:
 | Need | Tool | Behavior |
 |------|------|----------|
 | Nightly sweep, reminders, periodic audits | **cron job** | Fresh context every fire; survives restarts; process-independent |
-| Self-checks while idle | **heartbeat** | Batched periodic checks driven by HEARTBEAT.md |
+| Self-checks while idle | **cron + HEARTBEAT.md** | A cron job reads the HEARTBEAT.md checklist on a schedule |
 | Iterate on live context repeatedly | **chat session** | Accumulating context, session-bound |
 
 A cron entry like `0 4 * * 1` delivering "run the audit workflow above" into a chat gives you scheduled dynamic workflows with zero extra infrastructure.

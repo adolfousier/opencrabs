@@ -63,7 +63,7 @@ These are the only brain files injected into every request. The agent cannot fun
 | `SECURITY.md` | Security policies, incident response | Security-related requests |
 | `MEMORY.md` | Long-term knowledge: facts, context, project state, integrations | Session starts, context recall |
 | `BOOT.md` | Startup, memory-save triggers, upgrade/evolve, running as a service | First-time setup, new instances, or on demand |
-| `HEARTBEAT.md` | Heartbeat tasks, background work | Heartbeat-related requests |
+| `HEARTBEAT.md` | Periodic checklist (read on demand or by cron) | Heartbeat-related requests |
 
 These files are listed in a "Available Context Files" index in the system prompt. The agent sees they exist and calls `load_brain_file` when relevant. They are NOT loaded by default, only when the agent explicitly requests them.
 
