@@ -4222,9 +4222,9 @@ cat > ~/Library/LaunchAgents/com.opencrabs.agent.plist << 'EOF'
     <key>KeepAlive</key>
     <true/>
     <key>StandardOutPath</key>
-    <string>/tmp/opencrabs.log</string>
+    <string>/Users/YOU/.opencrabs/logs/daemon.out.log</string>
     <key>StandardErrorPath</key>
-    <string>/tmp/opencrabs.err</string>
+    <string>/Users/YOU/.opencrabs/logs/daemon.err.log</string>
 </dict>
 </plist>
 EOF
