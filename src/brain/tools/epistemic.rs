@@ -772,6 +772,19 @@ pub fn list_cold_beliefs(max_age_days: i64) -> Vec<Belief> {
         .collect()
 }
 
+/// Dry-run preview of the sections [`archive_cold_sections`] would move:
+/// same store, same path resolution, same clock, zero writes.
+pub fn list_cold_sections(max_age_days: i64) -> Vec<ArchivedSection> {
+    let home = crate::config::profile::resolve_profile_home();
+    let memory_path = home.join("MEMORY.md");
+    let Ok(content) = std::fs::read_to_string(&memory_path) else {
+        return Vec::new();
+    };
+    let store = get_store();
+    let guard = store.lock().expect("epistemic store lock poisoned");
+    select_archive_candidates(&guard, &content, max_age_days, Utc::now())
+}
+
 /// Archive cold MEMORY.md sections into `memory/archive/YYYY-MM.md` (#1657).
 ///
 /// Wraps [`archive_cold_sections_at`] with the real paths plus the durable

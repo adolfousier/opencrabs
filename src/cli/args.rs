@@ -359,6 +359,16 @@ pub enum MemoryCommands {
     },
     /// Show memory statistics
     Stats,
+    /// Prune cold beliefs and archive cold MEMORY.md sections (dry run by
+    /// default; --apply executes, receipts land in memory/archive/ + backups)
+    Prune {
+        /// Execute the prune (default: dry run, nothing is written)
+        #[arg(long)]
+        apply: bool,
+        /// Cold threshold in days (default: 90)
+        #[arg(long)]
+        max_age_days: Option<i64>,
+    },
 }
 
 #[derive(Subcommand, Debug)]
