@@ -65,6 +65,50 @@ Two footguns:
 | Sundays at 18:00 | `0 18 * * Sun` |
 | First of the month, 00:00 | `0 0 1 * *` |
 
+## Trigger-gated jobs
+
+A job can carry a **pre-flight trigger**: at each fire time the scheduler first
+runs a shell command, and only executes the prompt when a condition on that
+command's result is met. This turns cron jobs from "runs no matter what" into
+"runs when something actually happened" (a file appeared, a health check
+failed, a log line matched).
+
+Set it through the `cron_manage` tool at create or update time:
+
+| Field | What it does |
+|-------|--------------|
+| `trigger_cmd` | Shell command run under `/bin/sh -c` before the prompt. 30s timeout; a hung trigger is killed, not orphaned. Either `prompt` or `trigger_cmd` must be set. |
+| `trigger_on` | Fire condition (see below). Default `non_empty`. |
+| `set_goal` | On fire, set the active goal in the destination session instead of a plain prompt turn. Requires `deliver_to` to target a session; refused for passive channel deliveries. |
+| `goal_template` | Template for the goal/notification text. Interpolates `{output}`, `{stdout}`, `{stderr}`, `{exit_code}`. |
+
+### `trigger_on` conditions
+
+| Value | Fires when |
+|-------|-----------|
+| `non_empty` (default) | stdout or stderr contains any non-whitespace output |
+| `exit_zero` | the trigger exits 0 |
+| `exit_non_zero` | the trigger exits non-zero (health checks, `grep` misses) |
+| `regex:PATTERN` or `re:PATTERN` | combined output matches the regular expression |
+| `always` | the trigger finished, regardless of output or exit code |
+
+### Semantics
+
+- **Condition not met** → the run is short-circuited at 0 tokens and recorded
+  as a skipped/success run. The prompt never executes, nothing is delivered.
+- **Trigger command errors or times out** → the run is recorded as an error;
+  the prompt still does not execute.
+- **Empty `prompt` with a trigger** → direct 0-token delivery: the formatted
+  trigger output (`goal_template`, or the raw output) is delivered to
+  `deliver_to` without an agent turn at all.
+- **`set_goal`** → the fired trigger dispatches into the target session as an
+  active goal, so the session's agent works the condition it detected rather
+  than just echoing output.
+
+A trigger-gated job is the right shape for "watch X and act when it changes":
+put the watching in `trigger_cmd` (deterministic, cheap, script-runner
+pattern), the condition in `trigger_on`, and the acting in the prompt or goal.
+
 ## Using these templates
 
 1. Copy a script into your workspace:

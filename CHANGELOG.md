@@ -7,9 +7,151 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### 🐛 Bug Fixes
+## [0.5.3] - 2026-09-20
 
+121 commits since v0.5.2, 7 contributors. 192 files changed, +12,304 / -1,709 lines.
+
+A consolidation window: the TUI theme engine finished its sweep, every widget now resolves its colours through the theme (a suite-level guard fails on any new raw ANSI site) and themes can declare a canvas background (#1634). Windows became a first-class platform: a platform shell pair, BOM/UTF-16-aware reads, tilde and cwd fallbacks, with CI building and gating PRs on it (#627). Cron jobs can be trigger-gated - a pipeline with mechanical pre-flight and goal dispatch (#233) - and a timed-out trigger kills its shell instead of orphaning it. WhatsApp follow-up suggestions past the native button cap render as a poll, and a vote selects the option (#1616). MEMORY.md facts carry confidence and decay (#1643), with a file-level archive pass, config-driven decay and a `memory prune` CLI (#1657). Telegram gained a process-wide rate limiter and a global 429 cooldown lock (#1630). The reliability seams were tightened: the DONE-stream estimate no longer outranks reported usage and the cached prefix is netted out on compat providers (#1636), a crash-signal handler records SIGBUS/SIGSEGV diagnostics (#352), channel history is deduped and scoped across Slack, Discord and WhatsApp (#1618-#1620), stale notify_queue rows are reaped for unclaimed sessions (#182), and compaction stopped re-deriving prior summaries (#1649).
+
+### ✨ Features
+
+- `8960c2f8` **memory**: file-level archive pass, config-driven decay, memory prune CLI (#1657, #1658)
+- `dd9cad2f` **epistemic**: wire confidence + decay to MEMORY.md facts (#1643)
+- `064316e0` **tui/theme_catalog**: carry the source background through conversion (#1634)
+- `d6ba4710` **tui**: themes declare an optional canvas background (#1634)
+- `ca9a14c8` **windows**: utils shell_pair/push_shell_command and launch_cwd helpers
+- `9d2c9645` **cron**: trigger-gated cron pipeline with mechanical pre-flight and goal dispatch (#233)
+- `b42f51aa` **telegram**: process-wide rate limiter and global 429 cooldown lock
+- `cb06aa0f` **whatsapp**: select a follow-up suggestion from a poll vote (#1616)
+- `90221b94` **whatsapp**: render suggestion sets past the button cap as a poll (#1616)
+
+### 🔧 Fixes
+
+- `267967b9` **telegram**: stop General-topic history bleed in forum history injection
+- `8364a62f` **prompt**: state what the gh fallback can and cannot do
+- `cb24fdef` **tests**: one declaration per test module
+- `2c789cef` **tests**: reattach the telegram cfg to the module it guards
+- `a1267e25` **shell**: report what the process-tree sweep did instead of dropping it
+- `7680b683` **tools**: a truncated UTF-16 file must not decode silently short
+- `889ce7db` **tools**: a transformed read must not arm a whole-file overwrite
+- `cfa3f63b` **agent**: enrich AnnouncementLoop error with diagnostic context (#1647)
+- `4ceaff6d` **epistemic**: RalphLoopConfig silently drops the [epistemic] section (#1642)
+- `af5ac77b` **cron**: kill a timed-out trigger's shell instead of orphaning it (#1629)
+- `a0cda082` **telegram**: record 429s discovered outside wait_out (#1630)
+- `14a25295` **telegram**: take the global permit before the per-chat pacing gate (#1630)
+- `d8dd7b23` **logging**: stop warning at boot where the crash handler was never implemented (#1637)
+- `085a9ad6` **logging**: warm the unwinder at install so the crash backtrace is signal-safe (#1637)
+- `bc2c2566` **logging**: install a crash-signal diagnostic handler for SIGBUS/SIGSEGV (#352)
+- `b08c3a90` **provider**: stop the DONE-stream estimate from outranking reported usage (#1636)
+- `8f5ca58a` **usage**: anchor the ctx meter and compaction budget on the gross prompt (#1636)
+- `fd67e49f` **usage**: net the cached prefix out of input_tokens on compat providers (#1636)
+- `2773f5d1` **tui/onboarding**: resolve the voice step's colours through the theme (#1634)
+- `6f4c01ce` **tui/onboarding**: resolve the wizard's colours through the theme (#1634)
+- `3e3d995e` **tui/mission_control**: resolve panel error colours through the theme (#1634)
+- `1f6b9634` **tui/error**: resolve severity colours through the theme (#1634)
+- `afdd93d7` **tui/plan**: resolve the plan widgets' colours through the theme (#1634)
+- `dd2afaec` **tui/session_files**: resolve the file list's colours through the theme (#1634)
+- `b37b5280` **tui/projects**: resolve the project overlay's colours through the theme (#1634)
+- `8bf81ac7` **tui/dialogs**: resolve dialog colours through the theme (#1634)
+- `6bb07599` **tui/help**: resolve the help overlay's colours through the theme (#1634)
+- `1a121d76` **tui/sessions**: resolve the session picker's colours through the theme (#1634)
+- `5065e2e5` **tui/highlight**: resolve code-block chrome through the theme (#1634)
+- `3d531a6f` **tui/title**: resolve the header rule through the theme (#1634)
+- `3799cee7` **tui/panes**: resolve split-pane colours through the theme (#1634)
+- `0a3bfd37` **tui/tools**: resolve tool-output colours through the theme (#1634)
+- `fd5adbbb` **tui/input**: resolve the input box colours through the theme (#1634)
+- `a3e9366f` **tui/chat**: resolve the transcript's colours through the theme (#1634)
+- `6eb75057` **tui/markdown**: resolve chrome colours through the theme (#1634)
+- `78d694d3` **tui/markdown**: give body prose a themeable foreground (#1634)
+- `2a1495b1` **tui**: drop the render cache when the theme changes (#1634)
+- `792503ee` **agent**: report the real stream retry count in logs (#1635)
+- `cca5534e` **provider**: raise OpenAI-compatible total request timeout to 300s (#1635)
+- `7c6747b4` **brain**: accept valid profiles/ paths in write_opencrabs_file
+- `cb9d451d` **windows**: clippy-clean the new read/cwd helpers
+- `fed7ae33` **shell**: provide the Unix kill_process_tree so the timeout tree sweep compiles off Windows
+- `40f0c456` **windows**: expand_tilde handles the backslash ~ path form
+- `f9d5d6b4` **windows**: session_search empty query falls back to the session list
+- `a9f00ff8` **windows**: read_file decodes BOM/UTF-16 and degrades lossy instead of failing
+- `2f5e809f` **windows**: fall back to home cwd when launched from a system directory
+- `2eed541c` **windows**: bash tool verbatim args, timeout tree-kill, findstr/gh handling
+- `20b29c93` **windows**: replace hardcoded sh -c spawns with platform shell pair
+- `f511c8ed` **cron**: mark stuck cron runs as interrupted instead of error (#264)
+- `5fed4735` **telegram**: guard react-only branch against dedup-suppressed final text
+- `a42e664f` **title**: strip the channel-noun history block from title prompts
+- `36428fda` **slack**: dedup channel history, scope it to the thread, label the sender (#1620)
+- `02fc7939` **slack**: record the thread a channel message belongs to (#1620)
+- `dfab8a4b` **whatsapp**: dedup group history and label the current sender (#1618)
+- `5486e2c7` **discord**: dedup channel history and label the current sender (#1619)
+- `4e48f47c` **notify_queue**: log reaped rows whose ids fail to parse
+- `19ebf70e` **notify_queue**: reap stale rows after the redelivery pass, not before
+- `504c6365` **#182**: reap stale notify_queue rows for unclaimed sessions
 - `c1422802` **whatsapp**: release the outbox at turn start so a follow-up never edits the previous answer (#1614)
+- `ef394406` **brain/tools**: advertise the work_status path in tasks_list (#165)
+
+### 📖 Documentation
+
+- `9751a14d` rewrite OPENCRABS.md to match the real binary (#1650)
+- `2b0eca43` **readme**: add Epistemic Engine and 3-Tier Memory sections (#1645)
+- `8710b9da` **cron**: say that a skipped trigger run is stored as success (#1629)
+- `819ace0a` **db**: drop the wrong issue number from the trigger migration comment (#1629)
+- `d21e5801` **logging**: say what the alternate signal stack actually guarantees (#1637)
+- `495ad7d4` **telegram**: note that GLOBAL_PACER must not be held across an await (#1630)
+- `ffb79c2c` **cron**: document only the run statuses something actually writes (#1628)
+- `5197ec86` **contributing**: add first-run advisory with clippy --fix path
+- `836d0740` **contributing**: explain what clippy catches that cargo check misses
+- `5fc191e4` **contributing**: drop the stale [skip ci] instruction (#1622)
+- `0311f976` **contributing**: warn that target/ grows fast on the cargo run dev loop (#1622)
+- `a930c92e` **tasks_list**: correct the status-path provenance on subagent_status_file
+- `9e9d5441` **changelog**: record the WhatsApp turn-boundary outbox fix (#1614)
+
+### 🧹 Miscellaneous
+
+- `e7ef03e5` Delta-only compaction: stop re-deriving prior summaries (#1649)
+- `ac64f6b9` Add tokenized AND-match fallback to session_search (#1626)
+- `206c4896` Remove phantom heartbeat subsystem from docs and templates (#1621)
+- `c89d0b10` test(provider): guard the streaming total timeout and retry counters (#1635)
+- `c6ee718a` style: fmt utils_cwd_test, now that it is reachable
+- `39497594` test(shell): cover the Unix half of the process-tree sweep
+- `92bd2c01` test(shell): register utils_shell_test so it actually runs
+- `6698df6d` ci: keep windows-build out of the required gate and path-filter it
+- `c452281a` style: cargo fmt sweep over the merged tree
+- `b4698c56` test(cron): pin that a timed-out trigger kills its shell (#1629)
+- `500db577` test(cron): lift the trigger.rs inline tests into src/tests (#1629)
+- `c4341ec2` refactor(cron): delete the dead and lossy TriggerCondition::as_str (#1629)
+- `9bdef2f9` test(cron): lift the target_resolver inline tests into src/tests (#1629)
+- `04226dd3` style(cron): rustfmt import order across the trigger pipeline (#1629)
+- `43268f1f` test(telegram): pin the global 429 propagation and the permit ordering (#1630)
+- `7776360a` refactor(logging): compile the crash record formatter only where it has a consumer (#1637)
+- `009ac031` test(brain): tidy the write_opencrabs_file test imports and one stale comment (#1633)
+- `c7f5c667` test(telegram): lift the react-only dedup tests out of delivery.rs (#1623)
+- `87321e44` refactor(telegram): name the suppressed-final vs react-only distinction (#1623)
+- `b6e200a1` test(usage): guard the DONE-fallback against outranking reported usage (#1636)
+- `cd067c2c` test(usage): correct the compat cache test that asserted the double count (#1636)
+- `8b1c1b62` test(usage): guard the cached-prefix netting on every compat usage path (#1636)
+- `378d4c27` test(tui): fail the suite on any new raw ANSI colour site (#1634)
+- `081c097e` test(tui): pin the prose foreground and the theme cache sweep (#1634)
+- `cf1ff38b` test(tui): pin the canvas background declarations (#1634)
+- `28ed0da7` ci(windows): raise build timeout to 60m and drop dead save-if
+- `5d6ec12e` ci: build on Windows and gate PRs on it (#627)
+- `fc2665a4` test(windows): register shell, cwd, read-encoding, search-fallback, tilde tests
+- `d5c5bf3e` test(whatsapp): pin suggestion-poll routing and vote selection (#1616)
+- `f43a6d8c` test(slack): pin the history wiring against a silent fallback (#1620)
+- `a616edfc` test(slack): pin thread persistence and the NULL-scoping trap (#1620)
+- `da816070` test(whatsapp): pin the history wiring against a silent fallback (#1618)
+- `cc8e9d41` test(discord): pin the history wiring against a silent fallback (#1619)
+- `fc2e0a73` test(group_history): pin the lifted helpers against the legacy strings
+- `4189237b` refactor(channels): lift group-history preamble into a shared module
+- `7b22a450` test(tasks_list): pin the advertised path against a real writer file
+- `0674437a` style(tasks_list): rustfmt import order after the #1615 merge
+- `a36c8130` refactor(notify_queue): scope MAX_ROW_AGE_SECS and correct the stale-row doc
+- `03a05aa8` style(notify_queue): rustfmt import order after the #1617 merge
+
+### 📊 Stats
+
+- 121 commits since v0.5.2
+- 7 contributors: @adolfousier @leshchenko1979 @moe @moneyacademyKE @A2agent-ai @adi805 @carvalab
+- 192 files changed, +12,304 / -1,709 lines
+- 9,032 tests (8,994 passed, 0 failed, 38 ignored)
 
 ## [0.5.2] - 2026-09-16
 
@@ -8716,3 +8858,4 @@ fixes.
 [0.3.82]: https://github.com/adolfousier/opencrabs/compare/v0.3.81...v0.3.82
 [0.3.83]: https://github.com/adolfousier/opencrabs/compare/v0.3.82...v0.3.83
 [0.5.0]: https://github.com/adolfousier/opencrabs/compare/v0.3.83...v0.5.0
+[0.5.3]: https://github.com/adolfousier/opencrabs/compare/v0.5.2...v0.5.3
