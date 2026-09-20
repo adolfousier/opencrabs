@@ -277,6 +277,7 @@ pub mod duplicate_submit_test;
 pub mod edit_retry_test;
 pub mod empty_reasoning_stub_test;
 pub mod epistemic_archive_test;
+pub mod epistemic_decay_test;
 pub mod epistemic_inline_test;
 pub mod epistemic_plan_start_test;
 pub mod fallback_suggestion_test;

@@ -584,25 +584,69 @@ fn epistemic_store_path() -> Option<PathBuf> {
 /// Global epistemic store (cached for session lifetime).
 static STORE: OnceLock<std::sync::Mutex<EpistemicStore>> = OnceLock::new();
 
+/// Runtime decay policy resolved from config (piece C, #1657).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct DecaySettings {
+    /// Master switch for decay: false skips the decay pass entirely.
+    pub(crate) enabled: bool,
+    /// Days before an unverified belief decays one confidence level.
+    pub(crate) days: i64,
+}
+
+/// Map the `[epistemic]` section of ralph_loop.toml to decay settings.
+///
+/// `decay_interval_hours` divides down to whole days with a floor of 1:
+/// a sub-day interval must not become "decay everything immediately"
+/// (the silent-config-drop class of bug #1640 fixed).
+pub(crate) fn decay_settings_from(cfg: &super::plan_tool::EpistemicConfig) -> DecaySettings {
+    let days = (cfg.decay_interval_hours / 24).max(1) as i64;
+    DecaySettings {
+        enabled: cfg.decay_enabled,
+        days,
+    }
+}
+
+/// Resolve the active decay policy for this profile.
+///
+/// Reuses `ralph_loop_config` so per-project resolution (#947) and the
+/// HotToml cache apply: `<profile_home>/ralph_loop.toml` first, then the
+/// machine-wide `safety/ralph_loop.toml`. Absent or malformed config keeps
+/// the pre-#1657 behavior: decay enabled, 30 days.
+pub(crate) fn resolve_decay_settings() -> DecaySettings {
+    let home = crate::config::profile::resolve_profile_home();
+    match super::plan_tool::ralph_loop_config(&home) {
+        Some(cfg) => decay_settings_from(&cfg.epistemic),
+        None => DecaySettings {
+            enabled: true,
+            days: 30,
+        },
+    }
+}
+
 fn get_store() -> &'static std::sync::Mutex<EpistemicStore> {
     STORE.get_or_init(|| {
         let path = epistemic_store_path().expect("home dir must exist");
         let mut store = EpistemicStore::load(&path);
 
         // Session start maintenance: decay stale beliefs + backfill MEMORY.md (#1641).
-        let decayed = store.apply_decay(30);
+        // Decay policy comes from [epistemic] in ralph_loop.toml (piece C, #1657);
+        // absent config keeps the historical default: enabled, 30 days.
+        let policy = resolve_decay_settings();
+        let decayed = if policy.enabled {
+            store.apply_decay(policy.days)
+        } else {
+            Vec::new()
+        };
         if !decayed.is_empty() {
             tracing::info!("Epistemic session start: {} beliefs decayed", decayed.len());
         }
 
-        let memory_path = path
-            .parent()
-            .unwrap_or(&path)
-            .parent()
-            .unwrap_or(&path)
-            .join("MEMORY.md");
+        // MEMORY.md lives at the profile root. The old walk from beliefs.toml
+        // landed in brain/, so first-access backfill never found the file.
+        let memory_path = crate::config::profile::resolve_profile_home().join("MEMORY.md");
+        let mut added = 0;
         if let Ok(content) = std::fs::read_to_string(&memory_path) {
-            let added = store.backfill_from_content(&content);
+            added = store.backfill_from_content(&content);
             if added > 0 {
                 tracing::info!(
                     "Epistemic session start: {} new beliefs backfilled from MEMORY.md",
@@ -611,8 +655,8 @@ fn get_store() -> &'static std::sync::Mutex<EpistemicStore> {
             }
         }
 
-        // Save if anything changed
-        if !decayed.is_empty()
+        // Save if anything changed: decayed beliefs or backfilled sections.
+        if (!decayed.is_empty() || added > 0)
             && let Err(e) = store.save(&path)
         {
             tracing::warn!("Failed to save epistemic store after session start: {}", e);
@@ -682,22 +726,6 @@ pub fn touch_belief(key: &str) -> bool {
     result
 }
 
-/// Apply decay to the global store. Returns list of decayed beliefs.
-pub fn apply_decay(decay_days: i64) -> Vec<String> {
-    let store = get_store();
-    let mut guard = store.lock().expect("epistemic store lock poisoned");
-    let decayed = guard.apply_decay(decay_days);
-
-    if !decayed.is_empty()
-        && let Some(path) = epistemic_store_path()
-        && let Err(e) = guard.save(&path)
-    {
-        tracing::warn!("Failed to save epistemic store: {}", e);
-    }
-
-    decayed
-}
-
 /// List all contradicted beliefs in the global store.
 pub fn list_contradictions() -> Vec<Belief> {
     let store = get_store();
@@ -714,33 +742,6 @@ pub fn list_by_prefix(prefix: &str) -> Vec<Belief> {
         .into_iter()
         .cloned()
         .collect()
-}
-
-/// Index existing MEMORY.md sections into beliefs (#1641).
-///
-/// Reads MEMORY.md from the profile home and delegates to
-/// [`EpistemicStore::backfill_from_content`]. Returns the number of new
-/// beliefs added.
-pub fn backfill_beliefs() -> usize {
-    let home = crate::config::profile::resolve_profile_home();
-    let memory_path = home.join("MEMORY.md");
-    let content = match std::fs::read_to_string(&memory_path) {
-        Ok(c) => c,
-        Err(_) => return 0,
-    };
-
-    let store = get_store();
-    let mut guard = store.lock().expect("epistemic store lock poisoned");
-    let added = guard.backfill_from_content(&content);
-
-    if added > 0
-        && let Some(path) = epistemic_store_path()
-        && let Err(e) = guard.save(&path)
-    {
-        tracing::warn!("Failed to save epistemic store after backfill: {}", e);
-    }
-
-    added
 }
 
 /// Delete cold beliefs (0 hits, 90+ days) from the global store (#1641).
@@ -853,25 +854,4 @@ pub fn archive_cold_sections(max_age_days: i64) -> Result<ArchiveReport, String>
     }
 
     Ok(report)
-}
-
-/// Run epistemic maintenance at session start: decay + backfill (#1641).
-///
-/// Called once when the store is first loaded. Applies 30-day decay to
-/// stale beliefs, indexes any new MEMORY.md sections, and logs results.
-pub fn session_start_maintenance() {
-    // Apply decay (30-day threshold)
-    let decayed = apply_decay(30);
-    if !decayed.is_empty() {
-        tracing::info!("Epistemic session start: {} beliefs decayed", decayed.len());
-    }
-
-    // Backfill any new MEMORY.md sections
-    let added = backfill_beliefs();
-    if added > 0 {
-        tracing::info!(
-            "Epistemic session start: {} new beliefs backfilled from MEMORY.md",
-            added
-        );
-    }
 }
