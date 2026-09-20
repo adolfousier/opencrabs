@@ -176,3 +176,56 @@ async fn binary_file_read_is_lossy_not_fatal() {
         warning
     );
 }
+
+#[tokio::test]
+async fn a_truncated_utf16_file_announces_the_dropped_half_unit() {
+    // A UTF-16 file cut mid code unit: the last byte has no pair. `as_chunks`
+    // drops it, so the decoded text is one character short of the file. Say
+    // so, because text that is quietly not the file is the worse failure.
+    let dir = tempfile::tempdir().unwrap();
+    let p = dir.path().join("cut.txt");
+    let mut bytes: Vec<u8> = vec![0xFF, 0xFE];
+    for unit in "abc".encode_utf16() {
+        bytes.extend_from_slice(&unit.to_le_bytes());
+    }
+    bytes.push(0x64); // half of 'd'
+    std::fs::write(&p, bytes).unwrap();
+
+    let result = read(&p).await;
+    assert!(result.success);
+    let warning = result
+        .metadata
+        .get("warning")
+        .map(String::as_str)
+        .unwrap_or("");
+    assert!(
+        warning.contains("truncated"),
+        "expected the dropped half unit to be announced, got: {warning}"
+    );
+    assert!(result.output.contains("abc"));
+}
+
+#[tokio::test]
+async fn a_whole_utf16_file_reports_no_truncation() {
+    let dir = tempfile::tempdir().unwrap();
+    let p = dir.path().join("whole.txt");
+    let mut bytes: Vec<u8> = vec![0xFF, 0xFE];
+    for unit in "abcd".encode_utf16() {
+        bytes.extend_from_slice(&unit.to_le_bytes());
+    }
+    std::fs::write(&p, bytes).unwrap();
+
+    let result = read(&p).await;
+    assert!(result.success);
+    let warning = result
+        .metadata
+        .get("warning")
+        .map(String::as_str)
+        .unwrap_or("");
+    assert!(warning.contains("UTF-16LE"), "got: {warning}");
+    assert!(
+        !warning.contains("truncated"),
+        "an intact file must not claim truncation: {warning}"
+    );
+    assert!(result.output.contains("abcd"));
+}

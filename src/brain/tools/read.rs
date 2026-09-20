@@ -527,23 +527,8 @@ impl ReadTool {
             let le = bom == [0xFF, 0xFE];
             let mut rest = Vec::new();
             file.read_to_end(&mut rest).await?;
-            let units: Vec<u16> = rest
-                .as_chunks::<2>()
-                .0
-                .iter()
-                .map(|c| {
-                    if le {
-                        u16::from_le_bytes(*c)
-                    } else {
-                        u16::from_be_bytes(*c)
-                    }
-                })
-                .collect();
-            let text = String::from_utf16_lossy(&units);
-            let note = format!(
-                "file was UTF-16{} with BOM (typical PowerShell `>` output); decoded to UTF-8",
-                if le { "LE" } else { "BE" }
-            );
+            let (text, odd_tail) = decode_utf16_payload(&rest, le);
+            let note = utf16_note(le, odd_tail);
             let lines: Vec<String> = text.lines().map(str::to_string).collect();
             Ok((
                 LineSource::InMemory {
@@ -608,32 +593,52 @@ impl LineSource {
     }
 }
 
+/// Decode UTF-16 payload bytes (the BOM already consumed) into UTF-8.
+///
+/// Returns the text and whether a trailing odd byte was dropped. `as_chunks`
+/// discards an incomplete final pair, so a truncated UTF-16 file silently
+/// comes back one half code unit short of what is on disk. Text that is
+/// quietly not the file is worse than text with a warning attached, so the
+/// caller announces it.
+fn decode_utf16_payload(payload: &[u8], little_endian: bool) -> (String, bool) {
+    let (pairs, remainder) = payload.as_chunks::<2>();
+    let units: Vec<u16> = pairs
+        .iter()
+        .map(|c| {
+            if little_endian {
+                u16::from_le_bytes(*c)
+            } else {
+                u16::from_be_bytes(*c)
+            }
+        })
+        .collect();
+    (String::from_utf16_lossy(&units), !remainder.is_empty())
+}
+
+/// The note both UTF-16 paths attach, so they cannot describe the same
+/// decode differently.
+fn utf16_note(little_endian: bool, odd_tail: bool) -> String {
+    let mut note = format!(
+        "file was UTF-16{} with BOM (typical PowerShell `>` output); decoded to UTF-8",
+        if little_endian { "LE" } else { "BE" }
+    );
+    if odd_tail {
+        note.push_str(
+            "; it ended on an odd byte, so the file is truncated and a trailing \
+             half code unit was dropped",
+        );
+    }
+    note
+}
+
 /// Decode a whole small file with BOM awareness (the `read_file` small-file
 /// path). Returns the text plus a human-readable note when a transform was
 /// applied, so the model learns what it is looking at instead of guessing.
 fn decode_file_bytes(raw: &[u8]) -> (String, Option<String>) {
     if raw.starts_with(&[0xFF, 0xFE]) || raw.starts_with(&[0xFE, 0xFF]) {
         let le = raw[0] == 0xFF;
-        let units: Vec<u16> = raw[2..]
-            .as_chunks::<2>()
-            .0
-            .iter()
-            .map(|c| {
-                if le {
-                    u16::from_le_bytes(*c)
-                } else {
-                    u16::from_be_bytes(*c)
-                }
-            })
-            .collect();
-        let text = String::from_utf16_lossy(&units);
-        (
-            text,
-            Some(format!(
-                "file was UTF-16{} with BOM (typical PowerShell `>` output); decoded to UTF-8",
-                if le { "LE" } else { "BE" }
-            )),
-        )
+        let (text, odd_tail) = decode_utf16_payload(&raw[2..], le);
+        (text, Some(utf16_note(le, odd_tail)))
     } else if raw.starts_with(&[0xEF, 0xBB, 0xBF]) {
         (
             String::from_utf8_lossy(&raw[3..]).into_owned(),
