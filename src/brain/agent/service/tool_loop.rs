@@ -7331,9 +7331,13 @@ impl AgentService {
                         // Provider-attributable so it can reach the fallback
                         // walk (#1023): the nudge already failed against this
                         // model, and a different one usually emits the call.
+                        let model = self.provider_model_for_session(session_id);
                         return Err(AgentError::Provider(
                             crate::brain::provider::ProviderError::AnnouncementLoop(
-                                "near-identical announcements repeated within the turn".to_string(),
+                                format!(
+                                    "near-identical announcements repeated within the turn \
+                                     [diagnostics:model={model},retries={phantom_retries_used},swaps={phantom_swaps_done},rolls={phantom_rolls}]"
+                                ),
                             ),
                         ));
                     }
@@ -7662,9 +7666,13 @@ impl AgentService {
                         "⚠️ Cross-turn announcement loop persisted after nudge — aborting turn \
                          (#957)"
                     );
+                    let model = self.provider_model_for_session(session_id);
                     return Err(AgentError::Provider(
                         crate::brain::provider::ProviderError::AnnouncementLoop(
-                            "near-identical announcements repeated across turns".to_string(),
+                            format!(
+                                "near-identical announcements repeated across turns \
+                                 [diagnostics:model={model},retries={phantom_retries_used},swaps={phantom_swaps_done},rolls={phantom_rolls}]"
+                            ),
                         ),
                     ));
                 }

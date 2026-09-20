@@ -123,6 +123,48 @@ fn maps_repetition_loop_to_loop_message() {
 }
 
 #[test]
+fn repetition_loop_surfaces_diagnostic_counts_when_present() {
+    let err = AgentError::Provider(ProviderError::AnnouncementLoop(
+        "near-identical announcements repeated within the turn \
+         [diagnostics:model=qwen-3.7-max,retries=5,swaps=3,rolls=2]"
+            .to_string(),
+    ));
+    let msg = format_user_error(&err);
+    assert!(
+        msg.contains("qwen-3.7-max"),
+        "must surface the model name from the diagnostic suffix: {msg}"
+    );
+    assert!(
+        msg.contains("5 retries"),
+        "must surface the retry count: {msg}"
+    );
+    assert!(
+        msg.contains("3 provider swaps"),
+        "must surface the swap count: {msg}"
+    );
+    assert!(
+        msg.contains("2 roll(s)"),
+        "must surface the roll count: {msg}"
+    );
+}
+
+#[test]
+fn repetition_loop_works_without_diagnostic_suffix() {
+    let err = AgentError::Provider(ProviderError::AnnouncementLoop(
+        "near-identical announcements repeated within the turn".to_string(),
+    ));
+    let msg = format_user_error(&err);
+    assert!(
+        msg.contains("stuck") || msg.contains("loop"),
+        "must still produce a loop message without diagnostics: {msg}"
+    );
+    assert!(
+        !msg.contains("Recovery attempted"),
+        "must NOT include recovery counts when diagnostics are absent: {msg}"
+    );
+}
+
+#[test]
 fn maps_context_too_large_to_compact_hint() {
     let err = AgentError::ContextTooLarge {
         current: 250_000,

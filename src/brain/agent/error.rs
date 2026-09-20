@@ -101,16 +101,31 @@ pub fn format_user_error(err: &AgentError) -> String {
         // without emitting the call, and the turn was stopped rather than
         // left to spin. Blaming the provider sent users looking for
         // provider-side causes, and `/models` "worked" often enough to
-        // teach the wrong mental model — a different model usually DOES
+        // teach the wrong mental model -- a different model usually DOES
         // emit the call, which is why the suggestion stays, now with the
         // real reason attached.
-        return "I stopped the turn: I kept announcing the same action \
-                without actually running it, and the loop detector ended \
-                it rather than let it spin. This is usually the model \
-                struggling to emit a tool call it has described — \
-                rephrasing the request, or switching models via `/models`, \
-                normally clears it."
-            .to_string();
+        //
+        // When diagnostic context is embedded in the AnnouncementLoop
+        // message (model name, retry/swap/roll counts), surface it so the
+        // user sees how many recovery attempts were exhausted before the
+        // turn was killed. Reported by @loonix.
+        let diag = extract_loop_diagnostics(&raw);
+        let counts = match &diag {
+            Some(d) => format!(
+                " Recovery attempted: {} retries, {} provider swaps, \
+                 {} roll(s) on model `{}`.",
+                d.retries, d.swaps, d.rolls, d.model
+            ),
+            None => String::new(),
+        };
+        return format!(
+            "I stopped the turn: I kept announcing the same action \
+             without actually running it, and the loop detector ended \
+             it rather than let it spin. This is usually the model \
+             struggling to emit a tool call it has described -- \
+             rephrasing the request, or switching models via `/models`, \
+             normally clears it.{counts}"
+        );
     }
     if let AgentError::ContextTooLarge { current, limit } = err {
         return format!(
@@ -192,4 +207,46 @@ fn extract_http_status(s: &str) -> Option<u16> {
         }
     }
     None
+}
+
+/// Parsed diagnostic context from the `[diagnostics:model=X,retries=N,swaps=M,rolls=K]`
+/// suffix embedded in `AnnouncementLoop` error messages by `tool_loop.rs`.
+struct LoopDiagnostics {
+    model: String,
+    retries: u32,
+    swaps: u32,
+    rolls: u32,
+}
+
+/// Extract the `[diagnostics:model=X,retries=N,swaps=M,rolls=K]` suffix
+/// from an `AnnouncementLoop` error string. Returns `None` if the suffix
+/// is absent or malformed (backward-compatible with older errors that
+/// predate the diagnostic embedding).
+fn extract_loop_diagnostics(raw: &str) -> Option<LoopDiagnostics> {
+    let start = raw.find("[diagnostics:")?;
+    let end = raw[start..].find(']')?;
+    let payload = &raw[start + "[diagnostics:".len()..start + end];
+    let mut model = String::new();
+    let mut retries = 0u32;
+    let mut swaps = 0u32;
+    let mut rolls = 0u32;
+    for part in payload.split(',') {
+        let (key, val) = part.split_once('=')?;
+        match key.trim() {
+            "model" => model = val.trim().to_string(),
+            "retries" => retries = val.trim().parse().ok()?,
+            "swaps" => swaps = val.trim().parse().ok()?,
+            "rolls" => rolls = val.trim().parse().ok()?,
+            _ => {}
+        }
+    }
+    if model.is_empty() {
+        return None;
+    }
+    Some(LoopDiagnostics {
+        model,
+        retries,
+        swaps,
+        rolls,
+    })
 }
