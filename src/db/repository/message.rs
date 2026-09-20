@@ -400,6 +400,104 @@ impl MessageRepository {
             .context("Failed to search messages by content")
     }
 
+    /// Tokenized companion to `search_by_content` (#1626): every
+    /// whitespace-separated token must appear somewhere in the content (AND
+    /// of substring matches) instead of one contiguous substring. Fetches a
+    /// recency-ordered pool (5x the limit, capped at 200), then re-ranks in
+    /// Rust by total token hit count descending; a stable sort keeps SQL
+    /// recency order inside every tie.
+    pub async fn search_by_content_tokenized(
+        &self,
+        session_ids: Option<&[Uuid]>,
+        query: &str,
+        limit: usize,
+    ) -> Result<Vec<Message>> {
+        // Dedup exact repeats; cap the arms so a pasted paragraph of a
+        // query cannot build a 50-LIKE WHERE clause — 8 tokens already
+        // pins hard.
+        let mut tokens: Vec<String> = query.split_whitespace().map(str::to_string).collect();
+        tokens.sort();
+        tokens.dedup();
+        tokens.truncate(8);
+        if tokens.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let fetch_cap = (limit.saturating_mul(5)).clamp(1, 200) as i64;
+        let patterns: Vec<String> = tokens
+            .iter()
+            .map(|t| format!("%{}%", t.replace('%', "\\%").replace('_', "\\_")))
+            .collect();
+        let like_arms =
+            vec!["content LIKE ? ESCAPE '\\' COLLATE NOCASE"; patterns.len()].join(" AND ");
+        let id_strs: Option<Vec<String>> =
+            session_ids.map(|ids| ids.iter().map(|i| i.to_string()).collect());
+
+        let rows = self
+            .pool
+            .get()
+            .await
+            .context("Failed to get connection")?
+            .interact(move |conn| {
+                let mut params_vec: Vec<&dyn rusqlite::ToSql> = Vec::new();
+                if let Some(ids) = &id_strs {
+                    if ids.is_empty() {
+                        return Ok::<Vec<Message>, rusqlite::Error>(Vec::new());
+                    }
+                    let placeholders = vec!["?"; ids.len()].join(",");
+                    let sql = format!(
+                        "SELECT * FROM messages \
+                         WHERE session_id IN ({}) AND {like_arms} \
+                         ORDER BY created_at DESC LIMIT ?",
+                        placeholders
+                    );
+                    let mut stmt = conn.prepare(&sql)?;
+                    for id in ids {
+                        params_vec.push(id);
+                    }
+                    for p in &patterns {
+                        params_vec.push(p);
+                    }
+                    params_vec.push(&fetch_cap);
+                    let rows = stmt.query_map(params_vec.as_slice(), Message::from_row)?;
+                    rows.collect::<std::result::Result<Vec<_>, _>>()
+                } else {
+                    let sql = format!(
+                        "SELECT * FROM messages \
+                         WHERE {like_arms} \
+                         ORDER BY created_at DESC LIMIT ?"
+                    );
+                    let mut stmt = conn.prepare(&sql)?;
+                    for p in &patterns {
+                        params_vec.push(p);
+                    }
+                    params_vec.push(&fetch_cap);
+                    let rows = stmt.query_map(params_vec.as_slice(), Message::from_row)?;
+                    rows.collect::<std::result::Result<Vec<_>, _>>()
+                }
+            })
+            .await
+            .map_err(interact_err)?
+            .context("Failed to search messages by content (tokenized)")?;
+
+        // Precompute hit scores once (total occurrences of every token,
+        // case-insensitive), then one stable sort by score descending.
+        let lower_tokens: Vec<String> = tokens.iter().map(|t| t.to_lowercase()).collect();
+        let mut scored: Vec<(usize, Message)> = rows
+            .into_iter()
+            .map(|m| {
+                let lower = m.content.to_lowercase();
+                let hits: usize = lower_tokens
+                    .iter()
+                    .map(|t| lower.matches(t.as_str()).count())
+                    .sum();
+                (hits, m)
+            })
+            .collect();
+        scored.sort_by_key(|(hits, _)| std::cmp::Reverse(*hits));
+        Ok(scored.into_iter().map(|(_, m)| m).take(limit).collect())
+    }
+
     /// Count messages in a session
     pub async fn count_by_session(&self, session_id: Uuid) -> Result<i64> {
         let sid = session_id.to_string();
