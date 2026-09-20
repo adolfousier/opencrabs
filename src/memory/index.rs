@@ -1,7 +1,7 @@
 //! Indexing — insert memory/brain files into the memory store and generate embeddings.
 
 use super::db::Store;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use super::embedding::{backfill_embeddings, embed_content, embed_content_api};
@@ -191,7 +191,34 @@ pub(crate) fn index_file_sync_keyed(
     Ok(true)
 }
 
-/// Walk `~/.opencrabs/memory/*.md` and `~/.opencrabs/*.md` brain files, indexing all.
+/// Collect archived memory files under `<memory_dir>/archive/*.md` (#1657).
+///
+/// Returns `(doc_key, path)` pairs where `doc_key` is `archive/<basename>`.
+/// The prefix keeps archive keys distinct from the flat basename keys the
+/// daily walk uses, so a top-level note and an archived month can never
+/// collide (same reasoning as #1051's absolute external keys). Non-recursive
+/// by design: the archive pass writes flat monthly files. Sorted for
+/// deterministic logs and tests.
+pub(crate) fn archive_memory_files(memory_dir: &Path) -> Vec<(String, PathBuf)> {
+    let dir = memory_dir.join("archive");
+    let Ok(entries) = std::fs::read_dir(&dir) else {
+        return Vec::new();
+    };
+    let mut files: Vec<(String, PathBuf)> = entries
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.is_file() && p.extension().and_then(|s| s.to_str()) == Some("md"))
+        .filter_map(|p| {
+            let name = p.file_name()?.to_string_lossy().to_string();
+            Some((format!("archive/{name}"), p))
+        })
+        .collect();
+    files.sort_by(|a, b| a.0.cmp(&b.0));
+    files
+}
+
+/// Walk `~/.opencrabs/memory/*.md`, `memory/archive/*.md` (#1657) and
+/// `~/.opencrabs/*.md` brain files, indexing all.
 ///
 /// Also deactivates entries for files that no longer exist on disk.
 /// After indexing, backfills embeddings for any documents missing them.
@@ -223,6 +250,39 @@ pub async fn reindex(store: &'static Mutex<Store>) -> Result<usize, String> {
                     indexed += 1;
                 }
             }
+        }
+    }
+
+    // --- Index archived memory (memory/archive/*.md, #1657) ---
+    // The archive pass retires cold MEMORY.md sections into flat monthly
+    // files under memory/archive/. Without this second walk they would be
+    // invisible to memory_search and archiving would be deletion in
+    // disguise. Keyed `archive/<name>` so they never collide with top-level
+    // daily notes; prune below reconciles them via the same memory_on_disk
+    // list. FTS-only here, embeddings ride the backfill like external paths.
+    for (key, path) in archive_memory_files(&dir) {
+        memory_on_disk.push(key.clone());
+        let body = match tokio::fs::read_to_string(&path).await {
+            Ok(b) => b,
+            Err(e) => {
+                tracing::warn!("Failed to read archive file {}: {e}", path.display());
+                continue;
+            }
+        };
+        let result: Result<bool, String> = tokio::task::spawn_blocking({
+            let key = key.clone();
+            move || {
+                let store = store
+                    .lock()
+                    .map_err(|e| format!("Store lock poisoned: {e}"))?;
+                index_file_sync_keyed(&store, COLLECTION_MEMORY, &key, &body)
+            }
+        })
+        .await
+        .map_err(|e| format!("spawn_blocking failed: {e}"))?;
+        match result {
+            Ok(_) => indexed += 1,
+            Err(e) => tracing::warn!("Failed to index archive file {key}: {e}"),
         }
     }
 
