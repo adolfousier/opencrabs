@@ -83,9 +83,10 @@ impl PushShellCommand for tokio::process::Command {
 /// shell — so the actual work process spawned by the command (cargo,
 /// cmake, ping, …) survives as an orphan, still holding locks: a timed-out
 /// `cargo build` keeps the target-dir and package-cache locks taken for
-/// minutes afterwards. Failure (pid already exited, helper missing) is
-/// ignored: this is a best-effort sweep on the timeout error path, never a
-/// reason to mask the Timeout itself.
+/// minutes afterwards. Failure (pid already exited, helper missing) never
+/// aborts the caller — this is a best-effort sweep on the timeout error
+/// path, never a reason to mask the Timeout itself — but it is reported,
+/// see [`log_sweep`].
 ///
 /// Windows: `taskkill /T /F` walks the whole tree including the shell pid
 /// and force-terminates it.
@@ -94,9 +95,13 @@ pub fn kill_process_tree(pid: u32) {
     if pid == 0 {
         return;
     }
-    let _ = std::process::Command::new("taskkill")
-        .args(["/PID", &pid.to_string(), "/T", "/F"])
-        .output();
+    log_sweep(
+        pid,
+        "taskkill",
+        std::process::Command::new("taskkill")
+            .args(["/PID", &pid.to_string(), "/T", "/F"])
+            .output(),
+    );
 }
 
 /// Unix counterpart: signal the work processes the shell spawned.
@@ -113,7 +118,38 @@ pub fn kill_process_tree(pid: u32) {
     if pid == 0 {
         return;
     }
-    let _ = std::process::Command::new("pkill")
-        .args(["-TERM", "-P", &pid.to_string()])
-        .output();
+    log_sweep(
+        pid,
+        "pkill",
+        std::process::Command::new("pkill")
+            .args(["-TERM", "-P", &pid.to_string()])
+            .output(),
+    );
+}
+
+/// Record what the sweep did. Best-effort is a decision about whether to
+/// abort, not a licence to say nothing: a helper that is missing from the
+/// image looks exactly like a sweep that worked, and the orphan holding the
+/// cargo lock is the only symptom anyone ever sees. Exit status 1 is the
+/// ordinary "no such children" case for both helpers, so it stays at debug.
+fn log_sweep(pid: u32, helper: &str, result: std::io::Result<std::process::Output>) {
+    match result {
+        Ok(out) if out.status.success() => {
+            tracing::debug!("{helper} swept the process tree under pid {pid}");
+        }
+        Ok(out) => {
+            tracing::debug!(
+                "{helper} found nothing to sweep under pid {pid} ({}): {}",
+                out.status,
+                String::from_utf8_lossy(&out.stderr).trim()
+            );
+        }
+        Err(e) => {
+            tracing::warn!(
+                "could not run {helper} to sweep the process tree under pid {pid}: {e}. \
+                 A timed-out command's work process may survive as an orphan still \
+                 holding its locks."
+            );
+        }
+    }
 }
