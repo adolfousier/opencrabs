@@ -22,7 +22,6 @@ Start conservative:
 
 - Always set `channels.whatsapp.allowFrom` (never run open-to-the-world on your personal Mac).
 - Use a dedicated WhatsApp number for the assistant.
-- Heartbeats now default to every 30 minutes. Disable until you trust the setup by setting `agents.defaults.heartbeat.every: "0m"`.
 
 ## Prerequisites
 
@@ -82,25 +81,7 @@ opencrabs setup
 Full workspace layout + backup guide: [Agent workspace](/concepts/agent-workspace)
 Memory workflow: [Memory](/concepts/memory)
 
-Optional: choose a different workspace with `agents.defaults.workspace` (supports `~`).
-
-```json5
-{
-  agent: {
-    workspace: "~/.opencrabs/",
-  },
-}
-```
-
-If you already ship your own workspace files from a repo, you can disable bootstrap file creation entirely:
-
-```json5
-{
-  agent: {
-    skipBootstrap: true,
-  },
-}
-```
+Optional: named profiles give each setup its own workspace — `~/.opencrabs/` for the default profile, `~/.opencrabs/profiles/<name>/` with `opencrabs -p <name>`.
 
 ## The config that turns it into “an assistant”
 
@@ -108,7 +89,7 @@ OpenCrabs defaults to a good assistant setup, but you’ll usually want to tune:
 
 - persona/instructions in `SOUL.md`
 - thinking defaults (if desired)
-- heartbeats (once you trust it)
+- periodic checks (a cron job that reads `HEARTBEAT.md` — see Cron)
 
 Example:
 
@@ -120,8 +101,6 @@ Example:
     workspace: "~/.opencrabs/",
     thinkingDefault: "high",
     timeoutSeconds: 1800,
-    // Start with 0; enable later.
-    heartbeat: { every: "0m" },
   },
   channels: {
     whatsapp: {
@@ -155,24 +134,9 @@ Example:
 - `/new` or `/reset` starts a fresh session for that chat (configurable via `resetTriggers`). If sent alone, the agent replies with a short hello to confirm the reset.
 - `/compact [instructions]` compacts the session context and reports the remaining context budget.
 
-## Heartbeats (proactive mode)
+## Periodic checks (HEARTBEAT.md + cron)
 
-By default, OpenCrabs runs a heartbeat every 30 minutes with the prompt:
-`Read HEARTBEAT.md if it exists (workspace context). Follow it strictly. Do not infer or repeat old tasks from prior chats. If nothing needs attention, reply HEARTBEAT_OK.`
-Set `agents.defaults.heartbeat.every: "0m"` to disable.
-
-- If `HEARTBEAT.md` exists but is effectively empty (only blank lines and markdown headers like `# Heading`), OpenCrabs skips the heartbeat run to save API calls.
-- If the file is missing, the heartbeat still runs and the model decides what to do.
-- If the agent replies with `HEARTBEAT_OK` (optionally with short padding; see `agents.defaults.heartbeat.ackMaxChars`), OpenCrabs suppresses outbound delivery for that heartbeat.
-- Heartbeats run full agent turns — shorter intervals burn more tokens.
-
-```json5
-{
-  agent: {
-    heartbeat: { every: "30m" },
-  },
-}
-```
+There is no built-in heartbeat timer. `HEARTBEAT.md` is a plain checklist brain file (seeded empty in the workspace); it does nothing on its own. To run periodic checks, create a cron job whose prompt reads it — e.g. *"Every 30 minutes, read HEARTBEAT.md and act on anything that needs attention; if nothing does, stay quiet."* Cron jobs are isolated sessions with their own provider/model and a `--deliver` channel.
 
 ## Media in and out
 
