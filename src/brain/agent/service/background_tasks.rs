@@ -269,12 +269,14 @@ pub(super) fn task_repo() -> Option<crate::db::BackgroundTaskRepository> {
     crate::db::global_pool().map(|p| crate::db::BackgroundTaskRepository::new(p.clone()))
 }
 
-/// Run `command` through `sh -c` in `cwd`, capturing merged stdout+stderr.
+/// Run `command` through the platform shell (`cmd /C` on Windows, `sh -c`
+/// elsewhere) in `cwd`, capturing merged stdout+stderr.
 async fn run_detached(command: &str, cwd: &std::path::Path, session_id: Uuid) -> CmdResult {
+    use crate::utils::shell::PushShellCommand;
     use tokio::process::Command;
-    let output = Command::new("sh")
-        .arg("-c")
-        .arg(command)
+    let (shell, shell_arg) = crate::utils::shell::shell_pair();
+    let output = Command::new(shell)
+        .push_shell_command(shell_arg, command)
         .current_dir(cwd)
         .env("OPENCRABS_SESSION_ID", session_id.to_string())
         .output()

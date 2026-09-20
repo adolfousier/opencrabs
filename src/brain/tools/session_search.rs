@@ -165,13 +165,27 @@ impl Tool for SessionSearchTool {
                 self.tail_session(session_filter.as_deref(), n).await
             }
             "search" => {
-                let query = match input.get("query").and_then(|v| v.as_str()) {
-                    Some(q) if !q.is_empty() => q.to_string(),
-                    _ => {
-                        return Ok(ToolResult::error(
-                            "'query' is required for search".to_string(),
-                        ));
-                    }
+                // Trim first: a whitespace-only query is as empty as a
+                // missing one, and passing it through only moves the same
+                // failure one layer deeper.
+                let query = input
+                    .get("query")
+                    .and_then(|v| v.as_str())
+                    .map(str::trim)
+                    .filter(|q| !q.is_empty())
+                    .map(str::to_string);
+                let Some(query) = query else {
+                    // An empty search query is the #1 avoidable failure
+                    // class in the feedback ledger (600+ occurrences):
+                    // autoheal and cron loops call `search` with no query
+                    // when what they actually want is "what are the recent
+                    // sessions". Erroring just feeds the retry loop;
+                    // handing back the list they meant — with a banner that
+                    // teaches the right call — ends it.
+                    let banner = "Empty 'query' on search — returning the recent-session list instead. For substring search, pass a non-empty query. For the last messages of a session, use operation='tail' with a session filter.";
+                    let mut result = self.list_sessions().await?;
+                    result.output = format!("{}\n\n{}", banner, result.output);
+                    return Ok(result);
                 };
                 let session_filter = input
                     .get("session")

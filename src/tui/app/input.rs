@@ -1625,9 +1625,10 @@ impl App {
                         .map(|s| s.id)
                         .unwrap_or_else(uuid::Uuid::nil);
                     tokio::spawn(async move {
-                        let output = tokio::process::Command::new("sh")
-                            .arg("-c")
-                            .arg(&shell_cmd)
+                        use crate::utils::shell::PushShellCommand;
+                        let (shell, shell_arg) = crate::utils::shell::shell_pair();
+                        let output = tokio::process::Command::new(shell)
+                            .push_shell_command(shell_arg, &shell_cmd)
                             .current_dir(&cwd)
                             .output()
                             .await;
