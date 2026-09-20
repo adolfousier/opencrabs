@@ -2266,23 +2266,46 @@ pub(crate) async fn handle_message(
         let chat_id_str = msg.chat.id.0.to_string();
         // Scope recent history to THIS forum topic. Passing None pulled every
         // topic's messages into context, so each topic saw all the others
-        // (#226). Derive the thread_id exactly as the store path does
-        // (`t.0.to_string()`) so the filter matches what was persisted.
-        let thread_id_str = msg.thread_id.map(|t| t.0.to_string());
+        // (#226). #1655: the filter must be derived from the NORMALIZED topic
+        // (`topic_id`, the same resolution the session scoping at the top of
+        // handle_message uses), not the raw `msg.thread_id`: General messages
+        // carry no thread id, so raw None fell into recent()'s "no filter"
+        // arm and every General prompt bled ALL topics' history into its
+        // context. General rows persist with `thread_id = NULL`, so General
+        // scopes via recent_general() (thread_id IS NULL).
         // Issue #133: skip re-injecting history already present in the active
         // live session context (post-compaction). Shared with the other
         // multi-party surfaces (#1618, #1619, #1620); a fetch failure degrades
         // to "no history" rather than to a lost turn.
-        let fetched = channel_msg_repo
-            .recent(
-                Some("telegram"),
-                &chat_id_str,
-                30,
-                thread_id_str.as_deref(),
-                None,
-            )
-            .await
-            .unwrap_or_default();
+        let fetched = match topic_id {
+            // Known forum, General topic: this topic's rows ARE the NULL ones.
+            Some(session_resolve::GENERAL_TOPIC_ID) => {
+                channel_msg_repo
+                    .recent_general("telegram", &chat_id_str, 30, None)
+                    .await
+            }
+            // A real topic: filter by the thread id exactly as persisted
+            // (`t.0.to_string()`, unchanged from the pre-#1655 path).
+            Some(tid) => {
+                channel_msg_repo
+                    .recent(
+                        Some("telegram"),
+                        &chat_id_str,
+                        30,
+                        Some(&tid.to_string()),
+                        None,
+                    )
+                    .await
+            }
+            // Non-forum group (or a forum not yet recognized by the evidence
+            // cache): one shared conversation, no thread filter — unchanged.
+            None => {
+                channel_msg_repo
+                    .recent(Some("telegram"), &chat_id_str, 30, None, None)
+                    .await
+            }
+        }
+        .unwrap_or_default();
         match group_history::build_preamble(
             session_svc.pool(),
             session_id,

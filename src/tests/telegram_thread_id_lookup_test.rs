@@ -121,6 +121,82 @@ async fn recent_scoped_to_thread_does_not_bleed_across_topics() {
     assert_eq!(all.len(), 2);
 }
 
+/// #1655: General-topic isolation. General rows persist with `thread_id`
+/// NULL (General messages carry no `message_thread_id`), so scoping history
+/// "to General" means `thread_id IS NULL` — which `recent()`'s `None`
+/// filter cannot express: None means "no filter" and returns EVERY topic's
+/// rows. That is exactly how General prompts bled cross-topic history while
+/// real topics were already isolated (#226). `recent_general()` must return
+/// only the NULL-thread rows of the given chat.
+#[tokio::test]
+async fn recent_general_returns_only_general_rows_not_other_topics() {
+    let db = Database::connect_in_memory().await.unwrap();
+    db.run_migrations().await.unwrap();
+    let repo = ChannelMessageRepository::new(db.pool().clone());
+
+    let chat_id = "test-chat-general-isolation";
+    let mk = |chat: &str, body: &str, mid: &str, thread: Option<&str>| {
+        ChannelMessage::new(
+            "telegram".into(),
+            chat.into(),
+            None,
+            "u1".into(),
+            "alice".into(),
+            body.into(),
+            "text".into(),
+            Some(mid.into()),
+        )
+        .with_thread(thread.map(str::to_string), None)
+    };
+
+    // Interleave General (NULL) and topic rows so ordering cannot fake a pass.
+    repo.insert(&mk(chat_id, "general message one", "m-g1", None))
+        .await
+        .unwrap();
+    repo.insert(&mk(chat_id, "topic ten message", "m-10", Some("10")))
+        .await
+        .unwrap();
+    repo.insert(&mk(chat_id, "general message two", "m-g2", None))
+        .await
+        .unwrap();
+    repo.insert(&mk(chat_id, "topic twenty message", "m-20", Some("20")))
+        .await
+        .unwrap();
+    // A different chat's General row must not leak into this chat's fetch.
+    repo.insert(&mk("other-chat", "other chat general", "m-x1", None))
+        .await
+        .unwrap();
+
+    // General scoping → ONLY this chat's NULL-thread rows.
+    let general = repo
+        .recent_general("telegram", chat_id, 30, None)
+        .await
+        .unwrap();
+    assert_eq!(general.len(), 2, "General must see exactly its own rows");
+    assert!(general.iter().all(|m| m.thread_id.is_none()));
+    assert!(
+        general
+            .iter()
+            .all(|m| !m.content.contains("ten") && !m.content.contains("twenty"))
+    );
+    assert!(general.iter().all(|m| !m.content.contains("other chat")));
+
+    // The pre-#1655 path for contrast: recent(None) returns all 4 rows of
+    // the chat across topics — the bleed mode this test pins as fixed.
+    let unscoped = repo
+        .recent(Some("telegram"), chat_id, 30, None, None)
+        .await
+        .unwrap();
+    assert_eq!(unscoped.len(), 4);
+
+    // Real topics keep their exact pre-#1655 filter semantics.
+    let only_10 = repo
+        .recent(Some("telegram"), chat_id, 30, Some("10"), None)
+        .await
+        .unwrap();
+    assert_eq!(only_10.len(), 1);
+}
+
 /// The session label reads the topic NAME from `latest_topic_name`, which must
 /// return the most recent non-null name for a thread — so an in-topic reply
 /// (which omits the name) doesn't drop the label back to the numeric id.
