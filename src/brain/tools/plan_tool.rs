@@ -738,7 +738,6 @@ pub(crate) struct RalphLoopConfig {
     /// users edited `decay_enabled` or `decay_interval_hours` and got
     /// no error and no effect.
     #[serde(default)]
-    #[allow(dead_code)] // consumed by #1641 epistemic engine wiring
     pub(crate) epistemic: EpistemicConfig,
 }
 

@@ -875,11 +875,7 @@ impl AgentService {
         // #1649: the scope prelude rides in front of the unchanged body;
         // FullWindow gets an empty prelude, so the first-compaction prompt is
         // byte-identical to the classic one.
-        let compaction_prompt = format!(
-            "{}{}",
-            Self::compaction_scope_prelude(scope),
-            base_prompt
-        );
+        let compaction_prompt = format!("{}{}", Self::compaction_scope_prelude(scope), base_prompt);
         summary_messages.push(Message::user(compaction_prompt));
 
         // Never send a {provider, model} pair the user didn't configure.
@@ -1071,7 +1067,6 @@ impl AgentService {
             context.token_count
         );
     }
-
 
     /// Save a compaction summary to a daily memory log at `~/.opencrabs/memory/YYYY-MM-DD.md`.
     ///

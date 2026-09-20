@@ -347,7 +347,9 @@ impl AgentContext {
 
     /// Index of the first in-memory compaction marker, if any.
     pub(crate) fn first_marker_index(&self) -> Option<usize> {
-        self.messages.iter().position(Self::is_compaction_marker_msg)
+        self.messages
+            .iter()
+            .position(Self::is_compaction_marker_msg)
     }
 
     /// Index of the last in-memory compaction marker, if any.

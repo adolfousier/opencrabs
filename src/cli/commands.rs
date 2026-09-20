@@ -1591,6 +1591,84 @@ pub(crate) async fn cmd_memory(operation: MemoryCommands) -> Result<()> {
             println!();
             Ok(())
         }
+        MemoryCommands::Prune {
+            apply,
+            max_age_days,
+        } => {
+            use crate::brain::tools::epistemic;
+
+            let days = max_age_days.unwrap_or(90);
+            let mode = if apply { "APPLY" } else { "DRY RUN" };
+            println!("🦀 Memory Prune ({mode}, cold = 0 hits and unseen for {days}+ days)\n");
+
+            // Cold beliefs: same yardstick delete_cold_beliefs will apply.
+            let cold_beliefs = epistemic::list_cold_beliefs(days);
+            println!("  Cold beliefs: {}", cold_beliefs.len());
+            for belief in &cold_beliefs {
+                let last_seen = belief.last_used.unwrap_or(belief.source.recorded_at);
+                let age = (chrono::Utc::now() - last_seen).num_days();
+                println!(
+                    "    - {} [{}], {} hits, last seen {}d ago",
+                    belief.key,
+                    belief.confidence.label(),
+                    belief.hits,
+                    age
+                );
+            }
+
+            // Cold sections: what archive_cold_sections would retire.
+            let cold_sections = epistemic::list_cold_sections(days);
+            println!("\n  Cold MEMORY.md sections: {}", cold_sections.len());
+            for section in &cold_sections {
+                println!(
+                    "    - {} ({} bytes) -> memory/archive/",
+                    section.heading.trim(),
+                    section.rendered.len()
+                );
+            }
+
+            if !apply {
+                if cold_beliefs.is_empty() && cold_sections.is_empty() {
+                    println!("\n  Nothing cold enough to prune.");
+                } else {
+                    println!(
+                        "\n  Dry run: nothing written. Re-run with --apply to archive sections and delete cold beliefs."
+                    );
+                }
+                println!();
+                return Ok(());
+            }
+
+            // Apply: archive first (sections take their beliefs with them),
+            // then sweep whatever cold beliefs remain.
+            let report = epistemic::archive_cold_sections(days)
+                .map_err(|e| anyhow::anyhow!("memory prune: {e}"))?;
+            let deleted = epistemic::delete_cold_beliefs(days);
+
+            if report.skipped {
+                println!("\n  No sections were cold enough to archive.");
+            } else {
+                let archive_target = report
+                    .archive_path
+                    .as_ref()
+                    .map(|p| p.display().to_string())
+                    .unwrap_or_else(|| "memory/archive/".to_string());
+                println!(
+                    "\n  Archived {} section(s) to {}",
+                    report.archived.len(),
+                    archive_target
+                );
+                if let Some(backup) = &report.backup {
+                    println!("  Backup: {}", backup.display());
+                }
+            }
+            println!("  Deleted {} cold belief(s)", deleted.len());
+            for key in &deleted {
+                println!("    - {key}");
+            }
+            println!();
+            Ok(())
+        }
     }
 }
 

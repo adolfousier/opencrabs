@@ -30,14 +30,15 @@ async fn seed(db: &Database, title: &str, bodies: &[&str]) {
     let session = Session::new(Some(title.to_string()), Some("m".to_string()), None);
     srepo.create(&session).await.unwrap();
     for (i, body) in bodies.iter().enumerate() {
-        mrepo.create(&Message::new(
-            session.id,
-            "user".into(),
-            body.to_string(),
-            i as i32 + 1,
-        ))
-        .await
-        .unwrap();
+        mrepo
+            .create(&Message::new(
+                session.id,
+                "user".into(),
+                body.to_string(),
+                i as i32 + 1,
+            ))
+            .await
+            .unwrap();
     }
 }
 
