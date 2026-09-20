@@ -196,14 +196,33 @@ impl Tool for ReadTool {
             let raw = fs::read(&path).await.map_err(ToolError::Io)?;
             let (contents, encoding_warning) = decode_file_bytes(&raw);
             let line_count = contents.lines().count();
-            // Remember what this session saw, so a later whole-file write
-            // can tell its own output from another agent's change (#954).
-            // Only whole-file reads qualify: a partial read is not a basis
-            // for replacing the file.
-            super::file_versions::record(context.session_id, &path, &contents);
-            // Whole-file reads unlock later overwrites (#1168); windowed
-            // reads deliberately do not.
-            super::read_state::mark_fully_read(context.session_id, &path);
+            // A decode that transformed the bytes is not a byte-faithful view
+            // of the file, so it must not arm a wholesale overwrite. Writing
+            // this text back re-encodes a UTF-16 file as UTF-8 at best, and
+            // replaces a binary with U+FFFD soup at worst. The staleness
+            // guard cannot catch that either: `write_file` reads the current
+            // file with `read_to_string`, which yields None on those same
+            // bytes, and `is_stale_write` reports "not stale" for None. So
+            // the read still succeeds (that is the point of decoding at all),
+            // it just does not unlock the overwrite.
+            let byte_faithful = encoding_warning.is_none();
+            let encoding_warning = encoding_warning.map(|w| {
+                format!(
+                    "{w}. The bytes were transformed, so this read does not unlock a \
+                     whole-file overwrite: use edit_file, or pass overwrite_read_confirm \
+                     to write_file if replacing the file is intended."
+                )
+            });
+            if byte_faithful {
+                // Remember what this session saw, so a later whole-file write
+                // can tell its own output from another agent's change (#954).
+                // Only whole-file reads qualify: a partial read is not a basis
+                // for replacing the file.
+                super::file_versions::record(context.session_id, &path, &contents);
+                // Whole-file reads unlock later overwrites (#1168); windowed
+                // reads deliberately do not.
+                super::read_state::mark_fully_read(context.session_id, &path);
+            }
             // A whole-file read of a skill definition counts as consuming
             // that skill (issue #131): the post-compaction stamp lists it
             // even though no slash command was ever issued.
