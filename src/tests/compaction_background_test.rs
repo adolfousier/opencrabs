@@ -11,7 +11,7 @@
 //!    reload (2026-05-05), so the predicate that decides to wait is asserted
 //!    directly rather than inferred.
 
-use crate::brain::agent::context::AgentContext;
+use crate::brain::agent::context::{AgentContext, CompactionScope};
 use crate::brain::agent::service::AgentService;
 use crate::brain::agent::service::compaction::{BudgetPhase, must_wait_for_compaction};
 use crate::brain::provider::{ContentBlock, Message, Role};
@@ -72,7 +72,7 @@ fn work_done_during_the_summariser_call_survives_the_swap() {
         tool_result("tu_1", "the command output"),
     ]);
 
-    AgentService::apply_compaction_summary_after(&mut context, "SUMMARY BODY", 2);
+    AgentService::apply_compaction_summary_after(&mut context, CompactionScope::FullWindow, "SUMMARY BODY", 2);
 
     let rendered: Vec<String> = context.messages.iter().map(text_of).collect();
     assert!(
@@ -97,7 +97,7 @@ fn the_summarised_prefix_does_not_survive_as_messages() {
         Message::user("new question"),
     ]);
 
-    AgentService::apply_compaction_summary_after(&mut context, "SUMMARY BODY", 2);
+    AgentService::apply_compaction_summary_after(&mut context, CompactionScope::FullWindow, "SUMMARY BODY", 2);
 
     // Summary plus the one message the summariser never saw. The pair it did
     // see survives only as prose quoted inside the summary, which is the
@@ -122,7 +122,7 @@ fn a_delta_opening_on_tool_results_drops_the_orphans() {
         Message::assistant("carrying on"),
     ]);
 
-    AgentService::apply_compaction_summary_after(&mut context, "SUMMARY BODY", 2);
+    AgentService::apply_compaction_summary_after(&mut context, CompactionScope::FullWindow, "SUMMARY BODY", 2);
 
     assert!(
         !AgentContext::is_orphaned_tool_result_msg(&context.messages[1]),
@@ -144,7 +144,7 @@ fn an_all_orphan_delta_leaves_just_the_summary() {
         tool_result("tu_1", "two"),
     ]);
 
-    AgentService::apply_compaction_summary_after(&mut context, "SUMMARY BODY", 2);
+    AgentService::apply_compaction_summary_after(&mut context, CompactionScope::FullWindow, "SUMMARY BODY", 2);
 
     assert_eq!(context.messages.len(), 1);
     assert!(text_of(&context.messages[0]).contains("SUMMARY BODY"));
@@ -158,7 +158,7 @@ fn no_delta_behaves_like_a_blocking_compaction() {
     ]);
     let len = context.messages.len();
 
-    AgentService::apply_compaction_summary_after(&mut context, "SUMMARY BODY", len);
+    AgentService::apply_compaction_summary_after(&mut context, CompactionScope::FullWindow, "SUMMARY BODY", len);
 
     assert_eq!(context.messages.len(), 1);
     assert!(text_of(&context.messages[0]).contains("SUMMARY BODY"));
@@ -171,7 +171,7 @@ fn a_snapshot_that_outlived_its_context_still_applies() {
     // delta to recover, but the summary must still land rather than panic.
     let mut context = ctx(vec![Message::user("only message")]);
 
-    AgentService::apply_compaction_summary_after(&mut context, "SUMMARY BODY", 99);
+    AgentService::apply_compaction_summary_after(&mut context, CompactionScope::FullWindow, "SUMMARY BODY", 99);
 
     assert_eq!(context.messages.len(), 1);
     assert!(text_of(&context.messages[0]).contains("SUMMARY BODY"));
@@ -185,7 +185,7 @@ fn the_budget_counts_the_delta_it_kept() {
         Message::user("a considerably longer message that carries real weight in the budget"),
     ]);
 
-    AgentService::apply_compaction_summary_after(&mut context, "SUMMARY BODY", 2);
+    AgentService::apply_compaction_summary_after(&mut context, CompactionScope::FullWindow, "SUMMARY BODY", 2);
 
     let recomputed: usize = context
         .messages

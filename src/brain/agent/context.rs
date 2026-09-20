@@ -300,6 +300,182 @@ impl AgentContext {
         self.drop_leading_orphan_tool_results();
     }
 
+    /// #1649 delta compaction: the messages a delta summariser may see.
+    ///
+    /// Everything AFTER the last compaction marker. The frozen segments
+    /// (markers) never re-enter the summariser input — that re-derivation
+    /// was the cumulative-growth mechanism: every compaction re-billed the
+    /// previous summary into the new one (x8.6 over 5 compactions, 97.8% of
+    /// byte growth cumulative).
+    pub(crate) fn delta_since_last_marker(&self) -> Vec<Message> {
+        match self.last_marker_index() {
+            Some(idx) => self.messages[idx + 1..].to_vec(),
+            None => self.messages.clone(),
+        }
+    }
+
+    /// #1649: decide what a new compaction summarises.
+    ///
+    /// - No marker yet → full window (byte-identical to the classic path).
+    /// - Segments alone over half the window → consolidate the SEGMENTS only
+    ///   into one fresh summary; otherwise they crowd the window and no delta
+    ///   compaction can drop usage below the trigger (the 66dc5151 loop:
+    ///   20+ triggers in 3 minutes, none escaped).
+    /// - Otherwise → delta since the last marker.
+    pub(crate) fn compaction_scope(&self) -> CompactionScope {
+        if self.last_marker_index().is_none() {
+            return CompactionScope::FullWindow;
+        }
+        if self.segments_token_count() > self.max_tokens / 2 {
+            CompactionScope::SegmentConsolidation
+        } else {
+            CompactionScope::DeltaSinceMarker
+        }
+    }
+
+    /// Tokens held by the frozen segment block: everything through the last
+    /// marker, brain excluded.
+    pub(crate) fn segments_token_count(&self) -> usize {
+        match self.last_marker_index() {
+            Some(idx) => self.messages[..=idx]
+                .iter()
+                .map(|m| self.estimate_message_tokens(m))
+                .sum(),
+            None => 0,
+        }
+    }
+
+    /// Index of the first in-memory compaction marker, if any.
+    pub(crate) fn first_marker_index(&self) -> Option<usize> {
+        self.messages.iter().position(Self::is_compaction_marker_msg)
+    }
+
+    /// Index of the last in-memory compaction marker, if any.
+    pub(crate) fn last_marker_index(&self) -> Option<usize> {
+        self.messages
+            .iter()
+            .rposition(Self::is_compaction_marker_msg)
+    }
+
+    /// An in-memory marker: a user message whose FIRST text block starts
+    /// with the canonical prefix — the in-memory twin of the #175
+    /// anchored-prefix rule the DB loader uses.
+    pub(crate) fn is_compaction_marker_msg(m: &Message) -> bool {
+        m.role == Role::User
+            && matches!(m.content.first(), Some(ContentBlock::Text { text })
+                if text.starts_with(COMPACTION_MARKER_PREFIX))
+    }
+
+    /// #1649: apply a DELTA summary — append a new frozen segment.
+    ///
+    /// Previous segments survive verbatim; everything after the last marker
+    /// (the delta the summary describes) is replaced by the new marker. No
+    /// prior summary text is re-derived or re-billed into the result.
+    pub(crate) fn compact_with_delta_summary(&mut self, summary: String) {
+        let Some(idx) = self.last_marker_index() else {
+            // No prior marker: this is the session's first compaction —
+            // identical to the classic full-window swap.
+            self.compact_with_summary(summary, 0);
+            return;
+        };
+        // Keep the frozen segments; drop the delta the summary covers.
+        self.messages.truncate(idx + 1);
+        let summary_msg = Message {
+            role: Role::User,
+            content: vec![ContentBlock::Text {
+                text: format!(
+                    "[CONTEXT COMPACTION — {SEGMENT_SENTINEL} This block summarises only the \
+                     messages since the previous compaction marker. The earlier frozen \
+                     segments above remain in force unchanged; do not re-derive or merge \
+                     them.]\n\n{summary}"
+                ),
+            }],
+        };
+        self.messages.push(summary_msg);
+        self.recount_tokens_after_compaction();
+        self.provider_anchor = None;
+    }
+
+    /// #1649: replace every frozen segment with ONE consolidated summary.
+    ///
+    /// The only sanctioned re-derivation: the inputs are summaries already
+    /// (bounded by the summariser's output budget), never raw history, and
+    /// the result is a single marker again. The consolidated marker carries
+    /// no segment sentinel, so the DB loader treats it as a boundary and
+    /// drops every superseded marker row on reload.
+    pub(crate) fn consolidate_segments(&mut self, summary: String) {
+        let Some(first) = self.first_marker_index() else {
+            self.compact_with_summary(summary, 0);
+            return;
+        };
+        let last = self.last_marker_index().unwrap_or(first);
+        let tail: Vec<Message> = self.messages.split_off(last + 1);
+        self.messages.truncate(first);
+        let summary_msg = Message {
+            role: Role::User,
+            content: vec![ContentBlock::Text {
+                text: format!(
+                    "[CONTEXT COMPACTION — The session's accumulated compaction summaries \
+                     were consolidated into this single self-contained summary. It \
+                     replaces every earlier one; nothing before this point survives \
+                     except this marker.]\n\n{summary}"
+                ),
+            }],
+        };
+        self.messages.push(summary_msg);
+        self.messages.extend(tail);
+        self.recount_tokens_after_compaction();
+        self.provider_anchor = None;
+    }
+
+    /// Text of every frozen segment marker, in order (consolidation input).
+    pub(crate) fn segment_marker_texts(&self) -> Vec<String> {
+        self.messages
+            .iter()
+            .filter(|m| Self::is_compaction_marker_msg(m))
+            .filter_map(|m| match m.content.first() {
+                Some(ContentBlock::Text { text }) => Some(text.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// #1649: assemble the summariser input for this context's scope.
+    ///
+    /// One helper for BOTH the synchronous and background paths — parity by
+    /// construction, not by duplication.
+    pub(crate) fn compaction_input(&self) -> (CompactionScope, Vec<Message>, usize) {
+        let scope = self.compaction_scope();
+        match scope {
+            CompactionScope::FullWindow => (scope, self.messages.clone(), self.token_count),
+            CompactionScope::DeltaSinceMarker => {
+                let delta = self.delta_since_last_marker();
+                let tokens = delta.iter().map(AgentContext::estimate_tokens_static).sum();
+                (scope, delta, tokens)
+            }
+            CompactionScope::SegmentConsolidation => {
+                let joined = self.segment_marker_texts().join("\n\n---\n\n");
+                let messages = vec![Message::user(joined)];
+                let tokens = messages
+                    .iter()
+                    .map(AgentContext::estimate_tokens_static)
+                    .sum();
+                (scope, messages, tokens)
+            }
+        }
+    }
+
+    /// Recalculate `token_count` after a compaction swap (brain + messages).
+    fn recount_tokens_after_compaction(&mut self) {
+        self.token_count = 0;
+        if let Some(brain) = &self.system_brain {
+            self.token_count += Self::estimate_tokens(brain);
+        }
+        for msg in &self.messages {
+            self.token_count += self.estimate_message_tokens(msg);
+        }
+    }
+
     /// Compact the context by replacing old messages with a summary.
     ///
     /// Keeps the most recent messages that fit within the token budget
@@ -371,4 +547,31 @@ impl AgentContext {
         // with a stale delta (#211).
         self.provider_anchor = None;
     }
+}
+
+/// The canonical compaction-marker prefix. Every marker row — DB or
+/// in-memory — starts with this (the #175 anchored-prefix invariant).
+pub(crate) const COMPACTION_MARKER_PREFIX: &str = "[CONTEXT COMPACTION";
+
+/// Rides in a DELTA-SEGMENT marker's banner (#1649). Segments extend the
+/// window instead of restarting it, so the DB loader skips them when it
+/// looks for the reload boundary: it anchors on the LAST marker WITHOUT
+/// this sentinel — the full-window, hard-truncate, consolidation, RSI and
+/// cron markers all restart history, and only they bound the reload.
+/// Inverted on purpose: tagging the one new marker type keeps every legacy
+/// marker (and every legacy DB stream) behaving exactly as before.
+pub(crate) const SEGMENT_SENTINEL: &str = "DELTA SEGMENT.";
+
+/// What a compaction summarises (#1649).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum CompactionScope {
+    /// No marker in the window yet — summarise everything (the classic
+    /// full-window behaviour, byte-identical prompt and apply).
+    FullWindow,
+    /// Prior markers exist — summarise ONLY the messages since the last one
+    /// and append the result as a new frozen segment.
+    DeltaSinceMarker,
+    /// The frozen segments alone exceed half the window — consolidate the
+    /// segments into one fresh summary that supersedes them.
+    SegmentConsolidation,
 }
