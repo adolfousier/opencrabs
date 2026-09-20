@@ -300,9 +300,11 @@ impl Tool for BashTool {
          fetches, repo / code search, workflow runs, checks. When \
          installed, `gh` returns structured JSON (--json flag) and \
          respects --jq for filtering. Check availability first with \
-         `gh --version` if unsure — it is NOT preinstalled on stock \
-         Windows or macOS, so fall back to `http_request` against the \
-         GitHub REST API when it is missing. Never reach \
+         `gh --version` if unsure, since it is NOT preinstalled on stock \
+         Windows or macOS. Without it, `http_request` reads the public \
+         REST API fine, but anything that writes (opening an issue, \
+         commenting, merging) needs the token `gh` would have carried, so \
+         report that `gh` is missing instead of failing quietly. Never reach \
          for `browser_navigate` to inspect or act on a GitHub URL. \
          Examples: `gh pr view 123 --json title,body,comments`, \
          `gh issue list --label bug --json number,title`, \
