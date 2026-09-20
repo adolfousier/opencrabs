@@ -138,6 +138,19 @@ cargo test --all-features --verbose
 
 `cargo clippy` is the lint pass we trust — `cargo check` only type-checks and misses the lint rules CI enforces. Iterate with clippy locally so you don't burn a CI run discovering a `-D warnings` failure.
 
+#### Why clippy, not `cargo check`
+
+Most Rust users learned `check` before they met clippy, so the habit dies hard. The distinction is not style policing: clippy runs rustc itself (so it reports everything `cargo check` does) plus ~700 lints, and the [`clippy::correctness` group](https://doc.rust-lang.org/clippy/lints.html) is deny-by-default and aborts compilation: "if you see a correctness lint, it means that your code is outright wrong or useless". Those lints are deliberately low-FP, and `#[allow]`-ing them is discouraged. A clean `cargo check` still passes code like:
+
+- `let _ = parking_lot_mutex.lock();` - the guard drops on the next line, so the "locked" section protects nothing. `clippy::let_underscore_lock` (correctness) aborts; `cargo check` is silent.
+- `#[derive(PartialOrd)]` alongside a hand-written `impl Ord` that disagrees with it. Sorting and `BTreeMap` keys then violate their ordering invariants at runtime. `clippy::derive_ord_xor_partial_ord` (deny-by-default) catches it; `cargo check` is silent.
+- `assert_eq!(a, a)`, the test that passes whatever the code does. `clippy::eq_op` flags identical operands.
+- Quadratic loops and needless clones: "code that can be written to run faster" is `clippy::perf`'s job. Neither check nor the test suite notices until the profiler does, months later.
+
+Even rustc admits its own gap: per the [cargo book](https://doc.rust-lang.org/stable/cargo/commands/cargo-check.html), some diagnostics are only emitted during code generation, which `cargo check` skips. That is why the CI gate is `cargo clippy ... -D warnings` (`.github/workflows/ci.yml`), and why this repo's own tests carry deliberate `#[allow(clippy::field_reassign_with_default)]` suppressions in `src/tests/onboarding_*_test.rs`: the lint fires here, and each allow is a conscious call, not an oversight.
+
+A codebase built with `cargo check` alone can report *thousands* of clippy findings on its first run, so the time to start is the first commit. If you're inheriting a backlog, `cargo clippy --fix` mechanically applies the machine-applicable suggestions, so the wall is smaller than it looks.
+
 ### Running the App While You Iterate
 
 **Use `cargo run`. Do NOT `cargo build --release` for normal development.**
