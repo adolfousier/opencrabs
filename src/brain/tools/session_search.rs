@@ -417,13 +417,6 @@ impl SessionSearchTool {
             .await
             .map_err(|e| super::error::ToolError::Execution(e.to_string()))?;
 
-        if messages.is_empty() {
-            return Ok(ToolResult::success(format!(
-                "No messages found matching '{}' in the selected session(s).",
-                trimmed
-            )));
-        }
-
         let title_map: std::collections::HashMap<uuid::Uuid, String> = all_sessions
             .iter()
             .map(|s| {
@@ -434,8 +427,7 @@ impl SessionSearchTool {
             })
             .collect();
 
-        let mut output = String::new();
-        for msg in &messages {
+        let render = |msg: &crate::db::models::Message, terms: &[&str]| -> String {
             let title = title_map
                 .get(&msg.session_id)
                 .map(String::as_str)
@@ -446,11 +438,51 @@ impl SessionSearchTool {
             } else {
                 "assistant"
             };
-            let snippet = extract_snippet(&msg.content, trimmed, 280);
-            output.push_str(&format!(
-                "**{}** [{} • {}]\n   {}\n\n",
-                title, role, date, snippet
-            ));
+            let snippet = extract_snippet(&msg.content, terms, 280);
+            format!("**{}** [{} • {}]\n   {}\n\n", title, role, date, snippet)
+        };
+
+        // #1626: zero contiguous-verbatim hits do not mean the content is
+        // absent — a natural-language query scatters its words across a
+        // sentence. Before reporting nothing, retry multi-word queries with
+        // a tokenized AND-match (every word present somewhere) and label the
+        // rows so the weaker semantics stay explicit.
+        if messages.is_empty() {
+            let no_match = || {
+                ToolResult::success(format!(
+                    "No messages found matching '{}' in the selected session(s).",
+                    trimmed
+                ))
+            };
+            if trimmed.split_whitespace().count() < 2 {
+                // Single token: verbatim and tokenized are the same query;
+                // retrying would only duplicate the work.
+                return Ok(no_match());
+            }
+            let tokenized = message_repo
+                .search_by_content_tokenized(scope_ids.as_deref(), trimmed, n)
+                .await
+                .map_err(|e| super::error::ToolError::Execution(e.to_string()))?;
+            if tokenized.is_empty() {
+                return Ok(no_match());
+            }
+            let tokens: Vec<&str> = trimmed.split_whitespace().collect();
+            let mut terms: Vec<&str> = vec![trimmed];
+            terms.extend(tokens.iter().copied());
+            let mut output = format!(
+                "~ token match — no contiguous match for '{}'; every row below \
+                 contains all of its words, ranked by word hits then recency.\n\n",
+                trimmed
+            );
+            for msg in &tokenized {
+                output.push_str(&render(msg, &terms));
+            }
+            return Ok(ToolResult::success(output));
+        }
+
+        let mut output = String::new();
+        for msg in &messages {
+            output.push_str(&render(msg, std::slice::from_ref(&trimmed)));
         }
 
         Ok(ToolResult::success(output))
@@ -564,11 +596,23 @@ impl SessionSearchTool {
     }
 }
 
-fn extract_snippet(body: &str, query: &str, max_len: usize) -> String {
-    let query_lower = query.to_lowercase();
+fn extract_snippet(body: &str, terms: &[&str], max_len: usize) -> String {
     let body_lower = body.to_lowercase();
 
-    let best_pos = body_lower.find(&query_lower).unwrap_or(0);
+    // Center on the whole query when it is present (terms[0]); otherwise on
+    // the earliest single-term occurrence so tokenized rows (#1626) point
+    // at a matching word instead of the body's start.
+    let best_pos = terms
+        .first()
+        .and_then(|q| body_lower.find(&q.to_lowercase()))
+        .or_else(|| {
+            terms
+                .iter()
+                .skip(1)
+                .filter_map(|t| body_lower.find(&t.to_lowercase()))
+                .min()
+        })
+        .unwrap_or(0);
 
     let start = best_pos.saturating_sub(50);
     let end = (start + max_len).min(body.len());
