@@ -135,6 +135,55 @@ impl ChannelMessageRepository {
         Ok(updated as u64)
     }
 
+    /// #1655: General-topic history fetch. General rows persist with
+    /// `thread_id = NULL` (General messages carry no `message_thread_id`),
+    /// so "this topic only" for General means `thread_id IS NULL` — a state
+    /// `recent()`'s `Option<&str>` cannot express, because `None` there means
+    /// "no thread filter" and returns EVERY topic's rows. Without this, a
+    /// General prompt in a forum pulled cross-topic history and the agent
+    /// continued other topics' work in General.
+    pub async fn recent_general(
+        &self,
+        channel: &str,
+        chat_id: &str,
+        limit: i64,
+        message_type: Option<&str>,
+    ) -> Result<Vec<ChannelMessage>> {
+        let ch = channel.to_string();
+        let cid = chat_id.to_string();
+        let mtype = message_type.map(|s| s.to_string());
+        self.pool
+            .get()
+            .await
+            .context("Failed to get connection")?
+            .interact(move |conn| match mtype {
+                Some(mtype) => {
+                    let mut stmt = conn.prepare_cached(
+                        "SELECT * FROM channel_messages \
+                             WHERE channel = ?1 AND channel_chat_id = ?2 \
+                             AND thread_id IS NULL AND message_type = ?3 \
+                             ORDER BY created_at DESC LIMIT ?4",
+                    )?;
+                    let rows =
+                        stmt.query_map(params![ch, cid, mtype, limit], ChannelMessage::from_row)?;
+                    rows.collect::<std::result::Result<Vec<_>, _>>()
+                }
+                None => {
+                    let mut stmt = conn.prepare_cached(
+                        "SELECT * FROM channel_messages \
+                             WHERE channel = ?1 AND channel_chat_id = ?2 \
+                             AND thread_id IS NULL \
+                             ORDER BY created_at DESC LIMIT ?3",
+                    )?;
+                    let rows = stmt.query_map(params![ch, cid, limit], ChannelMessage::from_row)?;
+                    rows.collect::<std::result::Result<Vec<_>, _>>()
+                }
+            })
+            .await
+            .map_err(interact_err)?
+            .context("Failed to fetch recent general-topic messages")
+    }
+
     /// Get recent messages for a specific chat, optionally filtered by thread_id.
     /// When `thread_id` is Some, only messages belonging to that forum topic are returned.
     pub async fn recent(
