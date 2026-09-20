@@ -335,7 +335,7 @@ impl EpistemicStore {
                 continue;
             }
 
-            let heading = section.heading.trim().trim_start_matches('#').trim();
+            let heading = normalize_heading(&section.heading);
             let key = format!("MEMORY.md##{}", heading);
 
             // Don't overwrite existing beliefs — verified beliefs survive re-backfill.
@@ -402,6 +402,165 @@ impl EpistemicStore {
             })
             .collect()
     }
+}
+
+// ---------------------------------------------------------------------------
+// Archive pass (#1657 piece B): retire cold MEMORY.md sections into
+// memory/archive/YYYY-MM.md instead of deleting them.
+// ---------------------------------------------------------------------------
+
+/// One section retired from MEMORY.md into the monthly archive file.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ArchivedSection {
+    /// The heading line as it appeared in MEMORY.md (e.g. `## Old Rules`).
+    pub heading: String,
+    /// Normalized title (no hashes) — the suffix of the belief key.
+    pub title: String,
+    /// The `MEMORY.md##<title>` belief key this section was tracked under.
+    pub belief_key: String,
+    /// The full section text (heading + body) as appended to the archive.
+    pub rendered: String,
+}
+
+/// What `archive_cold_sections_at` did — the receipt a prune reports.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct ArchiveReport {
+    /// Sections archived, in file order.
+    pub archived: Vec<ArchivedSection>,
+    /// Monthly file the sections were appended to (`memory/archive/YYYY-MM.md`).
+    pub archive_path: Option<PathBuf>,
+    /// Backup snapshot of MEMORY.md taken before the survivor rewrite.
+    pub backup: Option<PathBuf>,
+    /// Belief keys removed from the epistemic store (one per section).
+    pub removed_beliefs: Vec<String>,
+    /// Nothing was cold enough to archive; no writes happened at all.
+    pub skipped: bool,
+}
+
+/// Heading line → normalized title: `## Foo ##` → `Foo`.
+///
+/// Shared by backfill and the archive pass so a section's belief key and
+/// its archive record can never disagree on what the section is called.
+pub(crate) fn normalize_heading(raw: &str) -> String {
+    raw.trim().trim_start_matches('#').trim().to_string()
+}
+
+/// Pure selection: which H2+ sections of `content` are cold enough to archive.
+///
+/// Cold means the section's belief exists AND matches the same yardstick as
+/// `delete_cold_beliefs`: zero hits and unseen for `max_age_days` (measured
+/// from `last_used`, falling back to `recorded_at`). Untracked sections are
+/// never selected — no belief is not evidence of cold, it is evidence the
+/// section predates tracking. The preamble and the H1 title are structurally
+/// excluded by the same H2+ gate backfill applies, so a section that could
+/// never be tracked can't be archived out from under the file either.
+pub(crate) fn select_archive_candidates(
+    store: &EpistemicStore,
+    content: &str,
+    max_age_days: i64,
+    now: DateTime<Utc>,
+) -> Vec<ArchivedSection> {
+    let mut cold = Vec::new();
+    for section in crate::brain::brain_sections::split_sections(content) {
+        let trimmed = section.heading.trim();
+        if trimmed.is_empty() || (trimmed.starts_with('#') && !trimmed.starts_with("##")) {
+            continue;
+        }
+        let title = normalize_heading(&section.heading);
+        let key = format!("MEMORY.md##{title}");
+        let Some(belief) = store.beliefs.get(&key) else {
+            continue;
+        };
+        let last_seen = belief.last_used.unwrap_or(belief.source.recorded_at);
+        if belief.hits == 0 && (now - last_seen).num_days() >= max_age_days {
+            cold.push(ArchivedSection {
+                heading: trimmed.to_string(),
+                title,
+                belief_key: key,
+                rendered: section.render(),
+            });
+        }
+    }
+    cold
+}
+
+/// Archive-pass core over explicit paths — the seam the tests drive.
+///
+/// Crash-safe ordering, in the only order that loses nothing:
+/// 1. append the cold sections to the monthly archive file FIRST — a crash
+///    after this step leaves duplicated content, which reconciliation
+///    fixes, never lost content, which nothing fixes;
+/// 2. snapshot MEMORY.md via `backup_before_write`;
+/// 3. rewrite MEMORY.md with only the survivors (byte-exact: renders of
+///    the untouched original sections, concatenated);
+/// 4. drop the archived sections' beliefs from the hot store — if we die
+///    before the caller saves, the beliefs merely outlive their sections
+///    and the next pass re-collects them.
+///
+/// This deliberately shrinks a protected file: the shrink is the entire
+/// point of the pass, and it is receipted (archive copy + backup + ledger)
+/// rather than merely permitted. The write-tool `check_no_shrink` gate
+/// governs tool-authored content; this maintenance pass carries its own
+/// stronger guarantees.
+pub(crate) fn archive_cold_sections_at(
+    store: &mut EpistemicStore,
+    memory_path: &std::path::Path,
+    archive_dir: &std::path::Path,
+    max_age_days: i64,
+    now: DateTime<Utc>,
+) -> Result<ArchiveReport, String> {
+    let content = std::fs::read_to_string(memory_path)
+        .map_err(|e| format!("archive: reading {}: {e}", memory_path.display()))?;
+
+    let candidates = select_archive_candidates(store, &content, max_age_days, now);
+    let mut report = ArchiveReport {
+        skipped: candidates.is_empty(),
+        ..Default::default()
+    };
+    if report.skipped {
+        return Ok(report);
+    }
+
+    // 1. Archive copy first (crash = duplication, never loss).
+    std::fs::create_dir_all(archive_dir)
+        .map_err(|e| format!("archive: creating {}: {e}", archive_dir.display()))?;
+    let archive_path = archive_dir.join(format!("{}.md", now.format("%Y-%m")));
+    let payload: String = candidates.iter().map(|c| c.rendered.as_str()).collect();
+    use std::io::Write as _;
+    let mut archive_file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&archive_path)
+        .map_err(|e| format!("archive: opening {}: {e}", archive_path.display()))?;
+    archive_file
+        .write_all(payload.as_bytes())
+        .map_err(|e| format!("archive: writing {}: {e}", archive_path.display()))?;
+    drop(archive_file);
+
+    // 2. Backup snapshot before the survivor rewrite.
+    let backup = crate::brain::tools::brain_file_safety::backup_before_write(memory_path)
+        .map_err(|e| format!("archive: backing up MEMORY.md: {e}"))?;
+
+    // 3. Survivor rewrite — everything the pass did not select, byte-exact.
+    let survivors: String = crate::brain::brain_sections::split_sections(&content)
+        .into_iter()
+        .filter(|s| !candidates.iter().any(|c| c.heading == s.heading.trim()))
+        .map(|s| s.render())
+        .collect();
+    std::fs::write(memory_path, survivors)
+        .map_err(|e| format!("archive: rewriting {}: {e}", memory_path.display()))?;
+
+    // 4. Beliefs ride out with their sections; the archive file carries
+    //    the content from here on (FTS keys it as archive/<YYYY-MM>.md).
+    for c in &candidates {
+        store.beliefs.remove(&c.belief_key);
+    }
+
+    report.removed_beliefs = candidates.iter().map(|c| c.belief_key.clone()).collect();
+    report.archive_path = Some(archive_path);
+    report.backup = backup;
+    report.archived = candidates;
+    Ok(report)
 }
 
 /// Result of adding a belief — indicates if a contradiction was detected.
@@ -610,6 +769,90 @@ pub fn list_cold_beliefs(max_age_days: i64) -> Vec<Belief> {
         .into_iter()
         .cloned()
         .collect()
+}
+
+/// Archive cold MEMORY.md sections into `memory/archive/YYYY-MM.md` (#1657).
+///
+/// Wraps [`archive_cold_sections_at`] with the real paths plus the durable
+/// side effects: epistemic store save, pruned-ledger `moved` records (the
+/// same mechanism RSI header moves use, so template sync never resurrects
+/// a retired section), and FTS reindex of both sides of the move so
+/// `memory_search` sees it without waiting for a restart.
+pub fn archive_cold_sections(max_age_days: i64) -> Result<ArchiveReport, String> {
+    let home = crate::config::profile::resolve_profile_home();
+    let memory_path = home.join("MEMORY.md");
+    let archive_dir = home.join("memory").join("archive");
+
+    // Core pass under the store lock; save only when something moved.
+    let report = {
+        let store = get_store();
+        let mut guard = store.lock().expect("epistemic store lock poisoned");
+        let r = archive_cold_sections_at(
+            &mut guard,
+            &memory_path,
+            &archive_dir,
+            max_age_days,
+            Utc::now(),
+        )?;
+        if !r.skipped
+            && let Some(path) = epistemic_store_path()
+            && let Err(e) = guard.save(&path)
+        {
+            tracing::warn!("archive: saving epistemic store: {e}");
+        }
+        r
+    };
+    if report.skipped {
+        return Ok(report);
+    }
+
+    // Ledger: record where each header moved. Home-relative dest so the
+    // record reads as a path a human can open (`memory/archive/2026-09.md`).
+    let archive_rel = report
+        .archive_path
+        .as_ref()
+        .and_then(|p| p.strip_prefix(&home).ok())
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_else(|| "memory/archive".to_string());
+    let mut pruned = crate::brain::rsi_pruned::PrunedState::load();
+    pruned.record_moved(
+        "MEMORY.md",
+        report
+            .archived
+            .iter()
+            .map(|c| crate::brain::rsi_pruned::MovedEntry {
+                header: c.heading.clone(),
+                dest: archive_rel.clone(),
+            })
+            .collect(),
+    );
+    if let Err(e) = pruned.save() {
+        tracing::warn!("archive: saving pruned ledger: {e}");
+    }
+
+    // Reindex both sides of the move; without a tokio runtime the startup
+    // reindex covers it on next boot rather than failing the pass.
+    let reindex_targets: Vec<PathBuf> = report
+        .archive_path
+        .iter()
+        .cloned()
+        .chain(std::iter::once(memory_path))
+        .collect();
+    if let Ok(handle) = tokio::runtime::Handle::try_current()
+        && let Ok(store) = crate::memory::get_store()
+    {
+        for path in reindex_targets {
+            handle.spawn(async move {
+                if let Err(e) = crate::memory::index_file_fts_only(store, &path).await {
+                    tracing::warn!("archive: reindexing {}: {e}", path.display());
+                }
+            });
+        }
+    } else {
+        tracing::debug!("archive: no tokio runtime, reindex deferred to startup");
+    }
+
+    Ok(report)
 }
 
 /// Run epistemic maintenance at session start: decay + backfill (#1641).
