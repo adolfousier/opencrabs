@@ -23,7 +23,9 @@ fn system_dir_launch_falls_back_to_home() {
         root.clone(),
         format!("{root}\\System32"),
         // alternate separators + case, as canonicalization may emit them
-        format!("{root}\\system32\\").replace('\\', "/").to_ascii_uppercase(),
+        format!("{root}\\system32\\")
+            .replace('\\', "/")
+            .to_ascii_uppercase(),
         format!("{root}\\SysWOW64"),
         format!("{root}\\Sysnative"),
     ] {
