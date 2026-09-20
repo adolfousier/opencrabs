@@ -21,6 +21,8 @@ fn flag(key: &str, value: &str, confidence: Confidence) -> Belief {
             last_verified: now,
         },
         notes: None,
+        hits: 0,
+        last_used: None,
     }
 }
 
