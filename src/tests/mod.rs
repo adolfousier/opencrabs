@@ -192,6 +192,7 @@ pub mod command_label_test;
 pub mod command_rich_table_test;
 mod compaction_background_test;
 pub mod compaction_fallback_chain_test;
+pub mod compaction_marker_no_brain_weld_test;
 pub mod compaction_notice_test;
 pub mod compaction_prompts_test;
 mod compaction_scope_test;

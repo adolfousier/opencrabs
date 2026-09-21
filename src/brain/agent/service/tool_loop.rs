@@ -1319,7 +1319,10 @@ impl AgentService {
                     }
 
                     // Return a brief confirmation to the user — not the full internal summary.
-                    let pct = context.usage_percentage() as u32;
+                    // `.round()`, not a truncating cast: the compaction log
+                    // line formats the same figure with `{:.0}`, and the two
+                    // printed different percentages for one event (#1676).
+                    let pct = context.usage_percentage().round() as u32;
                     let confirmation = format!(
                         "✅ Context compacted — now at {}% ({} tokens).",
                         pct, context.token_count

@@ -313,68 +313,6 @@ impl AgentService {
         }
     }
 
-    /// Build a "recovered brain" context string from key brain files.
-    ///
-    /// After compaction wipes the conversation history, this restores the agent's
-    /// core identity, user context, tool documentation, and coding standards so it
-    /// doesn't wake up with only a lossy LLM summary.
-    ///
-    /// Full files injected (~1-2k tokens total) — identity + always-enforced
-    /// rules ONLY:
-    /// - SOUL.md — personality / voice
-    /// - USER.md — who the human is, preferences
-    /// - AGENTS.md — workspace governance + the always-enforced hard rules
-    ///
-    /// Everything else is contextual and loaded ON DEMAND via `load_brain_file`,
-    /// exactly as during a normal turn: CODE.md (before code tasks), TOOLS.md
-    /// (environment/tool specifics), SECURITY.md, MEMORY.md, BOOT/HEARTBEAT.
-    /// They are NOT pre-injected here — the system prompt's "Available Context
-    /// Files" index (reassembled fresh every turn) keeps them discoverable, so
-    /// re-injecting them after compaction would just burn tokens on context the
-    /// task may not need. A one-line pointer below reminds the agent to fetch
-    /// them when relevant.
-    fn build_recovered_brain_context() -> String {
-        use std::path::PathBuf;
-
-        let full_files = [
-            ("SOUL.md", "personality / voice"),
-            ("USER.md", "user profile"),
-            ("AGENTS.md", "workspace governance + enforced hard rules"),
-        ];
-
-        let opencrabs_home = crate::config::opencrabs_home();
-        let mut files_block = String::new();
-
-        for (filename, label) in full_files {
-            let path: PathBuf = opencrabs_home.join(filename);
-            if let Ok(content) = std::fs::read_to_string(&path) {
-                let trimmed = content.trim();
-                if !trimmed.is_empty() {
-                    files_block.push_str(&format!(
-                        "--- {} ({}) ---\n{}\n\n",
-                        filename, label, trimmed
-                    ));
-                }
-            }
-        }
-
-        if files_block.is_empty() {
-            return String::from("[No brain files found — agent context limited]\n\n");
-        }
-
-        // Contextual files (CODE.md before code work, TOOLS.md for tool specifics,
-        // SECURITY/MEMORY/BOOT/HEARTBEAT) are NOT re-injected here — they load on
-        // demand like any normal turn. We don't repeat that directive: AGENTS.md
-        // (re-injected above) already owns it ("If writing code: Read CODE.md"),
-        // and the system prompt's always-present "Available Context Files" index
-        // keeps the full set discoverable. One source, no duplication.
-        format!(
-            "[RECOVERED BRAIN CONTEXT — these files define your identity, the user, and your \
-             always-enforced rules. They take priority over any contradictory inference from the \
-             summary.]\n\n{files_block}\n"
-        )
-    }
-
     /// Synchronous compaction: compute a summary and apply it to `context` in place.
     /// Used by the manual `/compact` command and the two emergency callsites that
     /// recover from "context too large" provider errors. The async path used by
@@ -1033,8 +971,15 @@ impl AgentService {
         // the marker and re-billed it on every subsequent compaction (#1649).
         // The raw tail a background compaction keeps
         // (`apply_compaction_summary_after`) covers continuation mechanically.
-        let brain_context = Self::build_recovered_brain_context();
-        let summary_with_context = format!("{}\n\n{}", brain_context, summary);
+        // No brain files are welded on either: SOUL.md, USER.md and AGENTS.md
+        // are injected into the system prompt on EVERY turn
+        // (`prompt_builder::CORE_BRAIN_FILES` / `ALWAYS_LOADED_FILES`), and
+        // `system_brain` survives compaction untouched. Welding them here
+        // duplicated ~16k tokens onto the in-memory marker while the marker
+        // persisted to the DB carried none, so the confirmation reported a
+        // size the next request never had, and the background path re-sent
+        // the duplicate on every turn until the next reload (#1676).
+        let marker_body = summary.to_string();
 
         match scope {
             CompactionScope::FullWindow => {
@@ -1046,18 +991,18 @@ impl AgentService {
                 // window and defeat the whole purpose of compacting. Pass 0
                 // so `compact_with_summary` clears everything and prepends
                 // just the summary.
-                context.compact_with_summary(summary_with_context, 0);
+                context.compact_with_summary(marker_body, 0);
             }
             CompactionScope::DeltaSinceMarker => {
                 // The prior frozen segments stay in force verbatim; only the
                 // messages the delta summary described are replaced by this
                 // new segment marker.
-                context.compact_with_delta_summary(summary_with_context);
+                context.compact_with_delta_summary(marker_body);
             }
             CompactionScope::SegmentConsolidation => {
                 // The segments merge into ONE superseding marker; the tail
                 // after the segment run is untouched.
-                context.consolidate_segments(summary_with_context);
+                context.consolidate_segments(marker_body);
             }
         }
 
