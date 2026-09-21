@@ -251,6 +251,7 @@ https://github.com/user-attachments/assets/7f45c5f8-acdf-48d5-b6a4-0e4811a9ee23
 |---------|-------------|
 | **Multi-Provider** | **Xiaomi MiMo**, Anthropic Claude, OpenAI, GitHub Copilot (uses your Copilot subscription), OpenRouter (400+ models), MiniMax, Google Gemini, z.ai GLM (General API + Coding API), Moonshot Kimi (API plan + Coding plan), Claude CLI, OpenCode CLI, Codex CLI (uses your ChatGPT/Codex subscription), Qwen Native (free OAuth with multi-account rotation), Qwen Code CLI (1k free req/day), and any OpenAI-compatible API (Ollama, LM Studio, LocalAI). Model lists fetched live from provider APIs — new models available instantly. Custom provider dialog: paste-by-default for API keys, Enter-to-load live models, typed-not-in-list models accepted and merged. Each session remembers its provider + model and restores it on switch |
 | **Fallback Providers** | Configure a chain of fallback providers — if the primary fails, each fallback is tried in sequence automatically. Any configured provider can be a fallback. Config: `[providers.fallback] providers = ["openrouter", "anthropic"]` |
+| **Per-Provider Timeouts** | `timeout_secs` caps a whole request; `stream_idle_timeout_secs` caps inter-chunk silence mid-stream before the stream is treated as dropped and retried. Defaults when unset: 3600s for CLI and local providers, 45s for z.ai on `api.z.ai` (whose host closes idle streams at ~30s), 20s for every other remote provider |
 | **Per-Provider Vision** | Set `vision_model` per provider — the LLM calls `analyze_image` as a tool, which uses the vision model on the same provider API to describe images. The chat model stays the same and gets vision capability via tool call. Gemini vision takes priority when configured. Auto-configured for known providers (e.g. MiniMax) on first run |
 | **Prompt Caching** | Caches the stable context prefix (system prompt, brain files, earlier turns) on every caching-capable provider — Anthropic native (default), OpenAI/OpenRouter (`cache_enabled`), Qwen/Alibaba (zero-config auto), Xiaomi (server-side). Averaging ~87% cache efficiency in real use; watch it live in the Cache Efficiency card of `/usage`. Big reason a larger context window stays affordable |
 | **Context Window & Auto-Compaction** | Per-provider `context_window` override (default 200k, works on every provider); transparent auto-compaction at 65% (soft, background) / 90% (hard) of the window gives effectively unlimited session memory with no manual clearing |
@@ -1278,7 +1279,7 @@ z.ai GLM (Zhipu AI) offers two endpoint types selectable during onboarding or vi
 
 Both use the same API key and model names. The endpoint type can be toggled in the onboarding wizard or `/models` dialog.
 
-The default host is `api.z.ai`, which closes an idle streaming connection after about 30 seconds; the mainland host `open.bigmodel.cn` serves the same API without that cut. To use it, or any other z.ai-compatible host, set `base_url` and it wins over `endpoint_type`:
+The default host is `api.z.ai`, which closes an idle streaming connection after about 30 seconds; the mainland host `open.bigmodel.cn` serves the same API without that cut. On `api.z.ai` the idle tolerance defaults to 45s so the host's own close is what we observe rather than our timer firing first; override it per provider with `stream_idle_timeout_secs`. To use it, or any other z.ai-compatible host, set `base_url` and it wins over `endpoint_type`:
 
 ```toml
 [providers.zai]
@@ -1558,6 +1559,28 @@ api_key = "nvapi-..."
 **Per-session provider:** Each session remembers which provider and model it was using. Switch to Claude in one session, Kimi in another — when you `/sessions` switch between them, the provider restores automatically. No need to `/models` every time. New sessions inherit the current provider.
 
 **What `enabled = false` actually means:** it only removes the provider from the default-selection scan above. It does NOT disable the provider. By-name usage ignores the flag entirely: per-session provider restoration, `/models` switching, the `[fallback]` chain, and the `[providers.fallback] vision` list can all still reach a provider marked `enabled = false`. Such a provider works perfectly fine when it has an API key, or when its CLI is authenticated and working on the same machine. Think of `enabled = false` as "not the default", not "dead" (#270).
+
+### Per-Provider Timeouts
+
+Every `[providers.*]` section accepts two independent timeouts:
+
+```toml
+[providers.anthropic]
+timeout_secs = 120              # whole-request budget
+stream_idle_timeout_secs = 45   # inter-chunk silence tolerated mid-stream
+```
+
+`stream_idle_timeout_secs` is the one that bites on long-context turns. It is not a total budget: the clock restarts on every chunk, so it only fires when the provider goes quiet for that long in a single gap. When it fires, the stream is abandoned with no stop reason and the tool loop retries the identical request, which re-sends the whole conversation.
+
+Defaults when the key is absent:
+
+| Provider | Idle tolerance |
+|---|---|
+| CLI providers (`claude_cli`, `codex_cli`, ...) and local base URLs | 3600s |
+| `zai` on the default `api.z.ai` host | 45s, deliberately above that host's own ~30s idle close |
+| Every other remote provider | 20s |
+
+`0` means "use the default", not "no timer". Raise the value if you see `Stream ended without [DONE] ... connection likely dropped` on turns with a long prefill pause: that message means our own idle timer fired, not that the network died.
 
 ### Fallback Providers
 
