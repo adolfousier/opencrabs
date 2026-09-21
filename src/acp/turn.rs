@@ -106,6 +106,15 @@ pub(crate) fn stop_reason(reason: Option<StopReason>) -> &'static str {
     }
 }
 
+/// Whether an `IntermediateText` round aggregate repeats the text live
+/// streaming already delivered this round. Whitespace is ignored on both
+/// sides: providers disagree about trailing newlines between the delta
+/// stream and the round summary. An empty aggregate is never a duplicate —
+/// emitting it would only add noise.
+pub(crate) fn round_text_is_duplicate(streamed: &str, aggregate: &str) -> bool {
+    !aggregate.trim().is_empty() && streamed.trim() == aggregate.trim()
+}
+
 /// Map loop progress to `session/update` notifications.
 ///
 /// Tool-call ids are invented here: `ProgressEvent` carries tool names but
@@ -119,12 +128,37 @@ fn progress_callback(
 ) -> ProgressCallback {
     let open_calls: Arc<StdMutex<HashMap<String, VecDeque<String>>>> =
         Arc::new(StdMutex::new(HashMap::new()));
+    // Text streamed since the last round boundary. The loop emits live
+    // deltas via `StreamingChunk` and then the round's full text again via
+    // `IntermediateText` — both map to `agent_message_chunk`, so without a
+    // guard every streamed answer renders twice on the client. Same rule as
+    // the WhatsApp handler's pre-send dedup: skip the aggregate when it
+    // repeats what streaming already delivered; emit it when it carries
+    // text the stream did not (CLI providers stream nothing).
+    let streamed: Arc<StdMutex<String>> = Arc::new(StdMutex::new(String::new()));
 
     Arc::new(move |session_id, event| {
         let update = match event {
-            ProgressEvent::StreamingChunk { text }
-            | ProgressEvent::IntermediateText { text, .. } => {
+            ProgressEvent::StreamingChunk { text } => {
+                if let Ok(mut buf) = streamed.lock() {
+                    buf.push_str(&text);
+                }
                 Some(text_chunk("agent_message_chunk", &text))
+            }
+            ProgressEvent::IntermediateText { text, .. } => {
+                let duplicate = streamed
+                    .lock()
+                    .map(|mut buf| {
+                        let dup = round_text_is_duplicate(&buf, &text);
+                        buf.clear();
+                        dup
+                    })
+                    .unwrap_or(false);
+                if duplicate {
+                    None
+                } else {
+                    Some(text_chunk("agent_message_chunk", &text))
+                }
             }
             ProgressEvent::ReasoningChunk { text } => {
                 Some(text_chunk("agent_thought_chunk", &text))
@@ -133,6 +167,11 @@ fn progress_callback(
                 tool_name,
                 tool_input,
             } => {
+                // A tool call ends the text round; round 2's stream starts
+                // fresh so its aggregate dedups against its own chunks.
+                if let Ok(mut buf) = streamed.lock() {
+                    buf.clear();
+                }
                 let call_id = Uuid::new_v4().to_string();
                 if let Ok(mut calls) = open_calls.lock() {
                     calls
