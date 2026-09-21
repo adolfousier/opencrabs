@@ -49,6 +49,7 @@ pub async fn summary(pool: Pool, window: TimeWindow) -> McAnalytics {
     let brain_verify = brain_verify_stats(pool.clone(), window).await;
     let model_tools = tool_stats_by_model(pool.clone(), window).await;
     let (rsi_last_call_ts, tool_events_since_rsi) = rsi_staleness(pool.clone()).await;
+    let decisions = decision_stats(pool.clone()).await;
     let (rsi_applied_total, rsi_top_dimensions) = rsi_stats(pool).await;
     let brain_files = collect_brain_sizes();
     let brain_total_kb = round1(brain_files.iter().map(|b| b.kb).sum::<f64>());
