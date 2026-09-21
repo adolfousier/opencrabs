@@ -170,6 +170,7 @@ pub mod channels_voice_service_test;
 pub mod chat_expand_anchor_test;
 pub mod chat_fold_deliverable_test;
 pub mod chunk_hash_cache_test;
+pub mod claude_cli_context_anchor_test;
 pub mod claude_cli_model_test;
 pub mod clear_context_test;
 pub mod cli_agent_session_resume_test;

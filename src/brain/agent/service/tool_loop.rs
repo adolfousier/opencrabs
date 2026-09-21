@@ -3918,6 +3918,15 @@ impl AgentService {
             // The "did the provider report anything" guard is `context_input()`,
             // not `input_tokens`: a fully cached prefix is a legitimate zero in
             // the billing field, and that is not the same as silence.
+            // Claude CLI reports its OWN internal cache in
+            // `context_input()`, not the prompt we sent. The calibration
+            // branch below already refuses that field for this provider;
+            // the ctx meter and the compaction budget read the same field
+            // and have to refuse it here too. Anchoring on the cache
+            // figure pushed the budget to 118% of the window on one turn
+            // and collapsed it to 2 tokens on another, so compaction both
+            // fired unprompted and stopped firing at all (#1677).
+            let is_claude_cli = self.provider_for_session(session_id).name() == "claude-cli";
             let reported_usage = response.usage.context_input() > 0;
             let tiktoken_estimate = || {
                 let baseline = self.base_context_tokens();
@@ -3939,7 +3948,7 @@ impl AgentService {
             // local-tokenizer calibration and no learned ratio. The ctx footer
             // reads `response.context_tokens` downstream and shows the user the
             // exact same prompt size the API just told us about.
-            let call_context_tokens = if reported_usage {
+            let call_context_tokens = if reported_usage && !is_claude_cli {
                 response.usage.context_input()
             } else {
                 tiktoken_estimate()
@@ -3952,6 +3961,7 @@ impl AgentService {
             // flat overhead to every call must not drag the budget up and
             // compact a context that was never close to full.
             if reported_usage
+                && !is_claude_cli
                 && !is_implausible_token_report(
                     context.token_count,
                     self.base_context_tokens() as usize,
@@ -3992,7 +4002,6 @@ impl AgentService {
             //
             // Other CLI providers (qwen-code) re-spawn cold each turn — their
             // reported context_input() IS what we sent and is calibration-worthy.
-            let is_claude_cli = self.provider_for_session(session_id).name() == "claude-cli";
             if is_cli_provider && !is_claude_cli {
                 let cli_context = response.usage.context_input() as usize;
                 if cli_context > 0 {
