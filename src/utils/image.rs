@@ -60,6 +60,56 @@ pub fn extract_react_marker_lenient(text: &str) -> (String, Option<String>) {
     extract_react_marker_inner(text, false)
 }
 
+/// Reaction-path-only companion of [`extract_react_marker_lenient`] (#1670).
+///
+/// Removes every remaining marker-shaped occurrence whose payload fails
+/// [`is_reaction_emoji`] — the empty `<<react:>>` (a model that forgot its
+/// emoji), word payloads, keyword-less `<<noise>>` brackets. Such a marker
+/// survives extraction as visible text and used to be delivered as a bubble;
+/// in a forum group that bubble landed in General, in front of a dormant
+/// topic (#1670). A reaction turn's output is a directive or the model's
+/// narration — never prose discussing the feature — so unlike the strict
+/// extractor this strips regardless of code spans and has no prose guard.
+/// Valid markers are LEFT (the extractor already consumed them; leaving them
+/// keeps this function idempotent-safe if ever called first). Unterminated
+/// openings (`<<react:` with no terminator) are LEFT: there is no close to
+/// anchor a strip to, and eating the rest of the text would be a worse leak.
+pub fn strip_invalid_react_markers(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut i = 0;
+    while i < text.len() {
+        let ch = text[i..].chars().next().expect("i lies on a char boundary");
+        if ch == '<'
+            && let Some(open_len) = match_react_open(&text[i..])
+            && let Some((rel_end, term_len)) = find_react_close(&text[i + open_len..])
+        {
+            let payload = text[i + open_len..i + open_len + rel_end].trim();
+            if !is_reaction_emoji(payload) {
+                i += open_len + rel_end + term_len; // debris: drop the marker
+                // A code-wrapped marker (`<<react:>>` in backticks) would
+                // strand its delimiters as "``" — a still-visible empty
+                // bubble. Pop one adjacent backtick from each side so the
+                // whole span disappears and the turn degrades to silence.
+                if out.ends_with('`') && text[i..].starts_with('`') {
+                    out.pop();
+                    i += 1;
+                }
+                // Collapse the spaces that framed the marker: debris in
+                // mid-sentence must leave one gap, not two. (The extractor
+                // never cared because its narration is dropped wholesale;
+                // a stripped marker keeps the narration alive.)
+                if out.ends_with(' ') && text[i..].starts_with(' ') {
+                    i += 1;
+                }
+                continue;
+            }
+        }
+        out.push(ch);
+        i += ch.len_utf8();
+    }
+    out.trim().to_string()
+}
+
 fn extract_react_marker_inner(
     text_arg: &str,
     respect_code_spans: bool,
