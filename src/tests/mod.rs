@@ -554,6 +554,7 @@ pub mod onboarding_channel_deep_link_test;
 pub mod onboarding_completion_state_test;
 pub mod onboarding_custom_model_input_test;
 pub mod onboarding_custom_model_pick_test;
+pub mod onboarding_deep_link_test;
 pub mod onboarding_endpoint_seed_test;
 pub mod onboarding_field_nav_test;
 pub mod onboarding_key_field_test;

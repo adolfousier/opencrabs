@@ -7,6 +7,7 @@
 mod brain;
 mod channels;
 mod config;
+pub mod deep_link;
 mod fetch;
 pub(crate) mod helpers;
 mod input;
