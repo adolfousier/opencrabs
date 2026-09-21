@@ -70,3 +70,19 @@ pub fn resolve<'a>(command: &str, input: &'a str) -> (DeepLink, &'a str) {
         None => (DeepLink::Unknown(head.to_string()), ""),
     }
 }
+
+/// The message shown for an unrecognised `/onboard:` suffix.
+///
+/// Naming the valid set beats opening the full wizard, which made a typo or
+/// a stale documented name indistinguishable from bare `/onboard` (#1664).
+pub fn unknown_suffix_message(suffix: &str) -> String {
+    let valid = ONBOARD_SUBCOMMANDS
+        .iter()
+        .map(|(name, _)| format!("`/onboard:{name}`"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!(
+        "⚠️ Unknown onboarding subcommand `{suffix}`. Valid: {valid}. \
+         Bare `/onboard` runs the full wizard, `/doctor` runs the health check."
+    )
+}

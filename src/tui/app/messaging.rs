@@ -790,9 +790,15 @@ impl App {
                 let (link, channel_arg) = deep_link::resolve(s, input);
                 let step = match link {
                     DeepLink::Step(step) => step,
-                    // Bare `/onboard` runs the full wizard. An unrecognised
-                    // suffix lands here too, which is #1664, handled next.
-                    DeepLink::FullWizard | DeepLink::Unknown(_) => OnboardingStep::ModeSelect,
+                    DeepLink::FullWizard => OnboardingStep::ModeSelect,
+                    // An unrecognised suffix used to fall through a catch-all
+                    // into the full wizard, so a typo and a doc row that had
+                    // outlived its arm both looked exactly like bare
+                    // `/onboard` (#1664). Name it back instead.
+                    DeepLink::Unknown(suffix) => {
+                        self.push_system_message(deep_link::unknown_suffix_message(&suffix));
+                        return true;
+                    }
                 };
                 let config = match crate::config::Config::load() {
                     Ok(c) => c,
