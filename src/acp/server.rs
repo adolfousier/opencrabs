@@ -136,7 +136,7 @@ impl AcpServer {
                     ),
                 }
             }
-            protocol::SESSION_SET_MODEL | protocol::SESSION_SET_MODE => {
+            protocol::SESSION_SET_MODEL => {
                 Self::session_set_model(state, id, params).await;
             }
             protocol::SESSION_SET_MODE => {
@@ -256,13 +256,10 @@ impl AcpServer {
     }
 
     async fn session_set_model(state: Arc<ServerState>, id: Value, params: Value) {
-        let model = params
-            .get("modelId")
-            .or_else(|| params.get("modeId"))
-            .and_then(Value::as_str);
+        let model = params.get("modelId").and_then(Value::as_str);
         let (Some(st), Some(model)) = (Self::lookup(&state, &params).await, model) else {
             let msg = if model.is_none() {
-                "session/set_model requires modelId (modeId accepted)"
+                "session/set_model requires modelId"
             } else {
                 "session/set_model: unknown session"
             };
