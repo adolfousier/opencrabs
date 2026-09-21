@@ -32,6 +32,7 @@ async fn rsi_wrap_returns_raw_when_no_fallback_configured() {
 async fn rsi_wrap_returns_raw_when_fallback_disabled() {
     let mut config = Config::default();
     config.providers.fallback = Some(FallbackProviderConfig {
+        generation: vec![],
         enabled: false,
         providers: vec!["minimax".to_string()],
         provider: None,
@@ -75,6 +76,7 @@ async fn rsi_wrap_actually_wraps_when_valid_fallback_configured() {
     );
     config.providers.custom = Some(customs);
     config.providers.fallback = Some(FallbackProviderConfig {
+        generation: vec![],
         enabled: true,
         providers: vec!["stub-fallback".to_string()],
         provider: None,
@@ -102,6 +104,7 @@ async fn rsi_wrap_actually_wraps_when_valid_fallback_configured() {
 async fn rsi_wrap_skips_fallback_with_same_name_as_primary() {
     let mut config = Config::default();
     config.providers.fallback = Some(FallbackProviderConfig {
+        generation: vec![],
         enabled: true,
         // MockProvider.name() returns "mock" — same as this fallback id.
         providers: vec!["mock".to_string()],

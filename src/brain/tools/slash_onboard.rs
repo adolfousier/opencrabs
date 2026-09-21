@@ -59,9 +59,12 @@ const IMAGE_MENU: &str = "Image setup — pick one:\n\
     • `/onboard:image gemini <GOOGLE_AI_KEY>` — Google vision + image generation (Nano Banana).\n\
     • `/onboard:image provider <VISION_MODEL>` — use your ACTIVE provider's vision model \
     (OpenAI-compatible, no extra key). e.g. `/onboard:image provider mimo-v2.5-pro`.\n\
+    • `/onboard:image generation <GENERATION_MODEL>` — route generate_image to your \
+    ACTIVE provider's images endpoint (OpenAI-compatible). e.g. `/onboard:image generation \
+    qwen-image`. Non-active providers: `[providers.fallback] generation = [\"name\"]`.\n\
     Ask the user which they want and re-run with the argument.";
 
-/// `/onboard:image [gemini <key> | provider <vision_model>]`
+/// `/onboard:image [gemini <key> | provider <vision_model> | generation <generation_model>]`
 pub(crate) fn onboard_image(args: &str) -> Result<ToolResult> {
     let args = args.trim();
     if args.is_empty() {
@@ -130,8 +133,39 @@ pub(crate) fn onboard_image(args: &str) -> Result<ToolResult> {
                  is set."
             )))
         }
+        "generation" | "generate" | "gen" => {
+            let model = rest.trim();
+            if model.is_empty() {
+                return Ok(ToolResult::error(
+                    "Need the generation model: `/onboard:image generation <GENERATION_MODEL>` \
+                     (an images-capable model on your active provider, e.g. qwen-image)."
+                        .into(),
+                ));
+            }
+            let config = match Config::load() {
+                Ok(c) => c,
+                Err(e) => return Ok(ToolResult::error(format!("Failed to load config: {e}"))),
+            };
+            let Some(section) = active_provider_section(&config) else {
+                return Ok(ToolResult::error(
+                    "No active provider. Set one up with /models or /onboard:provider first."
+                        .into(),
+                ));
+            };
+            if let Err(e) = Config::write_key(&section, "generation_model", model) {
+                return Ok(ToolResult::error(format!(
+                    "Failed to write {section}.generation_model: {e}"
+                )));
+            }
+            Ok(ToolResult::success(format!(
+                "Generation now routes through your active provider's '{model}' \
+                 (OpenAI-compatible /images/generations). To keep generating on this model \
+                 while chatting elsewhere, add it to [providers.fallback] generation. \
+                 Gemini stays last resort."
+            )))
+        }
         other => Ok(ToolResult::error(format!(
-            "Unknown image option '{other}'. Use 'gemini' or 'provider'.\n\n{IMAGE_MENU}"
+            "Unknown image option '{other}'. Use 'gemini', 'provider' or 'generation'.\n\n{IMAGE_MENU}"
         ))),
     }
 }

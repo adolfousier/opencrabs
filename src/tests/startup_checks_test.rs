@@ -94,6 +94,7 @@ fn config_with_chain(defined: &[&str], chain: &[&str]) -> Config {
         providers: ProviderConfigs {
             custom: Some(custom),
             fallback: Some(crate::config::types::FallbackProviderConfig {
+                generation: vec![],
                 enabled: true,
                 providers: chain.iter().map(|s| (*s).to_string()).collect(),
                 ..Default::default()

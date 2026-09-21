@@ -597,6 +597,7 @@ fn full_provider_sentinel() -> serde_json::Value {
 
 fn full_fallback_sentinel() -> serde_json::Value {
     let cfg = FallbackProviderConfig {
+        generation: vec![],
         enabled: true,
         provider: Some("p".into()),
         providers: vec!["p".into()],

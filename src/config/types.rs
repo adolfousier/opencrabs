@@ -2501,6 +2501,14 @@ pub struct FallbackProviderConfig {
     /// Empty = no override, scan all providers as before.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub vision: Vec<String>,
+
+    /// Ordered list of provider names to try for `generate_image`,
+    /// mirroring the `vision` chain but resolved over each provider's
+    /// `generation_model` (#1672). The session's current provider is always
+    /// tried first; this chain extends the roll, it does not replace it.
+    /// Global `[image.generation]` Gemini stays the last resort.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub generation: Vec<String>,
 }
 
 /// STT (Speech-to-Text) provider configurations

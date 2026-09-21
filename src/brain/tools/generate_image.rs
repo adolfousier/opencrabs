@@ -11,10 +11,17 @@
 //! * **OpenAI-compatible** — `POST {base_url}/images/generations` with
 //!   `Authorization: Bearer {key}` and `response_format: "b64_json"`.
 //!   Lets users point `generate_image` at OpenRouter, OpenAI, Together,
-//!   or any custom provider that exposes the OpenAI images endpoint by
-//!   setting `[providers.<name>] generation_model = "..."` in
-//!   `config.toml` (and api_key + base_url already there for chat).
-//!   img2img is NOT supported on this backend.
+//!   DashScope/Qwen-Image, or any custom provider that exposes the
+//!   OpenAI images endpoint by setting `[providers.<name>]
+//!   generation_model = "..."` in `config.toml` (and api_key + base_url
+//!   already there for chat). img2img is NOT supported on this backend.
+//!
+//! Candidate selection mirrors the vision chain (#1672, parity with
+//! #1318): the session's current provider first, then the ordered
+//! `[providers.fallback] generation` chain, then the global Gemini
+//! `[image.generation]` section strictly last — and that last leg alone
+//! is gated by `image.generation.enabled`. Resolution happens PER REQUEST
+//! from `Config::current()`, so editing the chain needs no restart.
 //!
 //! Both backends save the result as a PNG file in
 //! `~/.opencrabs/images/` and return the path.
@@ -24,34 +31,78 @@ use async_trait::async_trait;
 use serde_json::Value;
 
 const GEMINI_BASE_URL: &str = "https://generativelanguage.googleapis.com/v1beta";
-/// Substring match on the active provider's `base_url` is enough to
-/// decide which wire protocol to use — Google's images endpoint lives
-/// under this host, everyone else's `/v1/images/generations` follows the
-/// OpenAI shape.
+/// Substring match on a candidate's `base_url` is enough to decide which
+/// wire protocol to use — Google's images endpoint lives under this host,
+/// everyone else's `/v1/images/generations` follows the OpenAI shape.
 pub const GEMINI_HOST_MARKER: &str = "generativelanguage.googleapis.com";
 
 /// Which HTTP shape to use for the actual call.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum Backend {
     Gemini { api_key: String },
     OpenAi { api_key: String, base_url: String },
 }
 
-/// Image generation tool — Google Gemini or any OpenAI-compatible
-/// `/v1/images/generations` endpoint, picked at construction.
-pub struct GenerateImageTool {
+/// One resolved generation route: a wire backend plus the model to call
+/// on it. The tool holds an ordered list and rolls through at request time.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GenerationCandidate {
     backend: Backend,
     model: String,
 }
 
+impl GenerationCandidate {
+    /// `"gemini"` or `"openai"` — the wire protocol, for assertions and
+    /// logs without exposing keys.
+    pub fn backend_kind(&self) -> &'static str {
+        match &self.backend {
+            Backend::Gemini { .. } => "gemini",
+            Backend::OpenAi { .. } => "openai",
+        }
+    }
+
+    /// The model this candidate would call — read-only accessor for tests
+    /// and wiring; the model is picked at resolution time, never mutated.
+    pub fn model(&self) -> &str {
+        &self.model
+    }
+
+    /// img2img is a Gemini-only capability: the OpenAI
+    /// `/v1/images/generations` shape has no input-image slot.
+    fn supports_image_input(&self) -> bool {
+        matches!(&self.backend, Backend::Gemini { .. })
+    }
+}
+
+/// Image generation tool — walks an ordered candidate list, each on the
+/// Gemini or OpenAI-compatible wire, picked per candidate by URL shape.
+pub struct GenerateImageTool {
+    /// Pinned candidates for construction-time callers (tests, explicit
+    /// single-backend wiring). Empty = resolve from `Config::current()`
+    /// per request — the ordinary case, same lifetime contract as
+    /// `ProviderVisionTool` (#1318 → #1672).
+    pinned: Vec<GenerationCandidate>,
+}
+
+/// Setup hint emitted at request time when resolution genuinely finds
+/// nothing (mirrors `VISION_SETUP_HINT`: never a permanently-registered
+/// hint over a config that has since gained a route).
+pub const GENERATION_SETUP_HINT: &str = "Image generation is not configured. Options: \
+    `/onboard:image gemini <GOOGLE_AI_KEY>` for Gemini, or set `generation_model = \"<model>\"` \
+    on a provider section (`[providers.<name>]` / `[providers.custom.<name>]` with base_url) \
+    to route through any OpenAI-compatible `/images/generations` endpoint. Pin a non-active \
+    provider with `[providers.fallback] generation = [\"<name>\", ...]`.";
+
 impl GenerateImageTool {
-    /// Historical constructor — Gemini backend, model defaults to
-    /// whatever `cli/ui.rs` resolved from
+    /// Historical constructor — pinned single Gemini candidate, model
+    /// defaults to whatever `cli/ui.rs` resolved from
     /// `effective_generation_model(config)`.
     pub fn new(api_key: String, model: String) -> Self {
         Self {
-            backend: Backend::Gemini { api_key },
-            model,
+            pinned: vec![GenerationCandidate {
+                backend: Backend::Gemini { api_key },
+                model,
+            }],
         }
     }
 
@@ -60,39 +111,84 @@ impl GenerateImageTool {
     /// (`active_provider_generation` already normalises that).
     pub fn with_openai_backend(api_key: String, base_url: String, model: String) -> Self {
         Self {
-            backend: Backend::OpenAi { api_key, base_url },
+            pinned: vec![GenerationCandidate {
+                backend: Backend::OpenAi { api_key, base_url },
+                model,
+            }],
+        }
+    }
+
+    /// Per-request resolution mode: no pinned candidates, the chain is
+    /// rebuilt from live config on every call (#1672).
+    pub fn dynamic() -> Self {
+        Self { pinned: Vec::new() }
+    }
+
+    /// Map a factory candidate tuple `(api_key, base_url, model)` to a
+    /// backend, choosing the wire by URL shape so a Gemini-provider
+    /// override (e.g. `imagen-4.0-generate-001`) still routes through the
+    /// Gemini API rather than misfiring at an OpenAI endpoint that doesn't
+    /// exist there.
+    fn candidate_from_tuple(
+        (api_key, base_url, model): (String, String, String),
+    ) -> GenerationCandidate {
+        GenerationCandidate {
+            backend: if base_url.contains(GEMINI_HOST_MARKER) {
+                Backend::Gemini { api_key }
+            } else {
+                Backend::OpenAi { api_key, base_url }
+            },
             model,
         }
     }
 
-    /// Resolve provider config → concrete tool. Returns `None` when image
-    /// generation isn't enabled or no key is configured. Picks the
-    /// backend by `base_url` shape so a Gemini-provider override (e.g.
-    /// `imagen-4.0-generate-001`) still routes through the Gemini API
-    /// rather than misfiring at an OpenAI endpoint that doesn't exist
-    /// there.
-    pub fn from_config(config: &crate::config::Config) -> Option<Self> {
+    /// Global Gemini fallback leg — ONLY `[image.generation]` consults
+    /// `enabled`; provider routes are never vetoed by it (#1672, gap 2).
+    fn global_gemini_candidate(config: &crate::config::Config) -> Option<GenerationCandidate> {
         if !config.image.generation.enabled {
             return None;
         }
-        // Per-provider override wins. Backend chosen by URL shape so
-        // `generation_model = "imagen-4.0-generate-001"` on the Gemini
-        // provider stays on the Gemini wire, while the same field on an
-        // OpenRouter / OpenAI / custom provider takes the
-        // `/v1/images/generations` path.
-        if let Some((api_key, base_url, model)) =
-            crate::brain::provider::factory::active_provider_generation(config)
-        {
-            return Some(if base_url.contains(GEMINI_HOST_MARKER) {
-                Self::new(api_key, model)
-            } else {
-                Self::with_openai_backend(api_key, base_url, model)
-            });
-        }
-        // No provider override — fall back to the global image.generation
-        // config (Gemini-only, since the seeded path is Google's).
         let api_key = config.image.generation.api_key.as_ref()?.clone();
-        Some(Self::new(api_key, config.image.generation.model.clone()))
+        Some(GenerationCandidate {
+            backend: Backend::Gemini { api_key },
+            model: config.image.generation.model.clone(),
+        })
+    }
+
+    /// The ordered candidate list THIS config would roll: provider chain
+    /// (session provider → `[providers.fallback] generation`) then the
+    /// global Gemini fallback, deduped. Exposed for tests and wiring;
+    /// `execute` rebuilds it per request from `Config::current()`.
+    pub fn plan_candidates(
+        config: &crate::config::Config,
+        session_provider: Option<&str>,
+    ) -> Vec<GenerationCandidate> {
+        let mut out: Vec<GenerationCandidate> =
+            crate::brain::provider::factory::generation_candidates_for(config, session_provider)
+                .into_iter()
+                .map(Self::candidate_from_tuple)
+                .collect();
+        if let Some(global) = Self::global_gemini_candidate(config)
+            && !out.contains(&global)
+        {
+            out.push(global);
+        }
+        out
+    }
+
+    /// Resolve provider config → concrete tool. Returns `None` only when
+    /// NO generation route exists at all: a provider candidate (active or
+    /// chain, Gemini flag irrelevant) or the enabled global Gemini leg.
+    /// The returned tool re-resolves per request, so registration
+    /// existence is a coarse gate and the fine answer happens at call
+    /// time (#1672, mirrors the unconditional `analyze_image` registration
+    /// from #1318).
+    pub fn from_config(config: &crate::config::Config) -> Option<Self> {
+        if !Self::plan_candidates(config, None).is_empty() {
+            Some(Self::dynamic())
+        } else {
+            None
+        }
     }
 }
 
@@ -143,7 +239,7 @@ impl Tool for GenerateImageTool {
     async fn execute(
         &self,
         input: Value,
-        _context: &ToolExecutionContext,
+        context: &ToolExecutionContext,
     ) -> super::error::Result<ToolResult> {
         let prompt = match input["prompt"].as_str() {
             Some(p) if !p.is_empty() => p.to_string(),
@@ -188,28 +284,109 @@ impl Tool for GenerateImageTool {
         }
         let save_path = images_dir.join(&filename);
 
-        match &self.backend {
-            Backend::Gemini { api_key } => {
-                self.execute_gemini(&prompt, image.as_deref(), api_key, &save_path)
-                    .await
-            }
-            Backend::OpenAi { api_key, base_url } => {
-                self.execute_openai(&prompt, image.as_deref(), api_key, base_url, &save_path)
-                    .await
+        // Resolve the roll list: pinned at construction wins; otherwise
+        // rebuild from live config per request so a `[providers.fallback]
+        // generation` edit takes effect without a restart (#1672, same
+        // lifetime contract `ProviderVisionTool` established in #1318).
+        let mut candidates = if self.pinned.is_empty() {
+            let config = crate::config::Config::current();
+            Self::plan_candidates(&config, context.session_provider.as_deref())
+        } else {
+            self.pinned.clone()
+        };
+
+        if candidates.is_empty() {
+            return Ok(ToolResult::error(GENERATION_SETUP_HINT.to_string()));
+        }
+
+        // img2img is a Gemini-only capability — an OpenAI-compatible
+        // candidate would reject it mid-roll and burn the request. Filter
+        // up front so the instruction is clear when NOTHING can take it.
+        if image.is_some() {
+            candidates.retain(GenerationCandidate::supports_image_input);
+            if candidates.is_empty() {
+                return Ok(ToolResult::error(
+                    "No Gemini-backend candidate is configured, and img2img input images \
+                     require the Gemini backend. Either set up Gemini (`/onboard:image \
+                     gemini <key>`) or retry without the `image` parameter."
+                        .to_string(),
+                ));
             }
         }
+
+        // Roll through candidates in order: a failure logs and tries the
+        // next; the aggregate error is returned only when all fail.
+        let mut failures: Vec<String> = Vec::new();
+        for candidate in &candidates {
+            let attempt = match &candidate.backend {
+                Backend::Gemini { api_key } => {
+                    Self::execute_gemini(
+                        &candidate.model,
+                        &prompt,
+                        image.as_deref(),
+                        api_key,
+                        &save_path,
+                    )
+                    .await
+                }
+                Backend::OpenAi { api_key, base_url } => {
+                    Self::execute_openai(
+                        &candidate.model,
+                        &prompt,
+                        image.as_deref(),
+                        api_key,
+                        base_url,
+                        &save_path,
+                    )
+                    .await
+                }
+            };
+            match attempt {
+                Ok(result) if result.success => return Ok(result),
+                Ok(result) => {
+                    let msg = result.error.unwrap_or_else(|| result.output.clone());
+                    tracing::warn!(
+                        "generate_image: {} candidate '{}' failed: {msg}",
+                        candidate.backend_kind(),
+                        candidate.model
+                    );
+                    failures.push(format!(
+                        "{}({}): {msg}",
+                        candidate.backend_kind(),
+                        candidate.model
+                    ));
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        "generate_image: {} candidate '{}' errored: {e}",
+                        candidate.backend_kind(),
+                        candidate.model
+                    );
+                    failures.push(format!(
+                        "{}({}): {e}",
+                        candidate.backend_kind(),
+                        candidate.model
+                    ));
+                }
+            }
+        }
+        Ok(ToolResult::error(format!(
+            "All {} image generation candidates failed — {}",
+            candidates.len(),
+            failures.join(" | ")
+        )))
     }
 }
 
 impl GenerateImageTool {
     async fn execute_gemini(
-        &self,
+        model: &str,
         prompt: &str,
         image: Option<&str>,
         api_key: &str,
         save_path: &std::path::Path,
     ) -> super::error::Result<ToolResult> {
-        let url = format!("{}/models/{}:generateContent", GEMINI_BASE_URL, self.model);
+        let url = format!("{}/models/{}:generateContent", GEMINI_BASE_URL, model);
 
         // Build parts list: optional input image first, then the text prompt.
         let mut parts: Vec<Value> = Vec::with_capacity(2);
@@ -292,15 +469,15 @@ impl GenerateImageTool {
     }
 
     async fn execute_openai(
-        &self,
+        model: &str,
         prompt: &str,
         image: Option<&str>,
         api_key: &str,
         base_url: &str,
         save_path: &std::path::Path,
     ) -> super::error::Result<ToolResult> {
-        // img2img is a Gemini-only capability — the OpenAI
-        // `/v1/images/generations` endpoint has no input-image slot.
+        // Defensive: `execute` filters img2img requests down to Gemini
+        // candidates before ever reaching this backend.
         if image.is_some() {
             return Ok(ToolResult::error(
                 "The active image generation backend (OpenAI-compatible) does not support \
@@ -316,7 +493,7 @@ impl GenerateImageTool {
         // emit URLs fall through into the URL-fetch branch below.
         let url = format!("{}/images/generations", base_url.trim_end_matches('/'));
         let body = serde_json::json!({
-            "model": self.model,
+            "model": model,
             "prompt": prompt,
             "n": 1,
             "response_format": "b64_json",
