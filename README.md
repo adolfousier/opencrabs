@@ -54,6 +54,7 @@
 - [📝 Configuration](#-configuration)
 - [🛠️ Configuration (config.toml)](#-configuration-configtoml)
 - [🧠 Epistemic Engine](#-epistemic-engine)
+- [♻️ Decision Cache (`[decisions]`)](#-decision-cache-decisions)
 - [🛡️ Safety Gates (~/.opencrabs/safety/)](#-safety-gates-opencrabssafety)
 - [📋 Commands (commands.toml)](#-commands-commandstoml)
 - [🔌 Dynamic Tools (tools.toml)](#-dynamic-tools-toolstoml)
@@ -96,6 +97,7 @@ The docs and the landing at [opencrabs.com](https://opencrabs.com) are available
 - [Adding New Providers](src/docs/reference/ADDING_NEW_PROVIDERS.md)
 - [Plan JSON Specification](src/docs/reference/plans/plan-json-spec.md)
 - [Dynamic Workflows Guide](src/docs/reference/DYNAMIC_WORKFLOWS.md) — orchestrate agents with scripts: fan-out, pipelines, structured outputs, checkpointing
+- [Decision Cache](src/docs/reference/DECISIONS.md): L1 exact-decision reuse ring, `[decisions]` tiers, shadow/live/off modes, accounting, release-day evaluation (#1648)
 
 ### Brain File Templates
 - [SOUL.md](src/docs/reference/templates/SOUL.md) — personality and voice
@@ -984,6 +986,31 @@ When OpenCrabs starts (or the daemon first loads the epistemic store):
 4. **Ready** — the store is available for `memory_search` and `recall_for`
 
 The entire sequence runs once per process lifetime via `OnceLock`.
+
+---
+
+## ♻️ Decision Cache (`[decisions]`)
+
+Classification-shaped decisions (triage, routing, voice gates, draft scoring, self-audit) are re-paid in full model price even when the input is an exact repeat. The L1 reuse ring (#1648) closes that gap: the `decide_cached` tool keys answers on `sha256(tier + policy_version + normalizer + canonicalized input)` and serves exact repeats without a model call. Timestamps, UUIDs, IPs and paths are masked at canonicalization, so volatile fields can neither defeat reuse nor cause stale reuse.
+
+Every tier starts in **shadow** mode: the model is always asked, identical to a plain call, while would-hits are counted. Promotion to **live** is a per-tier, operator-made call backed by measured evidence, never a code default. `mode = "off"` is the kill switch: the exact pre-feature path, touching no cache and no counters.
+
+```toml
+# One ring per decision family; a tier with no entry does not exist.
+[decisions.tiers.triage]
+policy_version = "1"       # required; bump it when the policy changes
+mode = "shadow"            # shadow (default) | live | off
+ttl_hours = 336            # optional; stale rows pruned at startup
+margin_floor = 0.2         # optional write gate; borderline decisions stay live
+```
+
+Accounting is built in: `/usage` prints a per-tier decisions block (calls,
+would-hit, live-hit, rows cached, estimated calls avoided) only where counters
+exist, the Mission Control report carries the same table, and a startup sweep
+expires rows past `ttl_hours`. Release-day evaluation bar: a tier earns
+promotion consideration at >= 30% would-hit over >= 100 calls; an unmeasured
+feature is removed, not extended. Full reference:
+[DECISIONS.md](src/docs/reference/DECISIONS.md).
 
 ---
 

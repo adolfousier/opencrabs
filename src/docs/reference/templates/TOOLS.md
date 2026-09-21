@@ -50,6 +50,10 @@ Skill pointers, command/tool/skill distinction, profile-aware paths, custom rout
 
 Tool = function the agent calls (`bash`, `grep`); command = slash shortcut in commands.toml (`/check`); skill = workflow template loaded on demand (`/browser-cdp`).
 
+## Decision reuse ring (`decide_cached`, #1648)
+
+`decide_cached` asks a decision-shaped question through the L1 exact-reuse cache: `tier` (a `[decisions.tiers.<name>]` ring), `input` (the keyed context), `ask` (the miss-time question). Default mode is `shadow`: the model is always called and would-hits are counted for release-day evaluation; `live` serves fresh exact repeats without a call; `off` is the kill switch. An unconfigured tier is a named error, never an implicit default. Promotion to `live` is an operator decision (bar: >= 30% would-hit over >= 100 calls). Full reference: `src/docs/reference/DECISIONS.md`.
+
 ## Skill `globs:` frontmatter (path-scoped skill gate, #150)
 
 A `SKILL.md` may declare `globs:` so its topic is ENFORCED, not advisory: a tool call referencing a matching path is rejected (with the full skill body in the rejection) when the skill body is not in the current session context (fresh session or after compaction); the identical retry succeeds. Accepted forms — Cursor comma-string `globs: a/**, b.md`, inline flow `globs: [a/**, b.md]`, block list — quotes stripped; `metadata.globs` is ignored.

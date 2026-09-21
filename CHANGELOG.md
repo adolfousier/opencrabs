@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### ✨ Features
+
+- **decisions**: L1 tiered decision cache (#1648): `decide_cached` tool, `[decisions.tiers.<name>]` config with shadow/live/off modes, `/usage` + Mission Control accounting, startup TTL sweep. Shadow-first; release-day evaluation bar >= 30% would-hit over >= 100 calls per tier
+
 ## [0.5.3] - 2026-09-20
 
 121 commits since v0.5.2, 7 contributors. 192 files changed, +12,304 / -1,709 lines.
