@@ -210,6 +210,19 @@ pub fn replay_updates(messages: &[crate::db::models::Message]) -> Vec<Value> {
     out
 }
 
+/// Context usage to restore on `session/load`: the provider's own
+/// measurement (`input_tokens`) from the last assistant row — the doc on
+/// that column calls it "the authoritative last known context size", so the
+/// meter shows a real number, never a tokenized estimate. `None` when the
+/// session predates usage persistence; the caller decides the fallback.
+pub fn replay_usage(messages: &[crate::db::models::Message]) -> Option<i64> {
+    messages
+        .iter()
+        .rev()
+        .find(|m| m.role == "assistant")
+        .and_then(|m| m.input_tokens)
+}
+
 /// `initialize` result: protocol version plus the capabilities we honor.
 /// fs/terminal are false — MonoCode's adapter declares them false too, so
 /// file ops stay on the agent side where the tool loop already has them.
