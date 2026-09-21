@@ -2758,11 +2758,15 @@ impl AgentService {
                 {
                     // Timeout covers the new handshake-timeout path: a wedged
                     // local server that accepts TCP but never emits headers.
-                    // Funnel it into the same 3-retry + fallback chain as
+                    // Funnel it into the same MAX_STREAM_RETRIES + fallback chain as
                     // mid-stream StreamError so the user sees recovery
                     // activity instead of a dead turn.
                     let err_msg = e.to_string();
-                    tracing::warn!("Mid-stream error: {} — retrying up to 3 times", err_msg);
+                    tracing::warn!(
+                        "Mid-stream error: {} — retrying up to {} times",
+                        err_msg,
+                        MAX_STREAM_RETRIES
+                    );
                     let primary_from_name = self.provider_name_for_session(session_id);
                     let actual_model = {
                         let p = self.provider_for_session(session_id);
@@ -2899,9 +2903,9 @@ impl AgentService {
                                 session_id,
                                 ProgressEvent::SelfHealingAlert {
                                     message: format!(
-                                        "Continuation request to '{}/{}' failed after 3 retries: {}. \
+                                        "Continuation request to '{}/{}' failed after {} retries: {}. \
                                          Leaving the previous response truncated.",
-                                        active_name, model_name, err_snippet,
+                                        active_name, model_name, MAX_STREAM_RETRIES, err_snippet,
                                     ),
                                 },
                             );
@@ -2931,9 +2935,10 @@ impl AgentService {
                                 session_id,
                                 ProgressEvent::SelfHealingAlert {
                                     message: format!(
-                                        "Stream error on '{}/{}' after 3 retries: {}. {}",
+                                        "Stream error on '{}/{}' after {} retries: {}. {}",
                                         active_name,
                                         model_name,
+                                        MAX_STREAM_RETRIES,
                                         err_snippet,
                                         if self.has_fallback_provider() {
                                             "Switching to fallback provider..."
@@ -3000,7 +3005,7 @@ impl AgentService {
                             // Tell the user which fallback we're attempting —
                             // the earlier "Switching to fallback provider..."
                             // banner named the origin but not the destination,
-                            // so after 3 retries users saw a provider swap
+                            // so once the retries were exhausted users saw a provider swap
                             // with no hint what they're now talking to.
                             if let Some(ref cb) = progress_callback {
                                 cb(
@@ -3192,11 +3197,15 @@ impl AgentService {
                 Err(e) if matches!(&e, crate::brain::provider::ProviderError::ApiError { status, .. } if *status >= 500 && *status < 600) =>
                 {
                     // 5xx upstream errors (500/502/503/504) are transient — retry
-                    // up to 3 times with backoff before falling back, same as
+                    // up to MAX_STREAM_RETRIES times with backoff before falling back, same as
                     // StreamError/Timeout. Without this the user sees a hard
                     // failure on every blip from the provider.
                     let err_msg = e.to_string();
-                    tracing::warn!("Upstream 5xx error: {} — retrying up to 3 times", err_msg);
+                    tracing::warn!(
+                        "Upstream 5xx error: {} — retrying up to {} times",
+                        err_msg,
+                        MAX_STREAM_RETRIES
+                    );
                     let primary_from_name = self.provider_name_for_session(session_id);
                     let actual_model = {
                         let p = self.provider_for_session(session_id);
@@ -3318,9 +3327,10 @@ impl AgentService {
                                 session_id,
                                 ProgressEvent::SelfHealingAlert {
                                     message: format!(
-                                        "5xx error on '{}/{}' after 3 retries. {}",
+                                        "5xx error on '{}/{}' after {} retries. {}",
                                         active_name,
                                         model_name,
+                                        MAX_STREAM_RETRIES,
                                         if self.has_fallback_provider() {
                                             "Switching to fallback provider..."
                                         } else {
