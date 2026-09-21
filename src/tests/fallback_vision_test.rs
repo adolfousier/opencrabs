@@ -16,8 +16,23 @@ mod fallback_chain {
     }
 
     #[test]
+    fn generation_chain_parses_and_defaults_empty() {
+        // #1672: the ordered image-generation provider chain.
+        let cfg: FallbackProviderConfig =
+            toml::from_str("generation = [\"qwen-image\", \"openrouter\"]")
+                .expect("generation chain must parse");
+        assert_eq!(
+            cfg.generation,
+            ["qwen-image".to_string(), "openrouter".to_string()]
+        );
+        let bare = FallbackProviderConfig::default();
+        assert!(bare.generation.is_empty());
+    }
+
+    #[test]
     fn legacy_single_provider() {
         let cfg = FallbackProviderConfig {
+            generation: vec![],
             enabled: true,
             provider: Some("openrouter".into()),
             providers: vec![],
@@ -29,6 +44,7 @@ mod fallback_chain {
     #[test]
     fn providers_array_only() {
         let cfg = FallbackProviderConfig {
+            generation: vec![],
             enabled: true,
             provider: None,
             providers: vec!["anthropic".into(), "openai".into()],
@@ -40,6 +56,7 @@ mod fallback_chain {
     #[test]
     fn array_plus_legacy_appended() {
         let cfg = FallbackProviderConfig {
+            generation: vec![],
             enabled: true,
             provider: Some("gemini".into()),
             providers: vec!["anthropic".into(), "openai".into()],
@@ -51,6 +68,7 @@ mod fallback_chain {
     #[test]
     fn legacy_deduped_if_already_in_array() {
         let cfg = FallbackProviderConfig {
+            generation: vec![],
             enabled: true,
             provider: Some("anthropic".into()),
             providers: vec!["anthropic".into(), "openai".into()],
@@ -63,6 +81,7 @@ mod fallback_chain {
     #[test]
     fn single_provider_in_array() {
         let cfg = FallbackProviderConfig {
+            generation: vec![],
             enabled: true,
             provider: None,
             providers: vec!["minimax".into()],
@@ -471,6 +490,7 @@ mod factory_fallback {
                     ..Default::default()
                 }),
                 fallback: Some(FallbackProviderConfig {
+                    generation: vec![],
                     enabled: false,
                     provider: Some("anthropic".into()),
                     providers: vec![],
@@ -507,6 +527,7 @@ mod factory_fallback {
         let config = Config {
             providers: ProviderConfigs {
                 fallback: Some(FallbackProviderConfig {
+                    generation: vec![],
                     enabled: true,
                     provider: None,
                     providers: vec!["anthropic".into(), "openai".into()],
@@ -753,6 +774,7 @@ mod vision_fallback_chain {
         // Empty vision chain = no override, scan-all still works.
         let mut config = two_providers_config();
         config.providers.fallback = Some(FallbackProviderConfig {
+            generation: vec![],
             enabled: true,
             vision: vec![],
             ..Default::default()
@@ -786,6 +808,7 @@ mod vision_fallback_chain {
         // It is not in the chain, so it must not be tried.
         let mut config = two_providers_config();
         config.providers.fallback = Some(FallbackProviderConfig {
+            generation: vec![],
             enabled: true,
             vision: vec!["minimax".into()],
             ..Default::default()
@@ -801,6 +824,7 @@ mod vision_fallback_chain {
         // Owner contract (#1318): current provider, then chain, then Gemini.
         let mut config = two_providers_config();
         config.providers.fallback = Some(FallbackProviderConfig {
+            generation: vec![],
             enabled: true,
             vision: vec!["minimax".into()],
             ..Default::default()
@@ -816,6 +840,7 @@ mod vision_fallback_chain {
     fn a_session_provider_already_in_the_chain_is_not_tried_twice() {
         let mut config = two_providers_config();
         config.providers.fallback = Some(FallbackProviderConfig {
+            generation: vec![],
             enabled: true,
             vision: vec!["minimax".into(), "openai".into()],
             ..Default::default()
@@ -834,6 +859,7 @@ mod vision_fallback_chain {
         let mut config = two_providers_config();
         config.providers.openai.as_mut().unwrap().vision_model = None;
         config.providers.fallback = Some(FallbackProviderConfig {
+            generation: vec![],
             enabled: true,
             vision: vec!["minimax".into()],
             ..Default::default()
@@ -871,6 +897,7 @@ mod vision_fallback_chain {
         let mut config = two_providers_config();
         config.providers.openai.as_mut().unwrap().vision_model = None;
         config.providers.fallback = Some(FallbackProviderConfig {
+            generation: vec![],
             enabled: true,
             vision: vec!["openai".into(), "minimax".into()],
             ..Default::default()
@@ -891,6 +918,7 @@ mod vision_fallback_chain {
         let mut config = two_providers_config();
         config.providers.minimax.as_mut().unwrap().enabled = false;
         config.providers.fallback = Some(FallbackProviderConfig {
+            generation: vec![],
             enabled: true,
             vision: vec!["minimax".into()],
             ..Default::default()
@@ -911,6 +939,7 @@ mod vision_fallback_chain {
         let mut config = two_providers_config();
         config.providers.openai.as_mut().unwrap().vision_model = None;
         config.providers.fallback = Some(FallbackProviderConfig {
+            generation: vec![],
             enabled: true,
             vision: vec!["openai".into()],
             ..Default::default()
@@ -928,6 +957,7 @@ mod vision_fallback_chain {
         // Chain entry references a provider that doesn't exist in config.
         let mut config = two_providers_config();
         config.providers.fallback = Some(FallbackProviderConfig {
+            generation: vec![],
             enabled: true,
             vision: vec!["nonexistent".into()],
             ..Default::default()
@@ -1012,6 +1042,7 @@ mod vision_fallback_chain {
         config.providers.openai.as_mut().unwrap().vision_model = None;
         config.providers.minimax.as_mut().unwrap().vision_model = None;
         config.providers.fallback = Some(FallbackProviderConfig {
+            generation: vec![],
             enabled: true,
             vision: vec!["nonexistent".into(), "openai".into(), "minimax".into()],
             ..Default::default()
@@ -1038,6 +1069,7 @@ mod vision_fallback_chain {
         let mut config = two_providers_config();
         config.providers.custom = Some(custom);
         config.providers.fallback = Some(FallbackProviderConfig {
+            generation: vec![],
             enabled: true,
             vision: vec!["localllm".into()],
             ..Default::default()
@@ -1068,6 +1100,7 @@ mod vision_fallback_chain {
         let mut config = two_providers_config();
         config.providers.custom = Some(custom);
         config.providers.fallback = Some(FallbackProviderConfig {
+            generation: vec![],
             enabled: true,
             vision: vec!["custom:myvision".into()],
             ..Default::default()

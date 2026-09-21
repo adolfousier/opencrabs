@@ -780,41 +780,25 @@ impl App {
                 self.push_system_message(reply);
                 true
             }
-            // `/models` IS `/onboard:provider` without progress dots — the exact
-            // same shared provider/model picker. One implementation, so a change
-            // to the picker affects both; no separate ModelSelector dialog.
             s if s.starts_with("/onboard") || s == "/doctor" || s == "/models" => {
                 use crate::tui::onboarding::OnboardingStep;
-                // Use the full input (not just the first word) so arguments
-                // like `/onboard:channels whatsapp` are preserved. The `cmd`
-                // variable only holds the first word, which drops the channel
-                // name and causes the deep-link to fall back to the menu.
-                let suffix = if s == "/doctor" {
-                    "health"
-                } else if s == "/models" {
-                    "provider"
-                } else {
-                    input
-                        .strip_prefix("/onboard")
-                        .unwrap_or("")
-                        .trim_start_matches(':')
-                };
-                // `/onboard:channels whatsapp` (and telegram/slack/discord/
-                // trello) jumps straight into that channel's setup dialog;
-                // bare `/onboard:channels` opens the channel-selection menu.
-                let mut suffix_parts = suffix.split_whitespace();
-                let head = suffix_parts.next().unwrap_or("");
-                let channel_arg = suffix_parts.next().unwrap_or("");
-                let step = match head {
-                    "provider" => OnboardingStep::ProviderAuth,
-                    "workspace" => OnboardingStep::Workspace,
-                    "channels" => OnboardingStep::Channels,
-                    "voice" => OnboardingStep::VoiceSetup,
-                    "image" => OnboardingStep::ImageSetup,
-                    "daemon" => OnboardingStep::Daemon,
-                    "health" => OnboardingStep::HealthCheck,
-                    "brain" => OnboardingStep::BrainSetup,
-                    _ => OnboardingStep::ModeSelect,
+                use crate::tui::onboarding::deep_link::{self, DeepLink};
+                // Resolution reads the full input, not just the first word, so
+                // arguments like `/onboard:channels whatsapp` survive: `cmd`
+                // holds only the first word, which drops the channel name and
+                // sends the deep-link back to the menu.
+                let (link, channel_arg) = deep_link::resolve(s, input);
+                let step = match link {
+                    DeepLink::Step(step) => step,
+                    DeepLink::FullWizard => OnboardingStep::ModeSelect,
+                    // An unrecognised suffix used to fall through a catch-all
+                    // into the full wizard, so a typo and a doc row that had
+                    // outlived its arm both looked exactly like bare
+                    // `/onboard` (#1664). Name it back instead.
+                    DeepLink::Unknown(suffix) => {
+                        self.push_system_message(deep_link::unknown_suffix_message(&suffix));
+                        return true;
+                    }
                 };
                 let config = match crate::config::Config::load() {
                     Ok(c) => c,

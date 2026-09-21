@@ -1,12 +1,13 @@
 //! Onboarding Wizard
 //!
-//! A 7-step TUI-based onboarding wizard for first-time OpenCrabs users.
-//! Handles mode selection, provider/auth setup, workspace, gateway,
-//! channels, daemon installation, and health check.
+//! A TUI-based onboarding wizard for first-time OpenCrabs users.
+//! Handles mode selection, provider/auth setup, workspace, channels,
+//! voice, image, daemon installation, health check and brain setup.
 
 mod brain;
 mod channels;
 mod config;
+pub mod deep_link;
 mod fetch;
 pub(crate) mod helpers;
 mod input;

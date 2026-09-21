@@ -296,6 +296,14 @@ providers = ["openrouter", "anthropic"]  # Tried in order on failure
 # Empty or absent = scan all providers as before.
 # vision = ["minimax", "anthropic"]
 
+# Image-generation provider priority (#1672) — ordered chain tried by
+# generate_image after the session's current provider. Each entry is a
+# provider name (e.g. "openrouter", or the key of a [providers.custom.<name>]
+# section); the model is that provider's `generation_model`, endpoints are
+# derived and never guessed. The global Gemini [image.generation] section
+# stays the LAST resort and is the only leg gated by its `enabled` flag.
+# generation = ["qwen-image", "openrouter"]
+
 # ========================================
 # STT (Speech-to-Text) Providers
 # ========================================
@@ -485,11 +493,14 @@ enabled = false
 model = "gemini-3.1-flash-image-preview"   # Gemini image-gen model ("Nano Banana")
 # Override the model per-provider by setting `generation_model` under
 # `[providers.<name>]` — e.g. `imagen-4.0-generate-001` on gemini, or
-# `gpt-image-1` / `black-forest-labs/flux-1.1-pro` on any OpenAI-
-# compatible provider (openai, openrouter, custom, …). When the active
-# provider has the field set, generate_image picks the right wire
-# backend automatically: Gemini host → Gemini API, anything else →
-# `/v1/images/generations` with Bearer auth.
+# `gpt-image-1` / `black-forest-labs/flux-1.1-pro` / `qwen-image` on any
+# OpenAI-compatible provider (openai, openrouter, DashScope-backed custom
+# sections, …). Provider candidates are tried in order: the session's
+# current provider first, then `[providers.fallback] generation` above;
+# the backend wire is picked automatically (Gemini host → Gemini API,
+# anything else → `/v1/images/generations` with Bearer auth). This
+# `enabled` flag gates ONLY the global Gemini fallback below — a provider
+# route registers generate_image even with it off (#1672).
 
 # ========================================
 # Vision setup — two paths, pick one
@@ -717,9 +728,9 @@ port = 18790            # A2A gateway port
 enabled = true
 # MCP is enabled by default as its free. If want through API its free up to 1000 requests. API key goes in keys.toml: [providers.web_search.exa] api_key = "..."
 
-[providers.web_search.duckduckgo]
-enabled = true
-# Completely free, enabled by default"
+# Duck Duck Go needs no section of its own: it is built into web_search,
+# always available and free. A table for it is not part of the schema, so one
+# here would be discarded and reported back as an unrecognized config key.
 
 [providers.web_search.brave]
 enabled = false

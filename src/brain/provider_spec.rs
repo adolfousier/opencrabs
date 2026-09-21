@@ -50,6 +50,12 @@ impl ProviderKey {
         provider: "[providers.fallback] vision",
         model: "that provider's own vision_model",
     };
+    /// One entry of `[providers.fallback] generation` (#1672); the model is
+    /// the provider's `generation_model`.
+    pub const FALLBACK_GENERATION: Self = Self {
+        provider: "[providers.fallback] generation",
+        model: "that provider's own generation_model",
+    };
 }
 
 /// The provider and optional model a key resolves to, after normalisation.

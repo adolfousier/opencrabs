@@ -873,6 +873,18 @@ pub(crate) fn normalized_vision_chain(config: &Config) -> Vec<String> {
     )
 }
 
+/// `[providers.fallback] generation` with every entry normalised (#1672).
+pub(crate) fn normalized_generation_chain(config: &Config) -> Vec<String> {
+    let Some(fallback) = config.providers.fallback.as_ref() else {
+        return Vec::new();
+    };
+    normalized_names(
+        config,
+        crate::brain::provider_spec::ProviderKey::FALLBACK_GENERATION,
+        &fallback.generation,
+    )
+}
+
 /// Create fallback provider
 async fn create_fallback(config: &Config, fallback_type: &str) -> Result<Arc<dyn Provider>> {
     // Custom entries take precedence over built-in names. If the user
@@ -1230,23 +1242,226 @@ pub fn active_provider_generation(config: &Config) -> Option<(String, String, St
             .base_url
             .clone()
             .unwrap_or_else(|| "https://api.openai.com/v1".to_string());
-        let base_url = raw
-            .trim_end_matches("/chat/completions")
-            .trim_end_matches('/')
-            .to_string();
+        let base_url = generation_root_url(&raw);
         return Some((api_key, base_url, generation_model.clone()));
     }
     None
 }
 
-/// Final model name to hand to `GenerateImageTool` — active provider's
-/// `generation_model` override wins, otherwise fall back to the global
-/// `image.generation.model`. Keeps the resolution decision next to its
-/// vision counterpart so call sites stay plain wiring.
+/// Final model name to hand to `GenerateImageTool` — first resolved
+/// generation candidate (session provider's `generation_model`, then the
+/// `[providers.fallback] generation` chain) wins, otherwise fall back to the
+/// global `image.generation.model`. Keeps the resolution decision next to
+/// its vision counterpart so call sites stay plain wiring.
 pub fn effective_generation_model(config: &Config) -> String {
-    active_provider_generation(config)
-        .map(|(_, _, m)| m)
+    generation_candidates_for(config, None)
+        .first()
+        .map(|(_, _, m)| m.clone())
         .unwrap_or_else(|| config.image.generation.model.clone())
+}
+
+/// Normalise an endpoint for the OpenAI-style `/images/generations` route:
+/// strip a chat suffix and trailing slashes so callers can append the
+/// images segment. Accepts the three URL shapes users paste into
+/// provider config: `…/v1`, `…/v1/chat/completions`, or the bare host root.
+fn generation_root_url(url: &str) -> String {
+    url.trim_end_matches("/chat/completions")
+        .trim_end_matches('/')
+        .to_string()
+}
+
+/// Marker endpoint for the built-in Gemini provider's `generation_model`.
+/// `GenerateImageTool` detects the Google host marker and routes through
+/// the native Gemini wire (which builds its own URL); this string exists
+/// so the candidate carries the right backend signal, it is never called
+/// as-is.
+const GEMINI_GENERATION_MARKER_URL: &str = "https://generativelanguage.googleapis.com/v1beta";
+
+/// Generation endpoint for a built-in provider, derived the way the vision
+/// path derives it (#430 rule, applied to generation for #1672): explicit
+/// `base_url` first, then known per-provider defaults, and NEVER guessing
+/// OpenAI for an unknown id. `None` = endpoint unknown, candidate skipped.
+fn generation_base_url(session_id: &str, cfg: &ProviderConfig) -> Option<String> {
+    let derived = if let Some(url) = cfg.base_url.clone() {
+        url
+    } else {
+        match session_id {
+            "openai" => "https://api.openai.com/v1".to_string(),
+            // Anthropic's OpenAI-compatible layer.
+            "anthropic" => "https://api.anthropic.com/v1".to_string(),
+            "openrouter" => "https://openrouter.ai/api/v1".to_string(),
+            "minimax" => "https://api.minimax.io/v1".to_string(),
+            "qwen" => QWEN_DEFAULT_DASHSCOPE_URL.to_string(),
+            "ollama" => "http://localhost:11434/v1".to_string(),
+            "gemini" => GEMINI_GENERATION_MARKER_URL.to_string(),
+            // CLI wrappers, native protocols, and anything else without an
+            // explicit base_url: no derivable images endpoint.
+            _ => return None,
+        }
+    };
+    Some(generation_root_url(&derived))
+}
+
+/// Candidate for a built-in provider: derived endpoint + usable key.
+/// A real key wins; keyless only counts when the endpoint is local
+/// (Ollama diffusion and friends). Chat `enabled` is NOT consulted —
+/// same contract as the vision path (#401).
+fn builtin_generation_candidate(
+    session_id: &str,
+    cfg: &ProviderConfig,
+    generation_model: &str,
+) -> Option<(String, String, String)> {
+    let base_url = generation_base_url(session_id, cfg)?;
+    let api_key = cfg.api_key.clone().filter(|k| !k.is_empty());
+    if api_key.is_none() && !is_local_base_url(&base_url) {
+        return None;
+    }
+    Some((
+        api_key.unwrap_or_default(),
+        base_url,
+        generation_model.to_string(),
+    ))
+}
+
+/// Candidate for a custom provider: customs carry their own `base_url`
+/// (skipped when missing — never guessed) and may be keyless local
+/// endpoints (Ollama, llama.cpp, LM Studio, SD webui).
+fn custom_generation_candidate(
+    cfg: &ProviderConfig,
+    generation_model: &str,
+) -> Option<(String, String, String)> {
+    let base_url = generation_root_url(&cfg.base_url.clone()?);
+    Some((
+        cfg.api_key.clone().unwrap_or_default(),
+        base_url,
+        generation_model.to_string(),
+    ))
+}
+
+/// Look up a single provider by `name` (REGISTRATIONS session_id / alias,
+/// or custom map key, with or without the `custom:` prefix) and return its
+/// `(api_key, base_url, generation_model)` when it carries a
+/// `generation_model`. Mirrors `vision_by_name` exactly, including custom
+/// entries shadowing same-named built-ins.
+fn generation_by_name(config: &Config, name: &str) -> Option<(String, String, String)> {
+    // Custom entries take precedence (same convention as create_fallback).
+    if !name.starts_with("custom:")
+        && config
+            .providers
+            .custom
+            .as_ref()
+            .is_some_and(|m| m.contains_key(name))
+    {
+        let cfg = config.providers.custom.as_ref()?.get(name)?;
+        return cfg
+            .generation_model
+            .as_ref()
+            .and_then(|gm| custom_generation_candidate(cfg, gm));
+    }
+    if let Some(custom_name) = name.strip_prefix("custom:") {
+        let cfg = config.providers.custom.as_ref()?.get(custom_name)?;
+        return cfg
+            .generation_model
+            .as_ref()
+            .and_then(|gm| custom_generation_candidate(cfg, gm));
+    }
+    // Built-in registry — endpoint derived per provider, never guessed.
+    for reg in REGISTRATIONS.iter() {
+        if reg.session_id == name || reg.aliases.contains(&name) {
+            let cfg = (reg.config_field)(config)?;
+            return cfg
+                .generation_model
+                .as_ref()
+                .and_then(|gm| builtin_generation_candidate(reg.session_id, cfg, gm));
+        }
+    }
+    None
+}
+
+/// Ordered generation candidates `(api_key, base_url, generation_model)`,
+/// walked at REQUEST time by `GenerateImageTool` (#1672).
+///
+/// Order is the vision contract copied verbatim (#1318):
+/// 1. the session's CURRENT provider when it carries a `generation_model`
+///    (no session in hand: the config's active provider, preserving the
+///    pre-#1672 behavior for callers without session context);
+/// 2. `[providers.fallback] generation`, in the order written, deduped;
+/// 3. the global Gemini `[image.generation]` fallback — applied by the
+///    caller after every candidate fails, never primary.
+pub fn generation_candidates_for(
+    config: &Config,
+    session_provider: Option<&str>,
+) -> Vec<(String, String, String)> {
+    let mut out: Vec<(String, String, String)> = Vec::new();
+    let push = |cand: (String, String, String), out: &mut Vec<(String, String, String)>| {
+        if !out.contains(&cand) {
+            out.push(cand);
+        }
+    };
+
+    match session_provider {
+        Some(name) => {
+            if let Some(cand) = generation_by_name(config, name) {
+                push(cand, &mut out);
+            }
+        }
+        None => {
+            // No session in hand: the config's active provider, resolved
+            // through the SAME never-guess path as chain entries —
+            // `active_provider_generation`'s api.openai.com default would
+            // point a keyless local provider (Ollama diffusion) at a
+            // public endpoint and 401 every roll (#430 rule, applied to
+            // generation in #1672).
+            let (active, _) = config.providers.active_provider_and_model();
+            if let Some(cand) = generation_by_name(config, &active) {
+                push(cand, &mut out);
+            }
+        }
+    }
+    for name in normalized_generation_chain(config) {
+        if let Some(cand) = generation_by_name(config, &name) {
+            push(cand, &mut out);
+        }
+    }
+    out
+}
+
+/// Capability answer — "can ANY provider generate images?" — deliberately
+/// unordered, the same split `any_provider_vision` draws (#1318's lesson:
+/// capability scan must never feed precedence). Used by the registration
+/// gate so a provider-based generation route registers `generate_image`
+/// even when the Gemini `[image.generation]` flag is off.
+pub fn any_provider_generation(config: &Config) -> Vec<(String, String, String)> {
+    let mut out: Vec<(String, String, String)> = Vec::new();
+    let push = |cand: (String, String, String), out: &mut Vec<(String, String, String)>| {
+        if !out.contains(&cand) {
+            out.push(cand);
+        }
+    };
+
+    for reg in REGISTRATIONS.iter() {
+        if let Some(cfg) = (reg.config_field)(config)
+            && let Some(gm) = &cfg.generation_model
+            && let Some(cand) = builtin_generation_candidate(reg.session_id, cfg, gm)
+        {
+            push(cand, &mut out);
+        }
+    }
+    if let Some(customs) = &config.providers.custom {
+        for cfg in customs.values() {
+            if let Some(gm) = &cfg.generation_model
+                && let Some(cand) = custom_generation_candidate(cfg, gm)
+            {
+                push(cand, &mut out);
+            }
+        }
+    }
+    for name in normalized_generation_chain(config) {
+        if let Some(cand) = generation_by_name(config, &name) {
+            push(cand, &mut out);
+        }
+    }
+    out
 }
 
 // ── Individual provider factory functions ───────────────────────

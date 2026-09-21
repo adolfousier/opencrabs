@@ -58,7 +58,10 @@ pub(crate) fn register_config_dependent_tools(
     // DDG + Exa (+ Brave) in parallel instead of DDG-only.
     registry.register(Arc::new(WebSearchTool::new(Some(exa_tool), brave_tool)));
 
-    // Image generation — active provider override or the global Gemini config.
+    // Image generation — per-request chain (session provider →
+    // [providers.fallback] generation → global Gemini last, #1672). The
+    // registration only checks that SOME route exists; the roll itself is
+    // resolved from live config at call time, like analyze_image (#1318).
     if let Some(tool) = GenerateImageTool::from_config(config) {
         registry.register(Arc::new(tool));
     } else {
