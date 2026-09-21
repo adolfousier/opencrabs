@@ -8,9 +8,12 @@
 
 use crate::acp::protocol::{
     AcpMode, ClientMessage, SESSION_SET_MODE, SESSION_SET_MODEL, initialize_result, modes_payload,
-    parse_line, permission_outcome, prompt_text, tool_kind,
+    parse_line, permission_outcome, prompt_text, replay_updates, tool_kind,
 };
+use crate::db::models::Message;
+use chrono::Utc;
 use serde_json::json;
+use uuid::Uuid;
 
 #[test]
 fn parses_request() {
@@ -125,7 +128,13 @@ fn set_mode_is_accepted_alongside_set_model() {
 
 #[test]
 fn mode_parse_round_trips_advertised_ids() {
-    for id in ["supervised", "auto-accept-edits", "auto", "full-access", "plan"] {
+    for id in [
+        "supervised",
+        "auto-accept-edits",
+        "auto",
+        "full-access",
+        "plan",
+    ] {
         let mode = AcpMode::parse(id).expect("advertised id parses");
         assert_eq!(mode.id(), id);
     }
@@ -144,6 +153,56 @@ fn modes_payload_names_current() {
         .collect();
     assert_eq!(
         ids,
-        vec!["supervised", "auto-accept-edits", "auto", "full-access", "plan"]
+        vec![
+            "supervised",
+            "auto-accept-edits",
+            "auto",
+            "full-access",
+            "plan"
+        ]
     );
+}
+
+#[test]
+fn replay_updates_maps_reasoning_blocked_and_text_segments() {
+    let msg = Message {
+        id: Uuid::new_v4(),
+        session_id: Uuid::new_v4(),
+        role: "assistant".into(),
+        content: "<!-- reasoning -->\nthinking hard\n<!-- /reasoning -->\n\
+                  <!-- phantom_blocked=1 -->\nphantom narration\n<!-- /phantom_blocked=1 -->\n\
+                  the visible answer"
+            .into(),
+        sequence: 1,
+        created_at: Utc::now(),
+        token_count: None,
+        cost: None,
+        input_tokens: None,
+        cache_creation_tokens: None,
+        cache_read_tokens: None,
+        thinking: None,
+        duration_secs: None,
+    };
+    let updates = replay_updates(&[msg]);
+    let (kinds, texts): (Vec<&str>, Vec<&str>) = updates
+        .iter()
+        .map(|u| {
+            (
+                u["sessionUpdate"].as_str().unwrap(),
+                u["content"]["text"].as_str().unwrap(),
+            )
+        })
+        .unzip();
+    assert_eq!(
+        kinds,
+        vec![
+            "agent_thought_chunk",
+            "agent_thought_chunk",
+            "agent_message_chunk",
+        ]
+    );
+    assert_eq!(texts[0], "thinking hard");
+    assert!(texts[1].contains("Blocked narration"));
+    assert!(texts[1].contains("phantom narration"));
+    assert_eq!(texts[2], "the visible answer");
 }

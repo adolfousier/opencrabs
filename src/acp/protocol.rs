@@ -176,7 +176,7 @@ pub fn text_chunk(kind: &str, text: &str) -> Value {
 /// user_message_chunk; assistant → thought chunks (persisted `thinking` and
 /// inline reasoning segments via the TUI splitter) plus message chunks.
 pub fn replay_updates(messages: &[crate::db::models::Message]) -> Vec<Value> {
-    use crate::tui::app::reasoning_split::{Segment, split_segments};
+    use crate::tui::app::reasoning_split::{BLOCKED_LABEL, Segment, split_segments};
     let mut out = Vec::new();
     for m in messages {
         match m.role.as_str() {
@@ -196,6 +196,10 @@ pub fn replay_updates(messages: &[crate::db::models::Message]) -> Vec<Value> {
                         Segment::Reasoning(t) => {
                             out.push(text_chunk("agent_thought_chunk", &t));
                         }
+                        Segment::Blocked(b) => out.push(text_chunk(
+                            "agent_thought_chunk",
+                            &format!("{BLOCKED_LABEL}\n\n{b}"),
+                        )),
                         Segment::Text(t) => out.push(text_chunk("agent_message_chunk", &t)),
                     }
                 }
