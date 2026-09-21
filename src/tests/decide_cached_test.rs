@@ -82,6 +82,10 @@ impl Provider for StubProvider {
     fn context_window(&self, _model: &str) -> Option<u32> {
         Some(8192)
     }
+
+    fn calculate_cost(&self, _model: &str, _input: u32, _output: u32) -> f64 {
+        0.0
+    }
 }
 
 /// Minimal valid config: everything defaulted except the decisions tiers
@@ -98,13 +102,7 @@ fn config_with(tiers_toml: &str) -> Arc<Config> {
 }
 
 fn shadow_config() -> Arc<Config> {
-    config_with(
-        r#"
-[decisions.triers_placeholder]
-"#
-        .replace("triers_placeholder", "tiers.triage")
-            + "policy_version = \"p1\"\n",
-    )
+    config_with("[decisions.tiers.triage]\npolicy_version = \"p1\"\n")
 }
 
 async fn setup(

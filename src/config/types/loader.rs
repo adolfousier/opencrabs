@@ -934,6 +934,7 @@ impl Config {
             database: overlay.database,
             logging: overlay.logging,
             debug: overlay.debug,
+            decisions: overlay.decisions,
             providers: overlay.providers,
             channels: overlay.channels,
             agent: overlay.agent,
