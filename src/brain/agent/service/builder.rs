@@ -1,3 +1,4 @@
+use super::failure_window;
 use super::types::*;
 use crate::brain::provider::Provider;
 use crate::brain::tools::ToolRegistry;
@@ -252,13 +253,17 @@ pub struct AgentService {
     /// (which is the common case for transient outages where the
     /// primary recovers on the very next request).
     ///
-    /// When the count reaches `STICKY_FALLBACK_THRESHOLD` (4 — see
-    /// the fallback-success commit site in `tool_loop.rs`), the
-    /// fallback gets persisted into `session_providers` and the
-    /// per-session model override; before then the fallback rescues
-    /// only this single request and the primary is restored for the
-    /// next one.
-    pub(super) session_primary_failure_streak: std::sync::RwLock<HashMap<Uuid, u32>>,
+    /// When `STICKY_FALLBACK_THRESHOLD` (4 — see the fallback-success
+    /// commit site in `tool_loop.rs`) rescues land inside
+    /// `failure_window::STICKY_FALLBACK_WINDOW`, the fallback gets
+    /// persisted into `session_providers` and the per-session model
+    /// override; before then the fallback rescues only this single
+    /// request and the primary is restored for the next one.
+    ///
+    /// Timestamps rather than a running count so a rescue expires on its
+    /// own instead of being wiped by the next primary success (#1667).
+    pub(super) session_primary_failure_streak:
+        std::sync::RwLock<HashMap<Uuid, Vec<std::time::Instant>>>,
 
     /// Per-session set of skill names that have been invoked. When a skill
     /// is activated (via `/skill-name`), its name is recorded here so
@@ -1621,44 +1626,47 @@ impl AgentService {
     }
 
     /// Record one primary-provider failure that was rescued by a
-    /// successful fallback. Returns the new streak count.
+    /// successful fallback. Returns how many rescues now sit inside
+    /// `STICKY_FALLBACK_WINDOW`.
     ///
-    /// Bumped only when the fallback ACTUALLY succeeded — failures
+    /// Recorded only when the fallback ACTUALLY succeeded — failures
     /// where both primary and fallback errored out don't count, since
     /// no rescue happened and the situation is exceptional rather
     /// than evidence of a chronically broken primary.
     pub fn bump_primary_failure_streak(&self, session_id: Uuid) -> u32 {
+        self.record_primary_failure_at(session_id, std::time::Instant::now())
+    }
+
+    /// `bump_primary_failure_streak` with the clock supplied, so the window
+    /// expiry is exercisable without sleeping.
+    pub fn record_primary_failure_at(&self, session_id: Uuid, at: std::time::Instant) -> u32 {
         let mut map = self
             .session_primary_failure_streak
             .write()
             .expect("session_primary_failure_streak lock poisoned");
-        let entry = map.entry(session_id).or_insert(0);
-        *entry += 1;
-        *entry
+        failure_window::record(
+            map.entry(session_id).or_default(),
+            at,
+            failure_window::STICKY_FALLBACK_WINDOW,
+        )
     }
 
-    /// Reset the per-session primary-failure streak. Called after any
-    /// successful PRIMARY stream so a single recovery wipes the count
-    /// — the threshold meaning becomes "N consecutive rescues with
-    /// no primary success in between", which matches the user intent
-    /// ("if the fallback runs 3 times in a row successfully, the 4th
-    /// it sticks").
-    pub fn reset_primary_failure_streak(&self, session_id: Uuid) {
-        self.session_primary_failure_streak
-            .write()
-            .expect("session_primary_failure_streak lock poisoned")
-            .remove(&session_id);
-    }
-
-    /// Read current streak without mutating. Used by the fallback
-    /// commit site to decide between "rescue this request only" vs
-    /// "stick the fallback permanently".
+    /// Read the current in-window count without recording. Used by the
+    /// fallback commit site to decide between "rescue this request only"
+    /// vs "stick the fallback permanently".
     pub fn peek_primary_failure_streak(&self, session_id: Uuid) -> u32 {
+        self.peek_primary_failure_streak_at(session_id, std::time::Instant::now())
+    }
+
+    /// `peek_primary_failure_streak` with the clock supplied.
+    pub fn peek_primary_failure_streak_at(&self, session_id: Uuid, at: std::time::Instant) -> u32 {
         self.session_primary_failure_streak
             .read()
             .expect("session_primary_failure_streak lock poisoned")
             .get(&session_id)
-            .copied()
+            .map(|failures| {
+                failure_window::count(failures, at, failure_window::STICKY_FALLBACK_WINDOW)
+            })
             .unwrap_or(0)
     }
 

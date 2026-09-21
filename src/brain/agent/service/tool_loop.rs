@@ -1,5 +1,6 @@
 use super::builder::AgentService;
 use super::compaction_notice::CompactionNotifier;
+use super::failure_window;
 use super::types::*;
 use crate::brain::agent::context::AgentContext;
 use crate::brain::agent::error::{AgentError, Result};
@@ -11,13 +12,16 @@ use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
-/// How many consecutive primary-provider failures (each rescued by
-/// a successful fallback) before the fallback gets persisted into
-/// the session as the new active provider. Below this, every primary
-/// failure triggers a one-shot rescue and the primary is restored for
-/// the next request — so a brief outage doesn't permanently demote
-/// the primary. User-stated intent (2026-05-30): "if fallback 3
-/// times consecutively successfully, the 4th it sticks".
+/// How many primary-provider failures (each rescued by a successful
+/// fallback) inside `failure_window::STICKY_FALLBACK_WINDOW` before the
+/// fallback gets persisted into the session as the new active provider.
+/// Below this, every primary failure triggers a one-shot rescue and the
+/// primary is restored for the next request — so a brief outage doesn't
+/// permanently demote the primary. User-stated intent (2026-05-30): "if
+/// fallback 3 times successfully, the 4th it sticks"; counted over a
+/// recent window rather than strictly back-to-back, because a primary
+/// that alternates fail/ok never builds a run and was therefore immune
+/// to the gate entirely (#1667).
 const STICKY_FALLBACK_THRESHOLD: u32 = 4;
 
 /// Default interval in seconds between mid-turn intra-loop time markers (#153).
@@ -1970,15 +1974,13 @@ impl AgentService {
                 .await
             {
                 Ok(resp) => {
-                    // Primary succeeded on first try (no retry / no
-                    // fallback rescue needed). Reset the consecutive-
-                    // failure streak so a future hiccup starts fresh
-                    // at 1 instead of inheriting a count from an
-                    // unrelated earlier outage. Without this, a
-                    // primary that hit 3 transient failures days ago
-                    // would stick the fallback on the NEXT failure
-                    // even though it's been working flawlessly since.
-                    self.reset_primary_failure_streak(session_id);
+                    // Primary succeeded on first try. Deliberately does NOT
+                    // clear the rescue history (#1667): wiping it here made
+                    // STICKY_FALLBACK_THRESHOLD unreachable for a flapping
+                    // primary, which is precisely what sticky fallback is
+                    // for. Rescues age out of STICKY_FALLBACK_WINDOW on
+                    // their own, so an unrelated outage long ago still
+                    // cannot stick the fallback today.
                     resp
                 }
                 // /stop beats every recovery path (#1148): if the token fired
@@ -3069,18 +3071,19 @@ impl AgentService {
                             match fb_result {
                                 Ok(resp) => {
                                     // Streak gate: only stick the fallback as
-                                    // the session's persistent provider after
-                                    // STICKY_FALLBACK_THRESHOLD consecutive
-                                    // rescues. Most primary outages are
-                                    // transient (network blip, model warm-up,
-                                    // brief 5xx), so making the first rescue
-                                    // sticky meant a 5-second hiccup
-                                    // permanently demoted the primary until
-                                    // the user noticed and reset via /models.
-                                    // 4-rescues-in-a-row matches the user's
-                                    // intent: "if fallback rescues 3 times
-                                    // consecutively successfully, the 4th it
-                                    // sticks".
+                                    // the session's persistent provider once
+                                    // STICKY_FALLBACK_THRESHOLD rescues land
+                                    // inside STICKY_FALLBACK_WINDOW. Most
+                                    // primary outages are transient (network
+                                    // blip, model warm-up, brief 5xx), so
+                                    // making the first rescue sticky meant a
+                                    // 5-second hiccup permanently demoted the
+                                    // primary until the user noticed and
+                                    // reset via /models. Recent-window rather
+                                    // than consecutive because a primary that
+                                    // alternates fail/ok never accumulates a
+                                    // run, and that is the provider most
+                                    // worth demoting (#1667).
                                     let streak = self.bump_primary_failure_streak(session_id);
                                     let sticky = streak >= STICKY_FALLBACK_THRESHOLD;
                                     if sticky {
@@ -3102,16 +3105,24 @@ impl AgentService {
                                             ProgressEvent::SelfHealingAlert {
                                                 message: if sticky {
                                                     format!(
-                                                        "Stream error → switched to {}/{} (sticky after {} consecutive rescues)",
-                                                        fb_name, fb_model, streak
-                                                    )
-                                                } else {
-                                                    format!(
-                                                        "Stream error → rescued by {}/{} ({}/{} consecutive; primary will be tried again next turn)",
+                                                        "Stream error → switched to {}/{} (sticky after {} rescues within {}m)",
                                                         fb_name,
                                                         fb_model,
                                                         streak,
-                                                        STICKY_FALLBACK_THRESHOLD
+                                                        failure_window::STICKY_FALLBACK_WINDOW
+                                                            .as_secs()
+                                                            / 60
+                                                    )
+                                                } else {
+                                                    format!(
+                                                        "Stream error → rescued by {}/{} ({}/{} within {}m; primary will be tried again next turn)",
+                                                        fb_name,
+                                                        fb_model,
+                                                        streak,
+                                                        STICKY_FALLBACK_THRESHOLD,
+                                                        failure_window::STICKY_FALLBACK_WINDOW
+                                                            .as_secs()
+                                                            / 60
                                                     )
                                                 },
                                             },
@@ -3459,16 +3470,24 @@ impl AgentService {
                                             ProgressEvent::SelfHealingAlert {
                                                 message: if sticky {
                                                     format!(
-                                                        "5xx error → switched to {}/{} (sticky after {} consecutive rescues)",
-                                                        fb_name, fb_model, streak
-                                                    )
-                                                } else {
-                                                    format!(
-                                                        "5xx error → rescued by {}/{} ({}/{} consecutive; primary will be tried again next turn)",
+                                                        "5xx error → switched to {}/{} (sticky after {} rescues within {}m)",
                                                         fb_name,
                                                         fb_model,
                                                         streak,
-                                                        STICKY_FALLBACK_THRESHOLD
+                                                        failure_window::STICKY_FALLBACK_WINDOW
+                                                            .as_secs()
+                                                            / 60
+                                                    )
+                                                } else {
+                                                    format!(
+                                                        "5xx error → rescued by {}/{} ({}/{} within {}m; primary will be tried again next turn)",
+                                                        fb_name,
+                                                        fb_model,
+                                                        streak,
+                                                        STICKY_FALLBACK_THRESHOLD,
+                                                        failure_window::STICKY_FALLBACK_WINDOW
+                                                            .as_secs()
+                                                            / 60
                                                     )
                                                 },
                                             },

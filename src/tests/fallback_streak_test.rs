@@ -12,11 +12,17 @@
 //! recovered on the next request. User intent: "if fallback rescues
 //! 3 times consecutively successfully, the 4th it sticks".
 //!
+//! Superseded in part by #1667: the count is now "rescues inside
+//! `STICKY_FALLBACK_WINDOW`", not "rescues in a row". Resetting on any
+//! primary success made the threshold unreachable for a flapping
+//! provider, which is the case the gate is for.
+//!
 //! These tests cover the bare counter mechanics. Integration with
 //! the actual fallback flow lives in `tool_loop.rs` and is harder
 //! to unit-test (requires a real provider + DB); the counter
 //! helpers it consumes ARE testable here in isolation.
 
+use crate::brain::agent::service::failure_window::STICKY_FALLBACK_WINDOW;
 use crate::tests::agent_service_mocks::create_test_service;
 
 #[tokio::test]
@@ -35,26 +41,54 @@ async fn bump_increments_and_returns_new_count() {
 }
 
 #[tokio::test]
-async fn reset_clears_to_zero() {
+async fn rescues_age_out_of_the_window() {
+    // What used to be the job of reset-on-success: history must not
+    // accumulate forever. Time does it now, so an outage long past
+    // cannot stick the fallback on today's first hiccup.
     let (svc, sid) = create_test_service().await;
-    svc.bump_primary_failure_streak(sid);
-    svc.bump_primary_failure_streak(sid);
-    assert_eq!(svc.peek_primary_failure_streak(sid), 2);
-    svc.reset_primary_failure_streak(sid);
-    assert_eq!(svc.peek_primary_failure_streak(sid), 0);
+    let long_ago = std::time::Instant::now();
+    let now = long_ago + STICKY_FALLBACK_WINDOW + std::time::Duration::from_secs(1);
+
+    svc.record_primary_failure_at(sid, long_ago);
+    svc.record_primary_failure_at(sid, long_ago);
+    svc.record_primary_failure_at(sid, long_ago);
+    assert_eq!(svc.peek_primary_failure_streak_at(sid, long_ago), 3);
+
+    assert_eq!(
+        svc.peek_primary_failure_streak_at(sid, now),
+        0,
+        "rescues older than the window must stop counting"
+    );
+    assert_eq!(
+        svc.record_primary_failure_at(sid, now),
+        1,
+        "a fresh rescue after the window starts over at 1"
+    );
 }
 
 #[tokio::test]
-async fn reset_then_bump_starts_fresh_at_one() {
-    // The point of reset: a single primary success after a streak
-    // wipes the history, so a future hiccup doesn't inherit the
-    // count.
+async fn a_flapping_primary_reaches_the_threshold() {
+    // #1667: the counter used to be reset by ANY primary first-try
+    // success, so a fail/ok/fail/ok provider oscillated 1, 0, 1, 0 and
+    // the threshold was unreachable for exactly the intermittent
+    // pattern sticky fallback exists to absorb. The interleaved
+    // successes are represented by their absence here: nothing clears
+    // the history any more, so four rescues inside the window count.
     let (svc, sid) = create_test_service().await;
-    svc.bump_primary_failure_streak(sid);
-    svc.bump_primary_failure_streak(sid);
-    svc.bump_primary_failure_streak(sid);
-    svc.reset_primary_failure_streak(sid);
-    assert_eq!(svc.bump_primary_failure_streak(sid), 1);
+    let start = std::time::Instant::now();
+    let minute = std::time::Duration::from_secs(60);
+
+    let mut reached = 0;
+    for turn in 0..4 {
+        // Every other turn the primary succeeded; only the failures
+        // are recorded, spaced a minute apart but well inside the window.
+        reached = svc.record_primary_failure_at(sid, start + minute * (turn * 2));
+    }
+
+    assert!(
+        reached >= 4,
+        "a primary failing every other turn must still reach the sticky threshold, got {reached}"
+    );
 }
 
 #[tokio::test]

@@ -518,6 +518,7 @@ pub mod tool_repeat_test;
 //pub mod error_scenarios_test;
 pub mod evolve_verify_test;
 pub mod execution_blocklist_floor_test;
+pub mod failure_window_test;
 pub mod fallback_chain_hot_reload_test;
 pub mod fallback_cli_tool_ownership_test;
 pub mod fallback_provenance_test;
