@@ -37,6 +37,7 @@ pub use approval::{
 pub use file_extract::{FileContent, classify_file, inject_file_content, process_file_with_vision};
 pub use image::{
     extract_img_markers, extract_react_marker, extract_react_marker_lenient, extract_vid_markers,
+    strip_invalid_react_markers,
 };
 pub use prompt_analyzer::PromptAnalyzer;
 pub use retry::{RetryConfig, RetryableError, retry, retry_with_check};
