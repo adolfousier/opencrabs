@@ -142,9 +142,7 @@ fn text_of(result: crate::brain::tools::ToolResult) -> String {
 /// acceptance: "cached=true only under mode=live").
 #[tokio::test]
 async fn live_first_miss_then_cached_hit() {
-    let cfg = config_with(
-        "[decisions.tiers.triage]\npolicy_version = \"p1\"\nmode = \"live\"\n",
-    );
+    let cfg = config_with("[decisions.tiers.triage]\npolicy_version = \"p1\"\nmode = \"live\"\n");
     let (tool, stub, _db, ctx) = setup(cfg, r#"{"decision":"bugfix","p":0.9,"margin":0.4}"#).await;
 
     let first = text_of(
@@ -164,7 +162,11 @@ async fn live_first_miss_then_cached_hit() {
     let second: serde_json::Value = serde_json::from_str(&second).unwrap();
     assert_eq!(second["cached"], json!(true));
     assert_eq!(second["decision"]["decision"], json!("bugfix"));
-    assert_eq!(stub.calls.load(Ordering::SeqCst), 1, "live hit must not call the model");
+    assert_eq!(
+        stub.calls.load(Ordering::SeqCst),
+        1,
+        "live hit must not call the model"
+    );
 }
 
 /// Sentinel (#1648 acceptance, behavior identity): shadow mode with a
@@ -220,9 +222,7 @@ async fn shadow_always_calls_model_and_counts_would_hit() {
 /// mode=off takes zero cache code paths: no row, no stats, just the model.
 #[tokio::test]
 async fn off_mode_touches_nothing() {
-    let cfg = config_with(
-        "[decisions.tiers.triage]\npolicy_version = \"p1\"\nmode = \"off\"\n",
-    );
+    let cfg = config_with("[decisions.tiers.triage]\npolicy_version = \"p1\"\nmode = \"off\"\n");
     let (tool, stub, db, ctx) = setup(cfg, r#"{"decision":"feature","p":0.7,"margin":0.3}"#).await;
 
     let out = text_of(
@@ -238,9 +238,7 @@ async fn off_mode_touches_nothing() {
         .get()
         .await
         .unwrap()
-        .interact(|conn| {
-            conn.query_row("SELECT COUNT(*) FROM decision_cache", [], |r| r.get(0))
-        })
+        .interact(|conn| conn.query_row("SELECT COUNT(*) FROM decision_cache", [], |r| r.get(0)))
         .await
         .unwrap()
         .unwrap();
@@ -249,9 +247,7 @@ async fn off_mode_touches_nothing() {
         .get()
         .await
         .unwrap()
-        .interact(|conn| {
-            conn.query_row("SELECT COUNT(*) FROM decision_stats", [], |r| r.get(0))
-        })
+        .interact(|conn| conn.query_row("SELECT COUNT(*) FROM decision_stats", [], |r| r.get(0)))
         .await
         .unwrap()
         .unwrap();
@@ -264,10 +260,7 @@ async fn off_mode_touches_nothing() {
 async fn unknown_tier_is_a_named_error() {
     let (tool, stub, _db, ctx) = setup(shadow_config(), "{}").await;
     let out = tool
-        .execute(
-            json!({"tier": "nope", "input": {}, "ask": "x?"}),
-            &ctx,
-        )
+        .execute(json!({"tier": "nope", "input": {}, "ask": "x?"}), &ctx)
         .await
         .unwrap();
     let text = text_of(out);
@@ -282,23 +275,23 @@ async fn unknown_tier_is_a_named_error() {
 /// similarity=true are named config-load errors.
 #[test]
 fn decisions_tiers_rejected_at_load_without_policy_version() {
-    let cfg: Config = toml::from_str(
-        "[decisions.tiers.triage]\nmode = \"shadow\"\n",
-    )
-    .expect("parses (policy_version defaults to empty)");
-    let err = cfg.validate().expect_err("empty policy_version must stop the load");
+    let cfg: Config = toml::from_str("[decisions.tiers.triage]\nmode = \"shadow\"\n")
+        .expect("parses (policy_version defaults to empty)");
+    let err = cfg
+        .validate()
+        .expect_err("empty policy_version must stop the load");
     assert!(
-        err.to_string().contains("decisions.tiers.triage: policy_version is required"),
+        err.to_string()
+            .contains("decisions.tiers.triage: policy_version is required"),
         "named error expected, got: {err}"
     );
 }
 
 #[test]
 fn decisions_similarity_true_is_a_named_load_error() {
-    let cfg: Config = toml::from_str(
-        "[decisions.tiers.triage]\npolicy_version = \"p1\"\nsimilarity = true\n",
-    )
-    .expect("parses");
+    let cfg: Config =
+        toml::from_str("[decisions.tiers.triage]\npolicy_version = \"p1\"\nsimilarity = true\n")
+            .expect("parses");
     let err = cfg.validate().expect_err("similarity is not implemented");
     assert!(
         err.to_string()
@@ -317,11 +310,9 @@ fn decisions_empty_section_loads_clean() {
 /// decision is answered but never frozen.
 #[tokio::test]
 async fn sub_floor_margin_is_answered_but_not_stored() {
-    let cfg = config_with(
-        "[decisions.tiers.triage]\npolicy_version = \"p1\"\nmargin_floor = 0.5\n",
-    );
-    let (tool, stub, _db, ctx) =
-        setup(cfg, r#"{"decision":"maybe","p":0.55,"margin":0.05}"#).await;
+    let cfg =
+        config_with("[decisions.tiers.triage]\npolicy_version = \"p1\"\nmargin_floor = 0.5\n");
+    let (tool, stub, _db, ctx) = setup(cfg, r#"{"decision":"maybe","p":0.55,"margin":0.05}"#).await;
 
     let out = text_of(
         tool.execute(ask_input(json!({"file": "x.rs"})), &ctx)

@@ -54,11 +54,7 @@ impl DecideCachedTool {
     }
 
     #[cfg(test)]
-    pub(crate) fn with_stub(
-        pool: Pool,
-        config: Arc<Config>,
-        provider: Arc<dyn Provider>,
-    ) -> Self {
+    pub(crate) fn with_stub(pool: Pool, config: Arc<Config>, provider: Arc<dyn Provider>) -> Self {
         Self {
             cache: DecisionCacheRepository::new(pool.clone()),
             stats: DecisionStatsRepository::new(pool),
@@ -348,7 +344,10 @@ fn tier_name(mode: DecisionMode) -> &'static str {
 
 /// TTL gate on reads: `ttl_hours` unset means the row never expires here
 /// (the PR3 sweeper bounds it); set means an older row is a miss.
-fn fresh_enough(row: &crate::db::repository::decision_cache::DecisionCacheRow, tier: &DecisionTierConfig) -> bool {
+fn fresh_enough(
+    row: &crate::db::repository::decision_cache::DecisionCacheRow,
+    tier: &DecisionTierConfig,
+) -> bool {
     match tier.ttl_hours {
         Some(hours) => {
             let now = std::time::SystemTime::now()
