@@ -7,6 +7,7 @@
 //!    measuring a feature nobody opted into.
 //! 2. Load-time strictness: a tier without policy_version, or with the
 //!    unimplemented similarity flag, stops the config load by name.
+//!
 //! Plus the reuse round-trip under mode=live and the counters the
 //! evaluation reads.
 
