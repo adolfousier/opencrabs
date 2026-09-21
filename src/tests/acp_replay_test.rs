@@ -2,7 +2,7 @@
 //! chunk shapes, split out of protocol.rs to keep the module under the
 //! 500-line ceiling.
 
-use crate::acp::protocol::replay_updates;
+use crate::acp::protocol::{replay_updates, replay_usage};
 use crate::db::models::Message;
 use serde_json::{Value, json};
 
@@ -84,4 +84,33 @@ fn skips_empty_and_non_transcript_roles() {
     let updates = replay_updates(&messages);
     assert_eq!(updates.len(), 1);
     assert_eq!(kind_of(&updates[0]), "user_message_chunk");
+}
+
+#[test]
+fn replay_usage_takes_last_assistant_input_tokens() {
+    let earlier = Message {
+        input_tokens: Some(1_000),
+        ..msg("assistant", "earlier answer", None)
+    };
+    let later = Message {
+        input_tokens: Some(4_242),
+        ..msg("assistant", "latest answer", None)
+    };
+    let messages = vec![
+        msg("user", "hello", None),
+        earlier,
+        msg("user", "again", None),
+        later,
+    ];
+    // The provider's own measurement from the LAST assistant row — not the
+    // first, not a user row, not a sum.
+    assert_eq!(replay_usage(&messages), Some(4_242));
+}
+
+#[test]
+fn replay_usage_none_without_assistant_measurements() {
+    // Sessions predating usage persistence, or user-only: caller falls back.
+    let messages = vec![msg("user", "hello", None), msg("assistant", "answer", None)];
+    assert_eq!(replay_usage(&messages), None);
+    assert_eq!(replay_usage(&[]), None);
 }

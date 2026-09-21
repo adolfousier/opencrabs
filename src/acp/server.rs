@@ -226,6 +226,24 @@ impl AcpServer {
                     for update in protocol::replay_updates(&history) {
                         state.handle.send(protocol::session_update(&acp_id, update));
                     }
+                    // Restore the context meter: the provider's own last
+                    // measurement, falling back to the session row's
+                    // lifetime total. A real count beats silence; both beat
+                    // a tokenized estimate of raw content.
+                    let used = protocol::replay_usage(&history)
+                        .or((session.token_count > 0).then_some(session.token_count));
+                    if let Some(used) = used {
+                        state.handle.send(protocol::session_update(
+                            &acp_id,
+                            json!({
+                                "sessionUpdate": "usage",
+                                "usage": {
+                                    "used": used,
+                                    "size": state.agent.context_limit_for_session(session.id),
+                                },
+                            }),
+                        ));
+                    }
                 }
                 let current = st.model.lock().await.clone();
                 let models = catalog::models_payload(&state.config, current.as_deref());
