@@ -405,3 +405,108 @@ fn react_no_recovery_for_word_payload_in_orphan_fence() {
     assert_eq!(emoji, None);
     assert_eq!(text, raw);
 }
+
+// ── strip_invalid_react_markers (#1670) ──────────────────────────────────
+// The reaction path delivers what the extractor leaves behind. A malformed
+// marker (empty payload, word payload) survives extraction as visible text
+// and shipped as a bubble into the group's General topic. These tests pin
+// the reaction-path-only strip that closes the leak.
+
+use crate::utils::strip_invalid_react_markers as strip;
+
+#[test]
+fn strip_incident_repro_empty_payload_goes_to_silence() {
+    // The exact #1670 shape: the model emitted a bare empty-payload marker.
+    assert_eq!(strip("<<react:>>"), "");
+}
+
+#[test]
+fn strip_empty_payload_with_narration_keeps_the_narration() {
+    // Debris is removed, real narration survives (stop-signal turns reply).
+    assert_eq!(
+        strip("I will not react to that. <<react:>>"),
+        "I will not react to that."
+    );
+}
+
+#[test]
+fn strip_word_payload_removed() {
+    assert_eq!(strip("<<react:emoji>>"), "");
+    assert_eq!(strip("Sure <<react:hello>> done"), "Sure done");
+}
+
+#[test]
+fn strip_keyword_less_noise_removed() {
+    assert_eq!(strip("<<hello>>"), "");
+}
+
+#[test]
+fn strip_backtick_wrapped_debris_leaves_no_stray_span() {
+    // A stranded "``" pair is still a visible bubble; the span goes with it.
+    assert_eq!(strip("`<<react:>>`"), "");
+    assert_eq!(strip("narration `<<react:>>` tail"), "narration tail");
+}
+
+#[test]
+fn strip_valid_markers_are_left_for_the_extractor() {
+    // Defensive: the extractor consumes valid markers BEFORE the strip runs.
+    // If ever called first, a valid marker must survive untouched.
+    assert_eq!(strip("<<react:👍>>"), "<<react:👍>>");
+    assert_eq!(strip("Sure <<react:✅>>"), "Sure <<react:✅>>");
+}
+
+#[test]
+fn strip_unterminated_opening_is_left_as_text() {
+    // No terminator to anchor a strip to; eating the rest would be a worse
+    // leak. Same shape the extractor already leaves (react_malformed_no_closing).
+    assert_eq!(strip("<<react:"), "<<react:");
+    assert_eq!(strip("<<react:👍"), "<<react:👍");
+}
+
+#[test]
+fn strip_plain_prose_untouched() {
+    assert_eq!(strip("Just a normal message."), "Just a normal message.");
+    assert_eq!(strip("a < b and c > d"), "a < b and c > d");
+}
+
+#[test]
+fn strip_escaped_prefix_forms_removed_too() {
+    // The tolerant openers (single bracket, backslash escapes) are debris
+    // shapes the same scanner matches.
+    assert_eq!(strip("<react:>>"), "");
+    assert_eq!(strip("<\\react:>>"), "");
+}
+
+#[test]
+fn strip_multiple_debris_all_gone() {
+    assert_eq!(strip("<<react:>><<react:>>"), "");
+    assert_eq!(strip("<<react:>>x<<react:emoji>>"), "x");
+}
+
+#[test]
+fn reaction_path_wires_strip_after_extractor_and_threads_the_reply() {
+    // Source sentinel: the handler must (a) call the strip AFTER the lenient
+    // extractor, and (b) deliver the reaction text reply with the resolved
+    // topic instead of None (#1670 defect B — every reply landed in General).
+    let src = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/channels/telegram/handler.rs"),
+    )
+    .expect("handler source");
+    let extract = src
+        .find("extract_react_marker_lenient(&text_only)")
+        .expect("lenient extractor call");
+    let strip_at = src
+        .find("strip_invalid_react_markers(&text_only)")
+        .expect("debris strip call");
+    assert!(
+        extract < strip_at,
+        "the strip must run on the extractor's output, not before it"
+    );
+    let deliver = src
+        .find("topic_id.map(|t| ThreadId(MessageId(t))),")
+        .expect("reaction text reply must carry the resolved topic (#1670)");
+    assert!(
+        strip_at < deliver,
+        "sentinel anchors to the reaction handler, not some other path"
+    );
+}

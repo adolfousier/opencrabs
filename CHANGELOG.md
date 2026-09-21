@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **decisions**: L1 tiered decision cache (#1648): `decide_cached` tool, `[decisions.tiers.<name>]` config with shadow/live/off modes, `/usage` + Mission Control accounting, startup TTL sweep. Shadow-first; release-day evaluation bar >= 30% would-hit over >= 100 calls per tier
 
+### 🔧 Fixes
+
+- **telegram**: malformed reaction directives can no longer leak as chat bubbles (#1670). A reaction turn that emitted `<<react:>>` with an empty emoji slot survived the extractor's prose guard and shipped as a visible message. The reaction path now strips every remaining marker-shaped debris (empty/word payloads, code-wrapped forms) after extraction and logs when a turn degrades to silence. Fix also closes defect B: reaction-path text replies carried `thread_id: None`, so every reply posted to the forum group's General topic instead of the reacted message's topic; the reply send and its `channel_messages` row now carry the resolved topic
+
 ## [0.5.3] - 2026-09-20
 
 121 commits since v0.5.2, 7 contributors. 192 files changed, +12,304 / -1,709 lines.
