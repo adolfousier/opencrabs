@@ -1562,10 +1562,28 @@ fn try_create_zhipu(config: &Config) -> Result<Option<Arc<dyn Provider>>> {
         zhipu_config.endpoint_type,
         zhipu_config.base_url.is_some()
     );
-    let provider = configure_openai_compatible(
+    let mut provider = configure_openai_compatible(
         OpenAIProvider::with_base_url(api_key.clone(), base_url).with_name("zai"),
         zhipu_config,
     );
+    // An explicit stream_idle_timeout_secs already landed above. Otherwise the
+    // generic 20s remote default would cut a host the code documents as holding
+    // an idle stream to ~30s, and blame the connection for our own timer (#1666).
+    let host_aware_idle = zhipu_config
+        .stream_idle_timeout_secs
+        .filter(|&s| s > 0)
+        .is_none()
+        .then(|| {
+            super::zhipu_endpoint::default_idle_timeout_secs(
+                zhipu_config.base_url.as_deref(),
+                zhipu_config.endpoint_type.as_deref(),
+            )
+        })
+        .flatten();
+    if let Some(secs) = host_aware_idle {
+        provider = provider.with_stream_idle_timeout(std::time::Duration::from_secs(secs));
+        tracing::info!("z.ai host-aware stream idle timeout: {}s", secs);
+    }
     Ok(Some(Arc::new(provider)))
 }
 

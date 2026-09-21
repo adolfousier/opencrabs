@@ -47,3 +47,23 @@ pub(crate) fn chat_url(base_url: Option<&str>, endpoint_type: Option<&str>) -> S
 pub(crate) fn models_url(base_url: Option<&str>, endpoint_type: Option<&str>) -> String {
     format!("{}/models", root(base_url, endpoint_type))
 }
+
+/// Seconds of inter-chunk silence to tolerate before the stream is treated as
+/// dropped, when `stream_idle_timeout_secs` is not configured.
+///
+/// `api.z.ai` closes an idle streaming connection at roughly 30s; the generic
+/// remote default is 20s. On that host our own timer fired first and the client
+/// reported "connection likely dropped" about a socket that was still open
+/// (#1666). Sitting above the host's documented cut makes the server's close the
+/// thing we observe, instead of our guess about it.
+///
+/// `None` for any other host, including `open.bigmodel.cn`, which has no idle
+/// cut and therefore no host-specific reason to move off the generic default.
+pub(crate) fn default_idle_timeout_secs(
+    base_url: Option<&str>,
+    endpoint_type: Option<&str>,
+) -> Option<u64> {
+    root(base_url, endpoint_type)
+        .contains("api.z.ai")
+        .then_some(45)
+}
