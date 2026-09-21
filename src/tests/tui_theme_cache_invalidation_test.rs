@@ -14,6 +14,12 @@
 //! process-global and the parallel harness runs one sanctioned mutator test
 //! (`tui_theme_presets_test::set_and_reset_switch_active_theme`); a second
 //! mutator would race it.
+//!
+//! Reading it races that mutator too: the counter is process-wide, so its
+//! eleven bumps can land between an `App` capturing the live generation and
+//! this module asserting the two still agree. Every test here therefore takes
+//! `theme_global_lock` before touching the counter, and takes it *after* its
+//! async setup so the guard never spans an `.await`.
 
 use std::sync::Arc;
 
@@ -49,12 +55,22 @@ fn message(role: &str, content: &str) -> DisplayMessage {
     }
 }
 
-async fn app_with_chat() -> App {
+/// The async half of the fixture. Split from [`app_with_chat`] so a test can
+/// finish every `.await` before it takes the theme lock: `App::new` captures
+/// the live generation, which is exactly the read that must sit inside the
+/// critical section.
+async fn service_and_context() -> (Arc<AgentService>, ServiceContext) {
     let db = Database::connect_in_memory().await.unwrap();
     db.run_migrations().await.unwrap();
     let context = ServiceContext::new(db.pool().clone());
     let provider: Arc<dyn Provider> = Arc::new(MockProvider);
     let service = Arc::new(AgentService::new_for_test(provider, context.clone()).await);
+    (service, context)
+}
+
+/// The synchronous half: builds the `App` (stamping it with the live
+/// generation) and seeds a two-message transcript for the cache to fill from.
+fn app_with_chat(service: Arc<AgentService>, context: ServiceContext) -> App {
     #[cfg(feature = "whatsapp")]
     let mut app = App::new(
         service,
@@ -77,14 +93,18 @@ fn draw(terminal: &mut Terminal<TestBackend>, app: &mut App) {
 /// does not throw away a cache it just built.
 #[tokio::test]
 async fn a_fresh_app_starts_in_sync_with_the_live_generation() {
-    let app = app_with_chat().await;
+    let (service, context) = service_and_context().await;
+    let _guard = crate::tests::theme_global_lock::lock();
+    let app = app_with_chat(service, context);
     assert_eq!(app.render_cache_theme_gen, theme::generation());
 }
 
 /// The frame renders, fills the cache, and leaves the stamp matching.
 #[tokio::test]
 async fn rendering_fills_the_cache_and_stamps_the_generation() {
-    let mut app = app_with_chat().await;
+    let (service, context) = service_and_context().await;
+    let _guard = crate::tests::theme_global_lock::lock();
+    let mut app = app_with_chat(service, context);
     let mut terminal = Terminal::new(TestBackend::new(WIDTH, HEIGHT)).unwrap();
     draw(&mut terminal, &mut app);
     assert!(
@@ -102,7 +122,9 @@ async fn rendering_fills_the_cache_and_stamps_the_generation() {
 /// it, must sweep it away.
 #[tokio::test]
 async fn a_stale_generation_drops_the_cache() {
-    let mut app = app_with_chat().await;
+    let (service, context) = service_and_context().await;
+    let _guard = crate::tests::theme_global_lock::lock();
+    let mut app = app_with_chat(service, context);
     let mut terminal = Terminal::new(TestBackend::new(WIDTH, HEIGHT)).unwrap();
     draw(&mut terminal, &mut app);
 
@@ -135,7 +157,9 @@ async fn a_stale_generation_drops_the_cache() {
 /// keyed by length alone, so it needs the same sweep.
 #[tokio::test]
 async fn a_stale_generation_drops_the_streaming_cache() {
-    let mut app = app_with_chat().await;
+    let (service, context) = service_and_context().await;
+    let _guard = crate::tests::theme_global_lock::lock();
+    let mut app = app_with_chat(service, context);
     let mut terminal = Terminal::new(TestBackend::new(WIDTH, HEIGHT)).unwrap();
     draw(&mut terminal, &mut app);
 

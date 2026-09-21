@@ -654,6 +654,7 @@ pub mod rtk_rewrite_test;
 #[cfg(feature = "rtk")]
 pub mod rtk_tracker_test;
 pub mod stop_intent_test;
+pub mod theme_global_lock;
 pub mod theme_persist_roundtrip_test;
 pub mod toml_hot_reload_test;
 pub mod transport_ready_test;

@@ -212,6 +212,12 @@ fn by_name_is_case_insensitive() {
 /// not the active slot).
 #[test]
 fn set_and_reset_switch_active_theme() {
+    // The only writer of the global theme slot in the suite, and it bumps the
+    // generation counter eleven times. `tui_theme_cache_invalidation_test`
+    // reads that counter, so the two must not overlap under the parallel
+    // harness; see `theme_global_lock`.
+    let _guard = crate::tests::theme_global_lock::lock();
+
     assert_eq!(theme::role(Role::Accent), palette::ORANGE);
     theme::set(&DRACULA);
     assert_eq!(theme::role(Role::Accent), rgb(0xFFB86C));
