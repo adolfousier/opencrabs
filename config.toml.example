@@ -356,6 +356,22 @@ profile_id = ""
 # default_model = "MiniMax-M3"
 
 # ========================================
+# Tiered decision cache (#1648)
+# ========================================
+# A tier is a decision-shaped question worth reusing answers for.
+# Shadow mode (the default) changes nothing the agent experiences: it
+# only counts identical repeat decisions as would-hits so a deployment
+# can decide keep-or-cut with data. Set mode = "live" per tier to
+# actually reuse cached decisions; mode = "off" disables a tier.
+# policy_version is required; bump it whenever the semantics of the
+# tier's answer change, which keys every old row out.
+# [decisions.tiers.triage]
+# policy_version = "p1"
+# mode = "shadow"
+# ttl_hours = 168
+# margin_floor = 0.2
+
+# ========================================
 # Agent / Sub-Agent Defaults
 # ========================================
 # Default provider/model for the main chat session.

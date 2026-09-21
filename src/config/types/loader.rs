@@ -1621,6 +1621,30 @@ impl Config {
             anyhow::bail!("provider registry is enabled but base_url is empty");
         }
 
+        // #1648: [decisions] tiers are opt-in contracts; a half-written one
+        // must stop the load rather than run a ring on undefined semantics.
+        for (tier_id, tier) in &self.decisions.tiers {
+            if tier.policy_version.trim().is_empty() {
+                anyhow::bail!(
+                    "decisions.tiers.{tier_id}: policy_version is required \
+                     (bump it whenever the tier's decision semantics change)"
+                );
+            }
+            if tier.similarity {
+                anyhow::bail!(
+                    "decisions.tiers.{tier_id}: similarity reuse is not implemented (#1648 L2); \
+                     set similarity = false"
+                );
+            }
+            if let Some(ttl) = tier.ttl_hours
+                && ttl <= 0
+            {
+                anyhow::bail!(
+                    "decisions.tiers.{tier_id}: ttl_hours must be positive when set (got {ttl})"
+                );
+            }
+        }
+
         tracing::debug!("Configuration validation passed");
         Ok(())
     }

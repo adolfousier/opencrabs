@@ -55,6 +55,7 @@ pub mod channel_search;
 pub mod config_tool;
 pub mod context;
 pub mod cron_manage;
+pub mod decide_cached;
 pub mod evolve;
 pub mod feedback_analyze;
 pub mod feedback_record;

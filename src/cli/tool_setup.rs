@@ -116,6 +116,11 @@ pub(crate) fn register_core_agent_tools(
     ));
     // Config management (read/write config.toml, commands.toml)
     tool_registry.register(Arc::new(ConfigTool));
+    // L1 decision-reuse ring (#1648) — shadow by default; the release-day
+    // keep-or-cut evaluation runs on its persisted counters.
+    tool_registry.register(Arc::new(
+        crate::brain::tools::decide_cached::DecideCachedTool::new(db.pool().clone()),
+    ));
     // Slash command invocation (agent can call any slash command)
     tool_registry.register(Arc::new(SlashCommandTool));
     // Session rename — agent can update the current session's title

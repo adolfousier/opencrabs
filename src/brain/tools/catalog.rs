@@ -166,6 +166,7 @@ pub const EXTENDED_TOOL_INVENTORY: &[(&str, &[&str])] = &[
             "channel_search",
             "brave_search",
             "mission_control_report",
+            "decide_cached",
             "a2a_send",
             "profile_list",
             "tasks_list",
@@ -326,6 +327,7 @@ pub fn tool_category(name: &str) -> &'static str {
         }
         n if n == "cron_manage"
             || n == "goal_manage"
+            || n == "decide_cached"
             || n == "session_search"
             || n == "channel_search"
             || n == "a2a_send"

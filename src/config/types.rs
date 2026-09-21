@@ -78,6 +78,12 @@ pub struct Config {
     #[serde(default)]
     pub memory: MemoryConfig,
 
+    /// Tiered decision cache (#1648): per-tier reuse rings with a
+    /// release-day keep-or-cut evaluation. Empty section = feature fully
+    /// off, every code path behaves exactly like before this existed.
+    #[serde(default)]
+    pub decisions: DecisionsConfig,
+
     /// Brain-file behaviour: read-time empty-section stripping and other
     /// per-file knobs. Optional — defaults preserve historical behaviour
     /// where strip-on-load was off.
@@ -1696,6 +1702,82 @@ pub struct CronConfig {
     pub default_model: Option<String>,
 }
 
+/// One tier of the decision pyramid (#1648). A tier is a decision-shaped
+/// question the operator has declared worth caching: same canonical input
+/// + same policy version must give the same answer.
+///
+/// ```toml
+/// [decisions.tiers.triage]
+/// policy_version = "p1"        # REQUIRED — bump when the decision semantics change
+/// mode = "shadow"              # shadow (default) | live | off
+/// ttl_hours = 168              # optional; older rows miss and are swept (PR3)
+/// margin_floor = 0.2           # optional, default 0.0; sub-floor margins never cached
+/// similarity = false           # L2 reuse, not implemented — true is a load error
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DecisionTierConfig {
+    /// Semantic version of THIS tier's decision policy. Missing or empty is
+    /// a named load error: without it, a policy change silently reuses
+    /// stale decisions, which is the one failure the ring must never allow.
+    #[serde(default)]
+    pub policy_version: String,
+
+    /// Reuse posture for this tier.
+    #[serde(default)]
+    pub mode: DecisionMode,
+
+    /// Rows older than this miss (and will be pruned by the PR3 sweeper).
+    /// `None` = no expiry on reads; keep one set so pruning has a bound.
+    #[serde(default)]
+    pub ttl_hours: Option<i64>,
+
+    /// Write gate: a reported margin below this is never cached. Default
+    /// 0.0 caches everything measurable; a real deployment should raise it
+    /// (e.g. 0.2) so borderline decisions stay live.
+    #[serde(default)]
+    pub margin_floor: f64,
+
+    /// Similarity (L2) reuse. Unimplemented; `true` is rejected at load so
+    /// an operator never believes a fuzzy ring is on.
+    #[serde(default)]
+    pub similarity: bool,
+}
+
+impl Default for DecisionTierConfig {
+    fn default() -> Self {
+        Self {
+            policy_version: String::new(),
+            mode: DecisionMode::default(),
+            ttl_hours: None,
+            margin_floor: 0.0,
+            similarity: false,
+        }
+    }
+}
+
+/// How a tier uses its cache. Default is `Shadow`: keys computed, would-hits
+/// counted, the model still always asked — the release-day evaluation is
+/// built on shadow evidence, and promotion to `Live` is a per-deployment
+/// operator decision, never a code default (#1648 kill rule).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum DecisionMode {
+    #[default]
+    Shadow,
+    Live,
+    Off,
+}
+
+/// The `[decisions]` section: a map of named tiers. No global knobs in
+/// v1 — a tier with no config entry does not exist, and asking for it is
+/// a named error, never an implicit default.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct DecisionsConfig {
+    /// Named tiers: `[decisions.tiers.<name>]`.
+    #[serde(default)]
+    pub tiers: std::collections::BTreeMap<String, DecisionTierConfig>,
+}
+
 /// OpenAI-compatible embedding provider configuration.
 ///
 /// When set, embeddings are generated via an HTTP API call instead of the
@@ -2835,6 +2917,7 @@ impl Default for Config {
             image: ImageConfig::default(),
             cron: CronConfig::default(),
             memory: MemoryConfig::default(),
+            decisions: DecisionsConfig::default(),
             brain: BrainConfig::default(),
             browser: BrowserConfig::default(),
             doctor: DoctorConfig::default(),

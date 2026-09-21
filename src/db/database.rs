@@ -112,6 +112,10 @@ pub(crate) const MIGRATION_SQL: &[&str] = &[
     // until the [decisions] tooling lands (PR2). Appended last per the list
     // invariant.
     include_str!("../migrations/20260921000001_add_decision_cache.sql"),
+    // #1648 PR2: per-tier counters behind the release-day keep-or-cut call
+    // (shadow would-hits, live reuses). Idempotent CREATE, so no heal pass;
+    // appended last per the list invariant.
+    include_str!("../migrations/20260921000002_add_decision_stats.sql"),
 ];
 
 pub(crate) fn build_migrations() -> Migrations<'static> {
