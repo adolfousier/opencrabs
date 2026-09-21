@@ -309,6 +309,8 @@ api_key = "YOUR_GEMINI_KEY"
 
 > **Pinning vision to a provider:** set `[providers.fallback] vision = ["name"]` to try that provider first for `analyze_image` and `analyze_video`, regardless of its `enabled` flag (vision needs only `vision_model` plus a key). Names follow the same rule as every other provider key: the bare section name, so `[providers.custom.myprovider]` is `"myprovider"`. An entry that does not resolve is skipped with a warning and resolution falls through to the normal provider scan. There is no `[image.vision] provider` key; that section configures the Gemini backend only.
 
+> **Pinning generation to a provider:** `[providers.fallback] generation = ["name"]` is the same mechanism for `generate_image`, resolved over each provider's `generation_model` instead of `vision_model`. Order per request: the session's current provider, then this chain, then the global Gemini `[image.generation]` section strictly last — and only that Gemini leg is gated by `image.generation.enabled`; a provider route registers the tool even with the flag off. Custom providers need an explicit `base_url` (never guessed); any OpenAI-compatible `/images/generations` endpoint works (OpenRouter, Together, DashScope/Qwen-Image, vLLM, …). Quick setup for the active provider: `/onboard:image generation <model>`.
+
 **Diagnostic:** when vision is unavailable for any reason, `is_vision_available` logs the exact cause at INFO level in `~/.opencrabs/logs/opencrabs.YYYY-MM-DD` — search for `target=vision`.
 
 #### Context window & auto-compaction (effectively unlimited memory)
