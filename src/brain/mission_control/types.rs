@@ -244,4 +244,19 @@ pub struct McAnalytics {
     pub brain_verify: McBrainVerifyStats,
     /// Per-model tool reliability, most calls first.
     pub model_tools: Vec<McModelToolStat>,
+    /// Decision-cache tier counters (#1648 PR3), most calls first. Empty
+    /// when the feature has never been observed; empty means "no block".
+    pub decisions: Vec<McDecisionStat>,
+}
+
+/// One decision-reuse tier's counters (#1648), read straight from
+/// `decision_stats`. `would_hit` is what shadow mode measured but did not
+/// act on; `live_hit` is reuse actually taken. Release-day keep-or-cut is
+/// judged from these.
+#[derive(Debug, Clone, Default)]
+pub struct McDecisionStat {
+    pub tier_id: String,
+    pub calls: i64,
+    pub would_hit: i64,
+    pub live_hit: i64,
 }

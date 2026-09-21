@@ -9,3 +9,4 @@
 //! never drift.
 
 pub mod normalize;
+pub mod report;

@@ -1204,6 +1204,38 @@ async fn cmd_chat_inner(
         Err(e) => tracing::warn!("Sub-agent session sweep failed: {e:#}"),
     }
 
+    // Decision-cache sweep (#1648 PR3): rows past a tier's `ttl_hours` are
+    // stale by the tier's own definition, and rows for tiers no longer in
+    // `[decisions.tiers]` can never be read again (lookup starts from
+    // config), so an unconfigured table is pure leftover from the kill
+    // switch. Startup-only, like the sub-agent sweep above; never fatal:
+    // a failed sweep costs disk, not correctness.
+    {
+        use crate::db::repository::DecisionCacheRepository;
+        let cache = DecisionCacheRepository::new(db.pool().clone());
+        let mut swept = 0usize;
+        let mut sweep_err: Option<anyhow::Error> = None;
+        for (tier, tc) in &config.decisions.tiers {
+            if let Some(ttl) = tc.ttl_hours {
+                match cache.prune_expired(tier, ttl).await {
+                    Ok(n) => swept += n,
+                    Err(e) => sweep_err = Some(e),
+                }
+            }
+        }
+        let known: Vec<String> = config.decisions.tiers.keys().cloned().collect();
+        match cache.delete_unknown_tiers(&known).await {
+            Ok(n) => swept += n,
+            Err(e) => sweep_err = Some(e),
+        }
+        if let Some(e) = sweep_err {
+            tracing::warn!("Decision-cache sweep failed: {e:#}");
+        }
+        if swept > 0 {
+            tracing::info!("Pruned {swept} stale decision_cache row(s)");
+        }
+    }
+
     let agent_service = Arc::new(
         AgentService::new(provider.clone(), service_context.clone(), config)
             .await

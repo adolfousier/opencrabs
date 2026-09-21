@@ -1326,6 +1326,27 @@ async fn format_usage(
         ));
     }
 
+    // Decision reuse (#1648 PR3): per-tier shadow/live counters. Silent
+    // until the feature has actually measured something.
+    {
+        use crate::db::repository::{DecisionCacheRepository, DecisionStatsRepository};
+        let pool = session_svc.pool();
+        let stats = DecisionStatsRepository::new(pool.clone())
+            .all()
+            .await
+            .unwrap_or_default();
+        let cached_rows = DecisionCacheRepository::new(pool)
+            .count_by_tier()
+            .await
+            .unwrap_or_default();
+        let cfg = crate::config::Config::current();
+        if let Some(block) =
+            crate::decisions::report::render_usage_block(&stats, &cached_rows, &cfg.decisions.tiers)
+        {
+            blocks.push(block);
+        }
+    }
+
     blocks.join("\n\n")
 }
 

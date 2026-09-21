@@ -178,6 +178,25 @@ pub(crate) fn render_markdown(
         }
     };
 
+    // Decision-reuse counters (#1648 PR3). Silent when nothing has been
+    // measured: an unused feature must not clutter the report, and an
+    // empty section on release day is itself the cut signal.
+    table_section(
+        "Decision cache",
+        &["Tier", "Calls", "Would-hit", "Live-hit"],
+        a.decisions
+            .iter()
+            .map(|d| {
+                vec![
+                    format!("`{}`", d.tier_id),
+                    d.calls.to_string(),
+                    d.would_hit.to_string(),
+                    d.live_hit.to_string(),
+                ]
+            })
+            .collect(),
+    );
+
     table_section(
         "Top Tools",
         &["Tool", "Calls", "Fail"],

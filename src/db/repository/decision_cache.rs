@@ -197,4 +197,81 @@ impl DecisionCacheRepository {
             .context("Failed to delete decision_cache slice")?;
         Ok(n)
     }
+
+    /// Row count per tier, for the /usage decisions block (#1648 PR3):
+    /// the cached-answer distribution alongside the call counters.
+    pub async fn count_by_tier(&self) -> Result<Vec<(String, i64)>> {
+        let rows = self
+            .pool
+            .get()
+            .await
+            .context("Failed to get connection")?
+            .interact(|conn| {
+                let mut stmt =
+                    conn.prepare("SELECT tier_id, COUNT(*) FROM decision_cache GROUP BY tier_id")?;
+                let mapped = stmt
+                    .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))?
+                    .collect::<std::result::Result<Vec<_>, _>>()?;
+                Ok::<_, rusqlite::Error>(mapped)
+            })
+            .await
+            .map_err(interact_err)?
+            .context("Failed to count decision_cache rows by tier")?;
+        Ok(rows)
+    }
+
+    /// TTL pruning for one tier (#1648 PR3): rows untouched for longer than
+    /// `ttl_hours` go. Recency is `last_used_at` when a hit has refreshed
+    /// it, else `created_at`; a row is only ever kept by being useful.
+    /// Only called for tiers with `ttl_hours` set; `None` in config means
+    /// "bounded by policy_version only", which is the sweeper's job.
+    pub async fn prune_expired(&self, tier_id: &str, ttl_hours: i64) -> Result<usize> {
+        let tier_id = tier_id.to_string();
+        let n = self
+            .pool
+            .get()
+            .await
+            .context("Failed to get connection")?
+            .interact(move |conn| {
+                conn.execute(
+                    "DELETE FROM decision_cache \
+                     WHERE tier_id = ?1 \
+                       AND COALESCE(last_used_at, created_at) \
+                           < strftime('%s','now') - (?2 * 3600)",
+                    params![tier_id, ttl_hours],
+                )
+            })
+            .await
+            .map_err(interact_err)?
+            .context("Failed to prune expired decision_cache rows")?;
+        Ok(n)
+    }
+
+    /// Delete rows for tiers with no `[decisions.tiers]` entry (#1648 PR3).
+    /// An unconfigured tier's rows can never be read: lookup starts from
+    /// config, so these are garbage the kill switch left behind. Passing an
+    /// empty list (feature fully off) therefore clears the table, which is
+    /// exactly the removal cheapness the kill rule promises.
+    pub async fn delete_unknown_tiers(&self, known_tiers: &[String]) -> Result<usize> {
+        let known = known_tiers.to_vec();
+        let n = self
+            .pool
+            .get()
+            .await
+            .context("Failed to get connection")?
+            .interact(move |conn| {
+                if known.is_empty() {
+                    return conn.execute("DELETE FROM decision_cache", []);
+                }
+                let placeholders = known.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+                let sql =
+                    format!("DELETE FROM decision_cache WHERE tier_id NOT IN ({placeholders})");
+                let mut stmt = conn.prepare(&sql)?;
+                stmt.execute(rusqlite::params_from_iter(known.iter()))
+            })
+            .await
+            .map_err(interact_err)?
+            .context("Failed to delete orphaned decision_cache rows")?;
+        Ok(n)
+    }
 }

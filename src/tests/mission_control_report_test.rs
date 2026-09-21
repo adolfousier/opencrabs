@@ -3,9 +3,9 @@
 //! present and the output must stay em-dash-free (it is published into channels).
 
 use crate::brain::mission_control::types::{
-    McActivity, McActivityLevel, McAnalytics, McBrainFile, McBrainVerifyStats, McInboxItem,
-    McInboxKind, McModelToolStat, McPhantomStats, McScheduleItem, McScheduleKind, McStreamingStats,
-    McToolStat,
+    McActivity, McActivityLevel, McAnalytics, McBrainFile, McBrainVerifyStats, McDecisionStat,
+    McInboxItem, McInboxKind, McModelToolStat, McPhantomStats, McScheduleItem, McScheduleKind,
+    McStreamingStats, McToolStat,
 };
 use crate::brain::tools::mission_control_report::render_markdown;
 use chrono::Utc;
@@ -56,6 +56,12 @@ fn sample_analytics() -> McAnalytics {
             total: 100,
             failures: 7,
             fail_rate: 7.0,
+        }],
+        decisions: vec![McDecisionStat {
+            tier_id: "triage".into(),
+            calls: 40,
+            would_hit: 30,
+            live_hit: 0,
         }],
     }
 }
@@ -113,6 +119,10 @@ fn report_includes_all_sections() {
     assert!(md.contains("| tool_loop | 8 |"));
     assert!(md.contains("| MEMORY.md | 120.3 KB |"));
 
+    // Decision cache section (#1648 PR3): rendered when counters exist.
+    assert!(md.contains("### Decision cache"));
+    assert!(md.contains("| `triage` | 40 | 30 | 0 |"));
+
     // Inbox section
     assert!(md.contains("Inbox (RSI Proposals)"));
     assert!(md.contains("deploy_staging"));
@@ -143,4 +153,6 @@ fn empty_sections_are_omitted() {
     assert!(!md.contains("Inbox"));
     assert!(!md.contains("Activity Feed"));
     assert!(!md.contains("Schedule"));
+    // Kill-rule silence (#1648 PR3): no counters, no decision block.
+    assert!(!md.contains("Decision cache"));
 }

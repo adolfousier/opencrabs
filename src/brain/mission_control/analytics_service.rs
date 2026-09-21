@@ -12,12 +12,13 @@
 //! pre-fetches once (like the other panels) rather than per `draw`.
 
 use super::types::{
-    McAnalytics, McBrainFile, McBrainVerifyStats, McModelToolStat, McPhantomStats,
+    McAnalytics, McBrainFile, McBrainVerifyStats, McDecisionStat, McModelToolStat, McPhantomStats,
     McStreamingStats, McToolStat, TimeWindow,
 };
 use crate::db::Pool;
 use crate::db::repository::{
-    AnalyticsEventRepository, FeedbackLedgerRepository, ToolExecutionRepository,
+    AnalyticsEventRepository, DecisionStatsRepository, FeedbackLedgerRepository,
+    ToolExecutionRepository,
 };
 
 /// How many rows to surface in each ranked list.
@@ -83,7 +84,31 @@ pub async fn summary(pool: Pool, window: TimeWindow) -> McAnalytics {
         streaming,
         brain_verify,
         model_tools,
+        decisions,
     }
+}
+
+/// Decision-reuse counters per tier (#1648 PR3). Cumulative and
+/// point-in-time like the RSI counts, so `window` deliberately does not
+/// apply: the release-day evaluation wants the whole shadow period, not a
+/// slice. Empty (never error) keeps the panel honest: no counters means no
+/// block, which is also the kill-rule evidence of non-use.
+async fn decision_stats(pool: Pool) -> Vec<McDecisionStat> {
+    let rows = DecisionStatsRepository::new(pool)
+        .all()
+        .await
+        .unwrap_or_else(|e| {
+            tracing::warn!("analytics_service: decision stats query failed: {e:#}");
+            Vec::new()
+        });
+    rows.into_iter()
+        .map(|r| McDecisionStat {
+            tier_id: r.tier_id,
+            calls: r.calls,
+            would_hit: r.would_hit,
+            live_hit: r.live_hit,
+        })
+        .collect()
 }
 
 /// Per-tool usage with fail rate, most-used first. `window` bounds the query
