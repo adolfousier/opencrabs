@@ -110,14 +110,14 @@ impl DecisionCacheRepository {
     /// Re-put of an existing key refreshes the stored result in place: one
     /// row per key, hit counter and last_used preserved.
     pub async fn put(&self, input: DecisionPut, margin_floor: f64) -> Result<bool> {
-        if let Some(m) = input.margin {
-            if m < margin_floor {
-                tracing::debug!(
-                    "decision_cache: refused write for tier {} (margin {m} < floor {margin_floor})",
-                    input.tier_id
-                );
-                return Ok(false);
-            }
+        if let Some(m) = input.margin
+            && m < margin_floor
+        {
+            tracing::debug!(
+                "decision_cache: refused write for tier {} (margin {m} < floor {margin_floor})",
+                input.tier_id
+            );
+            return Ok(false);
         }
         self.pool
             .get()
