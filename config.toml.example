@@ -717,9 +717,9 @@ port = 18790            # A2A gateway port
 enabled = true
 # MCP is enabled by default as its free. If want through API its free up to 1000 requests. API key goes in keys.toml: [providers.web_search.exa] api_key = "..."
 
-[providers.web_search.duckduckgo]
-enabled = true
-# Completely free, enabled by default"
+# Duck Duck Go needs no section of its own: it is built into web_search,
+# always available and free. A table for it is not part of the schema, so one
+# here would be discarded and reported back as an unrecognized config key.
 
 [providers.web_search.brave]
 enabled = false

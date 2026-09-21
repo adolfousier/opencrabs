@@ -522,24 +522,32 @@ fn append_only_finding_yields_update_input_never_deletion() {
 
 /// `verify_config_key` must consult the COMPILED schema witness, never
 /// `config.toml.example`. Proven with the example file itself as the
-/// control: it documents a key the compiled types dropped
-/// (`web_search.duckduckgo` — `WebSearchProviders` has only exa/brave),
-/// and it omits keys the compiled schema has (`[doctor]`,
-/// `agent.eval_providers`, `agent.redact_group`). If the verifier read
-/// the example, duckduckgo would verify Ok and the schema-only keys would
-/// fail — the exact opposite of what it returns.
+/// control: it omits keys the compiled schema has (`[doctor]`,
+/// `agent.eval_providers`, `agent.redact_group`), which an example-driven
+/// verifier could not return Ok for, and a key in neither
+/// (`web_search.duckduckgo`, since `WebSearchProviders` has only exa and
+/// brave) verifies Stale off the schema alone.
+///
+/// The control used to run the other way: the example DOCUMENTED
+/// `[providers.web_search.duckduckgo]` while the schema never had it, and
+/// this test pinned that drift in place. The drift was a live bug (#1669).
+/// `seed.rs` copies the example into every fresh `~/.opencrabs/config.toml`,
+/// so the discarded key came back at the owner as an unrecognized-key alert
+/// on first startup. A test control must never be a reason to keep a bug,
+/// so the schema-only direction carries the proof now and the example is
+/// held to having no schema-absent keys instead.
 #[test]
 fn config_key_verification_targets_embedded_schema_not_example() {
-    // Control: assert the drift preconditions against the actual example
-    // file on disk, so a future sync that erases the drift case fails
-    // HERE with an explanation instead of silently weakening the test.
+    // Control: assert the preconditions against the actual example file on
+    // disk, so a future edit that breaks one of them fails HERE with an
+    // explanation instead of silently weakening the test.
     let example_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("config.toml.example");
     let example = fs::read_to_string(&example_path)
         .unwrap_or_else(|e| panic!("read {}: {e}", example_path.display()));
     assert!(
-        example.contains("[providers.web_search.duckduckgo]"),
-        "precondition drifted: example no longer documents web_search.duckduckgo — \
-         pick a fresh example-only key for this test"
+        !example.contains("[providers.web_search.duckduckgo]"),
+        "#1669 regressing: the example documents a table the compiled schema \
+         lacks, and seed.rs puts it in every fresh install"
     );
     for schema_only in ["[doctor]", "eval_providers", "redact_group"] {
         assert!(
@@ -550,8 +558,8 @@ fn config_key_verification_targets_embedded_schema_not_example() {
     }
 
     use crate::brain::rsi_stale_scan::verify_config_key;
-    // Documented in the example, ABSENT from the compiled types: the
-    // schema wins → Stale. (An example-driven verifier would say Ok.)
+    // Absent from the compiled types: the schema decides, so Stale. Since
+    // #1669 it is absent from the example too, which is the correct state.
     assert_eq!(
         verify_config_key("[providers.web_search.duckduckgo.api_key]"),
         Verdict::Stale,
@@ -563,7 +571,7 @@ fn config_key_verification_targets_embedded_schema_not_example() {
     assert_eq!(verify_config_key("[agent.eval_providers]"), Verdict::Ok);
     assert_eq!(verify_config_key("[agent.redact_group]"), Verdict::Ok);
 
-    // And through the scanner: a prescription citing the example-only key
+    // And through the scanner: a prescription citing the schema-absent key
     // is flagged with the reword action, while a prescription citing a
     // schema-only key is not.
     let dir = scratch_dir("cfgkeys");
