@@ -220,6 +220,10 @@ pub const SLASH_COMMANDS: &[SlashCommand] = &[
         description: "Jump to image handling setup (vision + generation)",
     },
     SlashCommand {
+        name: "/onboard:daemon",
+        description: "Jump to background service (always-on) setup",
+    },
+    SlashCommand {
         name: "/onboard:brain",
         description: "Jump to brain/persona setup",
     },

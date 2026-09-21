@@ -3692,6 +3692,7 @@ Any tool on your `$PATH` works. If it runs in your terminal, OpenCrabs can use i
 | `/onboard:channels` | Jump to channel config |
 | `/onboard:voice` | Jump to voice STT/TTS setup |
 | `/onboard:image` | Jump to image handling setup |
+| `/onboard:daemon` | Jump to background service (always-on) setup |
 | `/onboard:gateway` | Jump to API gateway settings |
 | `/onboard:brain` | Jump to brain/persona setup |
 | `/doctor` | Run connection health check |
