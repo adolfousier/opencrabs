@@ -106,6 +106,12 @@ pub(crate) const MIGRATION_SQL: &[&str] = &[
     // goal-dispatch flag. ALTER TABLE ADD COLUMN, so appended last per the
     // list invariant above.
     include_str!("../migrations/20260915000001_add_cron_trigger_pipeline.sql"),
+    // #1648: L1 exact-decision-reuse ring — versioned decision cache table.
+    // Idempotent CREATE + index, so no heal pass needed for stamp drift
+    // (same rationale as the #1529 entry above); nothing reads or writes it
+    // until the [decisions] tooling lands (PR2). Appended last per the list
+    // invariant.
+    include_str!("../migrations/20260921000001_add_decision_cache.sql"),
 ];
 
 pub(crate) fn build_migrations() -> Migrations<'static> {

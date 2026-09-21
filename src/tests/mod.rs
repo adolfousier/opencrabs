@@ -264,6 +264,7 @@ pub mod db_repository_project_test;
 pub mod db_repository_session_test;
 pub mod db_retry_test;
 pub mod db_thread_id_stamp_heal_test;
+pub mod decision_cache_test;
 pub mod deepseek_reasoning_test;
 pub mod directive_discovery_test;
 pub mod discord_tool_group_test;
