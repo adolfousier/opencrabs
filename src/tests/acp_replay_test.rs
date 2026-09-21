@@ -50,9 +50,12 @@ fn replays_user_and_assistant_in_order() {
 
 #[test]
 fn replays_thinking_and_inline_reasoning_as_thought_chunks() {
+    // Markers are line-start-anchored upstream (#1587): real stored content
+    // newline-delimits them, so the fixture must too — inline markers parse
+    // as one unclosed reasoning block, by contract.
     let messages = vec![msg(
         "assistant",
-        "<!-- reasoning -->pondering<!-- /reasoning -->visible answer",
+        "<!-- reasoning -->\npondering\n<!-- /reasoning -->\nvisible answer",
         Some("persisted thought"),
     )];
     let updates = replay_updates(&messages);
