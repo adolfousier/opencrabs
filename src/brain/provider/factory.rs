@@ -26,7 +26,8 @@ use super::{
     gemini::GeminiProvider,
     opencode_cli::OpenCodeCliProvider,
 };
-use crate::config::{Config, ProviderConfig};
+use crate::config::timeout::{TimeoutResolution, resolve_timeout};
+use crate::config::{AgentConfig, Config, ProviderConfig};
 use anyhow::Result;
 use std::future::Future;
 use std::pin::Pin;
@@ -806,7 +807,7 @@ fn try_create_custom_by_name(config: &Config, name: &str) -> Result<Option<Arc<d
     };
     builder = builder.with_body_transform(combined_transform);
 
-    let provider = configure_openai_compatible(builder, &custom_config);
+    let provider = configure_openai_compatible(builder, &custom_config, &config.agent);
     Ok(Some(Arc::new(provider)))
 }
 
@@ -1508,6 +1509,7 @@ fn try_create_github(config: &Config) -> Result<Option<Arc<dyn Provider>>> {
             .with_token_fn(token_fn)
             .with_extra_headers(copilot_extra_headers()),
         github_config,
+        &config.agent,
     );
     Ok(Some(Arc::new(provider)))
 }
@@ -1562,7 +1564,7 @@ async fn try_create_qwen(config: &Config) -> Result<Option<Arc<dyn Provider>>> {
         .with_body_transform(Arc::new(qwen_body_transform))
         .with_rate_limiter(qwen_limiter);
 
-    let provider = configure_openai_compatible(builder, qwen_config);
+    let provider = configure_openai_compatible(builder, qwen_config, &config.agent);
     Ok(Some(Arc::new(provider)))
 }
 
@@ -1608,6 +1610,7 @@ fn try_create_openrouter(config: &Config) -> Result<Option<Arc<dyn Provider>>> {
                 ),
             ]),
         openrouter_config,
+        &config.agent,
     );
 
     // OpenRouter caches by default — turn it on unless the user explicitly opted
@@ -1700,7 +1703,7 @@ fn try_create_xiaomi(config: &Config) -> Result<Option<Arc<dyn Provider>>> {
     // via prompt_tokens_details) — there is no request-side cache parameter, so
     // we deliberately do NOT set cache_enabled (which would send an
     // OpenRouter/Anthropic-style cache_control Xiaomi doesn't accept).
-    let provider = configure_openai_compatible(builder, xiaomi_config);
+    let provider = configure_openai_compatible(builder, xiaomi_config, &config.agent);
     Ok(Some(Arc::new(provider)))
 }
 
@@ -1739,6 +1742,7 @@ fn try_create_minimax(config: &Config) -> Result<Option<Arc<dyn Provider>>> {
     let mut provider = configure_openai_compatible(
         OpenAIProvider::with_base_url(api_key.clone(), full_url).with_name("minimax"),
         minimax_config,
+        &config.agent,
     );
 
     // MiniMax M2.7/M2.5 doesn't support vision — default to MiniMax-Text-01 in-memory.
@@ -1780,13 +1784,21 @@ fn try_create_zhipu(config: &Config) -> Result<Option<Arc<dyn Provider>>> {
     let mut provider = configure_openai_compatible(
         OpenAIProvider::with_base_url(api_key.clone(), base_url).with_name("zai"),
         zhipu_config,
+        &config.agent,
     );
-    // An explicit stream_idle_timeout_secs already landed above. Otherwise the
-    // generic 20s remote default would cut a host the code documents as holding
-    // an idle stream to ~30s, and blame the connection for our own timer (#1666).
-    let host_aware_idle = zhipu_config
-        .stream_idle_timeout_secs
-        .filter(|&s| s > 0)
+    // Neither tier configured an idle timeout, so the host-aware default is the
+    // only thing standing between z.ai and the generic 20s remote default, which
+    // would cut a host the code documents as holding an idle stream to ~30s and
+    // blame the connection for our own timer (#1666). Resolved across BOTH tiers
+    // (#1688): reading only the per-provider key here would let this default
+    // overwrite an explicit `[agent] stream_idle_timeout_secs`.
+    let idle_cfg = resolve_timeout(
+        zhipu_config.stream_idle_timeout_secs,
+        config.agent.stream_idle_timeout_secs,
+        None,
+    );
+    let host_aware_idle = idle_cfg
+        .effective
         .is_none()
         .then(|| {
             super::zhipu_endpoint::default_idle_timeout_secs(
@@ -1841,6 +1853,7 @@ fn try_create_moonshot(config: &Config) -> Result<Option<Arc<dyn Provider>>> {
     let provider = configure_openai_compatible(
         OpenAIProvider::with_base_url(api_key.clone(), base_url).with_name("moonshot"),
         moonshot_config,
+        &config.agent,
     );
     Ok(Some(Arc::new(provider)))
 }
@@ -1880,7 +1893,7 @@ fn try_create_ollama(config: &Config) -> Result<Option<Arc<dyn Provider>>> {
         let enable = ollama_config.enable_thinking.unwrap_or(true);
         builder = builder.with_body_transform(local_thinking_body_transform(enable));
     }
-    let provider = configure_openai_compatible(builder, ollama_config);
+    let provider = configure_openai_compatible(builder, ollama_config, &config.agent);
     Ok(Some(Arc::new(provider)))
 }
 
@@ -1933,14 +1946,32 @@ fn try_create_custom(config: &Config) -> Result<Option<Arc<dyn Provider>>> {
     };
     builder = builder.with_body_transform(combined_transform);
 
-    let provider = configure_openai_compatible(builder, &custom_config);
+    let provider = configure_openai_compatible(builder, &custom_config, &config.agent);
     Ok(Some(Arc::new(provider)))
+}
+
+/// Warn when a resolved timeout flag had to skip a tier that carried `0`.
+///
+/// `0` is not "no timer" for these two flags: a zero-second reqwest timeout is
+/// an instant deadline, and a zero-second idle timer fires before the first
+/// chunk arrives. So the resolver skips it and the default applies. Skipping it
+/// *silently*, though, is the same invisibility that kept #1689's dropped keys
+/// unnoticed long enough to become a documented example in the README, so the
+/// skip gets a log line naming the section that carried it.
+fn warn_skipped_zero(resolution: &TimeoutResolution, flag: &str) {
+    if let Some(note) = resolution.zero_note() {
+        tracing::warn!(
+            "`{flag} = 0` is skipped ({note}); a zero-second timer would fire \
+             immediately, so the default applies instead"
+        );
+    }
 }
 
 /// Configure OpenAI-compatible provider with custom model
 fn configure_openai_compatible(
     mut provider: OpenAIProvider,
     config: &ProviderConfig,
+    agent: &AgentConfig,
 ) -> OpenAIProvider {
     tracing::debug!(
         "configure_openai_compatible: default_model = {:?}",
@@ -1994,14 +2025,42 @@ fn configure_openai_compatible(
         provider = provider.with_cache_ttl(ttl);
         tracing::info!("OpenRouter cache TTL: {}s", ttl);
     }
-    if let Some(secs) = config.timeout_secs.filter(|&s| s > 0) {
-        provider = provider.with_timeout(std::time::Duration::from_secs(secs));
-        tracing::info!("Configured request timeout: {}s", secs);
+    // #1688: both flags resolve through [providers.<name>] -> [agent] -> the
+    // family default. Before this the per-provider struct was the only tier
+    // read anywhere in the tree, so `[agent] timeout_secs = 120` was parsed,
+    // stored, and then quietly ignored.
+    let request = resolve_timeout(
+        config.timeout_secs,
+        agent.timeout_secs,
+        Some(super::custom_openai_compatible::DEFAULT_TIMEOUT.as_secs()),
+    );
+    if let Some(dur) = request.duration() {
+        provider = provider.with_timeout(dur);
+        tracing::info!(
+            "Non-streaming request ceiling: {}s (from {})",
+            dur.as_secs(),
+            request.tier
+        );
     }
-    if let Some(secs) = config.stream_idle_timeout_secs.filter(|&s| s > 0) {
-        provider = provider.with_stream_idle_timeout(std::time::Duration::from_secs(secs));
-        tracing::info!("Configured stream idle timeout: {}s", secs);
+    warn_skipped_zero(&request, "timeout_secs");
+
+    // No compiled floor on purpose: the idle default is picked at stream time
+    // from whether the target is local/CLI or remote (`helpers.rs`), so a flag
+    // unset at both tiers must defer to that runtime choice, not override it.
+    let idle = resolve_timeout(
+        config.stream_idle_timeout_secs,
+        agent.stream_idle_timeout_secs,
+        None,
+    );
+    if let Some(dur) = idle.duration() {
+        provider = provider.with_stream_idle_timeout(dur);
+        tracing::info!(
+            "Stream idle timeout: {}s (from {})",
+            dur.as_secs(),
+            idle.tier
+        );
     }
+    warn_skipped_zero(&idle, "stream_idle_timeout_secs");
     provider
 }
 
@@ -2022,7 +2081,7 @@ fn try_create_openai(config: &Config) -> Result<Option<Arc<dyn Provider>>> {
             let enable = openai_config.enable_thinking.unwrap_or(true);
             builder = builder.with_body_transform(local_thinking_body_transform(enable));
         }
-        let provider = configure_openai_compatible(builder, openai_config);
+        let provider = configure_openai_compatible(builder, openai_config, &config.agent);
         return Ok(Some(Arc::new(provider)));
     }
 
@@ -2032,6 +2091,7 @@ fn try_create_openai(config: &Config) -> Result<Option<Arc<dyn Provider>>> {
         let provider = configure_openai_compatible(
             OpenAIProvider::new(api_key.clone()).with_name("openai"),
             openai_config,
+            &config.agent,
         );
         return Ok(Some(Arc::new(provider)));
     }
@@ -2223,6 +2283,7 @@ async fn try_create_opencode(config: &Config) -> Result<Option<Arc<dyn Provider>
             .with_name("opencode")
             .with_default_model(model.clone()),
         opencode_config,
+        &config.agent,
     );
 
     Ok(Some(Arc::new(provider)))

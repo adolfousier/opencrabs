@@ -19,6 +19,7 @@ pub mod sections;
 pub mod seed;
 pub mod startup_checks;
 pub mod stored_key;
+pub mod timeout;
 pub(crate) mod types;
 pub mod update;
 pub mod voice_flag_flips;
