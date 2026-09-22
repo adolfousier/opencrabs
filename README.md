@@ -1144,6 +1144,8 @@ The CLI `migrate` command currently supports OpenClaw and Hermes. For everything
 | [Ollama](#ollama) | Optional | Any pulled model | ✅ | ✅ | Local-first, zero API cost. Auto-detects localhost:11434 |
 | [Custom](#custom-openai-compatible) | Optional | Any | ✅ | ✅ | LM Studio, Groq, NVIDIA, any OpenAI-compatible API |
 
+> **CLI providers** (Claude Code, OpenCode, Codex, Qwen Code) spawn the local CLI as a full agent that sees only its **own** tools — OpenCrabs' tools are invisible to it — so when the model claims a capability it lacks or a background launch it didn't verify, tell it to use its own CLI tools and verify before claiming, and to write the correction into its memory files (`CLAUDE.md` or OpenCrabs brain files, re-injected every turn), since the CLI keeps no cross-turn state and anything fixed only in chat vanishes next spawn.
+
 ### Anthropic Claude
 
 **Models:** `claude-opus-4-6`, `claude-sonnet-4-5-20250929`, `claude-haiku-4-5-20251001`, plus legacy Claude 3.x models
@@ -1170,7 +1172,7 @@ Use your Claude Code CLI. OpenCrabs spawns the local `claude` CLI for completion
 enabled = true
 ```
 
-OpenCrabs handles all tools, memory, and context locally — the CLI is just the LLM backend. Each turn OpenCrabs builds a plain-text prompt from the full conversation (already trimmed by its own auto-compaction) and writes it to the CLI's stdin as a one-shot request under a freshly generated `--session-id`, so the CLI keeps no cross-turn state of its own. Context sizing is therefore governed entirely by the per-provider `context_window` setting and the 65%/90% auto-compaction described above, exactly as for native API providers. The CLI's own context window, its `~/.claude/` session history, and `CLAUDE_CODE_MAX_CONTEXT_TOKENS` are deliberately not used: this provider reports `cli_manages_context() = false`, the contract that makes OpenCrabs send full history every spawn and run its own compaction to stay within the window. The CLI's transparent prompt caching still applies, but that is a cost concern, not a context-sizing one.
+OpenCrabs owns memory and context locally, but the CLI is not merely an LLM backend: it is a full agent that executes its own native tools (Bash, Read, Edit, …) internally — OpenCrabs surfaces those calls for display and never re-executes them, and OpenCrabs' own tools are invisible to the spawned model. Each turn OpenCrabs builds a plain-text prompt from the full conversation (already trimmed by its own auto-compaction) and writes it to the CLI's stdin as a one-shot request under a freshly generated `--session-id`, so the CLI keeps no cross-turn state of its own. Context sizing is therefore governed entirely by the per-provider `context_window` setting and the 65%/90% auto-compaction described above, exactly as for native API providers. The CLI's own context window, its `~/.claude/` session history, and `CLAUDE_CODE_MAX_CONTEXT_TOKENS` are deliberately not used: this provider reports `cli_manages_context() = false`, the contract that makes OpenCrabs send full history every spawn and run its own compaction to stay within the window. The CLI's transparent prompt caching still applies, but that is a cost concern, not a context-sizing one.
 
 Running OpenCrabs as root (a VPS, a container)? The CLI refuses its headless mode for root until `~/.claude/settings.json` marks it: see [Claude Code CLI Refuses to Run as Root](#claude-code-cli-refuses-to-run-as-root-vps-docker) under Troubleshooting.
 
@@ -1372,7 +1374,7 @@ default_model = "gpt-5.5"   # falls back to gpt-5.4 if 5.5 isn't in your account
 - `gpt-5.3-codex-spark` — research preview for ChatGPT Pro (real-time iteration)
 - `gpt-5.2` — alternative tier for hard debugging
 
-OpenCrabs handles all tools, memory, and context locally; codex is just the LLM backend. The CLI runs `codex exec --json --ephemeral --dangerously-bypass-approvals-and-sandbox` so each turn is a fresh session driven by OpenCrabs' conversation state.
+OpenCrabs owns memory and context locally; codex is a full agent executing its own shell tools internally, with those calls surfaced for display only — OpenCrabs' own tools are invisible to it. The CLI runs `codex exec --json --ephemeral --dangerously-bypass-approvals-and-sandbox` so each turn is a fresh session driven by OpenCrabs' conversation state.
 
 **Features:** Streaming, tools (codex executes its own shell commands and they're surfaced to the TUI for display), JSONL event protocol
 
