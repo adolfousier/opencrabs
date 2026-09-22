@@ -1459,8 +1459,15 @@ impl AgentService {
         // (#703): resolve THIS session's own handle so a `cd` here mutates only
         // this session's cwd, and a concurrent session's `cd` can never move it.
         let session_cwd = self.working_dir_handle_for_session(session_id);
+        // `tool_context.auto_approve` seeds from the POLICY, but a per-call
+        // override callback means this surface CAN ask (ACP, channels) — the
+        // override must win over `auto_approve_tools=true`, or config
+        // `approval_policy = "auto-always"` silently suppresses the ask the
+        // override exists to make. The loop gate below already honours the
+        // override; this mirror must not un-do it.
+        let context_auto_approve = self.auto_approve_tools && !has_override_approval;
         let mut tool_context = ToolExecutionContext::new(session_id)
-            .with_auto_approve(self.auto_approve_tools)
+            .with_auto_approve(context_auto_approve)
             .with_working_directory(
                 session_cwd
                     .read()

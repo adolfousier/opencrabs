@@ -325,3 +325,63 @@ async fn test_mixed_tools_approval_and_auto() {
         "exactly one approval request should be made (for approval_tool only)"
     );
 }
+
+/// Gap fix (ACP dogfood round 7): a per-call override approval callback must
+/// be consulted even when `auto_approve_tools=true` (config
+/// `approval_policy = "auto-always"`). The ACP server passes its mode-aware
+/// callback per turn; the tool-context seed must not re-impose the config
+/// policy over it, or `session/set_mode supervised` silently never asks.
+#[tokio::test]
+async fn test_override_callback_beats_auto_approve_policy() {
+    let db = Database::connect_in_memory().await.unwrap();
+    db.run_migrations().await.unwrap();
+    let pool = db.pool().clone();
+    let context = ServiceContext::new(pool);
+
+    let asked = Arc::new(AtomicBool::new(false));
+    let asked_clone = Arc::clone(&asked);
+
+    let provider = Arc::new(MockProviderWithNamedTool::new("approval_tool"));
+    let registry = ToolRegistry::new();
+    registry.register(Arc::new(MockToolRequiresApproval));
+
+    // The ACP turn's callback: records the ask, approves.
+    let override_cb: ApprovalCallback = Arc::new(move |_info| {
+        asked_clone.store(true, Ordering::SeqCst);
+        Box::pin(async move { Ok((true, false)) })
+    });
+
+    // Config auto-always → auto_approve_tools(true), exactly the dogfood setup.
+    let agent_service = AgentService::new_for_test(provider, context.clone())
+        .await
+        .with_tool_registry(Arc::new(registry))
+        .with_auto_approve_tools(true);
+
+    let session_service = SessionService::new(context);
+    let session = session_service
+        .create_session(Some("Override Beats Policy Test".to_string()))
+        .await
+        .unwrap();
+
+    let response = agent_service
+        .send_message_with_tools_and_callback(
+            session.id,
+            "Use the approval tool".to_string(),
+            None,
+            None,
+            Some(override_cb),
+            None,
+            "acp",
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+
+    assert!(!response.content.is_empty());
+    assert!(
+        asked.load(Ordering::SeqCst),
+        "per-call override callback MUST be consulted even under \
+         auto_approve_tools=true — otherwise ACP supervised mode never asks"
+    );
+}
