@@ -38,11 +38,30 @@ const DEFAULT_POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(90);
 // waiting for the 300s request timeout. Critical for streaming.
 const DEFAULT_TCP_KEEPALIVE: Duration = Duration::from_secs(15);
 
+/// The streaming client: same pool and keepalive tuning as the request client,
+/// deliberately NO total request timeout. reqwest's `.timeout()` bounds the
+/// whole exchange including the body read, so on an SSE stream it is a
+/// wall-clock guillotine on healthy responses (#1687). Inter-chunk silence is
+/// guarded at the app level in `brain/agent/service/helpers.rs`; a handshake
+/// that never lands is still bounded by `connect_timeout`.
+fn build_stream_client() -> Client {
+    Client::builder()
+        .connect_timeout(DEFAULT_CONNECT_TIMEOUT)
+        .pool_idle_timeout(DEFAULT_POOL_IDLE_TIMEOUT)
+        .pool_max_idle_per_host(2)
+        .tcp_keepalive(DEFAULT_TCP_KEEPALIVE)
+        .build()
+        .expect("Failed to create streaming HTTP client")
+}
+
 /// Google Gemini provider
 #[derive(Clone)]
 pub struct GeminiProvider {
     api_key: String,
     client: Client,
+    /// Client for `stream()`: no total wall-clock ceiling, so a healthy long
+    /// stream is never cut (#1687).
+    stream_client: Client,
     model: String,
     cached_content_name: Arc<std::sync::Mutex<Option<String>>>,
     /// User override from `providers.gemini.context_window` in config.toml.
@@ -97,10 +116,12 @@ impl GeminiProvider {
             .tcp_keepalive(DEFAULT_TCP_KEEPALIVE)
             .build()
             .expect("Failed to create HTTP client");
+        let stream_client = build_stream_client();
 
         Self {
             api_key,
             client,
+            stream_client,
             model: "gemini-2.0-flash".to_string(),
             cached_content_name: Arc::new(std::sync::Mutex::new(None)),
             configured_context_window: None,
@@ -542,7 +563,7 @@ impl Provider for GeminiProvider {
         let response = retry(
             || async {
                 let response = self
-                    .client
+                    .stream_client
                     .post(&url)
                     .header("Content-Type", "application/json")
                     .header("x-goog-api-key", &self.api_key)
