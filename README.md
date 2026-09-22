@@ -1574,6 +1574,24 @@ timeout_secs = 120              # non-streaming ceiling (title gen, compaction, 
 stream_idle_timeout_secs = 45   # inter-chunk silence tolerated mid-stream
 ```
 
+Both keys resolve through three tiers, and the most specific tier that is set wins (#1688):
+
+| Tier | Where | Scope |
+|---|---|---|
+| 1 | `[providers.<name>] timeout_secs` | that provider alone |
+| 2 | `[agent] timeout_secs` and `[agent] stream_idle_timeout_secs` | every provider that names no tier-1 value |
+| 3 | the family's compiled default | 300s for the non-streaming ceiling. Stream idle has **no compiled floor**: the runtime table below applies instead |
+
+```toml
+[agent]
+timeout_secs = 120              # global non-streaming ceiling
+stream_idle_timeout_secs = 45   # global inter-chunk silence tolerance
+```
+
+Before #1688 only tier 1 was ever read, so a key under `[agent]` was parsed, stored, and silently ignored. The `anthropic` and `gemini` families read neither key at any tier, so their rows above were aspirational until #1689 rolled the same chain out to them.
+
+A `0` at either tier is skipped, not honoured: a zero-second timer fires on the first chunk, so `0` means "fall through to the default" and logs a warning naming the section that carried it.
+
 They do not overlap, and neither one is a budget on how long a turn may take. `timeout_secs` bounds a request that buffers its whole body. It has **no effect on streaming**: streams run on an HTTP client built without a total timeout, because reqwest's `.timeout()` covers the response body read and would therefore guillotine any stream that outlives the number, however healthily it was delivering (#1687 — GLM 5.3 flash on z.ai died this way on every long turn, then retried into the same wall five times before the fallback chain was consulted).
 
 `stream_idle_timeout_secs` is the one that bites on long-context turns, and the only timer a stream ever meets. It is not a total budget: the clock restarts on every chunk, so it only fires when the provider goes quiet for that long in a single gap. When it fires, the stream is abandoned with no stop reason and the tool loop retries the identical request, which re-sends the whole conversation.

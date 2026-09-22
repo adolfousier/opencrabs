@@ -1528,6 +1528,42 @@ pub struct AgentConfig {
     #[serde(default = "default_thinking_loop_timeout_secs")]
     pub thinking_loop_timeout_secs: u64,
 
+    /// Global non-streaming request ceiling, in seconds (#1688).
+    ///
+    /// The fallback for `[providers.<name>].timeout_secs`: a provider that
+    /// names no ceiling of its own inherits this one, and if neither is set the
+    /// family's compiled 300s default applies. Resolution lives in
+    /// `config::timeout`.
+    ///
+    /// Like the per-provider key, this has NO effect on streaming. Streams run
+    /// on a client built without a total timeout, so a healthy long turn is
+    /// never cut by a wall clock (#1687). The only stream timer here is
+    /// `stream_idle_timeout_secs`.
+    ///
+    /// ```toml
+    /// [agent]
+    /// timeout_secs = 120
+    /// ```
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout_secs: Option<u64>,
+
+    /// Global inter-chunk streaming inactivity timeout, in seconds (#1688).
+    ///
+    /// The fallback for `[providers.<name>].stream_idle_timeout_secs`. Silence
+    /// on a stream for longer than this is treated as a dead connection.
+    ///
+    /// There is deliberately no compiled floor for this flag: the default is
+    /// picked at stream time (3600s for local and CLI targets, 20s for remote),
+    /// so leaving it unset defers to that runtime choice instead of overriding
+    /// it.
+    ///
+    /// ```toml
+    /// [agent]
+    /// stream_idle_timeout_secs = 45
+    /// ```
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stream_idle_timeout_secs: Option<u64>,
+
     /// Interval in seconds for injecting mid-turn time notices in long-running
     /// tool execution loops (#153). Default: 900 (15 min). Set to 0 to disable.
     #[serde(default = "default_time_marker_interval_secs")]
@@ -1673,6 +1709,8 @@ impl Default for AgentConfig {
             redact_dm: None,
             debug_logs: default_debug_logs(),
             thinking_loop_timeout_secs: default_thinking_loop_timeout_secs(),
+            timeout_secs: None,
+            stream_idle_timeout_secs: None,
             time_marker_interval_secs: default_time_marker_interval_secs(),
             goal_max_turns: None,
         }

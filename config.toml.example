@@ -482,6 +482,22 @@ debug_logs = false
 # Set to 0 to disable. Hot-reloads with no restart.
 thinking_loop_timeout_secs = 600
 
+# Global non-streaming request ceiling, in seconds (#1688). The fallback for
+# `[providers.<name>].timeout_secs`: a provider naming no value of its own
+# inherits this one, and if neither is set the family's compiled 300s applies.
+# Like the per-provider key, it has NO effect on streaming — streams run on an
+# HTTP client built without a total timeout, so a healthy long turn is never cut
+# by a wall clock (#1687). Unset by default.
+#timeout_secs = 120
+
+# Global inter-chunk streaming inactivity timeout, in seconds (#1688). The
+# fallback for `[providers.<name>].stream_idle_timeout_secs`, and the only timer
+# a stream ever meets. Deliberately no compiled default: silence tolerance is
+# picked at stream time (3600s for CLI and local providers, 45s for z.ai on
+# api.z.ai, 20s for every other remote), so leaving this unset defers to that
+# runtime choice instead of overriding it.
+#stream_idle_timeout_secs = 45
+
 # Cadence (in seconds) for injecting periodic wall-clock notices during
 # long-running tool execution turns. Keeps autonomous multi-step loops
 # grounded without stale time drift or prompt-cache busting. Default: 900 (15 min).

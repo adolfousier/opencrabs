@@ -36,3 +36,38 @@ fn the_documented_defaults_name_all_three_tiers() {
         );
     }
 }
+
+/// #1688: the resolution chain is part of the contract, not an implementation
+/// detail. A user who sets `[agent] timeout_secs` has to be able to read that it
+/// does something — the whole bug was that it did something nowhere.
+#[test]
+fn the_resolution_order_is_documented() {
+    let readme = readme();
+    for token in [
+        "three tiers",
+        "`[providers.<name>] timeout_secs`",
+        "`[agent] timeout_secs`",
+        "`[agent] stream_idle_timeout_secs`",
+    ] {
+        assert!(
+            readme.contains(token),
+            "README no longer documents the {token} tier of the timeout \
+             resolution chain (#1688). The chain is the user-facing contract; \
+             dropping a tier from the docs is how a configured key becomes a \
+             silent no-op again."
+        );
+    }
+}
+
+/// Stream idle has no compiled floor on purpose. If the README ever claims one,
+/// a user will look for a default that does not exist and mis-read the runtime
+/// table as an override.
+#[test]
+fn stream_idle_is_documented_as_having_no_compiled_floor() {
+    let readme = readme();
+    assert!(
+        readme.contains("no compiled floor"),
+        "README must state that `stream_idle_timeout_secs` has no compiled \
+         default tier, so an unset key defers to the runtime table (#1688)"
+    );
+}
