@@ -182,7 +182,11 @@ fn fun_body(kind: CompactionKind) -> &'static str {
              query to recover the details.\n\
              3. If you need specific brain context, selectively load ONLY the relevant \
              brain file (e.g. TOOLS.md, SOUL.md, USER.md). NEVER use name=\"all\".\n\
-             4. IMMEDIATELY continue the task described in the \"IMMEDIATE TASK\" section \
+             4. Open your reply with ONE short ROAST about the compaction — roast yourself, \
+             the context you just lost, or the situation. Be creative and surprise them; \
+             cursing allowed. This is part of the protocol, not a detour: one line, then \
+             straight on.\n\
+             5. IMMEDIATELY continue the task described in the \"IMMEDIATE TASK\" section \
              of the compaction summary. This is NOT optional — you MUST pick up exactly \
              where you left off. Do NOT start a new topic. Do NOT ask what to do next. \
              Do NOT deviate to unrelated work. If the IMMEDIATE TASK section says \
@@ -194,7 +198,11 @@ fn fun_body(kind: CompactionKind) -> &'static str {
              1. Review the summary and snapshot to understand current task state.\n\
              2. Use `session_search` with keywords from the summary if you need older \
              context not in the snapshot.\n\
-             3. IMMEDIATELY continue the task described in the \"IMMEDIATE TASK\" section \
+             3. Open your reply with ONE short ROAST about the compaction — roast yourself, \
+             the context you just lost, or the situation. Be creative and surprise them; \
+             cursing allowed. Part of the protocol, not a detour: one line, then straight \
+             on.\n\
+             4. IMMEDIATELY continue the task described in the \"IMMEDIATE TASK\" section \
              of the compaction summary. This is NOT optional — you MUST pick up exactly \
              where you left off. Do NOT start a new topic. Do NOT ask what to do next. \
              Do NOT deviate to unrelated work.]"
@@ -204,16 +212,18 @@ fn fun_body(kind: CompactionKind) -> &'static str {
              too large. Context has been compacted. POST-COMPACTION PROTOCOL:\n\
              1. Review the summary to understand where you left off.\n\
              2. Use `session_search` with keywords if you need older context.\n\
-             3. Briefly acknowledge the compaction with a fun/cheeky remark, \
-             then resume the task. Do NOT repeat completed work.]"
+             3. Briefly acknowledge the compaction with a fun/cheeky ROAST — roast yourself, \
+             the lost context, or the situation; be creative, cursing allowed — then resume \
+             the task. Do NOT repeat completed work.]"
         }
         CompactionKind::PostTool => {
             "[SYSTEM: Mid-loop context compaction complete. The summary above has \
              full context of everything done so far. POST-COMPACTION PROTOCOL:\n\
              1. Review the summary to understand current task state.\n\
              2. Use `session_search` with keywords if you need older context.\n\
-             Briefly acknowledge the compaction to the user with a fun/cheeky remark (be \
-             creative, surprise them — cursing allowed), then IMMEDIATELY continue the task \
+             Briefly acknowledge the compaction to the user with a fun/cheeky ROAST (roast \
+             yourself, the lost context, or the situation; be creative, surprise them — \
+             cursing allowed), then IMMEDIATELY continue the task \
              described in the \"IMMEDIATE TASK\" section of the compaction summary. \
              Do NOT start a new topic. Do NOT deviate to unrelated work. \
              Do NOT re-do completed work.]"
