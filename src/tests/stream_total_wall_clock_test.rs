@@ -20,7 +20,6 @@
 //! the non-streaming path keeps it, and a control proves the ceiling is real
 //! when it is supposed to be.
 
-use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use crate::brain::provider::OpenAIProvider;
@@ -80,40 +79,6 @@ async fn serve_delayed_json(listener: TcpListener, body: String, delay: Duration
     );
     sock.write_all(resp.as_bytes()).await.expect("body");
     sock.flush().await.ok();
-}
-
-/// Accept connections forever, read each request head, then never answer it.
-///
-/// Records, per connection, how long the client held it open before hanging up
-/// — measured on the SERVER side, which is the only place that can see the
-/// transport ceiling fire. Nothing here writes a byte of body, so an EOF can
-/// only come from the client giving the request up.
-async fn serve_hanging_json(listener: TcpListener, hangups: Arc<Mutex<Vec<Duration>>>) {
-    loop {
-        let (mut sock, _) = match listener.accept().await {
-            Ok(pair) => pair,
-            Err(_) => return,
-        };
-        let hangups = hangups.clone();
-        tokio::spawn(async move {
-            let started = std::time::Instant::now();
-            let mut buf = [0u8; 8192];
-            let _ = timeout(Duration::from_secs(5), sock.read(&mut buf)).await;
-            // Poll for EOF for up to 5s. A total-timeout abort shows as the peer
-            // closing; `WouldBlock` means the client is still waiting.
-            for _ in 0..200 {
-                tokio::time::sleep(Duration::from_millis(25)).await;
-                match sock.try_read(&mut buf) {
-                    Ok(0) => {
-                        hangups.lock().unwrap().push(started.elapsed());
-                        return;
-                    }
-                    Ok(_) => continue,
-                    Err(_) => return,
-                }
-            }
-        });
-    }
 }
 
 fn role_frame(id: &str) -> String {
