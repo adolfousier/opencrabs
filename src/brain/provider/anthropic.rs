@@ -35,11 +35,30 @@ const DEFAULT_POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(90); // Keep con
 // socket in ~15-45s and reqwest surfaces an error so retry logic kicks in.
 const DEFAULT_TCP_KEEPALIVE: Duration = Duration::from_secs(15);
 
+/// The streaming client: same pool and keepalive tuning as the request client,
+/// deliberately NO total request timeout. reqwest's `.timeout()` bounds the
+/// whole exchange including the body read, so on an SSE stream it is a
+/// wall-clock guillotine on healthy responses (#1687). Inter-chunk silence is
+/// guarded at the app level in `brain/agent/service/helpers.rs`; a handshake
+/// that never lands is still bounded by `connect_timeout`.
+fn build_stream_client() -> Client {
+    Client::builder()
+        .connect_timeout(DEFAULT_CONNECT_TIMEOUT)
+        .pool_idle_timeout(DEFAULT_POOL_IDLE_TIMEOUT)
+        .pool_max_idle_per_host(2)
+        .tcp_keepalive(DEFAULT_TCP_KEEPALIVE)
+        .build()
+        .expect("Failed to create streaming HTTP client")
+}
+
 /// Anthropic provider for Claude models
 #[derive(Clone)]
 pub struct AnthropicProvider {
     api_key: String,
     client: Client,
+    /// Client for `stream()`: no total wall-clock ceiling, so a healthy long
+    /// stream is never cut (#1687).
+    stream_client: Client,
     custom_default_model: Option<String>,
     /// User override from `providers.anthropic.context_window` in config.toml.
     /// When set, becomes the compaction budget (overrides agent.context_limit).
@@ -50,27 +69,34 @@ impl AnthropicProvider {
     /// Create a new Anthropic provider
     pub fn new(api_key: String) -> Self {
         let client = Client::builder()
-            .timeout(DEFAULT_TIMEOUT) // Total request timeout (including streaming)
+            .timeout(DEFAULT_TIMEOUT) // Non-streaming ceiling; streams use build_stream_client (#1687)
             .connect_timeout(DEFAULT_CONNECT_TIMEOUT) // Connection establishment timeout
             .pool_idle_timeout(DEFAULT_POOL_IDLE_TIMEOUT) // Keep connections in pool
             .pool_max_idle_per_host(2) // Max idle connections per host
             .tcp_keepalive(DEFAULT_TCP_KEEPALIVE) // Detect silent TCP drops fast
             .build()
             .expect("Failed to create HTTP client");
+        let stream_client = build_stream_client();
 
         Self {
             api_key,
             client,
+            stream_client,
             custom_default_model: None,
             configured_context_window: None,
         }
     }
 
-    /// Create with custom HTTP client
+    /// Create with a custom HTTP client for NON-STREAMING calls.
+    ///
+    /// The stream client is always the total-timeout-free one built by
+    /// `build_stream_client`, so an injected client can never reintroduce the
+    /// #1687 ceiling on an SSE body.
     pub fn with_client(api_key: String, client: Client) -> Self {
         Self {
             api_key,
             client,
+            stream_client: build_stream_client(),
             custom_default_model: None,
             configured_context_window: None,
         }
@@ -332,7 +358,7 @@ impl Provider for AnthropicProvider {
         let response = retry(
             || async {
                 let response = self
-                    .client
+                    .stream_client
                     .post(ANTHROPIC_API_URL)
                     .headers(req_headers.clone())
                     .json(&anthropic_request)

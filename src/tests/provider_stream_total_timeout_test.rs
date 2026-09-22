@@ -8,6 +8,10 @@
 //!    are still arriving. Anthropic and Gemini already used 300s, which is why
 //!    only the compat providers (every custom endpoint, i.e. every cheap
 //!    thinking-heavy fallback model) died at exactly 60.0s mid-stream.
+//!    #1635 raised the number to 300s, which moved the wall. #1687 took it off
+//!    the stream path altogether: the total now bounds non-streaming calls only,
+//!    and `the_stream_clients_carry_no_total_timeout` below pins that it never
+//!    comes back.
 //! 2. The stream-retry log lines hardcoded `3` while `MAX_STREAM_RETRIES` is 5,
 //!    emitting `Stream retry 5/3 failed` and `All 3 stream retries failed`. That
 //!    made the retry budget look smaller than it is and sent the first reading
@@ -18,11 +22,6 @@ use std::path::Path;
 use crate::brain::provider::anthropic::DEFAULT_TIMEOUT as ANTHROPIC_TOTAL_TIMEOUT;
 use crate::brain::provider::custom_openai_compatible::DEFAULT_TIMEOUT as COMPAT_TOTAL_TIMEOUT;
 use crate::brain::provider::gemini::DEFAULT_TIMEOUT as GEMINI_TOTAL_TIMEOUT;
-
-/// Inter-chunk idle timeout applied to remote HTTP streams
-/// (`brain/agent/service/helpers.rs`). This is the intended fast detector for a
-/// genuinely dead stream; the total timeout must never creep down towards it.
-const STREAM_IDLE_TIMEOUT_SECS: u64 = 20;
 
 #[test]
 fn compat_total_timeout_is_not_below_the_native_stream_providers() {
@@ -42,16 +41,84 @@ fn compat_total_timeout_is_not_below_the_native_stream_providers() {
     );
 }
 
+/// #1687: the total wall clock must never sit on the stream path again.
+///
+/// reqwest's `.timeout()` bounds the whole exchange INCLUDING the body read, so
+/// a client that carries one puts a ceiling on every stream it serves, no matter
+/// how healthily chunks arrive. The inter-chunk idle guard in `helpers.rs` is
+/// the correct detector for a dead stream, and it is the only one a stream may
+/// meet. This scans the source of all three provider families rather than
+/// asserting a relationship between two constants, because the defect was never
+/// the VALUE of the number: #1635 raised it from 60s to 300s and the mechanism
+/// survived intact.
 #[test]
-fn compat_total_timeout_stays_far_above_the_idle_detector() {
-    assert!(
-        COMPAT_TOTAL_TIMEOUT.as_secs() >= STREAM_IDLE_TIMEOUT_SECS * 5,
-        "OpenAI-compatible total request timeout is {:?}, too close to the {}s inter-chunk \
-         idle timeout. The total clock is meant to catch pathological hangs only; when it \
-         approaches the idle window it starts killing streams that are still delivering (#1635).",
-        COMPAT_TOTAL_TIMEOUT,
-        STREAM_IDLE_TIMEOUT_SECS,
-    );
+fn the_stream_clients_carry_no_total_timeout() {
+    let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let families = [
+        (
+            "src/brain/provider/custom_openai_compatible.rs",
+            "build_stream_http_client",
+        ),
+        ("src/brain/provider/anthropic.rs", "build_stream_client"),
+        ("src/brain/provider/gemini.rs", "build_stream_client"),
+    ];
+
+    for (rel, builder) in families {
+        let src = std::fs::read_to_string(manifest.join(rel))
+            .unwrap_or_else(|e| panic!("cannot read {rel}: {e}"));
+
+        // 1. The stream-client builder exists...
+        let head = format!("fn {builder}() -> Client {{");
+        let start = src.find(&head).unwrap_or_else(|| {
+            panic!(
+                "{rel}: `{builder}()` is gone — that is the client that \
+                                         carries no total ceiling (#1687)"
+            )
+        });
+        let rest = &src[start..];
+        let body = &rest[..rest
+            .find(
+                "
+}",
+            )
+            .unwrap_or(rest.len())];
+
+        // 2a. ...and sets no total timeout.
+        assert!(
+            !body.contains(".timeout("),
+            "{rel}: `{builder}()` sets a total request timeout again, which is a wall clock on \
+             every stream it serves (#1687).\n{body}"
+        );
+
+        // 2b. ...and `stream()` posts through it, not through the timed client.
+        let sstart = src
+            .find("async fn stream(")
+            .unwrap_or_else(|| panic!("{rel}: no `stream()` found"));
+        let srest = &src[sstart..];
+        let send = &srest[..srest
+            .find(
+                "
+    async fn ",
+            )
+            .or_else(|| {
+                srest.find(
+                    "
+    fn ",
+                )
+            })
+            .unwrap_or(srest.len())];
+        assert!(
+            send.contains(".stream_client"),
+            "{rel}: `stream()` no longer posts on the total-timeout-free client (#1687)"
+        );
+        for (idx, line) in send.lines().enumerate() {
+            assert!(
+                line.trim() != ".client",
+                "{rel}: `stream()` still reaches for the timed `client` at relative line {idx} \
+                 — that is the #1687 ceiling back on the stream path"
+            );
+        }
+    }
 }
 
 #[test]

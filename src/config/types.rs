@@ -2835,8 +2835,13 @@ pub struct ProviderConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cache_ttl: Option<u32>,
 
-    /// Request timeout in seconds for HTTP client requests to this provider.
-    /// Overrides the default 60s client timeout.
+    /// Non-streaming request ceiling, in seconds, for this provider. Covers
+    /// calls that buffer a whole body: title generation, compaction, `/models`,
+    /// the TUI dialogs. Overrides the default 300s.
+    ///
+    /// It has NO effect on streaming. Streams run on a client built without a
+    /// total timeout, so a healthy long turn is never cut by a wall clock
+    /// (#1687); the only stream timer is `stream_idle_timeout_secs`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timeout_secs: Option<u64>,
 

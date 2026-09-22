@@ -251,7 +251,7 @@ https://github.com/user-attachments/assets/7f45c5f8-acdf-48d5-b6a4-0e4811a9ee23
 |---------|-------------|
 | **Multi-Provider** | **Xiaomi MiMo**, Anthropic Claude, OpenAI, GitHub Copilot (uses your Copilot subscription), OpenRouter (400+ models), MiniMax, Google Gemini, z.ai GLM (General API + Coding API), Moonshot Kimi (API plan + Coding plan), Claude CLI, OpenCode CLI, Codex CLI (uses your ChatGPT/Codex subscription), Qwen Native (free OAuth with multi-account rotation), Qwen Code CLI (1k free req/day), and any OpenAI-compatible API (Ollama, LM Studio, LocalAI). Model lists fetched live from provider APIs — new models available instantly. Custom provider dialog: paste-by-default for API keys, Enter-to-load live models, typed-not-in-list models accepted and merged. Each session remembers its provider + model and restores it on switch |
 | **Fallback Providers** | Configure a chain of fallback providers — if the primary fails, each fallback is tried in sequence automatically. Any configured provider can be a fallback. Config: `[providers.fallback] providers = ["openrouter", "anthropic"]` |
-| **Per-Provider Timeouts** | `timeout_secs` caps a whole request; `stream_idle_timeout_secs` caps inter-chunk silence mid-stream before the stream is treated as dropped and retried. Defaults when unset: 3600s for CLI and local providers, 45s for z.ai on `api.z.ai` (whose host closes idle streams at ~30s), 20s for every other remote provider |
+| **Per-Provider Timeouts** | `timeout_secs` caps a non-streaming request (one that buffers a whole body); it never caps a stream. `stream_idle_timeout_secs` is the only stream timer — it caps inter-chunk silence before the stream is treated as dropped and retried, so a long turn that keeps delivering is never cut. Defaults when unset: 3600s for CLI and local providers, 45s for z.ai on `api.z.ai` (whose host closes idle streams at ~30s), 20s for every other remote provider |
 | **Per-Provider Vision** | Set `vision_model` per provider — the LLM calls `analyze_image` as a tool, which uses the vision model on the same provider API to describe images. The chat model stays the same and gets vision capability via tool call. Gemini vision takes priority when configured. Auto-configured for known providers (e.g. MiniMax) on first run |
 | **Prompt Caching** | Caches the stable context prefix (system prompt, brain files, earlier turns) on every caching-capable provider — Anthropic native (default), OpenAI/OpenRouter (`cache_enabled`), Qwen/Alibaba (zero-config auto), Xiaomi (server-side). Averaging ~87% cache efficiency in real use; watch it live in the Cache Efficiency card of `/usage`. Big reason a larger context window stays affordable |
 | **Context Window & Auto-Compaction** | Per-provider `context_window` override (default 200k, works on every provider); transparent auto-compaction at 65% (soft, background) / 90% (hard) of the window gives effectively unlimited session memory with no manual clearing |
@@ -1564,15 +1564,17 @@ api_key = "nvapi-..."
 
 ### Per-Provider Timeouts
 
-Every `[providers.*]` section accepts two independent timeouts:
+Every `[providers.*]` section accepts two independent timeouts, on two different clocks:
 
 ```toml
 [providers.anthropic]
-timeout_secs = 120              # whole-request budget
+timeout_secs = 120              # non-streaming ceiling (title gen, compaction, /models)
 stream_idle_timeout_secs = 45   # inter-chunk silence tolerated mid-stream
 ```
 
-`stream_idle_timeout_secs` is the one that bites on long-context turns. It is not a total budget: the clock restarts on every chunk, so it only fires when the provider goes quiet for that long in a single gap. When it fires, the stream is abandoned with no stop reason and the tool loop retries the identical request, which re-sends the whole conversation.
+They do not overlap, and neither one is a budget on how long a turn may take. `timeout_secs` bounds a request that buffers its whole body. It has **no effect on streaming**: streams run on an HTTP client built without a total timeout, because reqwest's `.timeout()` covers the response body read and would therefore guillotine any stream that outlives the number, however healthily it was delivering (#1687 — GLM 5.3 flash on z.ai died this way on every long turn, then retried into the same wall five times before the fallback chain was consulted).
+
+`stream_idle_timeout_secs` is the one that bites on long-context turns, and the only timer a stream ever meets. It is not a total budget: the clock restarts on every chunk, so it only fires when the provider goes quiet for that long in a single gap. When it fires, the stream is abandoned with no stop reason and the tool loop retries the identical request, which re-sends the whole conversation.
 
 Defaults when the key is absent:
 
