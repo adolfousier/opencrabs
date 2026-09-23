@@ -1203,14 +1203,20 @@ async fn run_rsi_agent_cycle(
 ///   zero-improvement agent runs, reset by an applied improvement)
 /// - When opportunities are found, spawns an autonomous agent to apply improvements
 /// - Emits notifications to TUI via the provided channel
+///
+/// Takes no `Config` argument on purpose (#1696). It used to accept one and
+/// clone it for the life of the task, which froze everything the cycle builds
+/// from it (the RSI provider, its `[providers.fallback]` chain, the session
+/// pair) at process start, while the enable gate a few lines below already
+/// read the live mirror. Every config touch in this task now goes through
+/// [`Config::current()`], read once per cycle boundary so a save landing
+/// mid-cycle cannot tear the provider against the chain.
 pub fn spawn_rsi_engine(
     pool: crate::db::Pool,
-    config: &Config,
     notification_tx: mpsc::UnboundedSender<RsiNotification>,
     headless: bool,
 ) {
     let pool_clone = pool.clone();
-    let config_clone = config.clone();
     tokio::spawn(async move {
         // Delay to let the app fully start
         tokio::time::sleep(std::time::Duration::from_secs(5)).await;
@@ -1806,8 +1812,21 @@ pub fn spawn_rsi_engine(
                     let ledger_before = std::fs::metadata(&improvements_ledger_path)
                         .map(|m| m.len())
                         .unwrap_or(0);
-                    match run_rsi_agent_cycle(repo.pool().clone(), &config_clone, &opportunities)
-                        .await
+                    // #1696: one live read per cycle. The engine used to carry
+                    // a `Config` cloned at spawn, so the provider and the
+                    // fallback chain this cycle builds were the ones from
+                    // process start, and a rotated key or a provider deleted
+                    // from `[providers.fallback].providers` never reached RSI.
+                    // Read once here rather than per call inside, so a save
+                    // landing mid-cycle cannot tear the provider against the
+                    // chain across two config versions.
+                    let cycle_config = Config::current();
+                    match run_rsi_agent_cycle(
+                        repo.pool().clone(),
+                        &cycle_config,
+                        &opportunities,
+                    )
+                    .await
                     {
                         Ok(summary) => {
                             let short: String = summary.chars().take(200).collect();
