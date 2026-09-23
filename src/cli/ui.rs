@@ -512,8 +512,11 @@ async fn cmd_chat_inner(
     // Spawn RSI background engine (digest + periodic analysis). #1063: the
     // engine task always spawns and gates itself per cycle from the live
     // config mirror (headless daemons default OFF, TUI default ON).
+    // #1696: no `Config` is handed in. The engine reads `Config::current()`
+    // per cycle, so a key rotation or a fallback-chain edit reaches RSI on the
+    // next boundary instead of on the next restart.
     let (rsi_tx, mut rsi_rx) = tokio::sync::mpsc::unbounded_channel();
-    crate::brain::rsi::spawn_rsi_engine(db.pool().clone(), config, rsi_tx, headless);
+    crate::brain::rsi::spawn_rsi_engine(db.pool().clone(), rsi_tx, headless);
 
     // Resolve RTK in the background (auto-downloads on first use if missing) so
     // the first bash command never blocks on it.
