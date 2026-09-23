@@ -138,6 +138,55 @@ fn channel_id_hint_omits_thread_for_plain_chats() {
     assert_eq!(channel_id_hint(8535704842, None), "chat_id: 8535704842");
 }
 
+// ── #1708: the banner's thread id must be the SAME value session routing
+// uses — topic_session_id-gated, never the raw per-reply id.
+
+#[test]
+fn banner_never_shows_a_bare_reply_chain_thread_id() {
+    use crate::channels::telegram::session_resolve::topic_session_id;
+
+    // Production (#1708): a plain reply in a NON-forum group carried
+    // thread_id 215/220. The old banner displayed them verbatim, so the
+    // model read them as forum topics and bound phantom ones. Gated, the
+    // banner degrades to the bare chat id.
+    for stray in [215, 220] {
+        let shown = channel_id_hint(
+            -1004233630800,
+            topic_session_id(/* is_topic_message */ false, Some(stray)),
+        );
+        assert_eq!(
+            shown, "chat_id: -1004233630800",
+            "#1708: stray reply-chain id {stray} must not reach the banner"
+        );
+    }
+
+    // A real forum topic still names itself, so cross-surface sends keep
+    // working there (#215 behaviour unchanged).
+    assert_eq!(
+        channel_id_hint(-1001234567890, topic_session_id(true, Some(30045))),
+        "chat_id: -1001234567890, thread_id: 30045"
+    );
+}
+
+#[test]
+fn banner_never_names_general() {
+    use crate::channels::telegram::session_resolve::{GENERAL_TOPIC_ID, topic_session_id};
+
+    // The issue's literal suggestion (session_topic_for_event output) would
+    // normalize a known forum's General to Some(1) and put "thread_id: 1" on
+    // the banner — the model would then copy 1 onto the wire and every send
+    // would be refused (#1319). The gate keeps General unnamed instead.
+    let shown = channel_id_hint(
+        -1001234567890,
+        topic_session_id(/* is_topic_message */ false, Some(GENERAL_TOPIC_ID)),
+    );
+    assert_eq!(shown, "chat_id: -1001234567890");
+    assert!(
+        !shown.contains("thread_id"),
+        "#1319: never advertise thread 1"
+    );
+}
+
 // ── strip_command_mention_suffix: only strip @bot as a command suffix (#528)
 // A command suffix (/stop@opencrabsbot) is stripped for command matching, but
 // standalone mentions are preserved so the agent knows it was addressed and

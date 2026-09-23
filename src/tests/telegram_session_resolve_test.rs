@@ -242,21 +242,31 @@ fn normalize_topic_gives_general_its_own_bucket_in_known_forums() {
     assert_eq!(normalize_topic(None, false), None);
 }
 
-/// #1220: evidence-based forum detection on TelegramState.
+/// #1220: evidence-based forum detection on TelegramState, gated per #1708.
 #[tokio::test]
-async fn thread_evidence_marks_forum_once_and_only_from_threaded_msgs() {
+async fn thread_evidence_marks_forum_once_and_only_from_topic_flagged_msgs() {
     let state = TelegramState::new();
     let chat = 777_i64;
 
     // No evidence yet — cold start keeps legacy behaviour.
     assert!(!state.is_known_forum(chat).await);
 
-    // A thread-scoped message proves forum-ness...
-    state.note_thread_evidence(chat, Some(42)).await;
+    // #1708: a bare thread id WITHOUT is_topic_message is an ordinary reply
+    // chain in a non-forum group (production: OpenCrabbify produced 215 then
+    // 220 from plain replies). It must stay inert — trusting it flipped the
+    // chat to "forum" permanently and orphaned its session.
+    state.note_thread_evidence(chat, false, Some(42)).await;
+    assert!(
+        !state.is_known_forum(chat).await,
+        "#1708: a bare reply-chain thread id is NOT forum evidence"
+    );
+
+    // A thread-scoped message Telegram itself flagged proves forum-ness...
+    state.note_thread_evidence(chat, true, Some(42)).await;
     assert!(state.is_known_forum(chat).await);
 
     // ...and later topicless traffic never un-proves it.
-    state.note_thread_evidence(chat, None).await;
+    state.note_thread_evidence(chat, true, None).await;
     assert!(state.is_known_forum(chat).await);
 
     // A different chat stays unknown.

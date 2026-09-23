@@ -402,12 +402,15 @@ pub(crate) async fn handle_message(
     // return, since the burying messages are usually not addressed to the bot.
     telegram_state.note_incoming_msg(msg.chat.id.0, msg.id.0);
 
-    // Forum-ness evidence (#1220): any thread-scoped message proves this chat
-    // is a forum group. Recorded for EVERY message before early returns, so
-    // chatter not addressed to the bot still feeds the cache.
+    // Forum-ness evidence (#1220, gated per #1708): only a thread id that
+    // Telegram itself flagged is_topic_message proves this chat is a forum
+    // group. Recorded for EVERY message before early returns, so chatter not
+    // addressed to the bot still feeds the cache. A bare thread id from an
+    // ordinary reply chain in a non-forum group must stay inert — trusting
+    // it flipped real chats to "forum" and orphaned their sessions.
     let raw_thread = thread_id.map(|t| t.0.0);
     telegram_state
-        .note_thread_evidence(msg.chat.id.0, raw_thread)
+        .note_thread_evidence(msg.chat.id.0, msg.is_topic_message, raw_thread)
         .await;
 
     // Forum-topic rename capture (#143). A rename fires `forum_topic_edited`
@@ -2326,8 +2329,16 @@ pub(crate) async fn handle_message(
     // so it should NOT use telegram_send for simple text replies.
     // Surface the chat_id (and forum thread_id) so the agent can target THIS
     // conversation for cron reports / cross-surface sends without guessing or
-    // asking (#533, mirror of upstream #510).
-    let chan_ids = channel_id_hint(msg.chat.id.0, thread_id.map(|t| t.0.0));
+    // asking (#533, mirror of upstream #510). The thread id shown must be the
+    // SAME one session routing uses (#1708): topic_session_id-gated, so an
+    // ordinary reply chain in a non-forum group no longer displays a per-reply
+    // "thread_id: 215/220" that invites the model to bind phantom topics —
+    // and General stays unnamed, because writing 1 on the wire is refused
+    // (#1319).
+    let chan_ids = channel_id_hint(
+        msg.chat.id.0,
+        session_resolve::topic_session_id(msg.is_topic_message, thread_id.map(|t| t.0.0)),
+    );
     let agent_input = format!(
         "[Channel: Telegram ({chan_ids}) — your text response is automatically sent to this chat. \
          Do NOT call telegram_send to deliver your answer. Only use telegram_send for: \

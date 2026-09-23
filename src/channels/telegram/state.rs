@@ -166,12 +166,14 @@ pub struct TelegramState {
     /// take tokio mutexes. Never used for routing; the async maps stay the
     /// source of truth for everything else.
     channel_ownership: std::sync::Mutex<ChannelOwnershipMirror>,
-    /// Evidence-based forum detection (#1220): chat_id → true once ANY
-    /// thread-scoped message was seen from that chat. A bare thread id can
-    /// only exist on forum topics (governor.rs reached the same rule), so
-    /// one observation proves forum-ness permanently for the process
-    /// lifetime. Consumed by `normalize_topic` at ingress to give the
-    /// General topic its own session bucket instead of None.
+    /// Evidence-based forum detection (#1220): chat_id → true once a
+    /// thread-scoped message FLAGGED `is_topic_message` was seen from that
+    /// chat. A bare thread id alone is NOT proof: Telegram also sets
+    /// `message_thread_id` on ordinary reply chains in non-forum groups, so
+    /// trusting it permanently misclassified real chats as forums and
+    /// corrupted their session routing (#1708). Consumed by
+    /// `normalize_topic` at ingress to give the General topic its own
+    /// session bucket instead of None.
     chat_forums: Mutex<HashMap<i64, bool>>,
     /// Pending approval channels: approval_id → oneshot sender of (approved, always).
     pending_approvals: Mutex<HashMap<String, oneshot::Sender<(bool, bool)>>>,
@@ -662,12 +664,21 @@ impl TelegramState {
         self.bot.lock().await.is_some()
     }
 
-    /// Record forum-ness evidence for a chat (#1220). Any message carrying a
-    /// bare `thread_id` proves the chat is a forum group — ordinary
-    /// reply-threads never set it (same rule governor.rs uses). One-way:
-    /// forum-ness never un-proves itself for the process lifetime.
-    pub async fn note_thread_evidence(&self, chat_id: i64, thread_id: Option<i32>) {
-        if thread_id.is_some() {
+    /// Record forum-ness evidence for a chat (#1220, gated per #1708). A
+    /// thread-scoped message that Telegram itself flagged
+    /// `is_topic_message` proves the chat is a forum group. A bare
+    /// `thread_id` WITHOUT the flag is an ordinary reply-chain id and
+    /// proves nothing — non-forum groups set it on plain replies, and
+    /// trusting it permanently misclassified real chats as forums
+    /// (#1708). One-way: forum-ness never un-proves itself for the
+    /// process lifetime.
+    pub async fn note_thread_evidence(
+        &self,
+        chat_id: i64,
+        is_topic_message: bool,
+        thread_id: Option<i32>,
+    ) {
+        if is_topic_message && thread_id.is_some() {
             self.chat_forums.lock().await.insert(chat_id, true);
         }
     }

@@ -1681,8 +1681,10 @@ impl TelegramSendTool {
         {
             Ok(topic) => {
                 let thread_id = topic.thread_id.0.0;
+                // create_forum_topic succeeded on the API — this chat IS a
+                // forum; the evidence is API-proven, not inferred.
                 self.telegram_state
-                    .note_thread_evidence(chat_id, Some(thread_id))
+                    .note_thread_evidence(chat_id, true, Some(thread_id))
                     .await;
                 crate::channels::telegram::record_topic_created(
                     None,
@@ -1767,8 +1769,10 @@ impl TelegramSendTool {
         .await
         {
             Ok(_) => {
+                // edit_forum_topic succeeded on the API — this chat IS a
+                // forum; the evidence is API-proven, not inferred.
                 self.telegram_state
-                    .note_thread_evidence(chat_id, Some(thread_id_raw as i32))
+                    .note_thread_evidence(chat_id, true, Some(thread_id_raw as i32))
                     .await;
                 crate::channels::telegram::record_topic_created(
                     None,
@@ -1833,8 +1837,12 @@ impl TelegramSendTool {
             .await
         {
             Ok(_) => {
+                // bind_topic is an explicit forum operation by name: the
+                // caller asserted a topic id, so record topic-typed evidence
+                // (#1708: the message path no longer leaks stray reply-chain
+                // ids into this arm via the header).
                 self.telegram_state
-                    .note_thread_evidence(chat_id, topic_id)
+                    .note_thread_evidence(chat_id, true, topic_id)
                     .await;
                 log_send_success(
                     "tool",
