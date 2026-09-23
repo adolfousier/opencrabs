@@ -1574,7 +1574,7 @@ timeout_secs = 120              # non-streaming ceiling (title gen, compaction, 
 stream_idle_timeout_secs = 45   # inter-chunk silence tolerated mid-stream
 ```
 
-Both keys resolve through three tiers, and the most specific tier that is set wins (#1688):
+Both keys resolve through three tiers, and the most specific tier that is set wins (#1688, extended to every provider family by #1689):
 
 | Tier | Where | Scope |
 |---|---|---|
@@ -1588,7 +1588,7 @@ timeout_secs = 120              # global non-streaming ceiling
 stream_idle_timeout_secs = 45   # global inter-chunk silence tolerance
 ```
 
-Before #1688 only tier 1 was ever read, so a key under `[agent]` was parsed, stored, and silently ignored. The `anthropic` and `gemini` families read neither key at any tier, so their rows above were aspirational until #1689 rolled the same chain out to them.
+All three families — OpenAI-compatible (including every custom provider, z.ai, Kimi, MiniMax, OpenRouter), `anthropic`, and `gemini` — read both keys at all three tiers. Before #1688 only tier 1 existed anywhere, so a key under `[agent]` was parsed, stored, and silently ignored; before #1689 the `anthropic` and `gemini` families read neither key at any tier, which made the example above a documented no-op.
 
 A `0` at either tier is skipped, not honoured: a zero-second timer fires on the first chunk, so `0` means "fall through to the default" and logs a warning naming the section that carried it.
 

@@ -71,3 +71,25 @@ fn stream_idle_is_documented_as_having_no_compiled_floor() {
          default tier, so an unset key defers to the runtime table (#1688)"
     );
 }
+
+/// #1689: the two native families used to read neither key at any tier, which
+/// made the README's `[providers.anthropic] timeout_secs = 120` example a
+/// documented no-op. If the docs ever stop saying that all three families
+/// honour the chain, that example is a lie again and this test is the tripwire.
+#[test]
+fn every_provider_family_is_documented_as_honouring_the_chain() {
+    let readme = readme();
+    assert!(
+        readme.contains("All three families"),
+        "README no longer states that every provider family reads both timeout \
+         keys (#1689). The anthropic/gemini half of the contract is the part \
+         that was silently missing."
+    );
+    for family in ["anthropic", "gemini"] {
+        assert!(
+            readme.contains(&format!("`{family}`")),
+            "README no longer names the {family} family alongside the timeout \
+             chain (#1689)"
+        );
+    }
+}

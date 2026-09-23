@@ -345,6 +345,7 @@ pub mod model_match_test;
 pub mod model_menu_test;
 pub mod model_order_test;
 pub mod model_refresh_test;
+pub mod native_provider_timeout_test;
 pub mod new_session_pane_binding_test;
 pub mod nudge_text_test;
 pub mod pending_request_age_test;

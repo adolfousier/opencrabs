@@ -51,6 +51,22 @@ fn build_stream_client() -> Client {
         .expect("Failed to create streaming HTTP client")
 }
 
+/// The NON-streaming request client: same pool and keepalive tuning as the
+/// stream client, plus a total ceiling. That ceiling is a budget on a call that
+/// buffers its whole body (title generation, compaction, `/models`); streams
+/// never touch this client, so `with_timeout` can only ever change how long a
+/// non-streaming call is allowed to hang (#1687).
+fn build_request_client(timeout: Duration) -> Client {
+    Client::builder()
+        .timeout(timeout)
+        .connect_timeout(DEFAULT_CONNECT_TIMEOUT)
+        .pool_idle_timeout(DEFAULT_POOL_IDLE_TIMEOUT)
+        .pool_max_idle_per_host(2)
+        .tcp_keepalive(DEFAULT_TCP_KEEPALIVE)
+        .build()
+        .expect("Failed to create HTTP client")
+}
+
 /// Anthropic provider for Claude models
 #[derive(Clone)]
 pub struct AnthropicProvider {
@@ -59,6 +75,14 @@ pub struct AnthropicProvider {
     /// Client for `stream()`: no total wall-clock ceiling, so a healthy long
     /// stream is never cut (#1687).
     stream_client: Client,
+    /// The resolved `[providers.anthropic] timeout_secs` / `[agent] timeout_secs`
+    /// (#1688), mirrored from the client `with_timeout` rebuilt. `None` means
+    /// the compiled `DEFAULT_TIMEOUT` is what the request client carries.
+    request_timeout: Option<Duration>,
+    /// The resolved `stream_idle_timeout_secs` at either tier. Inter-chunk
+    /// silence is enforced in `brain/agent/service/helpers.rs`, which asks the
+    /// provider for this; `None` defers to that file's runtime table.
+    stream_idle_timeout: Option<Duration>,
     custom_default_model: Option<String>,
     /// User override from `providers.anthropic.context_window` in config.toml.
     /// When set, becomes the compaction budget (overrides agent.context_limit).
@@ -68,20 +92,15 @@ pub struct AnthropicProvider {
 impl AnthropicProvider {
     /// Create a new Anthropic provider
     pub fn new(api_key: String) -> Self {
-        let client = Client::builder()
-            .timeout(DEFAULT_TIMEOUT) // Non-streaming ceiling; streams use build_stream_client (#1687)
-            .connect_timeout(DEFAULT_CONNECT_TIMEOUT) // Connection establishment timeout
-            .pool_idle_timeout(DEFAULT_POOL_IDLE_TIMEOUT) // Keep connections in pool
-            .pool_max_idle_per_host(2) // Max idle connections per host
-            .tcp_keepalive(DEFAULT_TCP_KEEPALIVE) // Detect silent TCP drops fast
-            .build()
-            .expect("Failed to create HTTP client");
+        let client = build_request_client(DEFAULT_TIMEOUT);
         let stream_client = build_stream_client();
 
         Self {
             api_key,
             client,
             stream_client,
+            request_timeout: None,
+            stream_idle_timeout: None,
             custom_default_model: None,
             configured_context_window: None,
         }
@@ -97,9 +116,35 @@ impl AnthropicProvider {
             api_key,
             client,
             stream_client: build_stream_client(),
+            // An injected client's ceiling is opaque (reqwest does not read it
+            // back), so the accessor reports "no user override" rather than
+            // guessing a number.
+            request_timeout: None,
+            stream_idle_timeout: None,
             custom_default_model: None,
             configured_context_window: None,
         }
+    }
+
+    /// Set the NON-STREAMING request ceiling and rebuild that client only.
+    ///
+    /// `stream_client` is never touched, so a user raising or lowering
+    /// `timeout_secs` cannot put a wall clock back on an SSE body (#1687).
+    /// Pairs with the `request_timeout()` trait accessor.
+    pub fn with_timeout(mut self, timeout: Duration) -> Self {
+        self.client = build_request_client(timeout);
+        self.request_timeout = Some(timeout);
+        self
+    }
+
+    /// Set the inter-chunk streaming inactivity timeout (#1688/#1689).
+    ///
+    /// Stored rather than baked into a client: the stream loop in
+    /// `helpers.rs` owns the clock and asks the provider for this value,
+    /// falling back to its runtime table when it is `None`.
+    pub fn with_stream_idle_timeout(mut self, timeout: Duration) -> Self {
+        self.stream_idle_timeout = Some(timeout);
+        self
     }
 
     /// Set custom default model
@@ -509,6 +554,14 @@ impl Provider for AnthropicProvider {
 
     fn configured_context_window(&self) -> Option<u32> {
         self.configured_context_window
+    }
+
+    fn request_timeout(&self) -> Option<Duration> {
+        self.request_timeout
+    }
+
+    fn stream_idle_timeout(&self) -> Option<Duration> {
+        self.stream_idle_timeout
     }
 
     fn context_window(&self, model: &str) -> Option<u32> {

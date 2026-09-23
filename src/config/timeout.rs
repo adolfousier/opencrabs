@@ -76,6 +76,23 @@ impl TimeoutResolution {
         self.effective.map(Duration::from_secs)
     }
 
+    /// The value to *apply* as an override: `Some` only when a config tier said
+    /// so, `None` when the compiled floor won or nothing is set at all.
+    ///
+    /// The distinction is the `Provider` trait's contract: `request_timeout()`
+    /// and `stream_idle_timeout()` report "None when default timeouts apply"
+    /// (`brain/provider/trait.rs`), and consumers branch on it — `helpers.rs`
+    /// picks its runtime idle table when the accessor is `None`. Handing back
+    /// the compiled floor would make a provider claim an override nobody
+    /// configured, and would rebuild a client that already carries that exact
+    /// number, so the wire behaviour is unchanged while the reported one lies.
+    pub fn override_duration(&self) -> Option<Duration> {
+        match self.tier {
+            TimeoutTier::Provider | TimeoutTier::Agent => self.duration(),
+            TimeoutTier::Default => None,
+        }
+    }
+
     /// What the caller should log about a skipped `0`, or `None` when no tier
     /// carried one.
     ///

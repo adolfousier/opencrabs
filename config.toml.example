@@ -482,9 +482,11 @@ debug_logs = false
 # Set to 0 to disable. Hot-reloads with no restart.
 thinking_loop_timeout_secs = 600
 
-# Global non-streaming request ceiling, in seconds (#1688). The fallback for
-# `[providers.<name>].timeout_secs`: a provider naming no value of its own
+# Global non-streaming request ceiling, in seconds (#1688, #1689). The fallback
+# for `[providers.<name>].timeout_secs`: a provider naming no value of its own
 # inherits this one, and if neither is set the family's compiled 300s applies.
+# Every family honours it — OpenAI-compatible and custom providers, anthropic,
+# gemini.
 # Like the per-provider key, it has NO effect on streaming — streams run on an
 # HTTP client built without a total timeout, so a healthy long turn is never cut
 # by a wall clock (#1687). Unset by default.
