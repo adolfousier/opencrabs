@@ -485,3 +485,23 @@ tool_name_determiners = [
     "do",
     "da",
 ]
+
+# ── Marcador-less: participle com pronome objecto próprio (#1694) ──────────
+# "Lendo-os com atenção, anoto as discrepâncias." anuncia trabalho sem nenhum
+# marcador de iminência nem de sequência, por isso escapa às três armas
+# existentes. O clítico português é ENCLÍTICO atrás de hífen, daí `[-\s]?`
+# e o sufixo `-endo` a partir de {1,}: "Lendo" = `l` + `endo`, portanto {2,}
+# nunca casaria. O grupo 1 é o resto da oração ([^.!?\n]*).
+participle_object_re = "(?i)^[\\s\\-*•>]*[a-záéíóúâêôãõçú]{1,}(?:ando|endo)[-\\s]?(?:os|as|o|a|nos|lhes)\\b(?:\\s+[a-záéíóúâêôãõçú]+mente)?([^.!?\\n]*)"
+
+# Classe fechada que pode seguir o pronome num ANÚNCIO. O que começa por
+# outra coisa é sujeito gerundivo + verbo finito: "Lendo-os revelou o
+# problema." Não é lista de verbos — classe aberta que nunca converge (#1122).
+announcement_tail_words = [
+  "com", "contra", "antes", "depois", "sem", "em", "no", "na", "num", "para",
+  "por", "pelos", "pelas", "como", "e", "ou", "mas", "então", "agora",
+  "aqui", "ali", "um", "uma", "uns", "umas", "dois", "duas", "três",
+  "ambos", "cada", "vez", "passo", "melhor", "pior", "devagar", "rápido",
+  "primeiro", "segundo", "terceiro", "último", "próximo", "deve", "pode",
+  "vai", "ir",
+]

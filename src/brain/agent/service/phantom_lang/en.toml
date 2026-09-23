@@ -923,3 +923,38 @@ tool_name_determiners = [
     "this",
     "that",
 ]
+
+# ── Marker-less bare-participle announcement (#1694) ───────────────────────
+# "Reading them, with mtimes so I know each postdates the tree it claims to
+# cover." shipped as a finished answer from a turn that called nothing.
+# work_announcement_re and gerund_re want a trailing now / … / :, and
+# plan_announcement_re wants then / before / after; this clause has neither,
+# so all three miss it.
+#
+# The stem filter is closed-set, NOT a verb allowlist: STEM >=3 chars and not
+# ending in a/h/r. That drops bring/string/ring/cling/fling/spring/during (r),
+# king/sing/wing/sting (too short) and thing/something/anything/everything
+# (h), while keeping reading/checking/verifying/getting/loading. Enumerating
+# gerunds is the #1122 convergence trap.
+#
+# Group 1 must be rest-of-clause: [^.!?\n]*, NOT [.!?:\n]* — the latter
+# matches only punctuation, so every tail comes back empty and every
+# STATEMENT fires. The optional adverb group is what makes
+# "Reading them carefully." an announcement while "Reading them carefully
+# takes a while." stays a statement: the adverb is absorbed only when the
+# clause ends there.
+participle_object_re = "(?i)^[\\s\\-*•>]*[a-z]{2,}[^ahr]ing\\s+(?:it|them|us|me|you|him|her|both|all)\\b(?:\\s+[a-z]+ly)?([^.!?\\n]*)"
+
+# Closed class that may follow the pronoun in an announcement: prepositions,
+# conjunctions, numerals, ordinals, modals, fixed adverbials. A tail headed by
+# anything else is a participial SUBJECT plus its finite verb — "Getting them
+# took a while.", "Checking them revealed the gap.", "Loading them seemed
+# pointless." Verb lists are the open class that never converges (#1122), so
+# this is one on purpose.
+announcement_tail_words = [
+  "with", "against", "before", "after", "without", "in", "on", "at", "for",
+  "by", "from", "into", "onto", "as", "like", "and", "or", "but", "then",
+  "now", "here", "there", "one", "two", "three", "both", "all", "each",
+  "every", "time", "first", "second", "third", "next", "last", "can",
+  "could", "will", "would", "should", "must", "may", "might",
+]

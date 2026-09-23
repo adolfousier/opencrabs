@@ -486,3 +486,14 @@ tool_name_determiners = [
     "du",
     "des",
 ]
+
+# participle_object_re VOLONTAIREMENT ABSENT (#1694).
+# Le gérondif français « en + participe présent » est idiomatiquement un
+# complément de moyen, pas une annonce : « En les lisant, on comprend vite. »
+# est une affirmation sans aucune copule, donc aucune liste de copules ne la
+# sépare de « En les lisant attentivement. ». La vraie forme d'annonce,
+# « Je les lis avec les mtimes. », est la phrase française la plus ordinaire
+# qui soit — risque de faux positifs inacceptable. Il faut un autre
+# discriminant, pas une approximation. La table serde a tous ses champs en
+# #[serde(default)] et chaque consommateur teste is_empty() : l'arme absente
+# est inerte, jamais cassée.
