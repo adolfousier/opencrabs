@@ -1821,6 +1821,7 @@ async fn cmd_chat_inner(
         {
             let agent = app.agent_service().clone();
             let sender = app.event_sender();
+            let factory = Arc::clone(&channel_factory);
             callbacks.push(Arc::new(move |cfg: crate::config::Config| {
                 // Broadcast full config to all channels via watch channel
                 let _ = config_tx.send(cfg.clone());
@@ -1828,18 +1829,26 @@ async fn cmd_chat_inner(
                 // Provider swap still needs explicit call
                 let agent = agent.clone();
                 let sender = sender.clone();
+                let factory = Arc::clone(&factory);
                 tokio::spawn(async move {
-                    match crate::brain::provider::create_provider(&cfg).await {
+                    // Rebuilt ONCE and handed to both surfaces (#1700). Two
+                    // `create_provider` calls would pay two constructions and
+                    // could disagree with each other on a config that races.
+                    let primary = match crate::brain::provider::create_provider(&cfg).await {
                         Ok(new_provider) => {
-                            agent.swap_provider(new_provider);
                             tracing::info!("ConfigWatcher: LLM provider reloaded from new keys");
+                            Some(new_provider)
                         }
                         Err(e) => {
                             tracing::warn!(
                                 "ConfigWatcher: provider rebuild failed, keeping current: {}",
                                 e
                             );
+                            None
                         }
+                    };
+                    if let Some(p) = primary.as_ref() {
+                        agent.swap_provider(p.clone());
                     }
                     // #1249: the chain half of `[providers.fallback]` reloads
                     // here too. Swapping only the primary above left a chain
@@ -1849,6 +1858,13 @@ async fn cmd_chat_inner(
                     // independent, and a stale chain is exactly the state
                     // being fixed.
                     agent.reload_fallback_providers(&cfg).await;
+                    // #1700: the same two halves for every agent the channel
+                    // factory built. Until this line `reload_fallback_providers`
+                    // had exactly ONE production caller — the line above — so
+                    // channel agents, the A2A agent and the cron agents kept
+                    // the chain from their spawn config, and the factory kept
+                    // handing new agents the pre-rotation provider instance.
+                    factory.reload_providers(&cfg, primary).await;
                     // Fire AFTER the swap so the TUI refresh (commands, approval
                     // policy, and the context-budget footer) reads the new
                     // provider's context window, not the old one.
