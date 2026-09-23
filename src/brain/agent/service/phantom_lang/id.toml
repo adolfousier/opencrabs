@@ -389,3 +389,11 @@ tool_nouns = [
 # object. Empty for languages without articles.
 tool_name_determiners = [
 ]
+
+# participle_object_re DELIBERATELY ABSENT (#1694).
+# Indonesian has zero copula in the present tense, so "Membacanya mudah" is a
+# STATEMENT with no copula word and no closed-class head to reject — the tail
+# rule that separates announcement from statement in en/pt/es has nothing to
+# bite on. The construction itself is easy (membaca + -nya); the split is not.
+# Every LangConfig field is #[serde(default)] and every consumer guards
+# is_empty(), so an absent arm is inert rather than broken.

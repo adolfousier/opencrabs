@@ -75,6 +75,13 @@ pub fn has_phantom_tool_intent_no_tools(text: &str) -> bool {
         if matches_plan_announcement(window) {
             return true;
         }
+        // Marker-less bare-participle announcement carrying its own object
+        // pronoun ("Reading them, with mtimes so I know each postdates the
+        // tree it claims to cover.") — no now / … / : and no then / before,
+        // so all three arms above miss it (#1694).
+        if matches_participle_object(window) {
+            return true;
+        }
         if too_short_for_phrases {
             continue;
         }
@@ -676,12 +683,23 @@ pub(crate) fn matches_work_announcement(lead: &str) -> bool {
     })
 }
 
-/// Run an anchored announcement regex against every sentence start in the
-/// lead, tolerating a short lead clause before the gerund. The live escapes
-/// (#464) were all anchor evasions: "Internet's back, pushing now." (clause
-/// prefix), "Apologies Adolfo, you're right. Pushing now." (sentence
-/// prefix). Suffix slices keep the terminal imminence markers intact.
-fn announcement_matches_anywhere(re: &Regex, lead: &str) -> bool {
+/// Candidate clause starts inside `lead`: position 0, every position that
+/// begins a sentence or follows a clause introducer, and (in the caller) the
+/// short ", " lead-in. Shared by the boolean arms and by
+/// `matches_participle_object`, which needs the same tolerance but must see
+/// the CAPTURE rather than just a match.
+///
+/// Sentence enders, plus the clause introducers that carry an announcement
+/// just as often (#1192). "That's ten issues — fetching all specs fresh…:"
+/// placed both gerunds after an em dash, so neither was ever offered to the
+/// ^-anchored regex and a zero-tool turn shipped as a finished answer. The
+/// comma-window fallback in the callers was the earlier acknowledgement that
+/// a lead clause can precede the announcement; it only ever covered ", "
+/// inside 48 bytes.
+///
+/// Purely additive: every start the old scan produced is still produced, so
+/// nothing that matched before stops matching.
+fn announcement_clause_starts(lead: &str) -> Vec<usize> {
     let mut starts: Vec<usize> = vec![0];
     let mut after_ender = false;
     for (idx, ch) in lead.char_indices() {
@@ -689,28 +707,23 @@ fn announcement_matches_anywhere(re: &Regex, lead: &str) -> bool {
             starts.push(idx);
             after_ender = false;
         }
-        // Sentence enders, plus the clause introducers that carry an
-        // announcement just as often (#1192). "That's ten issues — fetching
-        // all specs fresh…:" placed both gerunds after an em dash, so neither
-        // was ever offered to the ^-anchored regex and a zero-tool turn
-        // shipped as a finished answer. The comma-window fallback below was
-        // the earlier acknowledgement that a lead clause can precede the
-        // announcement; it only ever covered ", " inside 48 bytes.
-        //
-        // Purely additive: every start the old scan produced is still
-        // produced, so nothing that matched before stops matching. The
-        // widening is bounded by the regex's own marker requirement — a
-        // suffix still has to reach " now", an ellipsis, or a colon at its
-        // very end, which ordinary prose after a colon does not.
         if matches!(ch, '.' | '!' | '?' | '\n' | '…' | '—' | '–' | ':' | ';') {
             after_ender = true;
         }
     }
-    for &start in &starts {
+    starts
+}
+
+/// Every slice of `lead` an anchored announcement regex should be offered:
+/// each clause start from `announcement_clause_starts`, plus the short ", "
+/// lead-in window ("Internet's back, pushing now.", #464). Order is per start,
+/// full suffix first. Purely additive — the same slices, in the same order,
+/// that the scan inside `announcement_matches_anywhere` used to visit.
+fn announcement_candidate_slices(lead: &str) -> Vec<&str> {
+    let mut out: Vec<&str> = Vec::new();
+    for &start in &announcement_clause_starts(lead) {
         let suffix = &lead[start..];
-        if re.is_match(suffix) {
-            return true;
-        }
+        out.push(suffix);
         // Short lead clause before the announcement ("internet's back, ").
         let window_end = suffix
             .char_indices()
@@ -718,13 +731,22 @@ fn announcement_matches_anywhere(re: &Regex, lead: &str) -> bool {
             .last()
             .map(|(i, c)| i + c.len_utf8())
             .unwrap_or(0);
-        if let Some(comma) = suffix[..window_end].find(", ")
-            && re.is_match(&suffix[comma + 2..])
-        {
-            return true;
+        if let Some(comma) = suffix[..window_end].find(", ") {
+            out.push(&suffix[comma + 2..]);
         }
     }
-    false
+    out
+}
+
+/// Run an anchored announcement regex against every sentence start in the
+/// lead, tolerating a short lead clause before the gerund. The live escapes
+/// (#464) were all anchor evasions: "Internet's back, pushing now." (clause
+/// prefix), "Apologies Adolfo, you're right. Pushing now." (sentence
+/// prefix). Suffix slices keep the terminal imminence markers intact.
+fn announcement_matches_anywhere(re: &Regex, lead: &str) -> bool {
+    announcement_candidate_slices(lead)
+        .iter()
+        .any(|slice| re.is_match(slice))
 }
 
 /// Does `text` contain a "Now &lt;gerund&gt;" work announcement at a sentence
@@ -766,6 +788,76 @@ pub(crate) fn matches_plan_announcement(text: &str) -> bool {
                 .map(|re| re.is_match(text))
                 .unwrap_or(false)
     })
+}
+
+/// Does `text` announce work with a bare participle carrying its OWN object
+/// pronoun, with no imminence marker and no sequencing?
+///
+/// "Reading them, with mtimes so I know each postdates the tree it claims to
+/// cover." — the #1694 incident, delivered as a finished answer by a turn that
+/// called nothing. Every existing arm needs a token this clause does not carry:
+/// `work_announcement_re` and `gerund_re` a trailing now / … / :,
+/// `plan_announcement_re` a then / before / after.
+///
+/// The regex alone cannot make the call, because the same construction is also
+/// an ordinary subject: "Reading them is straightforward." and "Getting them
+/// took a while." Only the second lacks a copula, so NO copula list separates
+/// the two — what separates them is the word class the pronoun is followed by.
+/// An announcement is followed by nothing, by a clause introducer, or by a
+/// closed-class modifier; a statement is followed by the finite verb its
+/// participle subject governs. Hence `announcement_tail_words`, a closed class
+/// (prepositions, conjunctions, numerals, ordinals, modals, fixed adverbials)
+/// rather than a verb list, which is the open class that never converges
+/// (#1122).
+///
+/// Zero-tool path only, for the reason `matches_plan_announcement` gives: after
+/// a real call the shape is a legitimate recap (#1506/#1172).
+pub(crate) fn matches_participle_object(text: &str) -> bool {
+    let text = strip_inline_directives(text);
+    let text = text.trim();
+    if text.is_empty() {
+        return false;
+    }
+    phantom_lang::all_langs().iter().any(|lang| {
+        !lang.participle_object_re.is_empty()
+            && Regex::new(&lang.participle_object_re)
+                .map(|re| {
+                    announcement_candidate_slices(text).iter().any(|slice| {
+                        re.captures(slice).is_some_and(|caps| {
+                            tail_reads_as_announcement(
+                                caps.get(1).map_or("", |m| m.as_str()),
+                                &lang.announcement_tail_words,
+                            )
+                        })
+                    })
+                })
+                .unwrap_or(false)
+    })
+}
+
+/// Whether the clause tail after the pronoun reads as an announcement.
+///
+/// Empty (the announcement is the last thing said), or opening on a clause
+/// introducer, or headed by a closed-class word. Everything else is the
+/// predicate of a participial subject.
+fn tail_reads_as_announcement(tail: &str, closed: &[String]) -> bool {
+    let tail = tail.trim_start();
+    if tail.is_empty() {
+        return true;
+    }
+    if matches!(tail.chars().next(), Some(',' | ':' | ';' | '…' | '(')) {
+        return true;
+    }
+    // Accented letters are word characters here, so a plain `split` on
+    // non-letters would chop "difícil" and hand the predicate test a fragment.
+    let head: String = tail
+        .chars()
+        .take_while(|c| c.is_alphabetic() || c.is_ascii_digit() || *c == '\'')
+        .collect();
+    if head.is_empty() {
+        return true;
+    }
+    closed.iter().any(|w| w == &head.to_lowercase())
 }
 
 /// Check if `lower` contains any completion claim.

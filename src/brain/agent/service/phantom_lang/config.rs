@@ -52,6 +52,38 @@ pub struct LangConfig {
     /// (#1261). Consumed by the zero-tool gate only.
     #[serde(default)]
     pub plan_announcement_re: String,
+    /// Bare-participle announcement carrying its OWN object pronoun, with no
+    /// imminence marker and no sequencing: "Reading them, with mtimes so I
+    /// know each postdates the tree it claims to cover." Every existing arm
+    /// needs something this clause does not have — `work_announcement_re` and
+    /// `gerund_re` a now / … / :, `plan_announcement_re` a then / before /
+    /// after — so the marker-less form shipped as a finished answer while
+    /// announcing unfinished work (#1694). Group 1 MUST capture the rest of
+    /// the clause; the announcement/statement split reads it.
+    ///
+    /// The construction is language-specific in more than vocabulary: the
+    /// clitic sits after and separate (en, ru), enclitic behind a hyphen (pt),
+    /// fused with an accent shift (es), PROCLITIC before the verb (fr), or as
+    /// a fused suffix (id). Empty for a language whose split cannot be
+    /// discriminated safely — every consumer guards `is_empty()` first, so an
+    /// absent arm is inert, not broken.
+    #[serde(default)]
+    pub participle_object_re: String,
+    /// Closed-class words that may follow the pronoun in an ANNOUNCEMENT
+    /// (prepositions, conjunctions, numerals, ordinals, modals, fixed
+    /// adverbials): "Reading them **against** the log", "Siguiéndolos **paso**
+    /// a paso". A tail beginning with anything else is a STATEMENT whose
+    /// participle is the subject — "Getting them **took** a while",
+    /// "Leyéndolos **reveló** el fallo" — and must not fire.
+    ///
+    /// This is deliberately a closed class. The split used to be specified as
+    /// a copula list, which is both open in the general case and insufficient:
+    /// the statements above carry no copula at all, and French "En les
+    /// lisant, on comprend vite" likewise has none, so no copula list can
+    /// separate them. Verb predicates are an open class and enumerating them
+    /// never converges (#1122); the word class AFTER the pronoun does.
+    #[serde(default)]
+    pub announcement_tail_words: Vec<String>,
     /// Verbs and prepositions that make a following BARE tool name the
     /// object of an action the model attributes to itself: "setting up the
     /// plan", "running bash". A multi-word name proves tool usage on its

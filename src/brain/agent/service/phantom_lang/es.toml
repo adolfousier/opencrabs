@@ -478,3 +478,22 @@ tool_name_determiners = [
     "esta",
     "del",
 ]
+
+# ── Gerundio sin marcador con pronombre propio (#1694) ────────────────────
+# "Leyéndolos con calma, encuentro tres diferencias." El clítico español va
+# FUSIONADO con desplazamiento de acento, por eso la alternancia necesita
+# `éndo`/`ándo` además de `ando`/`iendo`: "Leyéndolos" lleva é, y una
+# alternancia plana `endo` no lo casaría; "Corriéndolos"/"Siguiéndolos"
+# tampoco. Grupo 1 = resto de la oración ([^.!?\n]*).
+participle_object_re = "(?i)^[\\s\\-*•>]*[a-záéíóúüñ]{2,}(?:ando|iendo|éndo|ándo)[-\\s]?(?:los|las|lo|la|nos)\\b(?:\\s+[a-záéíóúüñ]+mente)?([^.!?\\n]*)"
+
+# Clase cerrada que puede seguir al pronombre en un ANUNCIO. Lo que empieza
+# de otro modo es sujeto gerundivo + verbo finito: "Leyéndolos reveló el
+# fallo.", "Leyéndolos no es difícil."
+announcement_tail_words = [
+  "con", "contra", "antes", "después", "sin", "en", "para", "por", "como",
+  "y", "o", "pero", "entonces", "ahora", "aquí", "allí", "uno", "una",
+  "dos", "tres", "ambos", "cada", "vez", "paso", "mejor", "peor", "seguido",
+  "despacio", "rápido", "primero", "segundo", "tercero", "último", "próximo",
+  "puede", "debe", "va", "suele",
+]
