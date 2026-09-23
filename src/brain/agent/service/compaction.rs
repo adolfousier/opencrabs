@@ -490,11 +490,12 @@ impl AgentService {
             map.insert(session_id, elapsed);
         }
         if let Some(cb) = progress_callback {
-            let after_pct = if context.max_tokens > 0 {
-                (context.token_count as f64 / context.max_tokens as f64) * 100.0
-            } else {
-                100.0
-            };
+            // The same basis the gate measures on and the meter logs at
+            // service/context.rs:1011. Dividing the raw `token_count` by
+            // `max_tokens` here dropped the provider anchor, so a context the
+            // log recorded at 17% was receipted at 19% (session bee04b00,
+            // #1686): one compaction, two different after-numbers.
+            let after_pct = context.usage_percentage();
             cb(
                 session_id,
                 ProgressEvent::CompactionSummary {
