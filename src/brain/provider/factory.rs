@@ -26,12 +26,13 @@ use super::{
     gemini::GeminiProvider,
     opencode_cli::OpenCodeCliProvider,
 };
-use crate::config::timeout::{TimeoutResolution, resolve_timeout};
+use crate::config::timeout::resolve_timeout;
 use crate::config::{AgentConfig, Config, ProviderConfig};
 use anyhow::Result;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, LazyLock};
+use std::time::Duration;
 
 // ── Provider Registry ───────────────────────────────────────────
 
@@ -1950,21 +1951,72 @@ fn try_create_custom(config: &Config) -> Result<Option<Arc<dyn Provider>>> {
     Ok(Some(Arc::new(provider)))
 }
 
-/// Warn when a resolved timeout flag had to skip a tier that carried `0`.
+/// Resolve one timeout flag across `[providers.<name>]` -> `[agent]` -> the
+/// family default, log the tier that won, and return the duration to apply.
 ///
-/// `0` is not "no timer" for these two flags: a zero-second reqwest timeout is
-/// an instant deadline, and a zero-second idle timer fires before the first
-/// chunk arrives. So the resolver skips it and the default applies. Skipping it
-/// *silently*, though, is the same invisibility that kept #1689's dropped keys
-/// unnoticed long enough to become a documented example in the README, so the
-/// skip gets a log line naming the section that carried it.
-fn warn_skipped_zero(resolution: &TimeoutResolution, flag: &str) {
+/// The return is an *override*, not the effective ceiling: when nothing usable
+/// is configured the family default still governs the wire, but the caller gets
+/// `None` so the provider keeps reporting "no override" through the trait
+/// accessors ([`crate::config::timeout::TimeoutResolution::override_duration`]).
+///
+/// `compiled_default` is `None` for a flag whose default is picked at runtime
+/// rather than baked into a family: `stream_idle_timeout_secs` is resolved in
+/// `brain/agent/service/helpers.rs` (3600s local/CLI, 45s z.ai, 20s remote), so
+/// a value unset at both tiers must defer to that table instead of overriding
+/// it with a number from the transport layer.
+///
+/// A `0` at either tier is skipped, never honoured: a zero-second reqwest
+/// timeout is an instant deadline, and a zero-second idle timer fires before
+/// the first chunk arrives. Skipping it *silently* is the same invisibility
+/// that kept these keys unnoticed long enough to become a documented README
+/// example, so every skip gets a log line naming the section that carried it.
+fn resolve_and_report(
+    provider_value: Option<u64>,
+    agent_value: Option<u64>,
+    compiled_default: Option<u64>,
+    flag: &str,
+    label: &str,
+) -> Option<Duration> {
+    let resolution = resolve_timeout(provider_value, agent_value, compiled_default);
+    let duration = resolution.override_duration();
+    if let Some(dur) = duration {
+        tracing::info!("{label}: {}s (from {})", dur.as_secs(), resolution.tier);
+    }
     if let Some(note) = resolution.zero_note() {
         tracing::warn!(
             "`{flag} = 0` is skipped ({note}); a zero-second timer would fire \
              immediately, so the default applies instead"
         );
     }
+    duration
+}
+
+/// Apply the resolved timeout chain to a provider that owns both setters.
+///
+/// Shared by all three families (#1688 compat, #1689 anthropic and gemini) so a
+/// new family cannot quietly implement one setter and forget the other: the
+/// per-provider tier, the global tier, and the family's compiled request
+/// ceiling are all named here, in one place.
+fn report_timeout_chain(
+    config: &ProviderConfig,
+    agent: &AgentConfig,
+    compiled_request_secs: u64,
+) -> (Option<Duration>, Option<Duration>) {
+    let request = resolve_and_report(
+        config.timeout_secs,
+        agent.timeout_secs,
+        Some(compiled_request_secs),
+        "timeout_secs",
+        "Non-streaming request ceiling",
+    );
+    let idle = resolve_and_report(
+        config.stream_idle_timeout_secs,
+        agent.stream_idle_timeout_secs,
+        None,
+        "stream_idle_timeout_secs",
+        "Stream idle timeout",
+    );
+    (request, idle)
 }
 
 /// Configure OpenAI-compatible provider with custom model
@@ -2028,39 +2080,19 @@ fn configure_openai_compatible(
     // #1688: both flags resolve through [providers.<name>] -> [agent] -> the
     // family default. Before this the per-provider struct was the only tier
     // read anywhere in the tree, so `[agent] timeout_secs = 120` was parsed,
-    // stored, and then quietly ignored.
-    let request = resolve_timeout(
-        config.timeout_secs,
-        agent.timeout_secs,
-        Some(super::custom_openai_compatible::DEFAULT_TIMEOUT.as_secs()),
+    // stored, and then quietly ignored. #1689 put the same chain behind
+    // `report_timeout_chain` so anthropic and gemini read it too.
+    let (request, idle) = report_timeout_chain(
+        config,
+        agent,
+        super::custom_openai_compatible::DEFAULT_TIMEOUT.as_secs(),
     );
-    if let Some(dur) = request.duration() {
+    if let Some(dur) = request {
         provider = provider.with_timeout(dur);
-        tracing::info!(
-            "Non-streaming request ceiling: {}s (from {})",
-            dur.as_secs(),
-            request.tier
-        );
     }
-    warn_skipped_zero(&request, "timeout_secs");
-
-    // No compiled floor on purpose: the idle default is picked at stream time
-    // from whether the target is local/CLI or remote (`helpers.rs`), so a flag
-    // unset at both tiers must defer to that runtime choice, not override it.
-    let idle = resolve_timeout(
-        config.stream_idle_timeout_secs,
-        agent.stream_idle_timeout_secs,
-        None,
-    );
-    if let Some(dur) = idle.duration() {
+    if let Some(dur) = idle {
         provider = provider.with_stream_idle_timeout(dur);
-        tracing::info!(
-            "Stream idle timeout: {}s (from {})",
-            dur.as_secs(),
-            idle.tier
-        );
     }
-    warn_skipped_zero(&idle, "stream_idle_timeout_secs");
     provider
 }
 
@@ -2125,6 +2157,19 @@ fn try_create_gemini(config: &Config) -> Result<Option<Arc<dyn Provider>>> {
     if let Some(cw) = gemini_config.context_window {
         tracing::info!("Gemini context window override: {} tokens", cw);
         provider = provider.with_context_window(cw);
+    }
+    // #1689: like anthropic, the gemini family read neither timeout key at any
+    // tier until this chain was wired in (#1688 built it for the compat family).
+    let (request, idle) = report_timeout_chain(
+        gemini_config,
+        &config.agent,
+        super::gemini::DEFAULT_TIMEOUT.as_secs(),
+    );
+    if let Some(dur) = request {
+        provider = provider.with_timeout(dur);
+    }
+    if let Some(dur) = idle {
+        provider = provider.with_stream_idle_timeout(dur);
     }
     Ok(Some(Arc::new(provider)))
 }
@@ -2313,6 +2358,20 @@ fn try_create_anthropic(config: &Config) -> Result<Option<Arc<dyn Provider>>> {
     if let Some(cw) = anthropic_config.context_window {
         tracing::info!("Anthropic context window override: {} tokens", cw);
         provider = provider.with_context_window(cw);
+    }
+    // #1689: the anthropic family used to read neither timeout key at any tier,
+    // so the README's `[providers.anthropic] timeout_secs = 120` example was a
+    // documented no-op. Same chain as the compat family (#1688).
+    let (request, idle) = report_timeout_chain(
+        anthropic_config,
+        &config.agent,
+        super::anthropic::DEFAULT_TIMEOUT.as_secs(),
+    );
+    if let Some(dur) = request {
+        provider = provider.with_timeout(dur);
+    }
+    if let Some(dur) = idle {
+        provider = provider.with_stream_idle_timeout(dur);
     }
 
     tracing::info!("Using Anthropic provider");

@@ -99,6 +99,27 @@ fn duration_maps_the_effective_seconds() {
 }
 
 #[test]
+fn the_compiled_default_is_never_reported_as_an_override() {
+    // `duration()` answers "what ceiling is in force"; `override_duration()`
+    // answers "did anybody configure it". The trait accessors must report the
+    // second one, or an unconfigured provider claims an override.
+    let unset = resolve_timeout(None, None, Some(300));
+    assert_eq!(unset.duration(), Some(std::time::Duration::from_secs(300)));
+    assert_eq!(unset.override_duration(), None);
+
+    let zeroed = resolve_timeout(Some(0), Some(0), Some(300));
+    assert_eq!(zeroed.override_duration(), None);
+
+    for configured in [
+        resolve_timeout(Some(120), None, Some(300)),
+        resolve_timeout(None, Some(60), Some(300)),
+    ] {
+        assert_eq!(configured.override_duration(), configured.duration());
+        assert_ne!(configured.tier, TimeoutTier::Default);
+    }
+}
+
+#[test]
 fn zero_note_names_only_the_section_that_actually_carried_it() {
     assert_eq!(
         resolve_timeout(Some(0), None, Some(300)).zero_note(),
@@ -172,10 +193,18 @@ fn factory_resolves_every_timeout_flag_through_the_chain() {
              stopped being consulted for a timeout flag (#1688)"
         );
     }
-    // request ceiling + stream idle + the z.ai host-aware check.
+    // #1689: the two per-flag resolutions now sit behind one shared helper, and
+    // that helper is called by all three families. Scanning for the helper keeps
+    // the count meaningful: a family that stops calling it is the regression.
     assert!(
-        src.matches("resolve_timeout(").count() >= 3,
-        "expected at least 3 resolve_timeout() call sites, found {}",
-        src.matches("resolve_timeout(").count()
+        src.matches("resolve_and_report(").count() >= 2,
+        "expected resolve_and_report() to cover both flags, found {}",
+        src.matches("resolve_and_report(").count()
+    );
+    assert!(
+        src.matches("report_timeout_chain(").count() >= 3,
+        "expected report_timeout_chain() in the compat, anthropic and gemini \
+         families, found {}",
+        src.matches("report_timeout_chain(").count()
     );
 }
