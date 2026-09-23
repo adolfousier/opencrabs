@@ -111,7 +111,7 @@ pub(crate) enum BudgetPhase {
 }
 
 /// What a visit found in the session's pending slot.
-enum PendingState {
+pub(crate) enum PendingState {
     /// Nothing in flight.
     Empty,
     /// Still thinking, and this visit is not obliged to wait for it.
@@ -122,6 +122,23 @@ enum PendingState {
     /// repeat the same failing call on every visit, so the caller falls back
     /// to the blocking path and its attempt budget.
     Failed,
+}
+
+/// What the 65% gate owes a session that has just crossed it (#1686).
+///
+/// True only when this visit starts or performs a summariser. The gate is
+/// re-entered on every tool iteration while a background summariser is in
+/// flight, and the announcement used to sit above that dispatch, so session
+/// `a58b8714` logged 128 gate WARNs. Across 2026-09-22 and 23 the ratio was
+/// 241 gate hits against 27 compactions that actually applied: roughly nine
+/// announcements, spawns and ledger rows per summariser.
+/// Each repeat paid three times: a WARN line, a `tokio::spawn`, and a
+/// feedback-ledger row asserting a compaction had started.
+///
+/// A `Failed` visit does announce. It falls back to the blocking path, which
+/// is a second summariser rather than a repeat of the first.
+pub(crate) fn gate_announces_compaction(state: &PendingState) -> bool {
+    matches!(state, PendingState::Empty | PendingState::Failed)
 }
 
 /// Fill level at which a turn stops running ahead of the summariser and waits
@@ -283,6 +300,17 @@ impl AgentService {
             return truncated.then_some(CompactionOutcome::Truncated);
         }
 
+        // Announce only on a visit that actually summarises. This used to sit
+        // above the dispatch, so every tool iteration that re-entered the gate
+        // while a background summariser was in flight re-announced the same
+        // compaction (#1686).
+        if !gate_announces_compaction(&pending_state) {
+            // Work is already under way against this exact conversation, or a
+            // summary already landed. A second summariser would burn a provider
+            // call describing a context the first one is about to replace.
+            return truncated.then_some(CompactionOutcome::Truncated);
+        }
+
         tracing::warn!(
             "Context at {:.0}% (>65%) — triggering LLM compaction",
             usage_pct
@@ -295,12 +323,6 @@ impl AgentService {
         );
 
         match pending_state {
-            // Work is already under way against this exact conversation. A
-            // second summariser would burn a provider call describing a
-            // context the first one is about to replace.
-            PendingState::StillRunning => {
-                return truncated.then_some(CompactionOutcome::Truncated);
-            }
             // Nothing in flight and backgrounding is on: start the summariser
             // and let the turn carry on. This is the whole point — the user
             // sees the receipt afterwards instead of a minute of nothing.
@@ -311,7 +333,9 @@ impl AgentService {
             // Backgrounding off, or the background attempt already failed:
             // block the turn, exactly as every compaction did before.
             PendingState::Empty | PendingState::Failed => {}
-            PendingState::Applied(_) => unreachable!("returned above"),
+            PendingState::StillRunning | PendingState::Applied(_) => {
+                unreachable!("gate_announces_compaction returns false for both")
+            }
         }
 
         // Signal channels that the next 10-60s will produce zero

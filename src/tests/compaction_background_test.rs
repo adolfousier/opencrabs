@@ -1,4 +1,4 @@
-//! Auto-compaction runs in the background, and the two things that makes
+//! Auto-compaction runs in the background, and the three things that makes
 //! dangerous are covered here.
 //!
 //! 1. **The gap.** A summariser that blocks the turn cannot miss anything:
@@ -10,10 +10,16 @@
 //!    what left a truncated context with no marker and looped two sessions on
 //!    reload (2026-05-05), so the predicate that decides to wait is asserted
 //!    directly rather than inferred.
+//! 3. **The notice.** The gate is re-entered on every tool iteration, so an
+//!    announcement placed above the dispatch repeats for a compaction that is
+//!    already running (#1686). The predicate deciding to announce, and the
+//!    order that puts it below the guard, are both asserted here.
 
 use crate::brain::agent::context::{AgentContext, CompactionScope};
 use crate::brain::agent::service::AgentService;
-use crate::brain::agent::service::compaction::{BudgetPhase, must_wait_for_compaction};
+use crate::brain::agent::service::compaction::{
+    BudgetPhase, PendingState, gate_announces_compaction, must_wait_for_compaction,
+};
 use crate::brain::provider::{ContentBlock, Message, Role};
 
 fn ctx(messages: Vec<Message>) -> AgentContext {
@@ -271,4 +277,61 @@ fn the_tool_loop_waits_at_the_ceiling() {
             "the loop kept growing the context at {usage}%"
         );
     }
+}
+
+// ── One notice per compaction cycle (#1686) ──
+
+/// Three consecutive gate hits in one cycle: the first starts the summariser,
+/// the next two find it already in flight. Before the reorder all three
+/// announced, which is how session `a58b8714` came to pay 128 gate WARNs, 128
+/// `tokio::spawn`s and 128 feedback-ledger rows. Across two days the gate hit
+/// 241 times against 27 compactions that actually applied, about nine
+/// announcements per summariser.
+#[test]
+fn one_cycle_announces_once_across_three_hits() {
+    let cycle = [
+        PendingState::Empty,
+        PendingState::StillRunning,
+        PendingState::StillRunning,
+    ];
+    let notices = cycle
+        .iter()
+        .filter(|state| gate_announces_compaction(state))
+        .count();
+    assert_eq!(notices, 1, "three gate hits announced {notices} times");
+}
+
+/// A summary that already landed is not a second compaction, and the visit that
+/// applies it must not announce one.
+#[test]
+fn an_applied_summary_is_never_re_announced() {
+    assert!(!gate_announces_compaction(&PendingState::Applied(
+        "the summary".into()
+    )));
+}
+
+/// A failed background attempt falls back to the blocking path. That is a second
+/// summariser rather than a repeat of the first, so it owes its own notice.
+#[test]
+fn the_blocking_fallback_still_announces() {
+    assert!(gate_announces_compaction(&PendingState::Failed));
+}
+
+/// The predicate is only the decision. The defect was an ordering: the WARN and
+/// the ledger record sat above the dispatch, so a repeat hit announced before
+/// it learned a summariser was already running. Pin the order too, or the
+/// predicate stays green while the announcement moves back up.
+#[test]
+fn the_announcement_sits_below_the_guard() {
+    const SRC: &str = include_str!("../brain/agent/service/compaction.rs");
+    let guard = SRC
+        .find("if !gate_announces_compaction(")
+        .expect("the gate guard");
+    let announce = SRC
+        .find("\"Context at {:.0}% (>65%)")
+        .expect("the gate WARN");
+    assert!(
+        guard < announce,
+        "the guard at {guard} must return before the announcement at {announce}"
+    );
 }
