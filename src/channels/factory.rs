@@ -21,7 +21,20 @@ use uuid::Uuid;
 /// The `tool_registry` is set lazily via [`set_tool_registry`] to break the circular
 /// dependency between tool registration and factory creation.
 pub struct ChannelFactory {
-    provider: Arc<dyn Provider>,
+    /// The primary provider every agent this factory builds starts on.
+    ///
+    /// Behind a lock since #1700: it used to be a bare `Arc` captured at
+    /// process start, so an agent built after a key rotation or a `[agent]
+    /// provider` edit still got the pre-rotation instance, and there was no
+    /// way to reach the agents already built. `reload_providers` is the writer.
+    provider: std::sync::RwLock<Arc<dyn Provider>>,
+    /// Every agent service this factory produced, as weak refs (#1700).
+    ///
+    /// The channel manager keeps `JoinHandle`s, not services, so without this
+    /// registry nothing outside a channel task can reach a running channel
+    /// agent. Weak on purpose: a stopped channel must not be kept alive by the
+    /// registry, and a dead entry is pruned on the next reload.
+    live_agents: std::sync::Mutex<Vec<std::sync::Weak<AgentService>>>,
     service_context: ServiceContext,
     shared_brain: String,
     tool_registry: OnceLock<Arc<ToolRegistry>>,
@@ -64,7 +77,8 @@ impl ChannelFactory {
         config_rx: tokio::sync::watch::Receiver<Config>,
     ) -> Self {
         Self {
-            provider,
+            provider: std::sync::RwLock::new(provider),
+            live_agents: std::sync::Mutex::new(Vec::new()),
             service_context,
             shared_brain,
             tool_registry: OnceLock::new(),
@@ -162,22 +176,25 @@ impl ChannelFactory {
         message_enqueue_callback: Option<crate::brain::agent::service::MessageEnqueueCallback>,
     ) -> Arc<AgentService> {
         let config = self.config_rx.borrow().clone();
-        let mut builder =
-            AgentService::new(self.provider.clone(), self.service_context.clone(), &config)
-                .await
-                .with_system_brain(self.shared_brain.clone())
-                // Live brain rebuild (#213): channel agents pick up brain-file
-                // edits on their next turn. Channels use the core brain; the
-                // lazy-tools suffix mirrors the startup assembly. Seeded from
-                // `shared_brain` so nothing is re-read until a file changes.
-                .with_brain_rebuild(
-                    crate::brain::prompt_builder::BrainLoader::new(self.brain_path.clone()),
-                    self.runtime_info.get().cloned(),
-                    true,
-                    config.agent.lazy_tools,
-                )
-                .with_working_directory(self.working_directory.clone())
-                .with_brain_path(self.brain_path.clone());
+        let mut builder = AgentService::new(
+            self.current_provider(),
+            self.service_context.clone(),
+            &config,
+        )
+        .await
+        .with_system_brain(self.shared_brain.clone())
+        // Live brain rebuild (#213): channel agents pick up brain-file
+        // edits on their next turn. Channels use the core brain; the
+        // lazy-tools suffix mirrors the startup assembly. Seeded from
+        // `shared_brain` so nothing is re-read until a file changes.
+        .with_brain_rebuild(
+            crate::brain::prompt_builder::BrainLoader::new(self.brain_path.clone()),
+            self.runtime_info.get().cloned(),
+            true,
+            config.agent.lazy_tools,
+        )
+        .with_working_directory(self.working_directory.clone())
+        .with_brain_path(self.brain_path.clone());
 
         if let Some(registry) = self.tool_registry.get() {
             builder = builder.with_tool_registry(registry.clone());
@@ -207,7 +224,105 @@ impl ChannelFactory {
             builder = builder.with_message_enqueue_callback(message_enqueue_callback);
         }
 
-        Arc::new(builder)
+        let agent = Arc::new(builder);
+        // #1700: register this instance so a config reload can reach it. Every
+        // agent the factory builds passes through this one function
+        // (`create_agent_service` and `_with_queue` delegate here), so this is
+        // the only registration point. Dead weaks are pruned on the way in
+        // rather than left to accumulate until the next reload.
+        if let Ok(mut live) = self.live_agents.lock() {
+            live.retain(|w| w.strong_count() > 0);
+            live.push(Arc::downgrade(&agent));
+        }
+        agent
+    }
+
+    /// The provider new agents should be built on: whatever the last reload
+    /// installed, not the instance captured at process start (#1700).
+    pub fn current_provider(&self) -> Arc<dyn Provider> {
+        self.provider
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+    }
+
+    /// Number of agents this factory has built that are still alive.
+    /// Test seam for the #1700 registry: an unregistered agent is invisible to
+    /// a reload, which is exactly the bug being fixed.
+    pub fn live_agent_count(&self) -> usize {
+        self.live_agents
+            .lock()
+            .map(|live| live.iter().filter(|w| w.strong_count() > 0).count())
+            .unwrap_or(0)
+    }
+
+    /// Push a reloaded config into every agent this factory built (#1700).
+    ///
+    /// The chain half of #1249 never reached channel agents: `AgentService`
+    /// builds its `[providers.fallback]` chain in `new()` and
+    /// `reload_fallback_providers` had exactly one production caller, the TUI's
+    /// `app.agent_service()` in `src/cli/ui.rs`. A provider deleted from the
+    /// chain kept serving channel sessions until restart, and the factory's own
+    /// `provider` field was a bare `Arc`, so even an agent built afterwards
+    /// inherited the pre-rotation instance.
+    ///
+    /// `primary` is the provider the caller already rebuilt, or `None` when that
+    /// rebuild failed. The chain reload runs either way: the two are
+    /// independent, and a stale chain is the state being fixed (#1249 rule).
+    ///
+    /// There is deliberately no per-channel hook. Channels read `config_rx`
+    /// with `borrow()` on each message and nothing in the repo consumes
+    /// `.changed()`, so no channel-side "config changed" arm exists to hang
+    /// this on; a central registry is the only shape that reaches them.
+    pub async fn reload_providers(&self, config: &Config, primary: Option<Arc<dyn Provider>>) {
+        if let Some(new_primary) = primary.as_ref() {
+            match self.provider.write() {
+                Ok(mut slot) => *slot = new_primary.clone(),
+                Err(e) => tracing::warn!(
+                    "ConfigWatcher: channel provider slot NOT updated, lock poisoned: {e} — \
+                     agents built from now on keep the previous provider"
+                ),
+            }
+        }
+
+        let live: Vec<Arc<AgentService>> = match self.live_agents.lock() {
+            Ok(mut registry) => {
+                let upgraded: Vec<Arc<AgentService>> = registry
+                    .iter()
+                    .filter_map(std::sync::Weak::upgrade)
+                    .collect();
+                // Prune in the same critical section: a channel that stopped
+                // between two reloads must not linger as a dead entry.
+                registry.retain(|w| w.strong_count() > 0);
+                upgraded
+            }
+            Err(e) => {
+                tracing::warn!(
+                    "ConfigWatcher: channel agent registry lock poisoned: {e} — \
+                     no channel agent reloaded"
+                );
+                return;
+            }
+        };
+
+        // Counted before iteration: the `for` loop below moves `live`.
+        let live_count = live.len();
+
+        for agent in live {
+            if let Some(new_primary) = primary.as_ref() {
+                agent.swap_provider(new_primary.clone());
+            }
+            agent.reload_fallback_providers(config).await;
+        }
+
+        tracing::info!(
+            "ConfigWatcher: {} channel agent(s) reloaded (primary {})",
+            live_count,
+            match primary.as_ref() {
+                Some(p) => format!("swapped to '{}'", p.name()),
+                None => "rebuild failed, chain-only reload".to_string(),
+            }
+        );
     }
 
     pub fn shared_session_id(&self) -> Arc<Mutex<Option<Uuid>>> {
