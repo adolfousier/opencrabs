@@ -452,6 +452,24 @@ impl AgentService {
         }
     }
 
+    /// The two fill levels the waiting path reports (#1686).
+    ///
+    /// A background summariser is announced while the live context is still
+    /// drifting down from Tier-2 trimming, so the live percentage and the
+    /// percentage the gate requested are two different measurements of one
+    /// event. Session `bee04b00` rendered a progress line reading 54% beside a
+    /// receipt reading 66% -> 17%, and `cb1c7a07` rendered 21% beside 66% ->
+    /// 16%: in both cases the progress figure sits under the 65% gate, so the
+    /// line announced a compaction at a level that cannot have requested one.
+    ///
+    /// The progress line therefore always carries the requested level, which is
+    /// the same `snapshot_usage_pct` the summary already reports as its
+    /// "before". The live level stays in the log, where showing how far the
+    /// context moved while the summariser ran is the whole point.
+    pub(crate) fn waiting_report_levels(requested: f64, live: f64) -> (f64, f64) {
+        (requested, live)
+    }
+
     /// Bookkeeping every successful compaction owes, whichever path produced
     /// it: clear the #909 pressure throttle so the ctx footer drops its
     /// marker, remember how long this took so the next compaction can quote a
@@ -549,9 +567,14 @@ impl AgentService {
         }
 
         if !pending.handle.is_finished() {
+            // One event, two levels (#1686): the notice carries the fill the
+            // compaction was requested at, the diagnostic keeps the live one
+            // so the drift stays visible in the log where it belongs.
+            let (notice_pct, log_pct) =
+                Self::waiting_report_levels(pending.snapshot_usage_pct, usage_pct);
             tracing::warn!(
                 "Waiting on background compaction at {:.0}% ({:?} elapsed) — {}",
-                usage_pct,
+                log_pct,
                 pending.started.elapsed(),
                 if phase == BudgetPhase::TurnStart {
                     "a reply must not be composed against a context queued for replacement"
@@ -565,7 +588,7 @@ impl AgentService {
                 cb(
                     session_id,
                     ProgressEvent::Compacting {
-                        usage_pct,
+                        usage_pct: notice_pct,
                         predicted: self.predicted_compaction_elapsed(session_id),
                     },
                 );

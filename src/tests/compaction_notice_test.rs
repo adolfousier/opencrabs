@@ -301,3 +301,48 @@ fn call_sites_pick_the_right_notifier() {
         .expect("background failure arm");
     assert!(COMPACTION[failed..failed + 700].contains("SelfHealingAlert"));
 }
+
+/// #1686 Defect 2: the waiting progress line reported the live fill, so a
+/// compaction the 65% gate requested at 66% announced itself at 54%
+/// (`bee04b00`, 2026-09-23) or 21% (`cb1c7a07`, 2026-09-22), a level that
+/// cannot have requested one, printed beside a receipt naming the real 66%.
+/// One event was reported as two facts because the two lines read two
+/// different measurements.
+#[test]
+fn compaction_notice_carries_start_fill() {
+    let (notice, live) = AgentService::waiting_report_levels(66.0, 54.0);
+    assert_eq!(
+        notice, 66.0,
+        "the progress line carries the fill the compaction was requested at"
+    );
+    assert_eq!(
+        live, 54.0,
+        "the log keeps the live fill, which is its point"
+    );
+    assert!(
+        notice > 65.0,
+        "no progress line can sit below the gate that triggers compaction"
+    );
+
+    // The helper is only a fix if the waiting emit site uses it. Pin the
+    // wiring so the payload cannot drift back to the live parameter. Anchor on
+    // the call itself: the log string sits *below* it, so scanning forward from
+    // the string would never reach the assignment it is meant to prove.
+    const COMPACTION: &str = include_str!("../brain/agent/service/compaction.rs");
+    let call = COMPACTION
+        .find("Self::waiting_report_levels(")
+        .expect("waiting helper call site");
+    let window = &COMPACTION[call..call + 1500];
+    assert!(
+        window.contains("pending.snapshot_usage_pct"),
+        "the waiting path must derive its levels from the recorded start fill"
+    );
+    assert!(
+        window.contains("usage_pct: notice_pct"),
+        "the Compacting payload must be the notice level, not the live one"
+    );
+    assert!(
+        window.contains("log_pct,"),
+        "the diagnostic keeps the live level, which is its whole point"
+    );
+}
