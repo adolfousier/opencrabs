@@ -51,12 +51,20 @@ pub(crate) fn build_progress_cb(
                     .await;
                 });
                 if let Ok(mut s) = st.lock() {
-                    s.compacting = true;
-                    s.header_preview = Some(COMPACTING_HEADER_TEXT.to_string());
-                    // The pair is opt-in chrome (#1686). The pin above stays
-                    // either way: it is what keeps the header from going stale
-                    // through the silent window, and it carries no numbers.
+                    // The whole compaction surface is opt-in chrome (#1686),
+                    // header pin included. Leaving the pin ungated was
+                    // justified by a staleness worry that does not exist:
+                    // tick_flow_header advances flow_status from
+                    // turn_started_at outside the `compacting` branch, so the
+                    // clock keeps counting through the silent window and the
+                    // header keeps its last real preview. With the flag off
+                    // the pin is never set, so a compaction leaves no trace on
+                    // the block at all. The CompactionSummary arm's lift stays
+                    // unconditional, so a flag flip mid-window cannot strand
+                    // a pin.
                     if Config::current().agent.compaction_notice {
+                        s.compacting = true;
+                        s.header_preview = Some(COMPACTING_HEADER_TEXT.to_string());
                         s.display_queue
                             .push(DisplayItem::Intermediate(compacting_flow_line(
                                 usage_pct, predicted,
@@ -206,9 +214,11 @@ pub(crate) fn build_progress_cb(
                     // activity arrives (#29).
                     s.compacting = false;
                     s.header_preview = None;
-                    // Lifting the pin stays unconditional: it is what lets the
-                    // next tick recompute the header from live data. Only the
-                    // numbered receipt is opt-in chrome (#1686).
+                    // Lifting the pin stays unconditional while setting it is
+                    // gated (#1686): set-gated / lift-ungated means a flag flip
+                    // inside the compaction window can never strand a pin that
+                    // nothing will clear. The lift is what lets the next tick
+                    // recompute the header from live data.
                     if Config::current().agent.compaction_notice {
                         s.display_queue
                             .push(DisplayItem::Intermediate(compacted_flow_line(

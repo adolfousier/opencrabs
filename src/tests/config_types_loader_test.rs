@@ -402,20 +402,21 @@ fn compaction_notice_leaves_the_roast_alone() {
 }
 
 #[test]
-fn every_pair_site_reads_the_flag() {
-    // Four render sites, two per file. The header pin is deliberately NOT
-    // gated: it is the anti-staleness surface and the hint itself, so muting
-    // the mess must not leave a stale "Working on…" preview up for the whole
-    // silent window.
+fn every_compaction_surface_reads_the_flag() {
+    // The whole compaction chrome is opt-in (#1686): the two numbered lines
+    // AND the header pin. Structural pin only. These arms are closures built
+    // inside handle_message, and no test in this repo constructs a Telegram
+    // StreamingState, so this proves the source shape rather than behaviour.
+    // The containment window is measured from the enclosing `st.lock()` block
+    // rather than by bare index order, so a guard that opens elsewhere in the
+    // file cannot satisfy it.
+    const GUARD: &str = "if Config::current().agent.compaction_notice {";
+    const LOCK: &str = "if let Ok(mut s) = st.lock() {";
+    const SET: &str = "s.compacting = true;";
+    const LIFT: &str = "s.compacting = false;";
     const PROGRESS: &str = include_str!("../channels/telegram/progress.rs");
     const RESUME: &str = include_str!("../channels/telegram/resume.rs");
     for (name, src) in [("progress.rs", PROGRESS), ("resume.rs", RESUME)] {
-        assert_eq!(
-            src.matches("Config::current().agent.compaction_notice")
-                .count(),
-            2,
-            "{name} must gate both of its render sites"
-        );
         assert_eq!(
             src.matches("compacting_flow_line(").count()
                 + src.matches("compacted_flow_line(").count(),
@@ -423,9 +424,26 @@ fn every_pair_site_reads_the_flag() {
             "{name} renders exactly two numbered flow lines, both gated"
         );
         assert_eq!(
-            src.matches("s.compacting = ").count(),
+            src.matches(GUARD).count(),
             2,
-            "{name} keeps its header pin ungated"
+            "{name} has exactly two gated surfaces"
+        );
+        assert_eq!(src.matches(SET).count(), 1, "{name} sets the pin once");
+        assert_eq!(src.matches(LIFT).count(), 1, "{name} lifts the pin once");
+
+        let set = src.find(SET).expect("pin set");
+        let set_block = src[..set].rfind(LOCK).expect("enclosing lock");
+        assert!(
+            src[set_block..set].contains(GUARD),
+            "{name}: the pin set must sit inside the compaction_notice guard"
+        );
+
+        let lift = src.find(LIFT).expect("pin lift");
+        let lift_block = src[..lift].rfind(LOCK).expect("enclosing lock");
+        assert!(
+            !src[lift_block..lift].contains(GUARD),
+            "{name}: the pin lift must stay unconditional, or a flag flip \
+             mid-window strands the pin"
         );
     }
 }
