@@ -111,7 +111,7 @@ pub(crate) enum BudgetPhase {
 }
 
 /// What a visit found in the session's pending slot.
-enum PendingState {
+pub(crate) enum PendingState {
     /// Nothing in flight.
     Empty,
     /// Still thinking, and this visit is not obliged to wait for it.
@@ -122,6 +122,23 @@ enum PendingState {
     /// repeat the same failing call on every visit, so the caller falls back
     /// to the blocking path and its attempt budget.
     Failed,
+}
+
+/// What the 65% gate owes a session that has just crossed it (#1686).
+///
+/// True only when this visit starts or performs a summariser. The gate is
+/// re-entered on every tool iteration while a background summariser is in
+/// flight, and the announcement used to sit above that dispatch, so session
+/// `a58b8714` logged 128 gate WARNs. Across 2026-09-22 and 23 the ratio was
+/// 241 gate hits against 27 compactions that actually applied: roughly nine
+/// announcements, spawns and ledger rows per summariser.
+/// Each repeat paid three times: a WARN line, a `tokio::spawn`, and a
+/// feedback-ledger row asserting a compaction had started.
+///
+/// A `Failed` visit does announce. It falls back to the blocking path, which
+/// is a second summariser rather than a repeat of the first.
+pub(crate) fn gate_announces_compaction(state: &PendingState) -> bool {
+    matches!(state, PendingState::Empty | PendingState::Failed)
 }
 
 /// Fill level at which a turn stops running ahead of the summariser and waits
@@ -283,6 +300,17 @@ impl AgentService {
             return truncated.then_some(CompactionOutcome::Truncated);
         }
 
+        // Announce only on a visit that actually summarises. This used to sit
+        // above the dispatch, so every tool iteration that re-entered the gate
+        // while a background summariser was in flight re-announced the same
+        // compaction (#1686).
+        if !gate_announces_compaction(&pending_state) {
+            // Work is already under way against this exact conversation, or a
+            // summary already landed. A second summariser would burn a provider
+            // call describing a context the first one is about to replace.
+            return truncated.then_some(CompactionOutcome::Truncated);
+        }
+
         tracing::warn!(
             "Context at {:.0}% (>65%) — triggering LLM compaction",
             usage_pct
@@ -295,12 +323,6 @@ impl AgentService {
         );
 
         match pending_state {
-            // Work is already under way against this exact conversation. A
-            // second summariser would burn a provider call describing a
-            // context the first one is about to replace.
-            PendingState::StillRunning => {
-                return truncated.then_some(CompactionOutcome::Truncated);
-            }
             // Nothing in flight and backgrounding is on: start the summariser
             // and let the turn carry on. This is the whole point — the user
             // sees the receipt afterwards instead of a minute of nothing.
@@ -311,7 +333,9 @@ impl AgentService {
             // Backgrounding off, or the background attempt already failed:
             // block the turn, exactly as every compaction did before.
             PendingState::Empty | PendingState::Failed => {}
-            PendingState::Applied(_) => unreachable!("returned above"),
+            PendingState::StillRunning | PendingState::Applied(_) => {
+                unreachable!("gate_announces_compaction returns false for both")
+            }
         }
 
         // Signal channels that the next 10-60s will produce zero
@@ -452,6 +476,24 @@ impl AgentService {
         }
     }
 
+    /// The two fill levels the waiting path reports (#1686).
+    ///
+    /// A background summariser is announced while the live context is still
+    /// drifting down from Tier-2 trimming, so the live percentage and the
+    /// percentage the gate requested are two different measurements of one
+    /// event. Session `bee04b00` rendered a progress line reading 54% beside a
+    /// receipt reading 66% -> 17%, and `cb1c7a07` rendered 21% beside 66% ->
+    /// 16%: in both cases the progress figure sits under the 65% gate, so the
+    /// line announced a compaction at a level that cannot have requested one.
+    ///
+    /// The progress line therefore always carries the requested level, which is
+    /// the same `snapshot_usage_pct` the summary already reports as its
+    /// "before". The live level stays in the log, where showing how far the
+    /// context moved while the summariser ran is the whole point.
+    pub(crate) fn waiting_report_levels(requested: f64, live: f64) -> (f64, f64) {
+        (requested, live)
+    }
+
     /// Bookkeeping every successful compaction owes, whichever path produced
     /// it: clear the #909 pressure throttle so the ctx footer drops its
     /// marker, remember how long this took so the next compaction can quote a
@@ -472,11 +514,12 @@ impl AgentService {
             map.insert(session_id, elapsed);
         }
         if let Some(cb) = progress_callback {
-            let after_pct = if context.max_tokens > 0 {
-                (context.token_count as f64 / context.max_tokens as f64) * 100.0
-            } else {
-                100.0
-            };
+            // The same basis the gate measures on and the meter logs at
+            // service/context.rs:1011. Dividing the raw `token_count` by
+            // `max_tokens` here dropped the provider anchor, so a context the
+            // log recorded at 17% was receipted at 19% (session bee04b00,
+            // #1686): one compaction, two different after-numbers.
+            let after_pct = context.usage_percentage();
             cb(
                 session_id,
                 ProgressEvent::CompactionSummary {
@@ -549,9 +592,14 @@ impl AgentService {
         }
 
         if !pending.handle.is_finished() {
+            // One event, two levels (#1686): the notice carries the fill the
+            // compaction was requested at, the diagnostic keeps the live one
+            // so the drift stays visible in the log where it belongs.
+            let (notice_pct, log_pct) =
+                Self::waiting_report_levels(pending.snapshot_usage_pct, usage_pct);
             tracing::warn!(
                 "Waiting on background compaction at {:.0}% ({:?} elapsed) — {}",
-                usage_pct,
+                log_pct,
                 pending.started.elapsed(),
                 if phase == BudgetPhase::TurnStart {
                     "a reply must not be composed against a context queued for replacement"
@@ -565,7 +613,7 @@ impl AgentService {
                 cb(
                     session_id,
                     ProgressEvent::Compacting {
-                        usage_pct,
+                        usage_pct: notice_pct,
                         predicted: self.predicted_compaction_elapsed(session_id),
                     },
                 );

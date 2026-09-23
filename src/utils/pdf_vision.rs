@@ -111,6 +111,41 @@ fn pdf_page_count(pdf_path: &Path) -> Option<usize> {
 // pdfium-render implementation
 // ---------------------------------------------------------------------------
 
+/// Process-wide pdfium handle. `pdfium-render` 0.9.1 keeps its loaded
+/// library in a process-global `OnceCell` that is never reset: a second
+/// bind attempt in the same process returns
+/// `PdfiumLibraryBindingsAlreadyInitialized`, and two concurrent attempts
+/// race through the crate's guard-less `is_none()` check into
+/// `Pdfium::new`'s `assert!(BINDINGS.get().is_none())`, panicking the
+/// loser (#1715). Binding exactly once behind
+/// `once_cell::sync::OnceCell::get_or_try_init` serialises the bind and
+/// lets every later render reuse the handle; a *failed* bind is not
+/// cached, so hosts without libpdfium still fall through to the pdftoppm
+/// strategy on every call instead of latching the first failure. The `std`
+/// `OnceLock::get_or_try_init` is still unstable on this toolchain, hence
+/// the `once_cell` crate, matching the `memory/embedding.rs` precedent.
+///
+/// `Pdfium::default()` is not a substitute: it re-runs the same guard-less
+/// racy bind, and per its own docs it "will panic if no suitable Pdfium
+/// library can be loaded", which inside `spawn_blocking` surfaces as a
+/// `JoinError` with no fallback at all (#1716).
+#[cfg(feature = "pdfium")]
+static PDFIUM: once_cell::sync::OnceCell<pdfium_render::prelude::Pdfium> =
+    once_cell::sync::OnceCell::new();
+
+/// Bind pdfium once per process; see [`PDFIUM`] for why re-binding is a
+/// guaranteed failure and concurrent re-binding a panic landmine. The
+/// error is already the caller-facing string so no remapping is needed.
+#[cfg(feature = "pdfium")]
+pub(crate) fn shared_pdfium() -> Result<&'static pdfium_render::prelude::Pdfium, String> {
+    PDFIUM
+        .get_or_try_init(|| {
+            pdfium_render::prelude::Pdfium::bind_to_system_library()
+                .map(pdfium_render::prelude::Pdfium::new)
+        })
+        .map_err(|e| format!("Cannot bind pdfium library: {}", e))
+}
+
 #[cfg(feature = "pdfium")]
 fn render_with_pdfium(
     pdf_path: &Path,
@@ -119,10 +154,7 @@ fn render_with_pdfium(
 ) -> Result<Vec<PathBuf>, String> {
     use pdfium_render::prelude::*;
 
-    let pdfium = Pdfium::new(
-        Pdfium::bind_to_system_library()
-            .map_err(|e| format!("Cannot bind pdfium library: {}", e))?,
-    );
+    let pdfium = shared_pdfium()?;
 
     let document = pdfium
         .load_pdf_from_file(pdf_path, None)
@@ -261,24 +293,18 @@ fn render_with_pdftoppm(
             continue;
         }
 
-        // Collect the generated files for this batch. pdftoppm uses
-        // 2-digit zero-padding under 100 pages and widens automatically
-        // for larger docs, so try both widths.
+        // Collect the generated files for this batch. pdftoppm pads page
+        // numbers to the digit-width of the *last page number rendered*,
+        // not of the document: `-f 1 -l 3` writes `page-1.png`, while
+        // `-f 1 -l 99` writes `page-01.png`. Every batch ending at a
+        // single-digit page therefore produced files none of the old
+        // 2-to-4 widths could find, and the pages were silently dropped
+        // (#1715). Try every candidate width instead of guessing the one.
         for page_num in start..=batch_end {
-            let file_path = output_dir
-                .join(format!("{}-{:02}.png", prefix, page_num))
-                .canonicalize()
-                .or_else(|_| {
-                    output_dir
-                        .join(format!("{}-{:03}.png", prefix, page_num))
-                        .canonicalize()
-                })
-                .or_else(|_| {
-                    output_dir
-                        .join(format!("{}-{:04}.png", prefix, page_num))
-                        .canonicalize()
-                });
-            if let Ok(p) = file_path {
+            if let Some(p) = pdftoppm_output_names(prefix, page_num)
+                .into_iter()
+                .find_map(|name| output_dir.join(name).canonicalize().ok())
+            {
                 rendered.push(p);
             }
         }
@@ -301,6 +327,17 @@ fn render_with_pdftoppm(
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/// Filenames `pdftoppm` may have written for `page_num`: the digits
+/// left-padded to every width from 1 to 4. Width 1 is the unpadded form
+/// `pdftoppm` uses whenever the rendered range ends at page 9 or below
+/// (`-f 1 -l 3` writes `page-1.png`), which the previous fixed 2-to-4
+/// lookup never tried (#1715).
+pub(crate) fn pdftoppm_output_names(prefix: &str, page_num: usize) -> Vec<String> {
+    (1..=4)
+        .map(|w| format!("{}-{:0w$}.png", prefix, page_num, w = w))
+        .collect()
+}
 
 /// Remove all files inside `dir` (but not the directory itself).
 fn cleanup_dir(dir: &Path) {

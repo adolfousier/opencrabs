@@ -1455,6 +1455,27 @@ pub struct AgentConfig {
     #[serde(default)]
     pub silent_compaction: bool,
 
+    /// Render the `⏳ Compacting` / `✅ Compacted` progress pair in chat.
+    /// Default `false` (= the hint only, no pair).
+    ///
+    /// Distinct from `silent_compaction`, which governs the model's
+    /// post-compaction narration and deliberately stays `false` so the
+    /// personality survives. This flag governs channel chrome: the two flow
+    /// lines carrying percentages and elapsed time.
+    ///
+    /// Off does not mean blind. The anti-staleness header pin
+    /// (`StreamingState::compacting`) is NOT gated here. No streaming chunks
+    /// arrive for 10-60s while a background summariser runs, so without the pin
+    /// the flow header would hold a stale "Working on…" preview for the whole
+    /// silent window. The pin carries a bare "⏳ Compacting context…" with no
+    /// numbers, which is exactly the hint.
+    ///
+    /// Telegram is the only surface that renders the pair: Discord's
+    /// `Compacting` arm pings the native typing indicator with no text, and the
+    /// TUI drops both events.
+    #[serde(default)]
+    pub compaction_notice: bool,
+
     /// Run auto-compaction in the background. **On by default.** The
     /// summariser call is spawned on a snapshot of the conversation and the
     /// turn keeps going; the summary is swapped in on a later budget check.
@@ -1713,6 +1734,7 @@ impl Default for AgentConfig {
             default_provider: None,
             default_model: None,
             silent_compaction: false,
+            compaction_notice: false,
             background_compaction: default_background_compaction(),
             skill_glob_gate: default_skill_glob_gate(),
             lazy_tools: default_lazy_tools(),

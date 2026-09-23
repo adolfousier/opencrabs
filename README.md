@@ -2682,6 +2682,10 @@ context_limit = 200000           # usable context window in tokens. Enforced at 
 max_tokens = 65536               # cap on output tokens per API call
 silent_compaction = false        # false (default) keeps the agent's post-compaction narration; true switches
                                  # to a silent-continuation prompt so a compaction passes without comment
+compaction_notice = false        # false (default) renders only the bare "⏳ Compacting context…" header hint, with no
+                                 # percentages or durations; true restores the numbered ⏳/✅ pair in the flow body.
+                                 # Independent of silent_compaction: this one is channel chrome, that one is the
+                                 # model's voice. Telegram is the only surface that renders the pair.
 plan_isolated_execution = false  # default: plan tasks run inline; set true for per-task isolated worker sessions
                                  # with the task brief and the parent's plan file. false shares the parent session
 plan_auto_start = false          # default false: completing a plan task NEVER spawns the next one - complete is a pure

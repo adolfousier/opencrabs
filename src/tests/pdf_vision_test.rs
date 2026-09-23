@@ -53,3 +53,45 @@ fn unrenderable_pdf_returns_err_not_empty_ok() {
         );
     }
 }
+
+/// #1715 defect 1: pdfium used to bind on every render call, so the
+/// second and every later render in the same process failed with
+/// `PdfiumLibraryBindingsAlreadyInitialized` (quietly degrading to
+/// pdftoppm), and two concurrent renders could race the crate's
+/// guard-less rebind into a panic. `shared_pdfium` must hand out the
+/// same process-wide handle on every call. Gated on a successful first
+/// bind so hosts without libpdfium installed stay green.
+#[cfg(feature = "pdfium")]
+#[test]
+fn pdfium_bind_is_reused_across_calls() {
+    use crate::utils::pdf_vision::shared_pdfium;
+
+    let Ok(handle) = shared_pdfium() else {
+        return; // no libpdfium on this host - nothing bound yet to reuse
+    };
+    let again = shared_pdfium().expect("second access must reuse the first bind, not rebind");
+    assert!(
+        std::ptr::eq(handle, again),
+        "second access produced a different Pdfium - a rebind was attempted"
+    );
+}
+
+/// #1715 defect 2: the pdftoppm output lookup only tried 2-to-4-digit
+/// zero-padding, but pdftoppm pads to the digit-width of the last
+/// rendered page number, so ranges ending at page 9 or below write
+/// unpadded names like `page-1.png`. Those batches rendered fine and
+/// then collected zero pages. The candidate set must include the
+/// single-digit (unpadded) width.
+#[test]
+fn pdftoppm_candidates_include_unpadded_width() {
+    use crate::utils::pdf_vision::pdftoppm_output_names;
+
+    let names = pdftoppm_output_names("page", 1);
+    for expected in ["page-1.png", "page-01.png", "page-001.png", "page-0001.png"] {
+        assert!(
+            names.iter().any(|n| n == expected),
+            "missing candidate {expected}: {names:?}"
+        );
+    }
+    assert_eq!(names.len(), 4, "exactly one candidate per width");
+}
