@@ -295,6 +295,31 @@ pub struct TokenUsage {
     /// Billing: cumulative cache read across all CLI tool rounds.
     #[serde(default)]
     pub billing_cache_read: u32,
+    /// Provider-reported cost for this call, in USD — e.g. OpenRouter's
+    /// `usage.cost`, LiteLLM-style gateways. Where a provider tells us what
+    /// it charged, that is the invoice; the local pricing table is only a
+    /// guess about it, and a wrong guess is the drift reported in #1707.
+    /// Accounting prefers this over the table computation when present.
+    /// `None` = provider doesn't report dollars. `Some(0.0)` = the provider
+    /// genuinely charged nothing (free model) — not a missing field.
+    #[serde(default)]
+    pub cost_usd: Option<f64>,
+}
+
+/// Pick the cost a turn writes to the ledger. `reported_sum` is the total of
+/// provider-reported dollars across the counted iterations (None when no
+/// iteration reported); `missing_cost_iters` counts iterations that reported
+/// no cost — even one makes the partial sum untrustworthy and the table wins.
+/// `table_cost` is the local pricing-table computation (#1707).
+pub fn authoritative_cost(
+    reported_sum: Option<f64>,
+    missing_cost_iters: u32,
+    table_cost: f64,
+) -> f64 {
+    match (reported_sum, missing_cost_iters) {
+        (Some(reported), 0) => reported,
+        _ => table_cost,
+    }
 }
 
 impl TokenUsage {

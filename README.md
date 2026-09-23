@@ -3378,6 +3378,8 @@ All API keys and secrets are stored in `keys.toml` — **not** in environment va
 
 OpenCrabs tracks real token costs per model using a centralized pricing table at `~/.opencrabs/usage_pricing.toml`. It's written automatically on first run with sensible defaults.
 
+**Provider-reported cost wins:** gateways that bill in dollars and say so on the response — OpenRouter's `usage.cost`, LiteLLM and similar proxies — have their reported amount written straight to the ledger instead of the table computation; the provider's number is the invoice, the table is only a guess about it. The table still prices every call where the provider reports nothing, or where only some calls of a turn reported. Cached tokens are billed separately wherever they're tracked: `cache_write_per_m` (default 1.25× input) and `cache_read_per_m` (default 0.1× input) are per-entry keys in this same file.
+
 **Why it matters:**
 - `/usage` dashboard shows real costs broken down by day, project, provider, model, activity, and tool usage
 - Old sessions with stored tokens but zero cost get estimated costs (shown as `~$X.XX` in yellow)

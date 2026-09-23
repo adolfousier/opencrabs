@@ -376,6 +376,7 @@ pub mod project_remote_identity_test;
 pub mod project_runner_test;
 pub mod provider_matches_session_test;
 pub mod provider_models_isolation_test;
+pub mod provider_reported_cost_test;
 pub mod provider_spec_test;
 pub mod provider_streaming_perf_test;
 pub mod queued_message_join_test;
