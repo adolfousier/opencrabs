@@ -386,6 +386,11 @@ struct Peer {
     /// Flips true the first time ANY call for this chat is observed carrying
     /// a topic id. Until then the peer passes through ungoverned: forums-only
     /// rollout, DMs (positive ids) never governed at all.
+    ///
+    /// Contract (#1708): the topic id must be FORUM-CERTIFIED — resolved
+    /// through the session topic pipeline, never a raw incoming reply-chain
+    /// id (ordinary groups hand those out and they are not forum evidence).
+    /// Enforced by `telegram_thread_gate_scan_test`.
     forum_seen: bool,
     typing: Option<Bucket>,
     edits: Option<Bucket>,
@@ -1110,7 +1115,9 @@ pub(crate) async fn pace_rich(chat: ChatId, thread_id: Option<i32>) {
             let peer = map.entry(chat_id).or_default();
             // The rich path carries the topic itself, so it can establish
             // forums-only rollout on its own rather than waiting for a typing
-            // gate to have run first for this chat.
+            // gate to have run first for this chat. Contract (#1708): this id
+            // is session-certified upstream; a raw reply-chain id from an
+            // ordinary group must never reach here (scan-test enforced).
             if thread_id.is_some() {
                 peer.forum_seen = true;
             }
