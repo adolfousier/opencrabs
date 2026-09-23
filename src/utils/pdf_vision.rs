@@ -293,24 +293,18 @@ fn render_with_pdftoppm(
             continue;
         }
 
-        // Collect the generated files for this batch. pdftoppm uses
-        // 2-digit zero-padding under 100 pages and widens automatically
-        // for larger docs, so try both widths.
+        // Collect the generated files for this batch. pdftoppm pads page
+        // numbers to the digit-width of the *last page number rendered*,
+        // not of the document: `-f 1 -l 3` writes `page-1.png`, while
+        // `-f 1 -l 99` writes `page-01.png`. Every batch ending at a
+        // single-digit page therefore produced files none of the old
+        // 2-to-4 widths could find, and the pages were silently dropped
+        // (#1715). Try every candidate width instead of guessing the one.
         for page_num in start..=batch_end {
-            let file_path = output_dir
-                .join(format!("{}-{:02}.png", prefix, page_num))
-                .canonicalize()
-                .or_else(|_| {
-                    output_dir
-                        .join(format!("{}-{:03}.png", prefix, page_num))
-                        .canonicalize()
-                })
-                .or_else(|_| {
-                    output_dir
-                        .join(format!("{}-{:04}.png", prefix, page_num))
-                        .canonicalize()
-                });
-            if let Ok(p) = file_path {
+            if let Some(p) = pdftoppm_output_names(prefix, page_num)
+                .into_iter()
+                .find_map(|name| output_dir.join(name).canonicalize().ok())
+            {
                 rendered.push(p);
             }
         }
@@ -333,6 +327,17 @@ fn render_with_pdftoppm(
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/// Filenames `pdftoppm` may have written for `page_num`: the digits
+/// left-padded to every width from 1 to 4. Width 1 is the unpadded form
+/// `pdftoppm` uses whenever the rendered range ends at page 9 or below
+/// (`-f 1 -l 3` writes `page-1.png`), which the previous fixed 2-to-4
+/// lookup never tried (#1715).
+pub(crate) fn pdftoppm_output_names(prefix: &str, page_num: usize) -> Vec<String> {
+    (1..=4)
+        .map(|w| format!("{}-{:0w$}.png", prefix, page_num, w = w))
+        .collect()
+}
 
 /// Remove all files inside `dir` (but not the directory itself).
 fn cleanup_dir(dir: &Path) {

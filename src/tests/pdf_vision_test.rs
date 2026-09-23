@@ -75,3 +75,23 @@ fn pdfium_bind_is_reused_across_calls() {
         "second access produced a different Pdfium - a rebind was attempted"
     );
 }
+
+/// #1715 defect 2: the pdftoppm output lookup only tried 2-to-4-digit
+/// zero-padding, but pdftoppm pads to the digit-width of the last
+/// rendered page number, so ranges ending at page 9 or below write
+/// unpadded names like `page-1.png`. Those batches rendered fine and
+/// then collected zero pages. The candidate set must include the
+/// single-digit (unpadded) width.
+#[test]
+fn pdftoppm_candidates_include_unpadded_width() {
+    use crate::utils::pdf_vision::pdftoppm_output_names;
+
+    let names = pdftoppm_output_names("page", 1);
+    for expected in ["page-1.png", "page-01.png", "page-001.png", "page-0001.png"] {
+        assert!(
+            names.iter().any(|n| n == expected),
+            "missing candidate {expected}: {names:?}"
+        );
+    }
+    assert_eq!(names.len(), 4, "exactly one candidate per width");
+}
