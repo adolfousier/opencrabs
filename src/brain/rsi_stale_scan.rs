@@ -591,6 +591,7 @@ fn full_provider_sentinel() -> serde_json::Value {
         cache_ttl: Some(300),
         timeout_secs: Some(30),
         stream_idle_timeout_secs: Some(20),
+        thinking_loop_timeout_secs: Some(600),
     };
     serde_json::to_value(cfg).expect("ProviderConfig serializes")
 }

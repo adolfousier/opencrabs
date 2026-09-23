@@ -93,3 +93,26 @@ fn every_provider_family_is_documented_as_honouring_the_chain() {
         );
     }
 }
+
+/// #1690: the thinking-loop guard is the third clock, it is now scopable per
+/// provider, and its `0` means the opposite of what the transport pair's `0`
+/// means. A user who reads only the transport section would otherwise set `0`
+/// expecting "fall through to the default" and get "no guard at all".
+#[test]
+fn the_thinking_loop_guard_is_documented_with_its_own_zero_semantics() {
+    let readme = readme();
+    for token in [
+        "The Thinking-Loop Guard",
+        "`[providers.<name>] thinking_loop_timeout_secs`",
+        "`[agent] thinking_loop_timeout_secs`",
+        "stands the clock down",
+    ] {
+        assert!(
+            readme.contains(token),
+            "README no longer documents {token} for the thinking-loop guard \
+             (#1690). The per-provider tier and the disarm-on-delivery contract \
+             are the whole user-visible change; without them the key looks like \
+             a kill switch that misfires on long answers."
+        );
+    }
+}

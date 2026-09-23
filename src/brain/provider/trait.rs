@@ -115,6 +115,20 @@ pub trait Provider: Send + Sync {
         None
     }
 
+    /// Resolved thinking-loop guard ceiling in seconds: `[providers.<name>]`
+    /// then `[agent]` (#1690). Returns `None` when this provider was not built
+    /// from a config tier — test doubles, or a caller that has not wired the
+    /// chain — and the consumer falls back to reading `[agent]` directly.
+    ///
+    /// A `Some(0)` is a real value, not an absent one: it disables the guard for
+    /// this provider. That is why this returns seconds rather than a `Duration`
+    /// like the two transport clocks above, and why it is resolved by
+    /// [`crate::config::timeout::resolve_thinking_loop`] instead of
+    /// [`crate::config::timeout::resolve_timeout`], which skips zeroes.
+    fn thinking_loop_timeout(&self) -> Option<u64> {
+        None
+    }
+
     /// Force the fallback wrapper to advance to the next provider.
     /// Used by the tool loop when stream drops exhaust retries — the
     /// stream started OK so `FallbackProvider::stream()` never saw an error,

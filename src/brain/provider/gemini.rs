@@ -86,6 +86,10 @@ pub struct GeminiProvider {
     /// silence is enforced in `brain/agent/service/helpers.rs`, which asks the
     /// provider for this; `None` defers to that file's runtime table.
     stream_idle_timeout: Option<Duration>,
+    /// The resolved thinking-loop guard ceiling in seconds (#1690), from
+    /// `[providers.gemini]` then `[agent]`. `Some(0)` disables the guard for
+    /// this provider, which is why this is seconds rather than a `Duration`.
+    thinking_loop_timeout: Option<u64>,
     model: String,
     cached_content_name: Arc<std::sync::Mutex<Option<String>>>,
     /// User override from `providers.gemini.context_window` in config.toml.
@@ -141,6 +145,7 @@ impl GeminiProvider {
             stream_client,
             request_timeout: None,
             stream_idle_timeout: None,
+            thinking_loop_timeout: None,
             model: "gemini-2.0-flash".to_string(),
             cached_content_name: Arc::new(std::sync::Mutex::new(None)),
             configured_context_window: None,
@@ -165,6 +170,17 @@ impl GeminiProvider {
     /// falling back to its runtime table when it is `None`.
     pub fn with_stream_idle_timeout(mut self, timeout: Duration) -> Self {
         self.stream_idle_timeout = Some(timeout);
+        self
+    }
+
+    /// Set the resolved thinking-loop guard ceiling in seconds (#1690).
+    ///
+    /// `0` is a value here, not an absent one: it disables the guard for this
+    /// provider. The factory resolves `[providers.gemini]` → `[agent]` and
+    /// always calls this, so a provider built from config never falls back to
+    /// the `[agent]` read in `brain/agent/service/helpers.rs`.
+    pub fn with_thinking_loop_timeout(mut self, secs: u64) -> Self {
+        self.thinking_loop_timeout = Some(secs);
         self
     }
 
@@ -872,6 +888,10 @@ impl Provider for GeminiProvider {
 
     fn stream_idle_timeout(&self) -> Option<Duration> {
         self.stream_idle_timeout
+    }
+
+    fn thinking_loop_timeout(&self) -> Option<u64> {
+        self.thinking_loop_timeout
     }
 
     fn context_window(&self, model: &str) -> Option<u32> {

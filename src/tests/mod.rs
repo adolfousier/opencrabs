@@ -979,6 +979,7 @@ pub mod text_complete_test;
 pub mod theme_catalog_converter_test;
 pub mod theme_pack_test;
 pub mod thinking_loop_fallback_test;
+pub mod thinking_loop_nudge_test;
 pub mod timezone_test;
 pub mod tool_search_activation_test;
 pub mod tracing_session_id_test;
