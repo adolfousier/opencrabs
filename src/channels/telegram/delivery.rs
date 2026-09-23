@@ -12,7 +12,7 @@ use super::flow::{
 use super::handler::{fire_reaction, map_to_allowed_reaction};
 use super::intermediates::send_html_or_plain;
 use super::markdown::{markdown_to_telegram_html, split_message};
-use super::send::{best_effort_delete, message_in_thread, photo_in_thread};
+use super::send::{best_effort_delete, message_in_thread, photo_in_thread, voice_in_thread};
 use crate::brain::agent::AgentService;
 use crate::db::ChannelMessageRepository;
 use crate::db::models::ChannelMessage as DbChannelMessage;
@@ -1084,9 +1084,13 @@ pub(crate) async fn deliver_final_response(
                             audio_bytes.len(),
                             chat_id
                         );
-                        match bot
-                            .send_voice(chat_id, InputFile::memory(audio_bytes))
-                            .await
+                        match voice_in_thread(
+                            bot,
+                            chat_id,
+                            thread_id,
+                            InputFile::memory(audio_bytes),
+                        )
+                        .await
                         {
                             Ok(m) => {
                                 tracing::info!(
