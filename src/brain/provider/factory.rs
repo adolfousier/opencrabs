@@ -26,7 +26,7 @@ use super::{
     gemini::GeminiProvider,
     opencode_cli::OpenCodeCliProvider,
 };
-use crate::config::timeout::resolve_timeout;
+use crate::config::timeout::{resolve_thinking_loop, resolve_timeout};
 use crate::config::{AgentConfig, Config, ProviderConfig};
 use anyhow::Result;
 use std::future::Future;
@@ -1997,11 +1997,15 @@ fn resolve_and_report(
 /// new family cannot quietly implement one setter and forget the other: the
 /// per-provider tier, the global tier, and the family's compiled request
 /// ceiling are all named here, in one place.
+///
+/// The third value is the resolved thinking-loop guard in seconds (#1690). It
+/// is a plain `u64` and not an `Option<Duration>` because for this clock `0` is
+/// a value, not an absent one: it disables the guard.
 fn report_timeout_chain(
     config: &ProviderConfig,
     agent: &AgentConfig,
     compiled_request_secs: u64,
-) -> (Option<Duration>, Option<Duration>) {
+) -> (Option<Duration>, Option<Duration>, u64) {
     let request = resolve_and_report(
         config.timeout_secs,
         agent.timeout_secs,
@@ -2016,7 +2020,11 @@ fn report_timeout_chain(
         "stream_idle_timeout_secs",
         "Stream idle timeout",
     );
-    (request, idle)
+    let thinking_loop = resolve_thinking_loop(
+        config.thinking_loop_timeout_secs,
+        agent.thinking_loop_timeout_secs,
+    );
+    (request, idle, thinking_loop)
 }
 
 /// Configure OpenAI-compatible provider with custom model
@@ -2082,7 +2090,7 @@ fn configure_openai_compatible(
     // read anywhere in the tree, so `[agent] timeout_secs = 120` was parsed,
     // stored, and then quietly ignored. #1689 put the same chain behind
     // `report_timeout_chain` so anthropic and gemini read it too.
-    let (request, idle) = report_timeout_chain(
+    let (request, idle, thinking_loop) = report_timeout_chain(
         config,
         agent,
         super::custom_openai_compatible::DEFAULT_TIMEOUT.as_secs(),
@@ -2093,6 +2101,7 @@ fn configure_openai_compatible(
     if let Some(dur) = idle {
         provider = provider.with_stream_idle_timeout(dur);
     }
+    provider = provider.with_thinking_loop_timeout(thinking_loop);
     provider
 }
 
@@ -2160,7 +2169,7 @@ fn try_create_gemini(config: &Config) -> Result<Option<Arc<dyn Provider>>> {
     }
     // #1689: like anthropic, the gemini family read neither timeout key at any
     // tier until this chain was wired in (#1688 built it for the compat family).
-    let (request, idle) = report_timeout_chain(
+    let (request, idle, thinking_loop) = report_timeout_chain(
         gemini_config,
         &config.agent,
         super::gemini::DEFAULT_TIMEOUT.as_secs(),
@@ -2171,6 +2180,7 @@ fn try_create_gemini(config: &Config) -> Result<Option<Arc<dyn Provider>>> {
     if let Some(dur) = idle {
         provider = provider.with_stream_idle_timeout(dur);
     }
+    provider = provider.with_thinking_loop_timeout(thinking_loop);
     Ok(Some(Arc::new(provider)))
 }
 
@@ -2362,7 +2372,7 @@ fn try_create_anthropic(config: &Config) -> Result<Option<Arc<dyn Provider>>> {
     // #1689: the anthropic family used to read neither timeout key at any tier,
     // so the README's `[providers.anthropic] timeout_secs = 120` example was a
     // documented no-op. Same chain as the compat family (#1688).
-    let (request, idle) = report_timeout_chain(
+    let (request, idle, thinking_loop) = report_timeout_chain(
         anthropic_config,
         &config.agent,
         super::anthropic::DEFAULT_TIMEOUT.as_secs(),
@@ -2373,6 +2383,7 @@ fn try_create_anthropic(config: &Config) -> Result<Option<Arc<dyn Provider>>> {
     if let Some(dur) = idle {
         provider = provider.with_stream_idle_timeout(dur);
     }
+    provider = provider.with_thinking_loop_timeout(thinking_loop);
 
     tracing::info!("Using Anthropic provider");
 

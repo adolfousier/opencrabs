@@ -1519,12 +1519,24 @@ pub struct AgentConfig {
     #[serde(default = "default_debug_logs")]
     pub debug_logs: bool,
 
-    /// Thinking-loop timeout in seconds (#890). If the model streams for this
-    /// long without emitting a single tool call, the stream is killed and
-    /// retried with multi-language phantom enforcement injected into the
-    /// system prompt. Catches the failure mode where a reasoning model loops
-    /// internally (thinking tokens flowing) but never acts. Default: 600 (10 min).
-    /// Set to 0 to disable.
+    /// Thinking-loop guard ceiling in seconds (#890), the global tier. If the
+    /// model streams this long without emitting a single tool call, the guard
+    /// fires. Catches the failure mode where a reasoning model loops internally
+    /// (thinking tokens flowing) but never acts. Default: 600 (10 min). Set to
+    /// 0 to disable.
+    ///
+    /// Two qualifiers as of #1690:
+    ///
+    /// * A provider may name its own ceiling via
+    ///   `[providers.<name>] thinking_loop_timeout_secs`, which wins here. Long
+    ///   reasoning runs are a property of the model, not of the agent, so one
+    ///   slow provider must not inherit — or impose — this number globally.
+    /// * The guard no longer discards a delivering stream. It kills only a
+    ///   stream that has produced NO output at all; a stream that is writing
+    ///   text but not calling tools stands the clock down and finishes, because
+    ///   replaying a turn to lose a complete answer is the worse bug. The
+    ///   killed stream is what triggers multi-language phantom enforcement in
+    ///   the retry.
     #[serde(default = "default_thinking_loop_timeout_secs")]
     pub thinking_loop_timeout_secs: u64,
 
@@ -2887,6 +2899,18 @@ pub struct ProviderConfig {
     /// Overrides the default 20s idle timeout for remote streams (or 3600s for local/CLI).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stream_idle_timeout_secs: Option<u64>,
+
+    /// Thinking-loop guard ceiling in seconds, for this provider. Overrides
+    /// `[agent] thinking_loop_timeout_secs` (default 600).
+    ///
+    /// Unlike the two transport clocks above, `0` here is a VALUE, not a typo:
+    /// it disables the guard for this provider. The guard is a prompt to the
+    /// model ("you narrated work without calling a tool"), not a verdict on the
+    /// connection, and a provider that legitimately needs longer to reach its
+    /// first tool call is silenced by setting this to `0` rather than by
+    /// guessing a bigger number (#1690).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thinking_loop_timeout_secs: Option<u64>,
 }
 
 fn default_enabled() -> bool {

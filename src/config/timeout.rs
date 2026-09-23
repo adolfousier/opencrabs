@@ -166,3 +166,27 @@ pub fn resolve_timeout(
 fn usable(value: Option<u64>) -> Option<u64> {
     value.filter(|&s| s > 0)
 }
+
+/// Resolve the thinking-loop guard: `[providers.<name>]` then `[agent]`.
+///
+/// This clock is NOT resolved by [`resolve_timeout`], and the difference is the
+/// point. The transport ceilings treat `0` as an unusable value because a
+/// zero-second reqwest timeout is an instant deadline: reading `0` literally
+/// turns a typo into "every call fails". The thinking-loop guard is a prompt to
+/// the model, not a deadline on a connection, and `0` is its documented
+/// off-switch ("Set to 0 to disable", `config/types.rs`). Skipping a `0` here
+/// would take away the only way to silence the guard for one provider, so the
+/// configured value is honoured verbatim.
+///
+/// The `[agent]` tier is a plain `u64` with a serde default of 600, so it is
+/// never absent: the chain is two tiers, not three.
+///
+/// ```text
+/// resolve_thinking_loop(Some(900), 600) -> 900  (provider wins)
+/// resolve_thinking_loop(None,      600) -> 600  (agent applies)
+/// resolve_thinking_loop(Some(0),   600) -> 0    (disabled, on purpose)
+/// resolve_thinking_loop(None,        0) -> 0    (disabled globally)
+/// ```
+pub fn resolve_thinking_loop(provider_value: Option<u64>, agent_value: u64) -> u64 {
+    provider_value.unwrap_or(agent_value)
+}

@@ -1606,6 +1606,29 @@ Defaults when the key is absent:
 
 `0` means "use the default", not "no timer". Raise the value if you see `Stream ended without [DONE] ... connection likely dropped` on turns with a long prefill pause: that message means our own idle timer fired, not that the network died.
 
+### The Thinking-Loop Guard (`thinking_loop_timeout_secs`)
+
+A third clock, on a different axis again: not how long a request may take, but how long a model may stream **without asking for a tool**.
+
+```toml
+[providers.deepseek]
+thinking_loop_timeout_secs = 900   # this provider alone (#1690)
+
+[agent]
+thinking_loop_timeout_secs = 600   # global default
+```
+
+| Tier | Where | Scope |
+|---|---|---|
+| 1 | `[providers.<name>] thinking_loop_timeout_secs` | that provider alone |
+| 2 | `[agent] thinking_loop_timeout_secs` | every other provider; default 600s |
+
+Two things make this clock different from the transport pair above. `0` here is a **value**, not a typo: it switches the guard off for that provider, where `0` on `timeout_secs` would fire instantly and get skipped. And CLI providers are always exempt, because they run tools inside their own subprocess, so a stream with no tool calls is normal for them.
+
+What firing means changed in #1690. The guard used to tear the stream down and hand the tool loop a `ThinkingLoopTimeout` error, which retried the identical request with phantom enforcement injected, re-sending the whole conversation. A healthy ten-paragraph answer that simply needed no tools was therefore discarded at 600s and replayed from scratch. Now the guard kills only a stream that has delivered **nothing** at all, which is the signature it was written for: thinking tokens flowing, no output, no action. A stream that is still delivering chunks stands the clock down and finishes its answer.
+
+Nothing runs unbounded as a result: inter-chunk silence is still bounded by `stream_idle_timeout_secs`, and a model that narrates "let me run that" without ever calling the tool is still caught by the post-success phantom detector.
+
 ### Fallback Providers
 
 If your primary provider goes down, fallback providers are tried automatically in sequence. Any provider with API keys already configured can be a fallback:
@@ -2646,11 +2669,12 @@ subagent_session_ttl_days = 7    # days a spawned sub-agent's session is kept be
                                  # them, so they accumulate with their messages, tool rows and plan files. 0 keeps forever
 
 # ── Runaway-reasoning guard ───────────────────────────────────────────────────
-thinking_loop_timeout_secs = 600 # kill a stream that runs this long with zero tool calls, then retry
-                                 # with phantom enforcement. Enforced at this default even when absent
-                                 # from this file. Armed per REQUEST, and disabled for the rest of a
-                                 # stream once any tool call lands, so a turn can exceed it in total
-                                 # while no single iteration reaches it. 0 disables.
+thinking_loop_timeout_secs = 600 # how long a model may stream with zero tool calls. Enforced at this
+                                 # default even when absent from this file. A stream still delivering
+                                 # chunks is NOT cut — it stands the guard down and finishes (#1690);
+                                 # only a stream that delivered nothing is killed and retried with
+                                 # phantom enforcement. Overridable per provider via
+                                 # `[providers.<name>] thinking_loop_timeout_secs` (#1690). 0 disables.
 
 # ── Provider registry ─────────────────────────────────────────────────────────
 # Optional discovery service that can add providers automatically. Opt-in: the

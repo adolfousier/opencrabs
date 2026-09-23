@@ -482,18 +482,35 @@ impl AgentService {
             std::time::Duration::from_secs(20)
         };
 
-        // --- Thinking-loop timeout (#890) ---
+        // --- Thinking-loop guard (#890, scoped and disarming per #1690) ---
         // If the model streams for `thinking_loop_timeout_secs` without
-        // emitting a single tool call, kill the stream and signal the
-        // tool loop to retry with phantom enforcement. Disabled (0) for
-        // CLI providers (they run tools internally) and when the config
-        // sets it to 0.
+        // emitting a single tool call, the guard fires. Two things changed
+        // here:
+        //
+        // 1. SCOPE. The ceiling resolves [providers.<name>] → [agent], asked
+        //    of the provider that is actually streaming, so a long-reasoning
+        //    model no longer inherits the global number and a phantom-prone
+        //    one can be tightened without touching every other provider.
+        //    `0` disables the guard for that provider (CLI providers force 0:
+        //    they run tools internally, so a tool-less stream is normal).
+        //
+        // 2. DISARM ON DELIVERY. The guard used to `return Err` unconditionally,
+        //    which threw away whatever the model had already written and made
+        //    the tool loop replay the whole turn. Now it only kills a stream
+        //    that delivered NOTHING — the genuine "thinking forever, saying
+        //    nothing" signature. A stream that is delivering tokens but emitting
+        //    no tool calls stands the clock down and finishes its answer:
+        //    silence is `stream_idle_timeout`'s job, narrated tool intent is the
+        //    post-success phantom detector's job (#1672), and a runaway
+        //    repetition is caught by the windows below.
         let thinking_loop_timeout_secs = if is_cli {
             0
         } else {
-            crate::config::Config::current()
-                .agent
-                .thinking_loop_timeout_secs
+            provider.thinking_loop_timeout().unwrap_or_else(|| {
+                crate::config::Config::current()
+                    .agent
+                    .thinking_loop_timeout_secs
+            })
         };
         let thinking_loop_deadline = if thinking_loop_timeout_secs > 0 {
             Some(
@@ -503,6 +520,9 @@ impl AgentService {
         } else {
             None
         };
+        // Separate from `thinking_loop_deadline` because the select future above
+        // borrows the deadline; this flag is what the arm is allowed to clear.
+        let mut thinking_loop_armed = thinking_loop_deadline.is_some();
         let mut has_tool_call = false;
 
         loop {
@@ -526,15 +546,34 @@ impl AgentService {
                         Some(deadline) => tokio::time::sleep_until(deadline).await,
                         None => std::future::pending::<()>().await,
                     }
-                }, if !has_tool_call => {
-                    tracing::warn!(
-                        "🧠 Thinking-loop timeout (#890): {}s elapsed with zero tool calls. \
-                         Killing stream for phantom enforcement retry.",
-                        thinking_loop_timeout_secs
-                    );
-                    return Err(crate::brain::provider::ProviderError::ThinkingLoopTimeout(
-                        thinking_loop_timeout_secs,
-                    ));
+                }, if !has_tool_call && thinking_loop_armed => {
+                    if last_delta_at.is_some() {
+                        // #1690: the clock expired on a stream that IS delivering.
+                        // Discarding it would throw away the answer the user waited
+                        // for and make the tool loop replay the whole turn, so stand
+                        // the guard down and keep consuming. Silence is still
+                        // bounded by `stream_idle_timeout` below.
+                        tracing::warn!(
+                            "🧠 Thinking-loop guard (#890/#1690): {}s elapsed with zero tool calls, \
+                             but the stream has delivered content — standing the clock down \
+                             instead of discarding the answer.",
+                            thinking_loop_timeout_secs
+                        );
+                        thinking_loop_armed = false;
+                    } else {
+                        tracing::warn!(
+                            "🧠 Thinking-loop timeout (#890): {}s elapsed with zero tool calls and \
+                             nothing delivered. Killing stream for phantom enforcement retry.",
+                            thinking_loop_timeout_secs
+                        );
+                        return Err(crate::brain::provider::ProviderError::ThinkingLoopTimeout(
+                            thinking_loop_timeout_secs,
+                        ));
+                    }
+                    // Disarmed on a delivering stream. `biased` above means the
+                    // stream branch was never polled for this iteration, so
+                    // re-polling without a value loses no chunk.
+                    continue;
                 }
                 result = tokio::time::timeout(stream_idle_timeout, stream.next()) => {
                     match result {

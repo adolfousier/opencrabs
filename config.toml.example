@@ -474,11 +474,21 @@ profile_id = ""
 # restart. Effective state is `--debug OR debug_logs`, so the flag always wins.
 debug_logs = false
 
-# Thinking-loop timeout in seconds (#890). If the model streams for this long
-# without emitting a single tool call, the stream is killed and retried with
-# multi-language phantom enforcement injected into the prompt. Catches the
+# Thinking-loop guard in seconds (#890, scoped and disarming per #1690). How
+# long a model may stream without emitting a single tool call. Catches the
 # failure mode where a reasoning model loops internally (thinking tokens
 # flowing, 0 tool calls) for an hour or more. Default 600 = 10 min.
+#
+# A stream that is still DELIVERING chunks is not cut: the guard stands itself
+# down and lets the answer finish, because discarding in-flight content and
+# replaying the whole conversation was the worse bug. Only a stream that has
+# delivered nothing is killed and retried with multi-language phantom
+# enforcement. Inter-chunk silence stays governed by stream_idle_timeout_secs.
+#
+# `[agent]` is the global tier; any provider may override it with
+# `thinking_loop_timeout_secs` in its own `[providers.<name>]` section (#1690),
+# which is the knob to reach for when one long-reasoning model needs 900s and
+# the rest of the fleet should keep the default.
 # Set to 0 to disable. Hot-reloads with no restart.
 thinking_loop_timeout_secs = 600
 

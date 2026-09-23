@@ -65,7 +65,13 @@ pub enum ProviderError {
     Timeout(u64),
 
     /// Thinking-loop timeout (#890): model streamed for N seconds without
-    /// emitting a tool call. Retryable with phantom enforcement.
+    /// emitting a tool call AND without delivering any content. Retryable with
+    /// phantom enforcement.
+    ///
+    /// The second half is #1690: this used to fire on a stream that was happily
+    /// mid-answer, which threw the delivered text away and replayed the whole
+    /// conversation. A stream that is delivering now stands the guard down and
+    /// finishes, so reaching this error means there was nothing to lose.
     #[error("Thinking loop timeout: {0}s with no tool call emitted")]
     ThinkingLoopTimeout(u64),
 

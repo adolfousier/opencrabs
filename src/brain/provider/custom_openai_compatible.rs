@@ -2260,6 +2260,10 @@ pub struct OpenAIProvider {
     request_timeout: Option<Duration>,
     /// Configured inter-chunk streaming inactivity timeout.
     stream_idle_timeout: Option<Duration>,
+    /// Resolved thinking-loop guard ceiling in seconds (#1690). `Some(0)`
+    /// disables the guard for this provider, so this is a plain `u64` in
+    /// seconds rather than a `Duration`.
+    thinking_loop_timeout: Option<u64>,
 }
 
 impl OpenAIProvider {
@@ -2328,6 +2332,7 @@ impl OpenAIProvider {
             retry_notices: Arc::new(std::sync::Mutex::new(Vec::new())),
             request_timeout: None,
             stream_idle_timeout: None,
+            thinking_loop_timeout: None,
         }
     }
 
@@ -2361,6 +2366,7 @@ impl OpenAIProvider {
             retry_notices: Arc::new(std::sync::Mutex::new(Vec::new())),
             request_timeout: None,
             stream_idle_timeout: None,
+            thinking_loop_timeout: None,
         }
     }
 
@@ -2394,6 +2400,7 @@ impl OpenAIProvider {
             retry_notices: Arc::new(std::sync::Mutex::new(Vec::new())),
             request_timeout: None,
             stream_idle_timeout: None,
+            thinking_loop_timeout: None,
         }
     }
 
@@ -2531,6 +2538,18 @@ impl OpenAIProvider {
     /// Set inter-chunk streaming inactivity timeout.
     pub fn with_stream_idle_timeout(mut self, timeout: Duration) -> Self {
         self.stream_idle_timeout = Some(timeout);
+        self
+    }
+
+    /// Set the resolved thinking-loop guard ceiling in seconds (#1690).
+    ///
+    /// Unlike the transport setters above, `0` is a value: it disables the
+    /// guard for this provider. The factory resolves
+    /// `[providers.<name>]` → `[agent]` and always calls this, so a provider
+    /// built from config never falls back to the `[agent]` read in
+    /// `brain/agent/service/helpers.rs`.
+    pub fn with_thinking_loop_timeout(mut self, secs: u64) -> Self {
+        self.thinking_loop_timeout = Some(secs);
         self
     }
 
@@ -5071,6 +5090,10 @@ impl Provider for OpenAIProvider {
 
     fn stream_idle_timeout(&self) -> Option<Duration> {
         self.stream_idle_timeout
+    }
+
+    fn thinking_loop_timeout(&self) -> Option<u64> {
+        self.thinking_loop_timeout
     }
 
     fn context_window(&self, model: &str) -> Option<u32> {

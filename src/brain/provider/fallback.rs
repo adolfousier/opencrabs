@@ -380,6 +380,13 @@ impl Provider for FallbackProvider {
         self.active_provider().stream_idle_timeout()
     }
 
+    fn thinking_loop_timeout(&self) -> Option<u64> {
+        // Follows the ACTIVE provider, not the primary: the guard clocks the
+        // stream that is actually running, and a fallback that is phantom-prone
+        // needs its own ceiling (#1690).
+        self.active_provider().thinking_loop_timeout()
+    }
+
     fn calculate_cost(&self, model: &str, input_tokens: u32, output_tokens: u32) -> f64 {
         self.primary
             .calculate_cost(model, input_tokens, output_tokens)
