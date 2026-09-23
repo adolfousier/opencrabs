@@ -6162,6 +6162,43 @@ impl AgentService {
                 break;
             }
 
+            // ── Mixed-iteration fact check (#1693) ──────────────────────────
+            // The 1,341-line block above runs only when `tool_uses` is empty, so
+            // one real call bought immunity for whatever sentence rode in with
+            // it: at 19:14:10 on 2026-09-22 a response asserted `Gate died on
+            // 2× E0603 "this item is private"` while the same response's tool
+            // call was LAUNCHING that gate. Nothing checked the claim, and the
+            // clippy log it refers to had exited 0.
+            //
+            // These three checks are content-vs-evidence, so they do not need
+            // the zero-tool precondition. The shape-based tells stay inside the
+            // block above on purpose — after a call, "Running fmt, then clippy"
+            // is a legitimate recap (#1506, #1172).
+            //
+            // Carried, not acted on: the calls are real work and still run, so
+            // this cannot discard the iteration the way the phantom path above
+            // does. It lands as a correction after the results, the same shape
+            // as the repeat verdict (#1030).
+            let mixed_fact_verdict =
+                if is_cli_provider || tool_uses.is_empty() || iteration_text.trim().is_empty() {
+                    None
+                } else {
+                    // This iteration's own calls count as executed for the command
+                    // check, or "Running `gh pr list`" plus a `gh pr list` call
+                    // would flag the work it is about to do. The OUTPUTS stay
+                    // prior-only: an in-flight call has produced nothing and so
+                    // cannot vouch for a past-tense claim.
+                    let mut executed = turn_tool_input.clone();
+                    executed.extend(tool_uses.iter().map(|(_, _, input)| input.to_string()));
+                    let evidence = Self::conversation_evidence(&context, &turn_tool_output);
+                    super::phantom::mixed_iteration_facts(
+                        &iteration_text,
+                        &executed,
+                        &turn_tool_output,
+                        &evidence,
+                    )
+                };
+
             // Emit intermediate text to TUI so it appears before the tool calls.
             //
             // Also emit when the iteration produced ONLY reasoning (no visible
@@ -7451,6 +7488,50 @@ impl AgentService {
                 content: tool_results,
             };
             context.add_message(tool_result_msg);
+
+            // A fabrication that rode in the same response as a real tool call
+            // (#1693). The calls above were real work and ran; only the claim
+            // attached to them was unsupported, so this suppresses nothing and
+            // ends nothing — it cites the unsupported assertion back and the
+            // loop continues, exactly like the repeat correction beside it.
+            //
+            // #1506 still governs: a structured completion report is never
+            // nagged into a retry, so its branches go to the WARN and stop.
+            if let Some(violation) = mixed_fact_verdict {
+                if violation.structured_report {
+                    tracing::warn!(
+                        target: "phantom",
+                        branches = ?violation.branches,
+                        "mixed-iteration fabrication inside a structured report — delivered, not nagged (#1506)",
+                    );
+                } else {
+                    tracing::warn!(
+                        target: "phantom",
+                        branches = ?violation.branches,
+                        commands = ?violation.uncalled_commands,
+                        facts = ?violation.unbacked_facts,
+                        "Fabricated claim rode a real tool call — correcting in-turn (#1693)",
+                    );
+                    let prov = self.provider_name_for_session(session_id);
+                    let mdl = Some(self.provider_model_for_session(session_id));
+                    crate::db::repository::AnalyticsEventRepository::emit_phantom(
+                        &session_id.to_string(),
+                        Some(&prov),
+                        mdl.as_deref(),
+                    );
+                    // Naming the fabricated command or invented fact outranks
+                    // the generic wording: it cites a fact instead of a
+                    // category, so the model cannot rationalise it (#797, #1423).
+                    let nudge = if !violation.uncalled_commands.is_empty() {
+                        super::nudge::uncalled_commands_nudge(&violation.uncalled_commands)
+                    } else if !violation.unbacked_facts.is_empty() {
+                        super::nudge::unbacked_facts_nudge(&violation.unbacked_facts)
+                    } else {
+                        super::nudge::no_tool_calls_nudge(is_local_provider)
+                    };
+                    context.add_message(Message::user(nudge));
+                }
+            }
 
             // The repeat correction goes AFTER the results, so the model sees
             // the identical output it just got and then why repeating it

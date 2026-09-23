@@ -1198,6 +1198,7 @@ pub fn asserted_facts(text: &str) -> Vec<String> {
     const MAX_FACTS: usize = 20;
     let mut out = asserted_shas(text);
     out.extend(asserted_tallies(text));
+    out.extend(asserted_diagnostics(text));
     out.sort();
     out.dedup();
     out.truncate(MAX_FACTS);
@@ -1211,6 +1212,78 @@ pub fn unbacked_facts(facts: &[String], known: &str) -> Vec<String> {
         .filter(|fact| !fact_is_backed(fact, known))
         .cloned()
         .collect()
+}
+
+/// Which fact checks an iteration that ALSO carried tool calls failed (#1693).
+///
+/// Every detector in the phantom block sits behind `if tool_uses.is_empty()`, so
+/// a fabrication glued to a legitimate tool call was never evaluated by any of
+/// them — the gate at `tool_loop.rs:4823` skipped the whole 1341-line block on
+/// the strength of one real call. The checks here are content-vs-evidence: they
+/// compare what the text asserts against what the turn actually produced, and
+/// that comparison does not depend on the iteration having zero tool calls.
+///
+/// The shape-based tells (`work_announcement_re`, `gerund_re`,
+/// `plan_announcement_re`) deliberately stay zero-tool-only. After a real call
+/// "Running fmt, then clippy" is a legitimate recap of work in progress, which
+/// is exactly what the post-success exemption exists to protect (#1506, #1172).
+pub(crate) struct MixedFactViolation {
+    /// Branch names for the WARN and telemetry, in detection order.
+    pub(crate) branches: Vec<&'static str>,
+    /// Commands named as already run that no call contained (#789).
+    pub(crate) uncalled_commands: Vec<String>,
+    /// Shas, tallies and diagnostic codes absent from the evidence (#1423, #1693).
+    pub(crate) unbacked_facts: Vec<String>,
+    /// Whether the text is a #1506 structured completion report. Carried on the
+    /// verdict so the call site can honour the directive without holding the
+    /// iteration text alive until the tool results land.
+    pub(crate) structured_report: bool,
+}
+
+/// Run the fact-based checks over an iteration that carried tool calls.
+///
+/// `executed_inputs` must include this iteration's OWN calls: the text "Running
+/// `gh pr list` now" accompanied by a `gh pr list` call is the call doing the
+/// thing, and scoring it against prior inputs alone would flag the work it is
+/// about to do. `tool_outputs` and `evidence` are deliberately the PRIOR
+/// iterations only — the in-flight calls have produced nothing yet, so they
+/// cannot vouch for a claim stated in the past tense. That asymmetry is the
+/// whole point: a gate claimed to have already died is checkable against what
+/// ran before, not against what is about to run.
+///
+/// Returns `None` when nothing is asserted that the evidence cannot support.
+pub(crate) fn mixed_iteration_facts(
+    text: &str,
+    executed_inputs: &[String],
+    tool_outputs: &[String],
+    evidence: &str,
+) -> Option<MixedFactViolation> {
+    if text.trim().is_empty() {
+        return None;
+    }
+    let uncalled_commands = claims_uncalled_commands(text, executed_inputs);
+    let facts = unbacked_facts(&asserted_facts(text), evidence);
+    let unbacked_evidence = claims_unbacked_evidence(text, tool_outputs);
+
+    let mut branches = Vec::new();
+    if !uncalled_commands.is_empty() {
+        branches.push("mixed_uncalled_commands");
+    }
+    if !facts.is_empty() {
+        branches.push("mixed_unbacked_facts");
+    }
+    if unbacked_evidence {
+        branches.push("mixed_unbacked_evidence");
+    }
+    if branches.is_empty() {
+        return None;
+    }
+    Some(MixedFactViolation {
+        branches,
+        uncalled_commands,
+        unbacked_facts: facts,
+        structured_report: is_structured_report(text),
+    })
 }
 
 /// Git object ids the text states.
@@ -1298,6 +1371,53 @@ fn asserted_tallies(text: &str) -> Vec<String> {
             out.push(format!("{digits} {kw}"));
         }
     }
+    out
+}
+
+/// Compiler and linter diagnostic codes the text states as already obtained.
+///
+/// Neither existing extractor reaches a rustc code. `asserted_shas` needs a run
+/// of at least seven hex characters and `E0603` is five; `asserted_tallies`
+/// recognises only `passed` / `failed` / `ignored`, so `2× E0603` is not a tally
+/// either. A turn can therefore assert a specific compiler error and quote its
+/// message, and no fact check in this module has anything to compare against —
+/// which is how "Gate died on 2× E0603 \"this item is private\"" reached the user
+/// in a response whose own tool call was launching that gate (#1693).
+///
+/// The token is the check, not the wording around it. `E0603` is not English
+/// prose, so unlike the shape-based tells it cannot be evaded by rephrasing,
+/// and unlike a sha it is never an incidental substring of ordinary text. The
+/// boundary rules mirror `asserted_shas`: a run that touches a word character,
+/// `_`, `-` or `.` is part of something else (a path, a longer hash) and is not
+/// a diagnostic.
+fn asserted_diagnostics(text: &str) -> Vec<String> {
+    /// A pathological iteration names a handful of diagnostics.
+    const MAX_DIAGNOSTICS: usize = 8;
+    /// rustc codes are `E` followed by exactly four digits.
+    const CODE_LEN: usize = 5;
+    let chars: Vec<char> = text.chars().collect();
+    let touches_word = |c: Option<&char>| {
+        c.is_some_and(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '-' || *c == '.')
+    };
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i + CODE_LEN <= chars.len() {
+        if chars[i] != 'E'
+            || !chars[i + 1..i + CODE_LEN]
+                .iter()
+                .all(|c| c.is_ascii_digit())
+        {
+            i += 1;
+            continue;
+        }
+        if !touches_word(i.checked_sub(1).map(|p| &chars[p]))
+            && !touches_word(chars.get(i + CODE_LEN))
+        {
+            out.push(chars[i..i + CODE_LEN].iter().collect());
+        }
+        i += CODE_LEN;
+    }
+    out.truncate(MAX_DIAGNOSTICS);
     out
 }
 
