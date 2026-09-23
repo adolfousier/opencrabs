@@ -53,3 +53,25 @@ fn unrenderable_pdf_returns_err_not_empty_ok() {
         );
     }
 }
+
+/// #1715 defect 1: pdfium used to bind on every render call, so the
+/// second and every later render in the same process failed with
+/// `PdfiumLibraryBindingsAlreadyInitialized` (quietly degrading to
+/// pdftoppm), and two concurrent renders could race the crate's
+/// guard-less rebind into a panic. `shared_pdfium` must hand out the
+/// same process-wide handle on every call. Gated on a successful first
+/// bind so hosts without libpdfium installed stay green.
+#[cfg(feature = "pdfium")]
+#[test]
+fn pdfium_bind_is_reused_across_calls() {
+    use crate::utils::pdf_vision::shared_pdfium;
+
+    let Ok(handle) = shared_pdfium() else {
+        return; // no libpdfium on this host - nothing bound yet to reuse
+    };
+    let again = shared_pdfium().expect("second access must reuse the first bind, not rebind");
+    assert!(
+        std::ptr::eq(handle, again),
+        "second access produced a different Pdfium - a rebind was attempted"
+    );
+}

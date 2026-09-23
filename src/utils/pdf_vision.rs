@@ -111,6 +111,41 @@ fn pdf_page_count(pdf_path: &Path) -> Option<usize> {
 // pdfium-render implementation
 // ---------------------------------------------------------------------------
 
+/// Process-wide pdfium handle. `pdfium-render` 0.9.1 keeps its loaded
+/// library in a process-global `OnceCell` that is never reset: a second
+/// bind attempt in the same process returns
+/// `PdfiumLibraryBindingsAlreadyInitialized`, and two concurrent attempts
+/// race through the crate's guard-less `is_none()` check into
+/// `Pdfium::new`'s `assert!(BINDINGS.get().is_none())`, panicking the
+/// loser (#1715). Binding exactly once behind
+/// `once_cell::sync::OnceCell::get_or_try_init` serialises the bind and
+/// lets every later render reuse the handle; a *failed* bind is not
+/// cached, so hosts without libpdfium still fall through to the pdftoppm
+/// strategy on every call instead of latching the first failure. The `std`
+/// `OnceLock::get_or_try_init` is still unstable on this toolchain, hence
+/// the `once_cell` crate, matching the `memory/embedding.rs` precedent.
+///
+/// `Pdfium::default()` is not a substitute: it re-runs the same guard-less
+/// racy bind, and per its own docs it "will panic if no suitable Pdfium
+/// library can be loaded", which inside `spawn_blocking` surfaces as a
+/// `JoinError` with no fallback at all (#1716).
+#[cfg(feature = "pdfium")]
+static PDFIUM: once_cell::sync::OnceCell<pdfium_render::prelude::Pdfium> =
+    once_cell::sync::OnceCell::new();
+
+/// Bind pdfium once per process; see [`PDFIUM`] for why re-binding is a
+/// guaranteed failure and concurrent re-binding a panic landmine. The
+/// error is already the caller-facing string so no remapping is needed.
+#[cfg(feature = "pdfium")]
+pub(crate) fn shared_pdfium() -> Result<&'static pdfium_render::prelude::Pdfium, String> {
+    PDFIUM
+        .get_or_try_init(|| {
+            pdfium_render::prelude::Pdfium::bind_to_system_library()
+                .map(pdfium_render::prelude::Pdfium::new)
+        })
+        .map_err(|e| format!("Cannot bind pdfium library: {}", e))
+}
+
 #[cfg(feature = "pdfium")]
 fn render_with_pdfium(
     pdf_path: &Path,
@@ -119,10 +154,7 @@ fn render_with_pdfium(
 ) -> Result<Vec<PathBuf>, String> {
     use pdfium_render::prelude::*;
 
-    let pdfium = Pdfium::new(
-        Pdfium::bind_to_system_library()
-            .map_err(|e| format!("Cannot bind pdfium library: {}", e))?,
-    );
+    let pdfium = shared_pdfium()?;
 
     let document = pdfium
         .load_pdf_from_file(pdf_path, None)
