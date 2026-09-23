@@ -555,8 +555,15 @@ impl AgentService {
     /// `swap_provider_for_session` wraps in a `FallbackProvider`.
     /// Marked `#[doc(hidden)]` because no production caller should
     /// mutate this field after construction.
+    ///
+    /// Takes `&self`, not `&mut self`: the chain lives behind a `RwLock`, so
+    /// the write never needed exclusive access, and `&mut self` made this seam
+    /// unusable on an `Arc<AgentService>`. `Arc` is the only shape production
+    /// holds these in (every `ChannelFactory` build, every channel session, the
+    /// A2A gateway, cron), so a `&mut self` seam could not reach the instances
+    /// the #1700 regression test has to drive.
     #[doc(hidden)]
-    pub fn set_fallback_providers_for_test(&mut self, providers: Vec<Arc<dyn Provider>>) {
+    pub fn set_fallback_providers_for_test(&self, providers: Vec<Arc<dyn Provider>>) {
         *self
             .fallback_providers
             .write()

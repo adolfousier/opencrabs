@@ -37,7 +37,7 @@ use std::sync::Arc;
 
 #[tokio::test]
 async fn swap_wraps_raw_provider_in_fallback_chain_when_fallbacks_configured() {
-    let (mut svc, sid) = create_test_service_with_provider(Arc::new(MockProvider)).await;
+    let (svc, sid) = create_test_service_with_provider(Arc::new(MockProvider)).await;
     svc.set_fallback_providers_for_test(vec![Arc::new(MockProviderWithTools::new())]);
 
     // Swap to a raw provider — no FallbackProvider wrapper around it.
@@ -57,7 +57,7 @@ async fn swap_wraps_raw_provider_in_fallback_chain_when_fallbacks_configured() {
 
 #[tokio::test]
 async fn swap_preserves_user_facing_name_after_wrap() {
-    let (mut svc, sid) = create_test_service_with_provider(Arc::new(MockProvider)).await;
+    let (svc, sid) = create_test_service_with_provider(Arc::new(MockProvider)).await;
     svc.set_fallback_providers_for_test(vec![Arc::new(MockProviderWithTools::new())]);
     svc.swap_provider_for_session(sid, Arc::new(MockProvider), "mock-model");
 
@@ -79,7 +79,7 @@ async fn swap_skips_wrap_when_no_fallbacks_configured() {
     // FallbackProvider(primary, vec![]) would behaviourally be
     // identical to the raw primary, but the extra pointer hop and
     // Drop overhead are pure waste. Skip the wrap in this case.
-    let (mut svc, sid) = create_test_service_with_provider(Arc::new(MockProvider)).await;
+    let (svc, sid) = create_test_service_with_provider(Arc::new(MockProvider)).await;
     svc.set_fallback_providers_for_test(vec![]); // no fallbacks
     svc.swap_provider_for_session(sid, Arc::new(MockProvider), "mock-model");
 
@@ -96,7 +96,7 @@ async fn swap_skips_wrap_when_no_fallbacks_configured() {
 async fn swap_does_not_double_wrap_existing_fallback_chain() {
     use crate::brain::provider::FallbackProvider;
 
-    let (mut svc, sid) = create_test_service_with_provider(Arc::new(MockProvider)).await;
+    let (svc, sid) = create_test_service_with_provider(Arc::new(MockProvider)).await;
     svc.set_fallback_providers_for_test(vec![Arc::new(MockProviderWithTools::new())]);
 
     // Construct a FallbackProvider externally (the same shape the
@@ -132,7 +132,7 @@ async fn swap_excludes_self_from_fallback_chain() {
     // in its own fallback chain — that would mean a primary failure
     // cascades to the SAME dead endpoint immediately, defeating the
     // purpose of fallback.
-    let (mut svc, sid) = create_test_service_with_provider(Arc::new(MockProvider)).await;
+    let (svc, sid) = create_test_service_with_provider(Arc::new(MockProvider)).await;
     svc.set_fallback_providers_for_test(vec![
         Arc::new(MockProvider), // same name as the new primary
         Arc::new(MockProviderWithTools::new()),
@@ -160,7 +160,7 @@ async fn swap_drops_to_raw_when_only_fallback_is_self() {
     // After filtering, the chain is empty, so we fall through to the
     // "no fallbacks → store raw" path. Otherwise we'd build a
     // pointless FallbackProvider with an empty fallbacks vec.
-    let (mut svc, sid) = create_test_service_with_provider(Arc::new(MockProvider)).await;
+    let (svc, sid) = create_test_service_with_provider(Arc::new(MockProvider)).await;
     svc.set_fallback_providers_for_test(vec![Arc::new(MockProvider)]);
     svc.swap_provider_for_session(sid, Arc::new(MockProvider), "mock-model");
 
