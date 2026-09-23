@@ -453,6 +453,7 @@ pub mod telegram_suggest_merge_test;
 #[cfg(feature = "telegram")]
 pub mod telegram_table_blank_line_test;
 pub mod telegram_table_render_test;
+pub mod telegram_thread_gate_scan_test;
 pub mod telegram_token_redaction_test;
 pub mod telegram_topic_routing_test;
 #[cfg(feature = "telegram-userbot")]
