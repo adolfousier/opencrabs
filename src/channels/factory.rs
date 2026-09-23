@@ -274,6 +274,16 @@ impl ChannelFactory {
     /// with `borrow()` on each message and nothing in the repo consumes
     /// `.changed()`, so no channel-side "config changed" arm exists to hang
     /// this on; a central registry is the only shape that reaches them.
+    ///
+    /// The class this belongs to is pinned by
+    /// `src/tests/config_freeze_class_test.rs`, which asserts both freeze shapes
+    /// rather than only one: no spawned task holding a `Config` (#1696) and no
+    /// struct holding a bare provider `Arc` (#1700). A census on `Config` alone
+    /// passes while A2A, WhatsApp/Trello and the secondary-profile cron factory
+    /// stay frozen, because those reach their provider through this factory and
+    /// not through a `Config`. Keep that test in step when changing this
+    /// function, and see it for why #1249 could close with channels and RSI
+    /// still broken.
     pub async fn reload_providers(&self, config: &Config, primary: Option<Arc<dyn Provider>>) {
         if let Some(new_primary) = primary.as_ref() {
             match self.provider.write() {

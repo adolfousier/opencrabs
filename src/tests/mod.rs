@@ -204,6 +204,7 @@ mod compaction_truncation_marker_test;
 pub mod confidential_read_deny_test;
 pub mod config_alias_merge_test;
 pub mod config_dotted_caps_test;
+pub mod config_freeze_class_test;
 pub mod config_guard_test;
 pub mod config_last_good_recovery_test;
 pub mod config_live_home_guard_test;
