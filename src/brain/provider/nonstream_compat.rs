@@ -68,6 +68,10 @@ struct NonStreamUsage {
     cache_creation_input_tokens: Option<u32>,
     #[serde(default, alias = "prompt_tokens_details")]
     prompt_details: Option<NonStreamPromptDetails>,
+    /// Gateway-reported dollars (OpenRouter `usage.cost`, LiteLLM) — the
+    /// invoice, preferred over the local table (#1707).
+    #[serde(default)]
+    cost: Option<f64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -196,6 +200,7 @@ pub(crate) fn synthesize_stream_events(
             token_usage.cache_creation_tokens = cache_create;
         }
         token_usage.cache_read_tokens = cached;
+        token_usage.cost_usd = usage.cost;
     }
 
     events.push(Ok(StreamEvent::MessageDelta {

@@ -74,6 +74,9 @@ impl AgentService {
                 response.usage.cache_creation_tokens,
                 response.usage.cache_read_tokens,
             );
+        // Single-call path: where the provider reported dollars for this
+        // call, that number IS the bill — the table is a guess (#1707).
+        let cost = response.usage.cost_usd.unwrap_or(cost);
 
         // Update message with usage info, stashing the server-reported
         // prompt token count so session reload reads it directly.

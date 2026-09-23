@@ -3313,6 +3313,7 @@ impl OpenAIProvider {
                 output_tokens: response.usage.completion_tokens.unwrap_or(0),
                 cache_creation_tokens: response.usage.cache_creation_input_tokens.unwrap_or(0),
                 cache_read_tokens: response.usage.effective_cache_read(),
+                cost_usd: response.usage.cost,
                 ..Default::default()
             },
             // Non-streaming parse path — streaming responses go through helpers.rs.
@@ -4803,16 +4804,17 @@ impl Provider for OpenAIProvider {
                                             // reported and what the [STREAM_USAGE] receipt line
                                             // has always carried. `net_input` is what the ledger
                                             // gets, cached prefix removed (#1636).
-                                            let (raw_input, raw_output, raw_cache_read, raw_cache_create, net_input) = if let Some(ref usage) = chunk.usage {
+                                            let (raw_input, raw_output, raw_cache_read, raw_cache_create, net_input, reported_cost) = if let Some(ref usage) = chunk.usage {
                                                 (
                                                     usage.prompt_tokens.unwrap_or(0),
                                                     usage.completion_tokens.unwrap_or(0),
                                                     usage.effective_cache_read(),
                                                     usage.cache_creation_input_tokens.unwrap_or(0),
                                                     usage.net_input_tokens(),
+                                                    usage.cost,
                                                 )
                                             } else {
-                                                (0, 0, 0, 0, 0)
+                                                (0, 0, 0, 0, 0, None)
                                             };
                                             let raw_reasoning = chunk
                                                 .usage
@@ -4861,6 +4863,7 @@ impl Provider for OpenAIProvider {
                                                         reasoning_tokens: raw_reasoning,
                                                         cache_creation_tokens: raw_cache_create,
                                                         cache_read_tokens: raw_cache_read,
+                                                        cost_usd: reported_cost,
                                                         ..Default::default()
                                                     },
                                                 }));
@@ -4928,6 +4931,7 @@ impl Provider for OpenAIProvider {
                                                             reasoning_tokens: reasoning,
                                                             cache_creation_tokens: cache_create,
                                                             cache_read_tokens: cache_read,
+                                                            cost_usd: usage.cost,
                                                             ..Default::default()
                                                         },
                                                     }));
@@ -5356,6 +5360,12 @@ struct OpenAIUsage {
     /// `usage.completion_tokens_details.reasoning_tokens`.
     #[serde(default)]
     completion_tokens_details: Option<OpenAICompletionTokensDetails>,
+    /// Gateway-reported dollars for this call: OpenRouter's `usage.cost`
+    /// (returned when the request opts into usage accounting), LiteLLM and
+    /// similar proxies. Where present the ledger trusts it over the pricing
+    /// table — it is what the provider actually charged (#1707).
+    #[serde(default)]
+    cost: Option<f64>,
 }
 
 impl OpenAIUsage {

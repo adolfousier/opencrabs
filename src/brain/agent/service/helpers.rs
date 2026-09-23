@@ -377,6 +377,10 @@ impl AgentService {
         let mut cache_read_tokens = 0u32;
         let mut billing_cache_creation = 0u32;
         let mut billing_cache_read = 0u32;
+        // Provider-reported dollars: the LAST report wins — OpenRouter and
+        // friends put the authoritative total on the final usage chunk, and
+        // MiniMax-style double deltas start at zero (#1707).
+        let mut cost_usd: Option<f64> = None;
 
         // --- Active-streaming-time accumulator ---
         // Tracks the wall-clock time spent actually receiving output
@@ -957,6 +961,9 @@ impl AgentService {
                     if usage.billing_cache_read > billing_cache_read {
                         billing_cache_read = usage.billing_cache_read;
                     }
+                    if usage.cost_usd.is_some() {
+                        cost_usd = usage.cost_usd;
+                    }
                 }
                 StreamEvent::MessageStop => break,
                 StreamEvent::Ping => {
@@ -1201,6 +1208,7 @@ impl AgentService {
                     cache_read_tokens,
                     billing_cache_creation,
                     billing_cache_read,
+                    cost_usd,
                     ..Default::default()
                 },
                 streaming_active_secs,

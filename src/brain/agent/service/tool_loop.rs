@@ -1547,6 +1547,11 @@ impl AgentService {
             .agent
             .time_marker_interval_secs;
         let mut total_input_tokens = 0u32;
+        // Provider-reported dollars summed across counted iterations, and a
+        // count of iterations that reported no cost. The sum may price the
+        // ledger only when nothing is missing from it (#1707).
+        let mut reported_cost_sum: Option<f64> = None;
+        let mut cost_missing_iters = 0u32;
         let mut total_output_tokens = 0u32;
         let mut total_cache_creation = 0u32;
         let mut total_cache_read = 0u32;
@@ -3990,6 +3995,13 @@ impl AgentService {
             } else {
                 response.usage.cache_read_tokens
             };
+            // Fold the provider's reported dollars for this iteration into
+            // the turn total; iterations that report none disqualify the sum
+            // and the turn falls back to table math (#1707).
+            match response.usage.cost_usd {
+                Some(c) => reported_cost_sum = Some(reported_cost_sum.unwrap_or(0.0) + c),
+                None => cost_missing_iters += 1,
+            };
 
             // Calibrate context token count from the provider's reported usage.
             //
@@ -4322,6 +4334,12 @@ impl AgentService {
                         total_cache_creation.saturating_sub(response.usage.cache_creation_tokens);
                     total_cache_read =
                         total_cache_read.saturating_sub(response.usage.cache_read_tokens);
+                    // Mirror the token subtraction for the cost accumulator:
+                    // this iteration will be re-counted on the retry.
+                    match response.usage.cost_usd {
+                        Some(c) => reported_cost_sum = reported_cost_sum.map(|s| s - c),
+                        None => cost_missing_iters = cost_missing_iters.saturating_sub(1),
+                    }
                     // Don't increment iteration — this is a retry, not a new turn
                     iteration -= 1;
                     continue;
@@ -4383,6 +4401,12 @@ impl AgentService {
                             .saturating_sub(response.usage.cache_creation_tokens);
                         total_cache_read =
                             total_cache_read.saturating_sub(response.usage.cache_read_tokens);
+                        // Cost accumulator mirrors the token subtraction —
+                        // the fallback provider will re-report this call.
+                        match response.usage.cost_usd {
+                            Some(c) => reported_cost_sum = reported_cost_sum.map(|s| s - c),
+                            None => cost_missing_iters = cost_missing_iters.saturating_sub(1),
+                        }
                         iteration -= 1;
                         continue;
                     }
@@ -7874,7 +7898,7 @@ impl AgentService {
         // input_tokens = non-cached, cache_creation/read tracked separately.
         let billable_input = total_input_tokens + total_cache_creation + total_cache_read;
         let total_tokens = billable_input + total_output_tokens;
-        let cost = self
+        let table_cost = self
             .provider_for_session(session_id)
             .calculate_cost_with_cache(
                 &response.model,
@@ -7883,6 +7907,22 @@ impl AgentService {
                 total_cache_creation,
                 total_cache_read,
             );
+        // The provider's own dollar figure is the invoice; the pricing table
+        // is only a guess about it. Use the reported sum only when every
+        // counted iteration reported one — a partial sum would under-bill the
+        // rest (#1707).
+        let cost = crate::brain::provider::types::authoritative_cost(
+            reported_cost_sum,
+            cost_missing_iters,
+            table_cost,
+        );
+        if cost != table_cost {
+            tracing::info!(
+                "ledger uses provider-reported cost {:.6} over table estimate {:.6}",
+                cost,
+                table_cost
+            );
+        }
 
         // Update message with usage info. The stashed prompt-token count
         // drives the UI ctx meter, which must show the LAST iteration's
