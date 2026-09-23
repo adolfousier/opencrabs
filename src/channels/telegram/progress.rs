@@ -14,6 +14,7 @@ use super::flow::{
 use super::handler::tool_context;
 use super::send::fire_chat_action;
 use crate::brain::agent::{ProgressCallback, ProgressEvent};
+use crate::config::Config;
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn build_progress_cb(
@@ -52,10 +53,15 @@ pub(crate) fn build_progress_cb(
                 if let Ok(mut s) = st.lock() {
                     s.compacting = true;
                     s.header_preview = Some(COMPACTING_HEADER_TEXT.to_string());
-                    s.display_queue
-                        .push(DisplayItem::Intermediate(compacting_flow_line(
-                            usage_pct, predicted,
-                        )));
+                    // The pair is opt-in chrome (#1686). The pin above stays
+                    // either way: it is what keeps the header from going stale
+                    // through the silent window, and it carries no numbers.
+                    if Config::current().agent.compaction_notice {
+                        s.display_queue
+                            .push(DisplayItem::Intermediate(compacting_flow_line(
+                                usage_pct, predicted,
+                            )));
+                    }
                 }
             }
             ProgressEvent::ReasoningChunk { text } => {
@@ -200,10 +206,15 @@ pub(crate) fn build_progress_cb(
                     // activity arrives (#29).
                     s.compacting = false;
                     s.header_preview = None;
-                    s.display_queue
-                        .push(DisplayItem::Intermediate(compacted_flow_line(
-                            before_pct, after_pct, elapsed,
-                        )));
+                    // Lifting the pin stays unconditional: it is what lets the
+                    // next tick recompute the header from live data. Only the
+                    // numbered receipt is opt-in chrome (#1686).
+                    if Config::current().agent.compaction_notice {
+                        s.display_queue
+                            .push(DisplayItem::Intermediate(compacted_flow_line(
+                                before_pct, after_pct, elapsed,
+                            )));
+                    }
                 }
             }
             _ => {}

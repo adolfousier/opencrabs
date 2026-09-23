@@ -366,3 +366,66 @@ fn test_agent_config_save_with_default_provider() {
         Some("mimo-v2.5-pro".to_string())
     );
 }
+
+// ── compaction_notice: the numbered pair is opt-in chrome (#1686) ──
+
+#[test]
+fn compaction_notice_defaults_off() {
+    assert!(
+        !AgentConfig::default().compaction_notice,
+        "the numbered pair must not render for a user who never asked for it"
+    );
+}
+
+#[test]
+fn absent_compaction_notice_key_is_off() {
+    // The contract that actually ships: a config file with no such key at all
+    // has to land off, not merely a Default impl that says so.
+    let config: Config = toml::from_str("[agent]\ndefault_model = \"mimo-v2.5-pro\"\n").unwrap();
+    assert!(!config.agent.compaction_notice);
+}
+
+#[test]
+fn compaction_notice_opt_in_is_honoured() {
+    let config: Config = toml::from_str("[agent]\ncompaction_notice = true\n").unwrap();
+    assert!(config.agent.compaction_notice, "true restores the pair");
+}
+
+#[test]
+fn compaction_notice_leaves_the_roast_alone() {
+    // Two different surfaces. Muting the chrome by default must not silence the
+    // model's narration, which is what users forward to friends and the reason
+    // silent_compaction defaults false.
+    let agent = AgentConfig::default();
+    assert!(!agent.compaction_notice, "chrome off");
+    assert!(!agent.silent_compaction, "voice still on");
+}
+
+#[test]
+fn every_pair_site_reads_the_flag() {
+    // Four render sites, two per file. The header pin is deliberately NOT
+    // gated: it is the anti-staleness surface and the hint itself, so muting
+    // the mess must not leave a stale "Working on…" preview up for the whole
+    // silent window.
+    const PROGRESS: &str = include_str!("../channels/telegram/progress.rs");
+    const RESUME: &str = include_str!("../channels/telegram/resume.rs");
+    for (name, src) in [("progress.rs", PROGRESS), ("resume.rs", RESUME)] {
+        assert_eq!(
+            src.matches("Config::current().agent.compaction_notice")
+                .count(),
+            2,
+            "{name} must gate both of its render sites"
+        );
+        assert_eq!(
+            src.matches("compacting_flow_line(").count()
+                + src.matches("compacted_flow_line(").count(),
+            2,
+            "{name} renders exactly two numbered flow lines, both gated"
+        );
+        assert_eq!(
+            src.matches("s.compacting = ").count(),
+            2,
+            "{name} keeps its header pin ungated"
+        );
+    }
+}
