@@ -2067,7 +2067,14 @@ pub(crate) async fn handle_message(
         // below returned "the latest bot message", which silently surfaced the
         // WRONG message whenever the user replied to anything but the newest
         // reply (#234 follow-up — confirmed in field logs).
-        if full_text.is_empty() && reply.from.as_ref().is_some_and(|u| u.is_bot) {
+        //
+        // The lookup is sender-agnostic (#548): a human's photo, sticker or
+        // voice message arrives with empty text()/caption() exactly as a rich
+        // bot message does, and their messages are persisted with their
+        // platform id too — so gating this on `is_bot` made a user-to-user
+        // reply to media permanently unreadable while the same reply to a bot
+        // resolved fine. Attempt it for any sender; a miss is just a miss.
+        if full_text.is_empty() {
             let chat_id_str = msg.chat.id.0.to_string();
             let reply_pmid = reply.id.0.to_string();
             match channel_msg_repo
@@ -2102,8 +2109,20 @@ pub(crate) async fn handle_message(
         // confirmed in field logs (2026-06-28) where every "yeah I can see it"
         // was a hallucination built on a mismatched message. Honesty beats a
         // confident wrong guess.
-        let unrecoverable_bot_reply =
-            full_text.is_empty() && reply.from.as_ref().is_some_and(|u| u.is_bot);
+        // #548: a human's media message (photo, sticker, voice, poll without
+        // caption) arrives with empty text exactly as a rich bot message does,
+        // so this marker must not be bot-only — otherwise a user-to-user reply
+        // to media was indistinguishable from not being a reply at all, and the
+        // model could not even tell that one had happened.
+        //
+        // The one target we must NOT mark is the topic-creation service
+        // message: in a forum topic every ordinary message carries it as its
+        // reply target (handler.rs topic_name resolution below relies on this),
+        // so marking it would put a spurious "could not be retrieved" line on
+        // every message in every topic.
+        let target_is_topic_root = reply.forum_topic_created().is_some();
+        let unrecoverable_reply =
+            full_text.is_empty() && !target_is_topic_root && reply.from.is_some();
 
         // Strip ctx footer from quoted text so metadata never leaks into agent context
         let full_clean = crate::utils::strip_ctx_footer(&full_text);
@@ -2123,18 +2142,26 @@ pub(crate) async fn handle_message(
             &reply_sender,
             &full_clean,
             &quote_clean,
-            unrecoverable_bot_reply,
+            unrecoverable_reply,
             full_in_context,
         );
+        // The two new booleans are logged because the field reports that
+        // produced #548 could only be read as "ctx=None, reason unknown" —
+        // topic-root silence and a genuine unrecoverable target looked
+        // identical. `topic_root` names the forum artifact; `unrecoverable`
+        // names a real unreadable target.
         tracing::info!(
             "Telegram reply context: chat_id={}, has_reply_to=true, \
              has_quote={}, quote_is_manual={:?}, quote_text_len={}, \
-             full_text_len={}, ctx={:?}",
+             full_text_len={}, topic_root={}, unrecoverable={}, in_context={}, ctx={:?}",
             msg.chat.id.0,
             msg.quote().is_some(),
             msg.quote().map(|q| q.is_manual),
             quote_text.chars().count(),
             full_text.chars().count(),
+            target_is_topic_root,
+            unrecoverable_reply,
+            full_in_context,
             ctx,
         );
         ctx
@@ -3201,34 +3228,32 @@ pub(crate) fn format_reply_sender(
 /// "content unavailable" marker instead of `None`. Returning `None` there let
 /// the model invent a reply target; an explicit marker tells it to say it
 /// cannot see the content rather than fabricate one.
+///
+/// The flag is sender-agnostic (#548): a human's photo or sticker is as
+/// unreadable as a rich bot message, and silence there left the model unable to
+/// tell that a reply had happened at all.
 #[cfg_attr(not(test), expect(dead_code))]
 pub(crate) fn resolve_reply_context(
     sender: &str,
     full_clean: &str,
     quote_clean: &str,
-    unrecoverable_bot_reply: bool,
+    unrecoverable_reply: bool,
 ) -> Option<String> {
-    resolve_reply_context_pruned(
-        sender,
-        full_clean,
-        quote_clean,
-        unrecoverable_bot_reply,
-        false,
-    )
+    resolve_reply_context_pruned(sender, full_clean, quote_clean, unrecoverable_reply, false)
 }
 
 pub(crate) fn resolve_reply_context_pruned(
     sender: &str,
     full_clean: &str,
     quote_clean: &str,
-    unrecoverable_bot_reply: bool,
+    unrecoverable_reply: bool,
     full_in_context: bool,
 ) -> Option<String> {
     match format_reply_context_pruned(sender, full_clean, quote_clean, full_in_context) {
         Some(c) => Some(c),
-        None if unrecoverable_bot_reply => Some(format!(
+        None if unrecoverable_reply => Some(format!(
             "[Replying to {sender}, but the exact content of that message could not be retrieved \
-             — Telegram delivers rich and cron bot messages without readable text. Do NOT guess, \
+             — Telegram delivers media and rich messages without readable text. Do NOT guess, \
              summarize, or describe what it said; if you need it, ask the user to quote or paste it.]"
         )),
         None => None,
@@ -3244,13 +3269,34 @@ pub(crate) fn format_reply_context(
     format_reply_context_pruned(sender, reply_full_text, quote_text, false)
 }
 
+/// Longest excerpt a pruned reply pointer carries (#548).
+///
+/// The pointer must identify WHICH message the user replied to. A bare
+/// "message above" cannot: the history block renders as `[HH:MM] sender: text`
+/// with no message ids, the compaction summary preserves none either, and
+/// several messages sit above — so the text itself is the only resolvable key.
+/// A bounded prefix identifies the message while keeping the prune worthwhile.
+pub(crate) const REPLY_EXCERPT_MAX_CHARS: usize = 120;
+
+/// Build the distinguishing excerpt a pruned reply pointer carries (#548).
+fn reply_excerpt(full: &str) -> String {
+    let mut out = crate::utils::string::truncate_chars(full, REPLY_EXCERPT_MAX_CHARS).to_string();
+    if full.chars().count() > REPLY_EXCERPT_MAX_CHARS {
+        out.push('…');
+    }
+    out
+}
+
 /// Format reply context with optional pruning if `full_in_context` is true.
 ///
 /// If the replied-to message is already present in the active compaction window:
 /// - If a specific user highlight/quote was provided: prune the redundant `Full message:` tail,
 ///   emitting only `[Replying to {sender}, user highlighted: "{quote}"]`.
-/// - If no highlight was provided: emit a lightweight reference
-///   `[Replying to {sender}'s message above]` instead of re-injecting thousands of characters.
+/// - If no highlight was provided: emit a lightweight reference carrying a bounded
+///   excerpt of the message, `[Replying to {sender}, the message beginning: "…" — it is
+///   already in your context above]`, instead of re-injecting thousands of characters.
+///   The excerpt is what makes the pointer resolvable (#548): without it the model was
+///   told "message above" while the identity of that message lived nowhere.
 pub(crate) fn format_reply_context_pruned(
     sender: &str,
     reply_full_text: &str,
@@ -3268,7 +3314,11 @@ pub(crate) fn format_reply_context_pruned(
                 "[Replying to {sender}, user highlighted: \"{quote}\"]"
             ))
         } else {
-            Some(format!("[Replying to {sender}'s message above]"))
+            Some(format!(
+                "[Replying to {sender}, the message beginning: \"{}\" — it is already in your \
+                 context above]",
+                reply_excerpt(full)
+            ))
         }
     } else if !quote.is_empty() && quote != full && !full.is_empty() {
         Some(format!(
