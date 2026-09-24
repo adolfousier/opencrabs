@@ -374,3 +374,107 @@ async fn notify_status_requires_the_id() {
         error_codes::INVALID_PARAMS
     );
 }
+
+/// Make a notify params object carrying a caller-minted id (#199).
+fn params_with_id(session_id: &str, message: &str, id: &str) -> serde_json::Value {
+    let mut p = params(session_id, message);
+    p["notify_id"] = serde_json::json!(id);
+    p
+}
+
+#[tokio::test]
+// Same serialization rationale as `live_uuid_delivers_through_the_claimed_route`.
+#[allow(clippy::await_holding_lock)]
+async fn a_retried_notify_id_delivers_exactly_once() {
+    // #199 acceptance: the CLI mints ONE id per invocation and re-sends it on
+    // a transport retry. The gateway must deliver the FIRST attempt and answer
+    // the retry with the prior outcome — a second delivery is the bug this
+    // leg exists to prevent (the fan-out's quiet path included).
+    let _guard = test_guard();
+    let ctx = placeholder_service_context().await;
+    let session = SessionService::new(ctx.clone())
+        .create_session(Some("#199 retry test session".to_string()))
+        .await
+        .expect("session row created");
+    let sid = session.id;
+
+    let deliveries = Arc::new(Mutex::new(0usize));
+    let sink = deliveries.clone();
+    register_session_route(
+        sid,
+        Arc::new(move |_id, _queued| {
+            *sink.lock().unwrap() += 1;
+        }),
+    );
+
+    let notify_id = uuid::Uuid::new_v4().to_string();
+    let p = params_with_id(&sid.to_string(), "ping", &notify_id);
+
+    let first = handle_session_notify(serde_json::json!(41), p.clone(), ctx.clone()).await;
+    assert!(first.error.is_none(), "{first:?}");
+    assert_eq!(outcome_of(&first), "delivered");
+    let first_body = first.result.expect("success");
+    assert_eq!(
+        first_body.get("notify_id").and_then(|v| v.as_str()),
+        Some(notify_id.as_str()),
+        "the response must echo the caller's id",
+    );
+
+    let second = handle_session_notify(serde_json::json!(42), p, ctx).await;
+    assert!(second.error.is_none(), "{second:?}");
+    assert_eq!(
+        outcome_of(&second),
+        "delivered",
+        "a retry of a delivered notify reports the prior outcome",
+    );
+    let second_body = second.result.expect("success");
+    assert_eq!(
+        second_body
+            .get("notify_duplicate")
+            .and_then(|v| v.as_bool()),
+        Some(true),
+        "the retry must be flagged as a duplicate: {second_body}",
+    );
+    assert_eq!(
+        *deliveries.lock().unwrap(),
+        1,
+        "a retried notify_id must not deliver a second copy",
+    );
+}
+
+#[tokio::test]
+// Same serialization rationale as `live_uuid_delivers_through_the_claimed_route`.
+#[allow(clippy::await_holding_lock)]
+async fn distinct_notify_ids_both_deliver() {
+    // Guard against over-deduping: two separate notifies to one target are two
+    // notifies, each with its own id.
+    let _guard = test_guard();
+    let ctx = placeholder_service_context().await;
+    let session = SessionService::new(ctx.clone())
+        .create_session(Some("#199 distinct ids test session".to_string()))
+        .await
+        .expect("session row created");
+    let sid = session.id;
+
+    let deliveries = Arc::new(Mutex::new(0usize));
+    let sink = deliveries.clone();
+    register_session_route(
+        sid,
+        Arc::new(move |_id, _queued| {
+            *sink.lock().unwrap() += 1;
+        }),
+    );
+
+    for seq in [51, 52] {
+        let id = uuid::Uuid::new_v4().to_string();
+        let p = params_with_id(&sid.to_string(), "ping", &id);
+        let resp = handle_session_notify(serde_json::json!(seq), p, ctx.clone()).await;
+        assert!(resp.error.is_none(), "{resp:?}");
+        assert_eq!(outcome_of(&resp), "delivered");
+    }
+    assert_eq!(
+        *deliveries.lock().unwrap(),
+        2,
+        "distinct ids are distinct notifies"
+    );
+}

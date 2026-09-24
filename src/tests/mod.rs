@@ -180,6 +180,7 @@ pub mod cli_arg_too_long_test;
 pub mod cli_context_rows_stripped_test;
 pub mod cli_headless_tools_test;
 pub mod cli_session_id_prefix_test;
+pub mod cli_session_notify_retry_test;
 pub mod cli_session_set_model_test;
 pub mod cli_silent_failure_test;
 pub mod cli_supported_models_test;

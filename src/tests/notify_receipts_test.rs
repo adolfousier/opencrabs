@@ -47,3 +47,55 @@ fn drain_is_idempotent_per_receipt() {
     let receipt = status(id).unwrap();
     assert_eq!(receipt.state, ReceiptState::Injected);
 }
+
+#[test]
+fn reserve_is_first_sight_only() {
+    // #199 idempotency leg: the first reservation OWNS the notify. A second
+    // sight of the same id is a retry whose first response was lost, so it
+    // must be refused — the caller reports the prior outcome instead of
+    // delivering a second copy.
+    let (id, target) = (Uuid::new_v4(), Uuid::new_v4());
+    assert!(reserve(id, target), "first sight of an id reserves it");
+    assert!(!reserve(id, target), "second sight must not re-reserve");
+    // The reservation IS a receipt: status is answerable from the moment of
+    // reservation, before any delivery has happened.
+    let receipt = status(id).expect("a reservation is status-checkable");
+    assert_eq!(receipt.state, ReceiptState::Queued);
+    assert_eq!(receipt.target, target);
+}
+
+#[test]
+fn distinct_ids_reserve_independently() {
+    // Guard against over-deduping: two notifies are two notifies, even to the
+    // same target.
+    let (a, b) = (Uuid::new_v4(), Uuid::new_v4());
+    let target = Uuid::new_v4();
+    assert!(reserve(a, target));
+    assert!(reserve(b, target));
+}
+
+#[test]
+fn forget_releases_a_reservation() {
+    // #199: a real non-delivery verdict banked NOTHING, so its id must be
+    // released — a retry carrying that id must stay free to deliver, and a
+    // status poll must not claim a delivery that never happened.
+    let (id, target) = (Uuid::new_v4(), Uuid::new_v4());
+    assert!(reserve(id, target));
+    forget(id);
+    assert!(
+        status(id).is_none(),
+        "a released id leaves no receipt behind"
+    );
+    assert!(reserve(id, target), "a released id can be reserved afresh");
+}
+
+#[test]
+fn a_delivered_id_stays_reserved_against_the_post_delivery_record() {
+    // The delivery path re-records the receipt after a successful route;
+    // that must not release the reservation, or the retry the reservation
+    // exists to catch would deliver a second copy.
+    let (id, target) = (Uuid::new_v4(), Uuid::new_v4());
+    assert!(reserve(id, target));
+    record_queued(id, target);
+    assert!(!reserve(id, target));
+}

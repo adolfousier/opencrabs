@@ -134,6 +134,28 @@ pub async fn handle_session_notify(
         }
     };
 
+    // #199 idempotency key: the caller MAY mint the notify id (the CLI does),
+    // so a retry re-sends the SAME id and the gateway can tell a retry from a
+    // new notify. Absent (every pre-#199 caller) or malformed → server-side
+    // mint, exactly as before. Parsed here with the other params: it is
+    // protocol-level validation, so it belongs before any lookup.
+    let notify_id = match params.get("notify_id") {
+        None => uuid::Uuid::new_v4(),
+        Some(value) => match value
+            .as_str()
+            .and_then(|raw| raw.parse::<uuid::Uuid>().ok())
+        {
+            Some(id) => id,
+            None => {
+                return JsonRpcResponse::error(
+                    req_id,
+                    error_codes::INVALID_PARAMS,
+                    format!("'notify_id' must be a UUID: {value}"),
+                );
+            }
+        },
+    };
+
     // Zombie-wake guard (#23, #17 class): only a session with a DB row may
     // be notified. `deliver_to_session` is never touched for a uuid with NO
     // row — its local-route fallback would hand the message to this
@@ -162,6 +184,41 @@ pub async fn handle_session_notify(
                 format!("session lookup failed: {e}"),
             );
         }
+    }
+
+    // #199 reserve-before-deliver: the receipt store IS the idempotency
+    // ledger. First sight of the id → this attempt owns the notify; a known id
+    // → an earlier attempt already handled it and only its RESPONSE was lost
+    // (a timeout is ambiguous, never a verdict), so report the prior outcome
+    // and do NOT deliver a second copy. `quiet` is the fan-out wave's default
+    // mode, so the guard covers that path too — a duplicate looks like
+    // `deferred` there, which is what the original attempt answered.
+    if !notify_receipts::reserve(notify_id, session_id) {
+        let detail = match notify_receipts::status(notify_id) {
+            Some(receipt) => format!(
+                "duplicate notify_id {notify_id}: an earlier attempt already handled this \
+                 notify for session {} (receipt {}, queued {}) — no re-delivery (#199)",
+                receipt.target,
+                receipt.state.as_str(),
+                receipt.queued_at.to_rfc3339()
+            ),
+            None => {
+                format!("duplicate notify_id {notify_id}: already handled — no re-delivery (#199)")
+            }
+        };
+        return JsonRpcResponse::success(
+            req_id,
+            serde_json::json!({
+                "outcome": if matches!(mode, DeliveryMode::Quiet { .. }) {
+                    "deferred"
+                } else {
+                    "delivered"
+                },
+                "detail": detail,
+                "notify_id": notify_id.to_string(),
+                "notify_duplicate": true,
+            }),
+        );
     }
 
     // Same message shape as the agent's session_notify tool
@@ -218,20 +275,26 @@ pub async fn handle_session_notify(
         max_delay,
     } = mode
     {
-        let id = quiet_delivery::defer_quiet(session_id, msg, quiet_for, max_delay);
+        // ponytail: `defer_quiet` mints its own registry handle; the RECEIPT
+        // (what a caller can query, and what makes a retry idempotent) is keyed
+        // on the caller's `notify_id` — so one notify = one id end to end. The
+        // two ids are not correlated anywhere today; unify them if a cancel
+        // action ever goes live (#199).
+        let _deferred_handle = quiet_delivery::defer_quiet(session_id, msg, quiet_for, max_delay);
         maybe_set_a2a_goal(session_id, goal, goal_max_turns, &service_context).await;
-        notify_receipts::record_queued(id, session_id);
+        notify_receipts::record_queued(notify_id, session_id);
+        let detail_str = format!(
+            "deferred for session {session_id}: delivers once the session has been \
+             quiet for {}s (hard cap {}s) — notification id {notify_id}",
+            quiet_for.as_secs(),
+            max_delay.as_secs()
+        );
         return JsonRpcResponse::success(
             req_id,
             serde_json::json!({
                 "outcome": "deferred",
-                "detail": format!(
-                    "deferred for session {session_id}: delivers once the session has been \
-                     quiet for {}s (hard cap {}s) — notification id {id}",
-                    quiet_for.as_secs(),
-                    max_delay.as_secs()
-                ),
-                "notify_id": id.to_string(),
+                "detail": detail_str,
+                "notify_id": notify_id.to_string(),
                 "notify_state": "deferred",
             }),
         );
@@ -242,8 +305,6 @@ pub async fn handle_session_notify(
         .get("confirm")
         .and_then(serde_json::Value::as_bool)
         .unwrap_or(false);
-    let notify_id = uuid::Uuid::new_v4();
-
     let (outcome, detail, extra) = match deliver_to_session(session_id, msg, interrupt) {
         Delivery::Delivered => {
             maybe_set_a2a_goal(session_id, goal, goal_max_turns, &service_context).await;
@@ -331,6 +392,14 @@ pub async fn handle_session_notify(
             serde_json::json!({}),
         ),
     };
+
+    // #199: a non-delivery banked NOTHING, so release the id as well — a retry
+    // carrying the same notify_id must stay free to deliver. The id is worth
+    // keeping only where an attempt actually accepted the notify (delivered,
+    // redirected, parked, deferred).
+    if matches!(outcome, "refused_in_flight" | "no_route") {
+        notify_receipts::forget(notify_id);
+    }
 
     JsonRpcResponse::success(req_id, {
         let mut body = serde_json::json!({ "outcome": outcome, "detail": detail });
