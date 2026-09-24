@@ -23,7 +23,7 @@ pub(crate) fn register_config_dependent_tools(
     use crate::brain::tools::{
         analyze_video::AnalyzeVideoTool, brave_search::BraveSearchTool, exa_search::ExaSearchTool,
         generate_image::GenerateImageTool, provider_vision::ProviderVisionTool,
-        web_search::WebSearchTool,
+        serper_search::SerperSearchTool, web_search::WebSearchTool,
     };
 
     // EXA: always available (free via MCP; direct API when a key is set).
@@ -54,9 +54,31 @@ pub(crate) fn register_config_dependent_tools(
         None
     };
 
+    // Serper (Google SERP): same contract as Brave — `enabled = true` AND a
+    // non-empty key (#1731). Paid API, so it never registers implicitly.
+    let serper_tool = if let Some(serper_cfg) = config
+        .providers
+        .web_search
+        .as_ref()
+        .and_then(|ws| ws.serper.as_ref())
+        && serper_cfg.enabled
+        && let Some(serper_key) = serper_cfg.api_key.clone().filter(|k| !k.is_empty())
+    {
+        let st = Arc::new(SerperSearchTool::new(serper_key));
+        registry.register(st.clone());
+        Some(st)
+    } else {
+        registry.unregister("serper_search");
+        None
+    };
+
     // Re-register web_search with engine references so it fans out to
-    // DDG + Exa (+ Brave) in parallel instead of DDG-only.
-    registry.register(Arc::new(WebSearchTool::new(Some(exa_tool), brave_tool)));
+    // DDG + Exa (+ Brave, + Serper) in parallel instead of DDG-only.
+    registry.register(Arc::new(WebSearchTool::new(
+        Some(exa_tool),
+        brave_tool,
+        serper_tool,
+    )));
 
     // Image generation — per-request chain (session provider →
     // [providers.fallback] generation → global Gemini last, #1672). The

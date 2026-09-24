@@ -668,6 +668,13 @@ pub(crate) fn merge_provider_keys(
             let entry = base_ws.brave.get_or_insert_with(ProviderConfig::default);
             entry.api_key = Some(key);
         }
+        if let Some(serper) = ws.serper
+            && let Some(key) = serper.api_key
+            && !key.is_empty()
+        {
+            let entry = base_ws.serper.get_or_insert_with(ProviderConfig::default);
+            entry.api_key = Some(key);
+        }
     }
     // Merge image provider keys (e.g. [providers.image.gemini])
     if let Some(img) = keys.image {

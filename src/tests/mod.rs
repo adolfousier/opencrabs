@@ -119,6 +119,7 @@ pub mod brain_tools_profile_list_test;
 pub mod brain_tools_read_encoding_test;
 pub mod brain_tools_read_test;
 pub mod brain_tools_registry_test;
+pub mod brain_tools_serper_search_test;
 pub mod brain_tools_slash_command_test;
 pub mod brain_tools_subagent_reconcile_test;
 pub mod brain_tools_tool_manage_test;

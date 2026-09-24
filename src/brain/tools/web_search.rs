@@ -1,13 +1,14 @@
 //! Web Search Tool (Unified)
 //!
-//! Single search entry point that fans out to DuckDuckGo, Exa, and Brave
-//! in parallel, merges results, and returns the best combined set. The
-//! agent calls one tool and never thinks about which engine answered.
+//! Single search entry point that fans out to DuckDuckGo, Exa, Brave, and
+//! Serper in parallel, merges results, and returns the best combined set.
+//! The agent calls one tool and never thinks about which engine answered.
 //!
 //! Engines:
 //! - **DuckDuckGo** (always available, free, captcha-prone)
 //! - **Exa** (free MCP endpoint or direct API with `EXA_API_KEY`)
 //! - **Brave** (requires `BRAVE_API_KEY`, registered only when configured)
+//! - **Serper** (Google SERP, requires configured key, #1731)
 //!
 //! DDG captcha detection (HTTP 202 + structural form heuristic) silently
 //! drops DDG from the result pool instead of surfacing an error.
@@ -15,25 +16,31 @@
 use super::brave_search::BraveSearchTool;
 use super::error::{Result, ToolError};
 use super::exa_search::ExaSearchTool;
+use super::serper_search::SerperSearchTool;
 use super::r#trait::{Tool, ToolCapability, ToolExecutionContext, ToolResult};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::sync::Arc;
 
-/// Unified web search tool. Fans out to DDG + Exa (+ Brave if configured)
-/// in parallel, merges results, dedupes by URL.
+/// Unified web search tool. Fans out to DDG + Exa (+ Brave, + Serper when
+/// configured) in parallel and merges results.
 #[derive(Default)]
 pub struct WebSearchTool {
     exa: Option<Arc<ExaSearchTool>>,
     brave: Option<Arc<BraveSearchTool>>,
+    serper: Option<Arc<SerperSearchTool>>,
 }
 
 impl WebSearchTool {
     /// Create a unified search tool with optional engine references.
-    /// When both are `None`, behaves as DDG-only (backward compat).
-    pub fn new(exa: Option<Arc<ExaSearchTool>>, brave: Option<Arc<BraveSearchTool>>) -> Self {
-        Self { exa, brave }
+    /// When all are `None`, behaves as DDG-only (backward compat).
+    pub fn new(
+        exa: Option<Arc<ExaSearchTool>>,
+        brave: Option<Arc<BraveSearchTool>>,
+        serper: Option<Arc<SerperSearchTool>>,
+    ) -> Self {
+        Self { exa, brave, serper }
     }
 
     /// DuckDuckGo search (extracted for parallel fan-out).
@@ -137,8 +144,8 @@ impl Tool for WebSearchTool {
 
     fn description(&self) -> &str {
         "Search the internet for real-time information. Fans out to \
-         DuckDuckGo, Exa, and Brave (when configured) in parallel and \
-         returns merged, deduplicated results. \
+         DuckDuckGo, Exa, Brave, and Serper (Google, when configured) in \
+         parallel and returns merged, deduplicated results. \
          \n\nDEFAULT web-research tool — use this for any \"find me info \
          about X\" / \"what's the latest Y\" / \"check the docs for Z\" \
          request unless the user explicitly asks for browser interaction. \
@@ -198,7 +205,7 @@ impl Tool for WebSearchTool {
 
         // No extra engines configured: DDG-only (backward compat with
         // tool_setup.rs registration before config is loaded).
-        if self.exa.is_none() && self.brave.is_none() {
+        if self.exa.is_none() && self.brave.is_none() && self.serper.is_none() {
             return self.search_ddg(&parsed.query, parsed.max_results).await;
         }
 
@@ -223,7 +230,16 @@ impl Tool for WebSearchTool {
             }
         };
 
-        let (ddg_res, exa_res, brave_res) = tokio::join!(ddg_fut, exa_fut, brave_fut);
+        let serper_input = input.clone();
+        let serper_fut = async {
+            match &self.serper {
+                Some(serper) => Some(serper.execute(serper_input, context).await),
+                None => None,
+            }
+        };
+
+        let (ddg_res, exa_res, brave_res, serper_res) =
+            tokio::join!(ddg_fut, exa_fut, brave_fut, serper_fut);
 
         // Collect successful outputs. DDG errors (captcha, rate limit)
         // are silently dropped; the other engines fill the gap.
@@ -251,6 +267,12 @@ impl Tool for WebSearchTool {
             sections.push(r.output);
         }
 
+        if let Some(Ok(r)) = serper_res
+            && r.success
+        {
+            sections.push(r.output);
+        }
+
         if sections.is_empty() {
             return Ok(ToolResult::error(
                 "All search engines failed or returned no results. \
@@ -259,8 +281,91 @@ impl Tool for WebSearchTool {
             ));
         }
 
-        Ok(ToolResult::success(sections.join("\n\n")))
+        Ok(ToolResult::success(dedup_sections(sections)))
     }
+}
+
+/// Entry line of a rendered search result that carries its URL. Covers both
+/// render formats in this module: Brave/Serper `   URL: https://...` and
+/// DuckDuckGo `   🔗 https://...`.
+fn entry_url(line: &str) -> Option<&str> {
+    let trimmed = line.trim_start();
+    let rest = trimmed
+        .strip_prefix("URL:")
+        .or_else(|| trimmed.strip_prefix("🔗"))?;
+    let url = rest.trim();
+    (url.starts_with("http://") || url.starts_with("https://")).then_some(url)
+}
+
+/// First line of a rendered result entry: `1. Title` / `10. Title`.
+fn is_entry_start(line: &str) -> bool {
+    let trimmed = line.trim_start();
+    match trimmed.split_once(". ") {
+        Some((num, _)) => !num.is_empty() && num.chars().all(|c| c.is_ascii_digit()),
+        None => false,
+    }
+}
+
+/// Canonical form for dup comparison: case-insensitive, trailing slash
+///-insensitive. Intentionally not full URL canonicalization.
+fn normalize_url(url: &str) -> String {
+    url.trim_end_matches('/').to_lowercase()
+}
+
+/// Merge engine sections, dropping later result entries whose URL was already
+/// returned by an earlier engine (#1731). Google, Brave, and DDG overlap hard
+/// on popular queries, and the merged output used to repeat the same hit once
+/// per engine. First occurrence wins, so engine priority order is preserved.
+/// Entries without a recognizable URL line (unknown render format) are kept
+/// verbatim, and a section reduced to header-only by dedup is dropped whole.
+pub(crate) fn dedup_sections(sections: Vec<String>) -> String {
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut merged: Vec<String> = Vec::new();
+
+    for section in sections {
+        // Was this section rendered in the numbered-entry format at all?
+        // Sections in an unknown format (no `N.` lines) pass through
+        // untouched; only entry-based sections can be reduced to
+        // header-only by dedup.
+        let entry_based = section.lines().any(is_entry_start);
+        let mut out: Vec<String> = Vec::new();
+        let mut entry_start: Option<usize> = None;
+        let mut dropping = false;
+        let mut mutated = false;
+
+        for line in section.lines() {
+            if is_entry_start(line) {
+                dropping = false;
+                entry_start = Some(out.len());
+            }
+            if !dropping
+                && let Some(url) = entry_url(line)
+                && !seen.insert(normalize_url(url))
+            {
+                // Duplicate: unwind this entry's already-pushed lines
+                // (its title came before the URL line) and skip its tail.
+                if let Some(start) = entry_start {
+                    out.truncate(start);
+                }
+                dropping = true;
+                mutated = true;
+            }
+            if !dropping {
+                out.push(line.to_string());
+            }
+        }
+
+        // Keep the section if an entry survived dedup, or if it never was
+        // entry-based (unknown render format). A section reduced to
+        // header-only (every entry was a duplicate) is dropped whole.
+        if !entry_based || out.iter().any(|l| is_entry_start(l)) {
+            // Untouched sections pass through byte-verbatim; only a
+            // section that lost entries is rebuilt from surviving lines.
+            merged.push(if mutated { out.join("\n") } else { section });
+        }
+    }
+
+    merged.join("\n\n")
 }
 
 /// Rotated User-Agent pool for DuckDuckGo Lite (#525). DDG blocks repetitive UA

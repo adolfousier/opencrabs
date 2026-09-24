@@ -764,6 +764,11 @@ enabled = true
 enabled = false
 # Its free up to 1000 requests. API key goes in keys.toml: [providers.web_search.brave] api_key = "..."
 
+# Serper (Google SERP via serper.dev, #1731): paid per-query, 2500 free
+# starter credits. Flip enabled = true AND put the key in keys.toml
+# ([providers.web_search.serper] api_key = "...") to add Google results
+# to the web_search fan-out. Supports gl/hl locale targeting per query.
+
 # ========================================
 # Memory / Embeddings
 # ========================================

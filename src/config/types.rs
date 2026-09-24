@@ -2785,6 +2785,10 @@ pub struct WebSearchProviders {
     /// Brave search configuration
     #[serde(default)]
     pub brave: Option<ProviderConfig>,
+
+    /// Serper (Google SERP) search configuration (#1731)
+    #[serde(default)]
+    pub serper: Option<ProviderConfig>,
 }
 
 /// Image provider configurations (e.g. Gemini for generation/vision)
