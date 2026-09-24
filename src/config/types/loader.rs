@@ -456,12 +456,12 @@ impl Config {
         let Ok(raw) = std::fs::read_to_string(path) else {
             return;
         };
-        let Ok(unknown) = crate::config::sections::unknown_top_level_sections(&raw) else {
+        let Ok(unknown) = crate::config::sections::unknown_config_paths(&raw) else {
             return;
         };
         if !unknown.is_empty() {
             tracing::warn!(
-                "Unknown top-level keys in config.toml (possible typos): {}",
+                "Unknown keys in config.toml (possible typos or stale entries): {}",
                 unknown.join(", ")
             );
             CONFIG_TYPO_WARNINGS
