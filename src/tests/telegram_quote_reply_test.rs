@@ -208,3 +208,27 @@ fn empty_non_bot_reply_stays_none() {
     // flag must stay None — no marker, no fabrication prompt.
     assert_eq!(resolve_reply_context("Alice", "", "", false), None);
 }
+
+#[test]
+fn unrecoverable_human_reply_emits_marker_not_none() {
+    // #548: the marker was bot-only, so a user-to-user reply to media (photo,
+    // sticker, voice) produced NOTHING — the model could not even tell a reply
+    // had happened. The flag is now sender-agnostic: the caller decides by
+    // whether the target is a real message that we failed to read.
+    let ctx = resolve_reply_context("Carol (@carol), ID 555", "", "", true);
+    let text = ctx.expect("a human's unreadable reply target must emit a marker");
+    assert!(text.contains("could not be retrieved"), "got: {text}");
+    assert!(text.contains("Carol"), "must name who was replied to: {text}");
+    assert!(text.contains("Do NOT guess"), "must forbid fabrication: {text}");
+}
+
+#[test]
+fn marker_wording_is_not_bot_specific() {
+    // The old text said "rich and cron bot messages" — wrong now that the
+    // marker also covers a human's media message.
+    let text = resolve_reply_context("Carol", "", "", true).expect("marker");
+    assert!(
+        !text.contains("bot messages"),
+        "marker must not claim the class is bot-only: {text}"
+    );
+}
