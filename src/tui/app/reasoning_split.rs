@@ -145,21 +145,43 @@ fn push_text(out: &mut Vec<Segment>, text: &str) {
 /// Whether the text segment at `i` is intermediate narration rather than the
 /// turn's answer.
 ///
-/// A text segment with reasoning after it is one the model kept thinking past,
-/// so it cannot be the answer however much it reads like one. Only text with no
-/// further reasoning behind it stays visible; the rest renders collapsed.
+/// A text segment with reasoning after it AND more text behind that reasoning
+/// is one the model kept thinking past before writing on, so it cannot be the
+/// answer however much it reads like one. When nothing but reasoning follows,
+/// the text is the answer.
 ///
-/// This matters because the model sometimes restates its reasoning through the
-/// content channel, where it is persisted unwrapped and is otherwise
-/// indistinguishable from the answer (#760). Position is the one signal that
-/// stays exact, so it is the one used here: no guessing at which prose looks
-/// like thinking.
+/// The distinction is the CLI persist layout (#1728): the CLI branch appends a
+/// turn's whole reasoning as one block at EOF, AFTER the streamed answer, so
+/// every CLI reasoning turn ends `[answer, reasoning]` even though the answer
+/// was fully delivered. Demoting on reasoning alone hid that answer behind a
+/// collapsed details row the moment the session reloaded, while the live view
+/// had shown it in full. A reasoning block with no text behind it is
+/// therefore a terminal append artifact, not proof the model was still
+/// thinking.
+///
+/// Reasoning BETWEEN texts still demotes the earlier text (#760): the model
+/// sometimes restates its reasoning through the content channel, where it is
+/// persisted unwrapped and is otherwise indistinguishable from the answer.
+/// Position is the one signal that stays exact, so it is the one used here: no
+/// guessing at which prose looks like thinking.
+///
+/// The cost of the terminal-reasoning exception is a truncated turn (narration
+/// persisted, crash before the answer) rendering its narration as content
+/// instead of collapsing it. Position alone cannot tell a truncated turn from
+/// the CLI artifact, the artifact ships on every CLI reasoning turn while the
+/// truncation is a crash corner, and erring visible matches the live view.
 ///
 /// A blocked section counts for nothing here: it is never the answer itself,
 /// and the reasoning it folded in must not demote the real answer before it.
 pub(crate) fn is_intermediate(segments: &[Segment], i: usize) -> bool {
-    segments
+    let Some(after_reasoning) = segments[i + 1..]
         .iter()
-        .rposition(|s| matches!(s, Segment::Reasoning(_)))
-        .is_some_and(|last| i < last)
+        .position(|s| matches!(s, Segment::Reasoning(_)))
+        .map(|pos| i + 1 + pos)
+    else {
+        return false;
+    };
+    segments[after_reasoning + 1..]
+        .iter()
+        .any(|s| matches!(s, Segment::Text(_)))
 }

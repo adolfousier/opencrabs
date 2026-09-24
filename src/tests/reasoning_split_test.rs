@@ -161,9 +161,48 @@ fn without_any_reasoning_every_text_stays_visible() {
 }
 
 #[test]
-fn trailing_reasoning_collapses_all_earlier_text() {
-    // A turn that ends mid-thought: no visible answer yet, and none of the
-    // narration should be promoted into one.
-    let segs = vec![text("narration"), reasoning("still thinking")];
+fn terminal_reasoning_after_final_text_keeps_it_visible() {
+    // CLI providers append the whole turn's reasoning as ONE block AFTER the
+    // streamed text (live persistence, #269), so a finished turn's row ends
+    // [answer, reasoning] even though the answer was fully delivered (#1728).
+    // Terminal reasoning is an append artifact, not proof the model was still
+    // thinking: the text before it stays visible.
+    let segs = vec![text("the delivered report"), reasoning("turn artifact")];
+    assert!(
+        !is_intermediate(&segs, 0),
+        "nothing but reasoning follows it, so it is the answer"
+    );
+}
+
+#[test]
+fn cli_reasoning_artifact_does_not_promote_narration_before_the_answer() {
+    // #760 still holds when a CLI artifact trails the region: narration the
+    // model kept thinking past stays collapsed, and only the real answer,
+    // followed by nothing but the artifact, stays visible.
+    let segs = vec![
+        text("restated reasoning that looks like an answer"),
+        reasoning("thought two"),
+        text("the real answer"),
+        reasoning("whole-turn artifact"),
+    ];
     assert!(is_intermediate(&segs, 0));
+    assert!(!is_intermediate(&segs, 2));
+}
+
+#[test]
+fn cli_final_region_split_keeps_the_report_visible() {
+    // End-to-end shape of a CLI row's final region: streamed report text,
+    // then the whole-turn reasoning block appended at EOF. Splitting must
+    // classify the report as the answer, not demote it into hidden details.
+    let persisted = "step 9 done, receipts posted\n\n\
+                     <!-- reasoning -->\nwhole turn thought\n<!-- /reasoning -->";
+    let segs = split_segments(persisted);
+    assert_eq!(
+        segs,
+        vec![
+            text("step 9 done, receipts posted"),
+            reasoning("whole turn thought")
+        ]
+    );
+    assert!(!is_intermediate(&segs, 0));
 }
