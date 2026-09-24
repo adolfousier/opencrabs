@@ -49,6 +49,19 @@ const TRUE_JSON: &str = r#"{"ok":true,"result":true}"#;
 
 #[tokio::test]
 async fn resume_shape_loop_edits_tools_in_place_and_never_reacts() {
+    // CI isolation (#199): `edit_admission`'s top fast-path drops every
+    // Clock/Intermediary edit while the PROCESS-WIDE 429 cooldown
+    // (`rate_limit::GLOBAL_COOLDOWN`) is live, and `gate_now()` is wall-clock
+    // based in test builds, so a sibling test that arms a cooldown holds a
+    // real edit-suppression window for the whole of its body. `cargo test`
+    // runs the suite as parallel threads in ONE process, so without this
+    // guard a cooldown armed elsewhere silently swallows this test's edits —
+    // which is exactly how the open flow stopped being edited in place.
+    // Every other test that touches the gates takes the same guard.
+    let _guard = crate::channels::telegram::governor::test_support::registry_guard().await;
+    crate::channels::telegram::governor::test_support::reset(0);
+    crate::channels::telegram::rate_limit::reset_global_cooldown();
+
     // Runtime evidence: with no subscriber, every warn!/telemetry line in the
     // loop is a no-op in tests. try_init keeps this idempotent.
     let _ = tracing_subscriber::fmt()

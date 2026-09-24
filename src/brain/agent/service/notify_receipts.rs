@@ -64,6 +64,53 @@ pub(crate) fn record_queued(id: Uuid, target: Uuid) {
     }
 }
 
+/// Reserve `id` for `target` BEFORE any delivery happens (#199) — the
+/// idempotency leg of the notify retry. `true` means this call is the FIRST
+/// sight of the id: the caller owns this notify and may deliver it. `false`
+/// means a prior attempt already reserved it, so the notify is delivered or in
+/// flight and only its RESPONSE was lost — the caller must report the prior
+/// outcome instead of delivering a second copy.
+///
+/// The reservation lives only in this process, so a daemon restart clears it:
+/// a retry that spans a restart delivers again rather than deduping against a
+/// dead entry. A poisoned lock FAILS OPEN (`true`) — dropping a notify is
+/// worse than the rare duplicate a lost mutex buys.
+pub(crate) fn reserve(id: Uuid, target: Uuid) -> bool {
+    let receipt = NotifyReceipt {
+        target,
+        state: ReceiptState::Queued,
+        queued_at: chrono::Utc::now(),
+        injected_at: None,
+    };
+    match receipts().lock() {
+        Ok(mut map) => match map.entry(id) {
+            std::collections::hash_map::Entry::Vacant(slot) => {
+                slot.insert(receipt);
+                true
+            }
+            std::collections::hash_map::Entry::Occupied(_) => false,
+        },
+        Err(e) => {
+            tracing::error!(
+                target: "quiet_delivery",
+                "notify receipts poisoned, receipt {id} not reserved: {e}"
+            );
+            true
+        }
+    }
+}
+
+/// Drop a reservation whose notify was NOT delivered (#199). A real verdict
+/// (`no_route`, `refused_in_flight`) is final and is never retried, so its id
+/// must not sit in the store claiming a queued notify — a later
+/// `session/notify-status` poll on it would report a delivery that never
+/// happened.
+pub(crate) fn forget(id: Uuid) {
+    if let Ok(mut map) = receipts().lock() {
+        map.remove(&id);
+    }
+}
+
 /// Stamp every queued receipt for `target` as injected. Called at the
 /// tool-loop drain point, which consumes the session's whole queue — a
 /// queued receipt that is still `Queued` after a drain for its target

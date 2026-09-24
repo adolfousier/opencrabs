@@ -30,6 +30,116 @@ pub const EXIT_NO_ROUTE: i32 = 2;
 pub const EXIT_REFUSED: i32 = 3;
 pub const EXIT_TRANSPORT: i32 = 4;
 
+/// Bounded retry budget for a notify's transport leg (#199).
+///
+/// A `req.send()` that ERRORS is ambiguous — the request may have reached the
+/// daemon and queued the notify (only the RESPONSE was lost), or it may never
+/// have arrived. The CLI cannot tell which, so it re-sends the SAME request,
+/// caller-minted `notify_id` included, and the gateway's reserve-before-deliver
+/// guard turns the ambiguous case into exactly-once delivery: the duplicate
+/// reports the original outcome instead of delivering a second copy.
+///
+/// Only transport-class failures are retried: a `req.send()` Err, or a reply
+/// that carries no JSON-RPC body at all (a gateway mid-reload, a proxy's
+/// 502/504) — neither is an answer. A reply that unpacks into a JSON-RPC error
+/// or result IS an answer, a decision, and re-sending a decision is pointless.
+/// `pub(crate)` so the bounds are assertable in tests.
+pub(crate) const MAX_ATTEMPTS: u32 = 3;
+pub(crate) const RETRY_BACKOFF_MS: [u64; 2] = [500, 1000];
+
+/// One POST to the A2A gateway, retried `MAX_ATTEMPTS` times on transport
+/// errors. Shared by the send and status verbs (one copy, no drift): both dial
+/// the same endpoint with the same client, timeout and auth, and differ only in
+/// the method they call and how they read the outcome back.
+///
+/// `Ok(result)` = the JSON-RPC result object. `Err(msg)` = the caller's journal
+/// detail for a transport failure.
+///
+/// `pub(crate)` so the retry leg is testable in-process (#199) — the
+/// behavioral test drives a real HTTP server through it.
+pub(crate) async fn post_jsonrpc(
+    url: &str,
+    api_key: Option<&str>,
+    body: &serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let mut last_error = format!("cannot reach the A2A gateway at {url}");
+    for attempt in 0..MAX_ATTEMPTS {
+        if attempt > 0 {
+            let backoff = RETRY_BACKOFF_MS[attempt as usize - 1];
+            tracing::debug!(attempt, backoff_ms = backoff, "retrying A2A transport");
+            tokio::time::sleep(std::time::Duration::from_millis(backoff)).await;
+        }
+        let mut req = reqwest::Client::new()
+            .post(url)
+            .timeout(std::time::Duration::from_secs(10))
+            .json(body);
+        if let Some(key) = api_key {
+            req = req.bearer_auth(key);
+        }
+        let resp = match req.send().await {
+            Ok(resp) => resp,
+            Err(e) => {
+                last_error = format!("cannot reach the A2A gateway at {url}: {e}");
+                continue;
+            }
+        };
+        let status = resp.status();
+        let rpc = match resp.json::<crate::a2a::types::JsonRpcResponse>().await {
+            Ok(rpc) => rpc,
+            // A response that carries no JSON-RPC body is NOT a decision: the
+            // usual cause is a gateway mid-reload or a proxy answering 502/504
+            // — transient by nature, and the very case this leg exists for. So
+            // it retries like a transport error instead of failing the notify
+            // on the first attempt. A JSON-RPC `error` below IS a decision and
+            // is never retried.
+            Err(e) => {
+                last_error =
+                    format!("gateway at {url} returned HTTP {status} without a JSON-RPC body: {e}");
+                continue;
+            }
+        };
+        if let Some(err) = rpc.error {
+            return Err(format!("gateway error {}: {}", err.code, err.message));
+        }
+        return match rpc.result {
+            Some(result) => Ok(result),
+            None => Err("gateway response carried neither result nor error".into()),
+        };
+    }
+    Err(last_error)
+}
+
+/// The gateway endpoint and auth for this profile's config — one derivation,
+/// used by both verbs. A bind of `0.0.0.0`/`::` is a LISTENING address, not a
+/// connectable one: same-box callers always dial loopback.
+fn gateway_endpoint(config: &Config) -> (String, Option<String>) {
+    let host = match config.a2a.bind.as_str() {
+        "0.0.0.0" | "::" | "[::]" => "127.0.0.1",
+        other => other,
+    };
+    (
+        format!("http://{}:{}/a2a/v1", host, config.a2a.port),
+        config.a2a.api_key.clone(),
+    )
+}
+
+/// Read `outcome`/`detail` out of a gateway result object, with the shared
+/// fallback wording.
+fn result_outcome(result: &serde_json::Value) -> (String, String) {
+    (
+        result
+            .get("outcome")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("unknown")
+            .to_string(),
+        result
+            .get("detail")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("")
+            .to_string(),
+    )
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn run(
     config: &Config,
@@ -127,16 +237,17 @@ pub(crate) async fn run(
         );
     }
 
-    // A bind of 0.0.0.0/:: is a listening address, not a connectable one —
-    // same-box callers always dial loopback.
-    let host = match config.a2a.bind.as_str() {
-        "0.0.0.0" | "::" | "[::]" => "127.0.0.1",
-        other => other,
-    };
-    let url = format!("http://{}:{}/a2a/v1", host, config.a2a.port);
+    let (url, api_key) = gateway_endpoint(config);
+
+    // #199: the id is minted ONCE per invocation, before the transport leg, so
+    // every retry of THIS notify carries the identical id and the gateway's
+    // reserve-before-deliver guard can recognise it as a retry rather than a
+    // second notify. Minting inside the retry loop would defeat the whole leg.
+    let notify_id = uuid::Uuid::new_v4();
     let mut params = serde_json::json!({
         "session_id": target.to_string(),
         "message": text,
+        "notify_id": notify_id.to_string(),
     });
     // Omit `interrupt` unless explicitly true (fork #158): the CLI flags default
     // `interrupt` to false, but unconditionally sending `interrupt: false`
@@ -175,62 +286,17 @@ pub(crate) async fn run(
         "params": params,
     });
 
-    let mut req = reqwest::Client::new()
-        .post(&url)
-        .timeout(std::time::Duration::from_secs(10))
-        .json(&body);
-    if let Some(key) = config.a2a.api_key.as_deref() {
-        req = req.bearer_auth(key);
-    }
-
-    let (outcome, exit_code, detail) = match req.send().await {
-        Err(e) => (
-            "transport_error".to_string(),
-            EXIT_TRANSPORT,
-            format!("cannot reach the A2A gateway at {url}: {e}"),
-        ),
-        Ok(resp) => {
-            let status = resp.status();
-            match resp.json::<crate::a2a::types::JsonRpcResponse>().await {
-                Err(e) => (
-                    "transport_error".into(),
-                    EXIT_TRANSPORT,
-                    format!("gateway at {url} returned HTTP {status} without a JSON-RPC body: {e}"),
-                ),
-                Ok(rpc) => {
-                    if let Some(err) = rpc.error {
-                        (
-                            "transport_error".into(),
-                            EXIT_TRANSPORT,
-                            format!("gateway error {}: {}", err.code, err.message),
-                        )
-                    } else if let Some(result) = rpc.result {
-                        let outcome = result
-                            .get("outcome")
-                            .and_then(serde_json::Value::as_str)
-                            .unwrap_or("unknown")
-                            .to_string();
-                        let detail = result
-                            .get("detail")
-                            .and_then(serde_json::Value::as_str)
-                            .unwrap_or("")
-                            .to_string();
-                        let code = match outcome.as_str() {
-                            "delivered" | "parked" | "deferred" => EXIT_OK,
-                            "no_route" => EXIT_NO_ROUTE,
-                            "refused_in_flight" => EXIT_REFUSED,
-                            _ => EXIT_TRANSPORT,
-                        };
-                        (outcome, code, detail)
-                    } else {
-                        (
-                            "transport_error".into(),
-                            EXIT_TRANSPORT,
-                            "gateway response carried neither result nor error".into(),
-                        )
-                    }
-                }
-            }
+    let (outcome, exit_code, detail) = match post_jsonrpc(&url, api_key.as_deref(), &body).await {
+        Err(detail) => ("transport_error".to_string(), EXIT_TRANSPORT, detail),
+        Ok(result) => {
+            let (outcome, detail) = result_outcome(&result);
+            let code = match outcome.as_str() {
+                "delivered" | "parked" | "deferred" => EXIT_OK,
+                "no_route" => EXIT_NO_ROUTE,
+                "refused_in_flight" => EXIT_REFUSED,
+                _ => EXIT_TRANSPORT,
+            };
+            (outcome, code, detail)
         }
     };
 
@@ -266,71 +332,23 @@ async fn run_status(
             "the [a2a] gateway is disabled in this profile's config — the daemon cannot be reached",
         );
     }
-    let host = match config.a2a.bind.as_str() {
-        "0.0.0.0" | "::" | "[::]" => "127.0.0.1",
-        other => other,
-    };
-    let url = format!("http://{}:{}/a2a/v1", host, config.a2a.port);
+    let (url, api_key) = gateway_endpoint(config);
     let body = serde_json::json!({
         "jsonrpc": "2.0",
         "id": 1,
         "method": "session/notify-status",
         "params": { "notify_id": notify_id },
     });
-    let mut req = reqwest::Client::new()
-        .post(&url)
-        .timeout(std::time::Duration::from_secs(10))
-        .json(&body);
-    if let Some(key) = config.a2a.api_key.as_deref() {
-        req = req.bearer_auth(key);
-    }
-    let (outcome, exit_code, detail) = match req.send().await {
-        Err(e) => (
-            "transport_error".to_string(),
-            EXIT_TRANSPORT,
-            format!("cannot reach the A2A gateway at {url}: {e}"),
-        ),
-        Ok(resp) => {
-            let status = resp.status();
-            match resp.json::<crate::a2a::types::JsonRpcResponse>().await {
-                Err(e) => (
-                    "transport_error".into(),
-                    EXIT_TRANSPORT,
-                    format!("gateway at {url} returned HTTP {status} without a JSON-RPC body: {e}"),
-                ),
-                Ok(rpc) => {
-                    if let Some(err) = rpc.error {
-                        (
-                            "transport_error".into(),
-                            EXIT_TRANSPORT,
-                            format!("gateway error {}: {}", err.code, err.message),
-                        )
-                    } else if let Some(result) = rpc.result {
-                        let outcome = result
-                            .get("outcome")
-                            .and_then(serde_json::Value::as_str)
-                            .unwrap_or("unknown")
-                            .to_string();
-                        let detail = result
-                            .get("detail")
-                            .and_then(serde_json::Value::as_str)
-                            .unwrap_or("")
-                            .to_string();
-                        let code = match outcome.as_str() {
-                            "injected" | "queued" => EXIT_OK,
-                            "unknown_id" => EXIT_NO_ROUTE,
-                            _ => EXIT_TRANSPORT,
-                        };
-                        (outcome, code, detail)
-                    } else {
-                        (
-                            "transport_error".into(),
-                            EXIT_TRANSPORT,
-                            "gateway response carried neither result nor error".into(),
-                        )
-                    }
-                }
-            }
+    let (outcome, exit_code, detail) = match post_jsonrpc(&url, api_key.as_deref(), &body).await {
+        Err(detail) => ("transport_error".to_string(), EXIT_TRANSPORT, detail),
+        Ok(result) => {
+            let (outcome, detail) = result_outcome(&result);
+            let code = match outcome.as_str() {
+                "injected" | "queued" => EXIT_OK,
+                "unknown_id" => EXIT_NO_ROUTE,
+                _ => EXIT_TRANSPORT,
+            };
+            (outcome, code, detail)
         }
     };
     finish(format, id_raw, &outcome, exit_code, &detail)
