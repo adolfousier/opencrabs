@@ -2034,6 +2034,14 @@ pub(crate) async fn handle_message(
     let reply_context = if let Some(reply) = msg.reply_to_message() {
         let mut full_text = reply.text().or(reply.caption()).unwrap_or("").to_string();
         let quote_text = msg.quote().map(|q| q.text.as_str()).unwrap_or("");
+        // #548: in a forum topic EVERY ordinary message carries the
+        // topic-creation service message as its reply target, so this branch
+        // runs on messages that are not replies at all. Computed once here
+        // because two later legs must respect it — the recovery lookup (which
+        // must not chase the topic root's id) and the honesty marker (which
+        // must not fire for it, or every message in every topic gains a
+        // spurious "could not be retrieved" line).
+        let target_is_topic_root = reply.forum_topic_created().is_some();
         // Identify the replied-to author the same way the current sender is
         // identified ("{name}{handle}, ID {id}") so the agent knows exactly
         // WHO is being replied to — not just a bare first name. Without the
@@ -2074,7 +2082,12 @@ pub(crate) async fn handle_message(
         // platform id too — so gating this on `is_bot` made a user-to-user
         // reply to media permanently unreadable while the same reply to a bot
         // resolved fine. Attempt it for any sender; a miss is just a miss.
-        if full_text.is_empty() {
+        //
+        // Not attempted for the topic root: that id belongs to a service
+        // message, so the lookup can only ever waste a query — and a store hit
+        // on it would inject the topic's own metadata as if it were the
+        // content the user replied to.
+        if full_text.is_empty() && !target_is_topic_root {
             let chat_id_str = msg.chat.id.0.to_string();
             let reply_pmid = reply.id.0.to_string();
             match channel_msg_repo
@@ -2113,14 +2126,8 @@ pub(crate) async fn handle_message(
         // caption) arrives with empty text exactly as a rich bot message does,
         // so this marker must not be bot-only — otherwise a user-to-user reply
         // to media was indistinguishable from not being a reply at all, and the
-        // model could not even tell that one had happened.
-        //
-        // The one target we must NOT mark is the topic-creation service
-        // message: in a forum topic every ordinary message carries it as its
-        // reply target (handler.rs topic_name resolution below relies on this),
-        // so marking it would put a spurious "could not be retrieved" line on
-        // every message in every topic.
-        let target_is_topic_root = reply.forum_topic_created().is_some();
+        // model could not even tell that one had happened. The topic root is
+        // excluded by `target_is_topic_root` (computed above).
         let unrecoverable_reply =
             full_text.is_empty() && !target_is_topic_root && reply.from.is_some();
 
