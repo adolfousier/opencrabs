@@ -412,7 +412,45 @@ pub(crate) async fn cmd_doctor(config: &crate::config::Config, fix: bool) -> Res
         println!("    {marker} {line}");
     }
 
-    // 8. CLI tools in PATH
+    // 8. Config keys (#1725). Reads config.toml through the compiled struct
+    // with serde_ignored — any key the struct discards is reported. A user
+    // who follows the Telegram alert's "Run /doctor" advice is no longer told
+    // everything is fine when the file has stale or typoed keys.
+    println!();
+    println!("  Config:");
+    {
+        let config_path = crate::config::opencrabs_home().join("config.toml");
+        if config_path.exists() {
+            match std::fs::read_to_string(&config_path) {
+                Ok(raw) => match crate::config::sections::ignored_key_paths(&raw) {
+                    Ok(paths) if paths.is_empty() => {
+                        println!("    ✅ All keys recognized");
+                        pass += 1;
+                    }
+                    Ok(paths) => {
+                        println!(
+                            "    ❌ {} unrecognized key(s): {}",
+                            paths.len(),
+                            paths.join(", ")
+                        );
+                        fail += 1;
+                    }
+                    Err(e) => {
+                        println!("    ❌ Could not parse config.toml: {e}");
+                        fail += 1;
+                    }
+                },
+                Err(e) => {
+                    println!("    ❌ Could not read config.toml: {e}");
+                    fail += 1;
+                }
+            }
+        } else {
+            println!("    ⬚  No config.toml found (using defaults)");
+        }
+    }
+
+    // 9. CLI tools in PATH
     println!();
     println!("  CLI tools:");
     for (name, desc) in [

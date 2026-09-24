@@ -239,6 +239,38 @@ impl SlashCommandTool {
             lines.push(format!("  {line}"));
         }
 
+        // Config keys (#1725) — report unrecognized keys so the agent-side
+        // /doctor matches what the Telegram config alert already caught.
+        lines.push(String::new());
+        lines.push("Config:".to_string());
+        {
+            let config_path = crate::config::opencrabs_home().join("config.toml");
+            if config_path.exists() {
+                match std::fs::read_to_string(&config_path) {
+                    Ok(raw) => match crate::config::sections::ignored_key_paths(&raw) {
+                        Ok(paths) if paths.is_empty() => {
+                            lines.push("  ✅ All keys recognized".to_string());
+                        }
+                        Ok(paths) => {
+                            lines.push(format!(
+                                "  ❌ {} unrecognized key(s): {}",
+                                paths.len(),
+                                paths.join(", ")
+                            ));
+                        }
+                        Err(e) => {
+                            lines.push(format!("  ❌ Could not parse config.toml: {e}"));
+                        }
+                    },
+                    Err(e) => {
+                        lines.push(format!("  ❌ Could not read config.toml: {e}"));
+                    }
+                }
+            } else {
+                lines.push("  ⬚ No config.toml found (using defaults)".to_string());
+            }
+        }
+
         // Last known good config
         let has_good = crate::config::opencrabs_home()
             .join("config.last_good.toml")
