@@ -306,6 +306,18 @@ pub struct AgentService {
     pub(super) session_outgoing_text_ring:
         std::sync::RwLock<HashMap<Uuid, super::announcement_loop::OutgoingTextRing>>,
 
+    /// Per-tool health annotations (#1706). Success rates from the feedback
+    /// ledger, surfaced as description suffixes on the tool schemas the model
+    /// sees, so routing decisions use recorded reality instead of stale
+    /// marketing descriptions. The ledger is queried by a fire-and-forget
+    /// task at most once per refresh interval; request-path reads only touch
+    /// this cache (the schema-build path is sync and must not block on the
+    /// DB). First process start serves an empty map for the milliseconds
+    /// until the first refresh lands, which is the correct degradation: no
+    /// data, no warnings.
+    pub(super) tool_health_cache:
+        std::sync::Arc<std::sync::RwLock<super::feedback::ToolHealthCache>>,
+
     /// Service context for database operations
     pub(super) context: ServiceContext,
 
@@ -480,6 +492,9 @@ impl AgentService {
             session_pressure_warned: std::sync::RwLock::new(HashMap::new()),
             last_compaction_elapsed: std::sync::RwLock::new(HashMap::new()),
             session_outgoing_text_ring: std::sync::RwLock::new(HashMap::new()),
+            tool_health_cache: std::sync::Arc::new(std::sync::RwLock::new(
+                super::feedback::ToolHealthCache::default(),
+            )),
             context,
             tool_registry: {
                 let mut registry = ToolRegistry::new();

@@ -235,12 +235,24 @@ impl AgentService {
         &self,
         session_id: uuid::Uuid,
     ) -> Vec<crate::brain::provider::Tool> {
-        if self.lazy_tools {
+        let mut defs = if self.lazy_tools {
             let active = self.tool_registry.active_tools(session_id);
             self.tool_registry.get_tool_definitions_filtered(&active)
         } else {
             self.tool_registry.get_tool_definitions()
+        };
+        // #1706: append recorded-success-rate warnings to the descriptions
+        // the model routes on, so a dead tool's schema can no longer outrank
+        // reality. Cache-backed, never blocks the request path.
+        let health = self.tool_health_annotations();
+        if !health.is_empty() {
+            for def in defs.iter_mut() {
+                if let Some(warning) = health.get(&def.name) {
+                    def.description.push_str(warning);
+                }
+            }
         }
+        defs
     }
 
     /// Stream a request and accumulate into an LLMResponse.

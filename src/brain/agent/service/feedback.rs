@@ -15,7 +15,94 @@
 //! exactly as before.
 
 use super::builder::AgentService;
+use std::collections::HashMap;
+use std::time::{Duration, Instant};
 use uuid::Uuid;
+
+/// Sentinel dimensions recorded by diagnostics (phantom-call detection,
+/// regression probes) that ride the same `tool_`-prefixed event types but
+/// are not real tools. Mirrors `SENTINEL_DIMENSIONS` in `brain/rsi.rs`;
+/// kept as a local copy so the feedback module does not depend on the RSI
+/// subsystem (rsi.rs is feature-gated, this is not).
+const NON_TOOL_DIMENSIONS: &[&str] = &[
+    "phantom_intent_loop",
+    "phantom_tool_call",
+    "self_improve_exact_match_fail",
+    "sticky_fallback_regression",
+    "thinking_persistence_qwen36",
+    "", // empty tool name (internal bookkeeping)
+];
+
+/// Window over which tool health is judged (#1706). Matches the 7-day
+/// window the RSI analysis uses: long enough to span intermittent use,
+/// short enough that a fixed tool stops being flagged a week after it
+/// was repaired.
+pub(super) const TOOL_HEALTH_WINDOW_DAYS: i64 = 7;
+
+/// Below this many recorded attempts a tool is not flagged. One failure in
+/// one session is noise; the issue's evidence tools had 6 and 14 attempts.
+pub(crate) const TOOL_HEALTH_MIN_SAMPLES: i64 = 5;
+
+/// A tool succeeding less than half its recent attempts gets the warning.
+pub(crate) const TOOL_HEALTH_MAX_RATE: f64 = 0.5;
+
+/// How long a health snapshot is served before a refresh is spawned. The
+/// request path must stay sync and DB-free, so staleness up to this bound
+/// is the accepted trade; tool health changes on the scale of turns, not
+/// milliseconds.
+pub(super) const TOOL_HEALTH_REFRESH_INTERVAL: Duration = Duration::from_secs(300);
+
+/// Cached tool-health annotations, keyed by tool name. `fetched_at: None`
+/// means no successful fetch has happened yet (fresh process, or the DB
+/// has been unreachable since start).
+#[derive(Default)]
+pub(crate) struct ToolHealthCache {
+    fetched_at: Option<Instant>,
+    annotations: HashMap<String, String>,
+}
+
+/// Pure builder from ledger stats to annotation strings. A tool is flagged
+/// when it has at least `TOOL_HEALTH_MIN_SAMPLES` attempts in the window
+/// AND its success rate is below `TOOL_HEALTH_MAX_RATE`. Sentinel
+/// dimensions are excluded so diagnostic bookkeeping can never flag a real
+/// tool (nor be flagged itself).
+pub(crate) fn build_tool_health_annotations(
+    stats: &[crate::db::repository::feedback_ledger::DimensionStats],
+) -> HashMap<String, String> {
+    let mut out = HashMap::new();
+    for s in stats {
+        if NON_TOOL_DIMENSIONS.contains(&s.dimension.as_str()) {
+            continue;
+        }
+        if s.total_events < TOOL_HEALTH_MIN_SAMPLES || s.success_rate >= TOOL_HEALTH_MAX_RATE {
+            continue;
+        }
+        out.insert(s.dimension.clone(), health_annotation_text(s));
+    }
+    out
+}
+
+/// The model-facing suffix appended to a flagged tool's description. Terse,
+/// factual, and actionable: state the numbers, name the window, tell the
+/// model what to do about it. Never says "disabled" (nothing is disabled)
+/// and never speculates about WHY the tool fails.
+fn health_annotation_text(s: &crate::db::repository::feedback_ledger::DimensionStats) -> String {
+    let successes = s.successes.max(0);
+    let total = s.total_events.max(0);
+    if successes == 0 {
+        format!(
+            " [TOOL HEALTH WARNING: 0/{total} recent calls succeeded in the last \
+             {TOOL_HEALTH_WINDOW_DAYS} days; this tool appears broken, prefer an \
+             alternative tool if one exists]"
+        )
+    } else {
+        format!(
+            " [TOOL HEALTH WARNING: only {successes}/{total} recent calls succeeded \
+             in the last {TOOL_HEALTH_WINDOW_DAYS} days; verify this tool works \
+             before relying on it]"
+        )
+    }
+}
 
 /// Enrich the metadata snippet for tool failures so RSI / SQL
 /// analyses can categorize them by subsystem. Without this every
@@ -131,6 +218,49 @@ impl AgentService {
     /// `git` / `python` / `docker` prefixes). Pass `None` when the
     /// call site doesn't have a meaningful input (e.g. user-denial
     /// before execution).
+    /// Tool-health annotations for the schema-build path (#1706). Returns
+    /// the cached map, spawning a fire-and-forget ledger refresh when the
+    /// snapshot is older than `TOOL_HEALTH_REFRESH_INTERVAL` (or missing).
+    /// The current call always gets the previous snapshot: the request path
+    /// is sync and must not block on the DB, and health data moving one
+    /// turn late is harmless. DB errors leave the cache untouched and only
+    /// log at debug, same contract as `record_tool_feedback`.
+    pub(super) fn tool_health_annotations(&self) -> HashMap<String, String> {
+        let stale = {
+            let cache = self.tool_health_cache.read().unwrap();
+            cache
+                .fetched_at
+                .map(|t| t.elapsed() >= TOOL_HEALTH_REFRESH_INTERVAL)
+                .unwrap_or(true)
+        };
+        if stale {
+            let pool = self.context.pool();
+            let cache_handle = std::sync::Arc::clone(&self.tool_health_cache);
+            tokio::spawn(async move {
+                let repo = crate::db::repository::FeedbackLedgerRepository::new(pool);
+                let window_since = (chrono::Utc::now()
+                    - chrono::Duration::days(TOOL_HEALTH_WINDOW_DAYS))
+                .format("%Y-%m-%dT%H:%M:%SZ")
+                .to_string();
+                match repo
+                    .stats_by_dimension_since("tool_", Some(&window_since))
+                    .await
+                {
+                    Ok(stats) => {
+                        let annotations = build_tool_health_annotations(&stats);
+                        let mut cache = cache_handle.write().unwrap();
+                        cache.fetched_at = Some(Instant::now());
+                        cache.annotations = annotations;
+                    }
+                    Err(e) => {
+                        tracing::debug!("tool health refresh failed: {e}");
+                    }
+                }
+            });
+        }
+        self.tool_health_cache.read().unwrap().annotations.clone()
+    }
+
     pub(super) fn record_tool_feedback(
         &self,
         session_id: Uuid,

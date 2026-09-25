@@ -989,6 +989,7 @@ pub mod theme_pack_test;
 pub mod thinking_loop_fallback_test;
 pub mod thinking_loop_nudge_test;
 pub mod timezone_test;
+pub mod tool_health_test;
 pub mod tool_search_activation_test;
 pub mod tracing_session_id_test;
 pub mod truncation_test;
