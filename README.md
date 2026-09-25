@@ -565,6 +565,7 @@ This solves the core UX problem in mention-only groups: previously, tagging the 
 | **Multi-line Input** | Alt+Enter / Shift+Enter for newlines; Enter to send |
 | **Abort Processing** | Escape×2 within 3 seconds to cancel any in-progress request |
 | **Clipboard Image Paste** | Copy an image from a browser, screenshot tool, or any app and paste it directly into the input. Raw image bytes are read from the OS clipboard (macOS: osascript, Linux: wl-paste/xclip), written to a temp file, and attached through the existing image pipeline. No need to save to disk first |
+| **File Drag & Drop** | Drag a file onto the TUI and the terminal inserts its path; OpenCrabs unescapes it and takes it from there. Images attach as vision content, text files (`.txt`, `.md`, `.json`, source code) are read from disk and inlined into the message, and PDFs surface a hint pointing the agent at `pdf_to_images` + `analyze_image`. Over SSH the dropped path names a file on the wrong machine; see [Dropping files into a TUI running on a VPS](#dropping-files-into-a-tui-running-on-a-vps) |
 | **Bang Operator (`!cmd`)** | Run any shell command directly from the input — no LLM round-trip. Output is shown as a system message in the working directory context |
 | **Auto-Update** | Checks GitHub for new releases on startup and once every 24h in the background. When a new version is found it silently installs and hot-restarts. Disable via `[agent] auto_update = false` in `config.toml` to be prompted instead |
 
@@ -3745,6 +3746,7 @@ Any tool on your `$PATH` works. If it runs in your terminal, OpenCrabs can use i
 | `Ctrl+K` | Clear current session |
 | `Page Up/Down` | Scroll chat history |
 | `Mouse Scroll` | Scroll chat history |
+| `F12` | Toggle mouse capture: off gives native terminal drag-select and copy (browser-style), on restores in-app click, right-click, and scroll. Works even inside dialogs |
 | `Escape` | Clear input / close overlay |
 
 ### Chat Mode
