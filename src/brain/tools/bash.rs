@@ -295,6 +295,13 @@ impl Tool for BashTool {
          Each call is a fresh shell — `cd` does not persist across calls; chain with \
          `&&` or use `git -C <path> <cmd>` for cross-directory work. Use carefully \
          as this can modify system state. \
+         \n\nSHELL DIALECT: command strings run under a real `bash` when the host has \
+         one (probed once at first use), and fall back to POSIX `sh` — dash on \
+         Debian/Ubuntu — where it does not. Bash-only syntax (`$'…'` ANSI-C quoting, \
+         `[[ ]]`, arrays, `<<<`, `${PIPESTATUS}`, `set -o pipefail`) is therefore the \
+         normal case but is NOT guaranteed: on a host with no bash those constructs \
+         either error or, worse, silently misparse. If a command must work everywhere, \
+         write it in POSIX. The dialect in force is logged once per process. \
          \n\nGITHUB OPERATIONS: use the `gh` CLI via this tool for \
          everything GitHub — issues, PRs, releases, comments, file \
          fetches, repo / code search, workflow runs, checks. When \
