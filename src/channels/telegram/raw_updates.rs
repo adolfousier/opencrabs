@@ -115,6 +115,33 @@ struct RawPollState {
     stop_token: StopToken,
 }
 
+/// What a failed getUpdates response actually means. Telegram answers 409
+/// "Conflict: terminated by other getUpdates request" when ANOTHER instance
+/// is long-polling the same bot token; treating it like any transient error
+/// makes two opencrabs instances fight forever in near-silence, each
+/// receiving a random subset of updates and both replying (#1721).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PollFailure {
+    /// Another poller owns this bot token right now.
+    Conflict,
+    /// Anything else: transient network/API trouble, retry shortly.
+    Other,
+}
+
+/// Classify a non-ok getUpdates response body.
+pub(crate) fn classify_poll_failure(value: &Value) -> PollFailure {
+    let code = value.get("error_code").and_then(|v| v.as_i64());
+    let description = value
+        .get("description")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    if code == Some(409) && description.contains("terminated by other getUpdates request") {
+        PollFailure::Conflict
+    } else {
+        PollFailure::Other
+    }
+}
+
 /// One getUpdates long-poll: stash raw message payloads, queue the typed
 /// updates. Errors are logged and absorbed with a short backoff — the outer
 /// dispatcher retry loop still guards against total failure.
@@ -154,11 +181,27 @@ async fn poll_once(st: &mut RawPollState) {
         }
     };
     if value.get("ok").and_then(|v| v.as_bool()) != Some(true) {
-        tracing::warn!(
-            "Telegram raw poll: getUpdates not ok: {}",
-            crate::utils::truncate_str(&value.to_string(), 200)
-        );
-        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+        match classify_poll_failure(&value) {
+            PollFailure::Conflict => {
+                // #1721: escalate loudly and back off hard. The fight itself
+                // is self-inflicted: another opencrabs (or any bot client)
+                // is long-polling this exact token.
+                tracing::error!(
+                    "Telegram poll CONFLICT (409): another instance is polling this bot token. \
+                     Two pollers on one token each receive a random subset of updates and both \
+                     reply, producing duplicate sessions and answers. Stop the other instance, \
+                     or give this one its own bot token and profile. Backing off 30s."
+                );
+                tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+            }
+            PollFailure::Other => {
+                tracing::warn!(
+                    "Telegram raw poll: getUpdates not ok: {}",
+                    crate::utils::truncate_str(&value.to_string(), 200)
+                );
+                tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+            }
+        }
         return;
     }
     let Some(updates) = value.get("result").and_then(|v| v.as_array()) else {
