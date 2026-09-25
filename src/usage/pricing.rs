@@ -8,11 +8,61 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::collections::HashMap;
-use std::sync::LazyLock;
+use std::collections::HashSet;
+use std::sync::{LazyLock, Mutex};
 
 /// Minimum matched-substring length for a fuzzy family match, so a tiny
 /// coincidental overlap can't price a model against an unrelated family.
 const MIN_MATCH_OVERLAP: usize = 3;
+
+/// Conservative default input rate (USD per 1M tokens) billed when no pricing
+/// entry matches a model (#1717). Sonnet-class mid-tier: an unpriced model's
+/// estimate errs visibly high rather than silently to $0, while a mistaken
+/// default stays within the order of magnitude of a real invoice.
+pub const DEFAULT_UNKNOWN_INPUT_PER_M: f64 = 3.0;
+
+/// Conservative default output rate (USD per 1M tokens) for unpriced models.
+/// See [`DEFAULT_UNKNOWN_INPUT_PER_M`].
+pub const DEFAULT_UNKNOWN_OUTPUT_PER_M: f64 = 15.0;
+
+/// Models already warned about this process lifetime (warn once per model,
+/// not per turn, #1717).
+static WARNED_UNKNOWN_MODELS: LazyLock<Mutex<HashSet<String>>> =
+    LazyLock::new(|| Mutex::new(HashSet::new()));
+
+fn warn_unknown_model_once(model: &str) {
+    let mut warned = WARNED_UNKNOWN_MODELS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if warned.insert(model.to_lowercase()) {
+        tracing::warn!(
+            target: "pricing",
+            model,
+            input_per_m = DEFAULT_UNKNOWN_INPUT_PER_M,
+            output_per_m = DEFAULT_UNKNOWN_OUTPUT_PER_M,
+            "no pricing entry matched: billing a conservative default rate \
+             (marked ~ in /usage). Add the model to usage_pricing.toml for exact pricing"
+        );
+    }
+}
+
+/// How a cost number was produced.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CostOrigin {
+    /// Resolved from a `usage_pricing.toml` entry.
+    Priced,
+    /// No entry matched: [`DEFAULT_UNKNOWN_INPUT_PER_M`] /
+    /// [`DEFAULT_UNKNOWN_OUTPUT_PER_M`] applied (#1717).
+    Estimated,
+}
+
+/// A computed cost plus how it was produced, so callers can tell a table
+/// price from the conservative default (#1717).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CostBreakdown {
+    pub total: f64,
+    pub origin: CostOrigin,
+}
 
 /// Remove version tokens (digit runs with `.`/`_` separators) from a model or
 /// prefix and collapse leftover separators, so a new release inherits the
@@ -77,6 +127,28 @@ impl PricingConfig {
         cache_creation_tokens: u32,
         cache_read_tokens: u32,
     ) -> f64 {
+        self.calculate_cost_with_cache_detailed(
+            model,
+            input_tokens,
+            output_tokens,
+            cache_creation_tokens,
+            cache_read_tokens,
+        )
+        .total
+    }
+
+    /// [`Self::calculate_cost_with_cache`] plus the [`CostOrigin`], so callers
+    /// can flag a turn as estimated instead of table-priced (#1717).
+    /// Unrecognized families bill the conservative default rates (never $0)
+    /// and warn once per model.
+    pub fn calculate_cost_with_cache_detailed(
+        &self,
+        model: &str,
+        input_tokens: u32,
+        output_tokens: u32,
+        cache_creation_tokens: u32,
+        cache_read_tokens: u32,
+    ) -> CostBreakdown {
         match self.resolve_entry(model) {
             Some(entry) => {
                 let input = (input_tokens as f64 / 1_000_000.0) * entry.input_per_m;
@@ -85,20 +157,56 @@ impl PricingConfig {
                 let cache_read_rate = entry.cache_read_per_m.unwrap_or(entry.input_per_m * 0.1);
                 let cache_write = (cache_creation_tokens as f64 / 1_000_000.0) * cache_write_rate;
                 let cache_read = (cache_read_tokens as f64 / 1_000_000.0) * cache_read_rate;
-                input + output + cache_write + cache_read
+                CostBreakdown {
+                    total: input + output + cache_write + cache_read,
+                    origin: CostOrigin::Priced,
+                }
             }
-            None => 0.0,
+            None => {
+                warn_unknown_model_once(model);
+                let input = (input_tokens as f64 / 1_000_000.0) * DEFAULT_UNKNOWN_INPUT_PER_M;
+                let output = (output_tokens as f64 / 1_000_000.0) * DEFAULT_UNKNOWN_OUTPUT_PER_M;
+                let cache_write = (cache_creation_tokens as f64 / 1_000_000.0)
+                    * (DEFAULT_UNKNOWN_INPUT_PER_M * 1.25);
+                let cache_read =
+                    (cache_read_tokens as f64 / 1_000_000.0) * (DEFAULT_UNKNOWN_INPUT_PER_M * 0.1);
+                CostBreakdown {
+                    total: input + output + cache_write + cache_read,
+                    origin: CostOrigin::Estimated,
+                }
+            }
         }
     }
 
-    /// Estimate cost from a combined token count using an 80/20 input/output split.
-    /// Returns None only for an unrecognizable model family (see [`resolve_entry`]).
-    pub fn estimate_cost(&self, model: &str, token_count: i64) -> Option<f64> {
-        self.resolve_entry(model).map(|entry| {
-            let input = (token_count as f64 * 0.80 / 1_000_000.0) * entry.input_per_m;
-            let output = (token_count as f64 * 0.20 / 1_000_000.0) * entry.output_per_m;
-            input + output
-        })
+    /// Estimate cost from a combined token count using an 80/20 input/output
+    /// split. Unrecognizable families bill the conservative default rates
+    /// (#1717) instead of returning nothing; check [`Self::cost_origin`] to
+    /// distinguish estimated from table-priced.
+    pub fn estimate_cost(&self, model: &str, token_count: i64) -> f64 {
+        match self.resolve_entry(model) {
+            Some(entry) => {
+                let input = (token_count as f64 * 0.80 / 1_000_000.0) * entry.input_per_m;
+                let output = (token_count as f64 * 0.20 / 1_000_000.0) * entry.output_per_m;
+                input + output
+            }
+            None => {
+                warn_unknown_model_once(model);
+                (token_count as f64 * 0.80 / 1_000_000.0) * DEFAULT_UNKNOWN_INPUT_PER_M
+                    + (token_count as f64 * 0.20 / 1_000_000.0) * DEFAULT_UNKNOWN_OUTPUT_PER_M
+            }
+        }
+    }
+
+    /// Which origin [`Self::estimate_cost`] /
+    /// [`Self::calculate_cost_with_cache`] would use for `model` right now:
+    /// the cheap check the `/usage` dashboard uses to mark estimated rows
+    /// (#1717).
+    pub fn cost_origin(&self, model: &str) -> CostOrigin {
+        if self.resolve_entry(model).is_some() {
+            CostOrigin::Priced
+        } else {
+            CostOrigin::Estimated
+        }
     }
 
     /// Resolve the best pricing entry for a model, never dropping a recognizable

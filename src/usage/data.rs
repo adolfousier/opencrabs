@@ -679,9 +679,14 @@ async fn fetch_model_entries(pool: &Pool, since: Option<i64>) -> Result<Vec<Mode
             for (full_name, tokens, calls) in variants {
                 let cost = pricing
                     .as_ref()
-                    .and_then(|p| p.estimate_cost(&full_name, tokens))
+                    .map(|p| p.estimate_cost(&full_name, tokens))
                     .unwrap_or(0.0);
-                let estimated = cost == 0.0 && tokens > 0;
+                // #1717: "~" now means the conservative-default estimate from
+                // cost_origin, not the old cost == 0.0 sinkhole: a genuinely
+                // free model is Priced and renders $0.00 unmarked.
+                let estimated = pricing.as_ref().is_some_and(|p| {
+                    p.cost_origin(&full_name) == crate::usage::pricing::CostOrigin::Estimated
+                });
                 if estimated {
                     has_estimate = true;
                 }
@@ -698,7 +703,7 @@ async fn fetch_model_entries(pool: &Pool, since: Option<i64>) -> Result<Vec<Mode
             // Recalculate base cost from totals using normalized base model name
             let base_cost = pricing
                 .as_ref()
-                .and_then(|p| p.estimate_cost(&base, total_tokens))
+                .map(|p| p.estimate_cost(&base, total_tokens))
                 .unwrap_or(0.0);
             let base_estimated = has_estimate;
 

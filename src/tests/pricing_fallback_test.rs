@@ -1,12 +1,16 @@
-//! Pricing fallback ladder (#655).
+//! Pricing fallback ladder (#655) + conservative default floor (#1717).
 //!
 //! A model not in the pricing table must not silently cost $0 when its family
 //! is recognizable. `estimate_cost` / `calculate_cost_with_cache` resolve via a
 //! ladder: exact substring, then a version-agnostic tier match so a new release
 //! inherits the last-known price of its tier, then a family-root flagship
-//! fallback. Only a genuinely unrecognizable family returns None / $0.
+//! fallback. The ladder's bottom rung (#1717) is a conservative default rate
+//! (never $0), reported as [`CostOrigin::Estimated`] and marked ~ in /usage.
 
-use crate::usage::pricing::{PricingConfig, PricingEntry, ProviderBlock};
+use crate::usage::pricing::{
+    CostOrigin, DEFAULT_UNKNOWN_INPUT_PER_M, DEFAULT_UNKNOWN_OUTPUT_PER_M, PricingConfig,
+    PricingEntry, ProviderBlock,
+};
 use std::collections::HashMap;
 
 const TOK: i64 = 1_000_000;
@@ -65,7 +69,7 @@ fn cfg() -> PricingConfig {
 fn exact_match_is_unchanged() {
     let c = cfg();
     // A known model still resolves to its own rate.
-    let cost = c.estimate_cost("qwen3.6-max-preview", TOK).unwrap();
+    let cost = c.estimate_cost("qwen3.6-max-preview", TOK);
     let expected = (TOK as f64 * 0.80 / 1e6) * 1.30 + (TOK as f64 * 0.20 / 1e6) * 7.80;
     assert!((cost - expected).abs() < 1e-9);
 }
@@ -76,7 +80,7 @@ fn new_version_inherits_last_known_tier_not_zero() {
     // qwen3.8-max-preview is absent: fall back to the max-preview tier, not $0.
     let new = c.estimate_cost("qwen3.8-max-preview", TOK);
     assert_eq!(new, c.estimate_cost("qwen-max-preview", TOK));
-    assert!(new.unwrap() > 0.0);
+    assert!(new > 0.0);
     // ...and not the cheaper plus tier.
     assert_ne!(new, c.estimate_cost("qwen-plus", TOK));
 }
@@ -129,7 +133,7 @@ fn new_gpt_version_inherits_gpt_rate() {
         c.estimate_cost("gpt-5.3", TOK),
         c.estimate_cost("gpt-5", TOK)
     );
-    assert!(c.estimate_cost("gpt-5.3", TOK).unwrap() > 0.0);
+    assert!(c.estimate_cost("gpt-5.3", TOK) > 0.0);
 }
 
 #[test]
@@ -138,18 +142,66 @@ fn family_root_fallback_for_a_brand_new_tier() {
     // "qwen-ultra-9" is a tier with no version-agnostic match, but the qwen
     // family flagship (most expensive = max-preview) prices it, never $0.
     let cost = c.estimate_cost("qwen-ultra-9", TOK);
-    assert!(cost.is_some());
+    assert!(cost > 0.0);
     assert_eq!(cost, c.estimate_cost("qwen-max-preview", TOK));
 }
 
+// ── #1717: the bottom rung is a conservative default, never $0 ──────────────
+
 #[test]
-fn unrecognizable_family_still_returns_none_and_zero() {
+fn unrecognizable_family_bills_conservative_default_and_reports_estimated() {
     let c = cfg();
-    assert!(c.estimate_cost("frobnicator-9", TOK).is_none());
-    assert_eq!(
-        c.calculate_cost_with_cache("frobnicator-9", 1_000_000, 1_000_000, 0, 0),
-        0.0
+    let b = c.calculate_cost_with_cache_detailed("totally-unknown-family-xyz", 1_000, 500, 0, 0);
+    assert!(b.total > 0.0, "unpriced model must never bill $0");
+    assert_eq!(b.origin, CostOrigin::Estimated);
+    // Pins the default rates exactly: plain input+output, no cache tokens.
+    let expected = (1_000.0 / 1e6) * DEFAULT_UNKNOWN_INPUT_PER_M
+        + (500.0 / 1e6) * DEFAULT_UNKNOWN_OUTPUT_PER_M;
+    assert!((b.total - expected).abs() < 1e-12);
+
+    // Same contract through the 80/20 estimator.
+    let est = c.estimate_cost("totally-unknown-family-xyz", TOK);
+    let expected = (TOK as f64 * 0.80 / 1e6) * DEFAULT_UNKNOWN_INPUT_PER_M
+        + (TOK as f64 * 0.20 / 1e6) * DEFAULT_UNKNOWN_OUTPUT_PER_M;
+    assert!((est - expected).abs() < 1e-9);
+}
+
+#[test]
+fn unknown_model_cache_tokens_bill_default_cache_rates() {
+    let c = cfg();
+    let b = c.calculate_cost_with_cache_detailed(
+        "totally-unknown-family-xyz",
+        0,
+        0,
+        1_000_000,
+        1_000_000,
     );
+    assert_eq!(b.origin, CostOrigin::Estimated);
+    // Cache write defaults to 1.25x input rate, cache read to 0.1x — the
+    // same shape a priced entry gets, at the default input rate.
+    let expected = DEFAULT_UNKNOWN_INPUT_PER_M * 1.25 + DEFAULT_UNKNOWN_INPUT_PER_M * 0.1;
+    assert!((b.total - expected).abs() < 1e-12);
+}
+
+#[test]
+fn cost_origin_splits_priced_from_estimated() {
+    let c = cfg();
+    assert_eq!(c.cost_origin("claude-sonnet-4"), CostOrigin::Priced);
+    // A tier-ladder / family-flagship fallback is still a table price.
+    assert_eq!(c.cost_origin("qwen3.8-max-preview"), CostOrigin::Priced);
+    assert_eq!(c.cost_origin("qwen-ultra-9"), CostOrigin::Priced);
+    assert_eq!(
+        c.cost_origin("totally-unknown-family-xyz"),
+        CostOrigin::Estimated
+    );
+}
+
+#[test]
+fn known_model_resolves_exactly_and_reports_priced() {
+    let c = cfg();
+    let b = c.calculate_cost_with_cache_detailed("claude-sonnet-4", 1_000_000, 1_000_000, 0, 0);
+    assert_eq!(b.origin, CostOrigin::Priced);
+    assert!((b.total - (3.0 + 15.0)).abs() < 1e-9);
 }
 
 #[test]

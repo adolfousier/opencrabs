@@ -8,7 +8,9 @@
 #   - `prefix` is matched as a case-insensitive substring of the model name
 #   - First match within each provider wins — put specific prefixes before general ones
 #   - Costs are per 1 million tokens (USD)
-#   - Add any provider/model — if it's not here, cost shows as $0.00
+#   - Add any provider/model — if it's not here, cost is estimated at a
+#     conservative default rate and marked ~ in /usage (#1717). Add an entry
+#     for exact pricing.
 
 [providers.anthropic]
 entries = [

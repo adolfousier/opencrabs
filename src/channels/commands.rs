@@ -1162,7 +1162,7 @@ async fn format_usage(
             let cost = if session.total_cost > 0.0 {
                 session.total_cost
             } else if tokens > 0 {
-                estimate_cost(model, tokens).unwrap_or(0.0)
+                estimate_cost(model, tokens)
             } else {
                 0.0
             };
@@ -1350,10 +1350,10 @@ async fn format_usage(
     blocks.join("\n\n")
 }
 
-fn estimate_cost(model: &str, token_count: i64) -> Option<f64> {
+fn estimate_cost(model: &str, token_count: i64) -> f64 {
     crate::usage::pricing::PricingConfig::load()
-        .ok()
-        .and_then(|cfg| cfg.estimate_cost(model, token_count))
+        .map(|cfg| cfg.estimate_cost(model, token_count))
+        .unwrap_or(0.0)
 }
 
 pub(crate) fn format_number(n: i64) -> String {
