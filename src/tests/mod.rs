@@ -993,6 +993,7 @@ pub mod tool_health_test;
 pub mod tool_search_activation_test;
 pub mod tracing_session_id_test;
 pub mod truncation_test;
+pub mod tui_capture_test;
 pub mod tui_compact_notice_test;
 pub mod tui_render_panes_test;
 pub mod tui_tool_stack_test;

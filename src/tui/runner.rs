@@ -3,6 +3,7 @@
 //! Main event loop and terminal setup for the TUI.
 
 use super::app::App;
+use super::capture::CaptureWriter;
 use super::events::EventHandler;
 use super::render;
 use anyhow::Result;
@@ -20,6 +21,11 @@ use std::io;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{LazyLock, Mutex};
+
+/// The concrete terminal type used everywhere in this module. The backend
+/// wraps the real stdout in [`CaptureWriter`] so every byte the render loop
+/// emits is recorded for the #1719 garble post-mortem.
+type TuiTerminal = Terminal<CrosstermBackend<CaptureWriter<io::Stdout>>>;
 
 /// Captures location + filtered backtrace of the last panic so the
 /// render loop can correlate a caught panic with its source. `catch_unwind`
@@ -177,7 +183,7 @@ pub async fn run(mut app: App) -> Result<()> {
         PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES)
     );
 
-    let backend = CrosstermBackend::new(stdout);
+    let backend = CrosstermBackend::new(CaptureWriter::new(stdout));
     let mut terminal = Terminal::new(backend)?;
 
     // Signal that the TUI owns stdout — suppress_stdio() will skip fd 1
@@ -233,7 +239,7 @@ pub async fn run(mut app: App) -> Result<()> {
 
 /// Main event loop
 async fn run_loop(
-    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+    terminal: &mut TuiTerminal,
     app: &mut App,
     sigint_flag: &AtomicBool,
 ) -> Result<()> {
@@ -295,7 +301,7 @@ async fn run_loop(
         // Reborrow terminal/app as fresh mutable references for this
         // iteration so moving them into the catch_unwind closure doesn't
         // consume the outer references permanently.
-        let term_ref: &mut Terminal<CrosstermBackend<io::Stdout>> = &mut *terminal;
+        let term_ref: &mut TuiTerminal = &mut *terminal;
         let app_ref: &mut App = &mut *app;
         // Clear prior location before each draw so we only see what THIS
         // frame hit (panic hook overwrites the slot unconditionally, but
@@ -331,6 +337,11 @@ async fn run_loop(
                     })
                     .unwrap_or_default();
                 tracing::error!("[TUI] render panic caught{}{}: {}", loc, caller, msg);
+                // #1719: what the terminal was actually fed right before the
+                // panic. Escape junk in the tail = unsanitized content was
+                // executed on-screen; clean tail = the panic itself is the
+                // corruption source.
+                super::capture::dump_tail_to_log("before caught render panic");
                 app.error_message = Some(format!("render panic{}{}: {}", loc, caller, msg));
                 // Try to recover the terminal state for the next frame.
                 let _ = terminal.clear();

@@ -524,6 +524,20 @@ static IPV4_RE: Lazy<Regex> =
 static QWEN_TOOL_MARKER_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"<\|tool[\u{2581}_][^|]*\|>").unwrap());
 
+/// ANSI CSI sequences: `ESC [ <params> <final>`, params may include space
+/// (DECSCUSR `\x1b[2 q`). Model or tool text carrying these gets EXECUTED by
+/// the terminal the moment ratatui writes the span buffer (#1719 garble).
+static ANSI_CSI_RE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"\x1b\[[0-9;:?<=>! ]*[A-Za-z@]").unwrap());
+
+/// OSC sequences (window title rewrites etc.), BEL- or ST-terminated.
+static ANSI_OSC_RE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)").unwrap());
+
+/// Remaining two-byte ESC sequences. ECMA-48 final bytes span 0x30-0x7E
+/// (`ESC 7` save, `ESC 8` restore, `ESC c` reset, `ESC M` reverse index...).
+static ANSI_ESC_SINGLE_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"\x1b[0-~]").unwrap());
+
 /// Redact API keys and tokens from free-form text (thinking, responses, etc.).
 ///
 /// Catches:
@@ -892,6 +906,15 @@ pub fn strip_llm_artifacts(text: &str) -> String {
     use crate::brain::agent::service::AgentService;
 
     let mut result = text.to_string();
+    // Raw ANSI escapes FIRST (#1719): a single ESC byte in model/tool output
+    // means whatever follows is terminal grammar, not prose. Structured
+    // styling happens in widgets; inline escapes are always garbage here and
+    // get executed by the terminal when the span buffer is drawn.
+    if result.contains('\x1b') {
+        result = ANSI_CSI_RE.replace_all(&result, "").into_owned();
+        result = ANSI_OSC_RE.replace_all(&result, "").into_owned();
+        result = ANSI_ESC_SINGLE_RE.replace_all(&result, "").into_owned();
+    }
     // Qwen 3 / DeepSeek SentencePiece-style tool-call tokens.
     // The streaming filter in custom_openai_compatible.rs catches
     // these in real time, but a chunk-boundary near a marker can

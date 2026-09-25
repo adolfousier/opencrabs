@@ -484,3 +484,35 @@ fn phantom_strip_passthrough_without_marker() {
     let input = "ordinary content with <!-- some other comment --> intact";
     assert_eq!(strip_phantom_blocked(input), input);
 }
+
+#[test]
+fn strip_llm_artifacts_removes_ansi_csi_sequences() {
+    // #1719: escape sequences in model/tool text get executed by the
+    // terminal when the span buffer is drawn. They must not reach it.
+    let input = "\u{1b}[31mred\u{1b}[0m plain";
+    assert_eq!(strip_llm_artifacts(input), "red plain");
+}
+
+#[test]
+fn strip_llm_artifacts_removes_osc_and_single_char_escapes() {
+    let osc_bel = "\u{1b}]0;evil title\u{7}body";
+    assert_eq!(strip_llm_artifacts(osc_bel), "body");
+    let osc_st = "\u{1b}]2;t\u{1b}\\body";
+    assert_eq!(strip_llm_artifacts(osc_st), "body");
+    let single = "\u{1b}csave\u{1b}8rest";
+    assert_eq!(strip_llm_artifacts(single), "saverest");
+}
+
+#[test]
+fn strip_llm_artifacts_ansi_strip_keeps_plain_text_and_literal_brackets() {
+    // No ESC byte anywhere: fast path, text byte-identical.
+    let plain = "# Heading\n[31m not an escape\n`code [0m here`";
+    assert_eq!(strip_llm_artifacts(plain), plain);
+}
+
+#[test]
+fn strip_llm_artifacts_ansi_strip_survives_marker_then_escape_mix() {
+    // ANSI pass runs before the Qwen marker sweep; both must apply.
+    let input = "\u{1b}[2K<|tool\u{2581}call_begin|>hi";
+    assert_eq!(strip_llm_artifacts(input), "hi");
+}
