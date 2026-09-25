@@ -1662,9 +1662,11 @@ impl AgentService {
         // Local reasoning models (notably Qwen3.6-35B on MLX) periodically
         // emit an EOS token mid-sentence — the response looks complete from
         // a protocol standpoint (proper finish_reason=stop + usage chunk)
-        // but the visible text ends mid-word ("Standard Get I"). One-shot
-        // nudge to continue from where they left off.
-        let mut truncated_mid_sentence_retry_used: bool = false;
+        // but the visible text ends mid-word ("Standard Get I"). Bounded
+        // continuation budget (#1737): the original anchored nudge plus one
+        // anchored retry when a continuation degenerates into echoing the
+        // tail or merely closing dangling markup.
+        let mut truncation_continue_attempts: u32 = 0;
         // Mermaid regen attempts spent (#37): each spend echoes the broken
         // text as an assistant message and injects the renderer's error as
         // a user-role [System: ...] nudge — same shape as the empty-answer
@@ -5904,7 +5906,7 @@ impl AgentService {
                 // truncation by looking at the last non-whitespace character
                 // — if it's not a terminal token (punctuation, close-tag,
                 // table pipe, code fence) we ask the model to continue once.
-                if !truncated_mid_sentence_retry_used
+                if truncation_continue_attempts < super::truncation::MAX_CONTINUATION_ATTEMPTS
                     && iteration > 0
                     && !is_cli_provider
                     && matches!(
@@ -5917,6 +5919,7 @@ impl AgentService {
                         &response.usage,
                         &mut context,
                         session_id,
+                        truncation_continue_attempts + 1,
                         &progress_callback,
                     )
                 {
@@ -5924,7 +5927,7 @@ impl AgentService {
                     // response only, so without this the continuation replaces
                     // the answer instead of extending it (#859).
                     truncation_partial = Some(iteration_text.clone());
-                    truncated_mid_sentence_retry_used = true;
+                    truncation_continue_attempts += 1;
                     // Mark the next iteration so the stream-error path skips
                     // cross-provider fallback for the continuation request.
                     current_iter_is_truncation_continue = true;
@@ -5948,6 +5951,58 @@ impl AgentService {
                 }
 
                 // Mermaid regen nudge (#37): if any fence in the reply fails
+                // ── Degenerate continuation retry (#1737) ─────────────────
+                // The previous iteration WAS a truncation continuation and
+                // its result added nothing: join_continuation classifies it
+                // as Echoed (returned only the tail, or just closed dangling
+                // markup — the 2026-09-25 qwen case answered an unclosed code
+                // span with a single backtick, 774 tokens billed). One
+                // anchored retry, bounded by MAX_CONTINUATION_ATTEMPTS; a
+                // second degenerate result falls through to the normal close
+                // and the post-loop join appends the incomplete marker,
+                // unchanged.
+                if iter_is_truncation_continue
+                    && truncation_continue_attempts < super::truncation::MAX_CONTINUATION_ATTEMPTS
+                    && let Some(partial) = truncation_partial.as_deref()
+                    && matches!(
+                        super::truncation::join_continuation(partial, &iteration_text),
+                        super::truncation::Continuation::Echoed(_)
+                    )
+                {
+                    truncation_continue_attempts += 1;
+                    let attempt = truncation_continue_attempts;
+                    tracing::warn!(
+                        "[TRUNCATION] verdict=retry-again attempt={}/{}: {} char continuation \
+                         added nothing to the {} char partial (echoed tail / closed markup \
+                         only) — retrying with anchored prompt",
+                        attempt,
+                        super::truncation::MAX_CONTINUATION_ATTEMPTS,
+                        iteration_text.trim().chars().count(),
+                        partial.trim_end().chars().count(),
+                    );
+                    if let Some(ref cb) = progress_callback {
+                        cb(
+                            session_id,
+                            ProgressEvent::SelfHealingAlert {
+                                message: "Continuation added nothing — retrying with an \
+                                          anchored prompt"
+                                    .into(),
+                            },
+                        );
+                    }
+                    // The degenerate response itself stays in context (the
+                    // model must see what it already returned and had
+                    // rejected), then the anchored nudge replaces the vague
+                    // original.
+                    context.add_message(Message::assistant(iteration_text.clone()));
+                    context.add_message(Message::user(super::truncation::continuation_nudge(
+                        partial,
+                        Some(&iteration_text),
+                    )));
+                    current_iter_is_truncation_continue = true;
+                    continue;
+                }
+
                 // to parse DETERMINISTICALLY, hand the model the renderer's
                 // own error text before the reply goes final — same shape as
                 // the empty-answer ladder: echo the broken text as an
@@ -7756,8 +7811,8 @@ impl AgentService {
                 }
                 Continuation::Echoed(still_partial) => {
                     // The continuation recovered nothing — the model echoed the
-                    // tail it was asked to continue from. Only one attempt is
-                    // made (`truncated_mid_sentence_retry_used`), so this answer
+                    // tail it was asked to continue from. The attempt budget is
+                    // spent (`truncation_continue_attempts`), so this answer
                     // is as complete as it will get. Delivering it unmarked told
                     // the user a sentence ending at a colon was finished (#956).
                     tracing::warn!(

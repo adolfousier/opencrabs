@@ -1,10 +1,12 @@
-//! Truncated-mid-sentence response detection and one-shot continuation.
+//! Truncated-mid-sentence response detection and bounded continuation.
 //!
 //! Local reasoning models (notably Qwen3.6-35B on MLX) periodically emit
 //! an EOS token mid-sentence — the response looks complete from a
 //! protocol standpoint (proper `finish_reason=stop` + usage chunk) but
 //! the visible text ends mid-word. This module owns the decision to
-//! ask the model to continue once.
+//! ask the model to continue, up to `MAX_CONTINUATION_ATTEMPTS` times
+//! per turn (#1737): the original attempt plus one anchored retry when
+//! a continuation degenerates into echoing the tail.
 //!
 //! Extracted from `tool_loop.rs` (was lines 2800-2866) as part of the
 //! 2026-05-04 Linor-flagged refactor: tool_loop.rs was 4,047 lines.
@@ -46,8 +48,57 @@ pub(crate) fn has_usage_gap(text: &str, usage: &crate::brain::provider::TokenUsa
     chars < visible_tokens * 2
 }
 
-/// Detect a mid-sentence cut-off and inject the one-shot continuation
-/// prompt into the context.
+/// Maximum continuation requests per turn (#1737): the original
+/// mid-sentence retry plus one anchored retry when a continuation
+/// degenerates (echoed the tail / only closed dangling markup).
+pub(crate) const MAX_CONTINUATION_ATTEMPTS: u32 = 2;
+
+/// How many trailing characters of the partial are embedded verbatim in
+/// the continuation nudge as the anchor (#1737).
+pub(crate) const TAIL_ANCHOR_CHARS: usize = 120;
+
+/// Build the continuation nudge for a truncated partial (#1737).
+///
+/// The nudge embeds the verbatim tail of the partial between explicit
+/// delimiter lines. The unanchored predecessor ("continue from exactly
+/// where you left off", #36) left the model to guess where that was from
+/// its own last assistant message — and when that message ended inside
+/// an unclosed code span, the minimal legal "continuation" was the lone
+/// closing backtick: 1 visible char, 774 billed tokens, verdict
+/// unrecovered. The anchor removes the guess; the anti-markup clause
+/// removes the degenerate minimal move. `degenerate` carries the
+/// discarded continuation text on a retry so the model knows its previous
+/// attempt was rejected and why.
+pub(crate) fn continuation_nudge(partial: &str, degenerate: Option<&str>) -> String {
+    let tail: String = partial
+        .trim_end()
+        .chars()
+        .rev()
+        .take(TAIL_ANCHOR_CHARS)
+        .collect::<String>()
+        .chars()
+        .rev()
+        .collect();
+    let head = match degenerate {
+        Some(d) => format!(
+            "[System: Your previous continuation attempt returned only {d:?} — it added \
+             no content, so it was discarded. "
+        ),
+        None => "[System: Your previous reply was cut off mid-sentence. ".to_string(),
+    };
+    format!(
+        "{head}Your reply so far ends with these exact characters:\n---\n{tail}\n---\n\
+         Continue from that exact point onward: the very next characters must be NEW \
+         content that carries the answer forward. Do NOT repeat any earlier text, do \
+         NOT restart the answer, do NOT re-plan. If the tail ends inside unclosed \
+         markup (a code span, fence, bracket or quote), closing it alone does NOT \
+         count as continuing — carry the content forward and close the markup only \
+         when the content is actually done. Just keep writing.]"
+    )
+}
+
+/// Detect a mid-sentence cut-off and inject the continuation prompt
+/// into the context.
 ///
 /// Returns `true` when the text was detected as truncated AND the
 /// caller should `continue;` to the next loop iteration. Returns
@@ -67,7 +118,7 @@ pub(crate) fn has_usage_gap(text: &str, usage: &crate::brain::provider::TokenUsa
 ///     message instructing the model to continue from where it left off
 ///     without restarting or re-planning
 ///
-/// Caller is responsible for the gating preconditions (one-shot guard,
+/// Caller is responsible for the gating preconditions (attempt budget,
 /// CLI-provider exclusion, `iteration > 0`, `StopReason::EndTurn`)
 /// because those depend on the surrounding loop state and would just
 /// be more parameters here without making the function clearer.
@@ -77,6 +128,7 @@ pub(super) fn try_emit_truncation_continue(
     usage: &crate::brain::provider::TokenUsage,
     context: &mut AgentContext,
     session_id: Uuid,
+    attempt: u32,
     progress_callback: &Option<ProgressCallback>,
 ) -> bool {
     let structural = looks_truncated_mid_sentence(iteration_text.trim_end());
@@ -106,13 +158,15 @@ pub(super) fn try_emit_truncation_continue(
         .rev()
         .collect();
     tracing::warn!(
-        "[TRUNCATION] verdict=retry signals=structural{} tail={:?} text_chars={}, usage_output={}, usage_reasoning={}, usage_gap={} — asking model to continue once",
+        "[TRUNCATION] verdict=retry signals=structural{} tail={:?} text_chars={}, usage_output={}, usage_reasoning={}, usage_gap={}, attempt={}/{} — asking model to continue",
         if usage_gap { "+usage_gap" } else { "" },
         preview,
         iteration_text.trim_end().chars().count(),
         usage.output_tokens,
         usage.reasoning_tokens,
-        usage_gap
+        usage_gap,
+        attempt,
+        MAX_CONTINUATION_ATTEMPTS
     );
 
     if let Some(cb) = progress_callback {
@@ -138,13 +192,7 @@ pub(super) fn try_emit_truncation_continue(
     }
 
     context.add_message(Message::assistant(iteration_text.to_string()));
-    context.add_message(Message::user(
-        "[System: Your previous reply was cut off mid-sentence (no terminal \
-         punctuation). Continue from exactly where you left off — do NOT repeat \
-         what you already wrote, do NOT restart the answer, do NOT re-plan. \
-         Just keep writing.]"
-            .to_string(),
-    ));
+    context.add_message(Message::user(continuation_nudge(iteration_text, None)));
 
     true
 }
