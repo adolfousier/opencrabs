@@ -18,7 +18,8 @@
 use crate::brain::agent::context::{AgentContext, CompactionScope};
 use crate::brain::agent::service::AgentService;
 use crate::brain::agent::service::compaction::{
-    BudgetPhase, PendingState, gate_announces_compaction, must_wait_for_compaction,
+    BudgetPhase, PendingState, gate_announces_compaction, gate_warn_message,
+    must_wait_for_compaction,
 };
 use crate::brain::provider::{ContentBlock, Message, Role};
 
@@ -327,11 +328,40 @@ fn the_announcement_sits_below_the_guard() {
     let guard = SRC
         .find("if !gate_announces_compaction(")
         .expect("the gate guard");
-    let announce = SRC
-        .find("\"Context at {:.0}% (>65%)")
-        .expect("the gate WARN");
+    // The WARN's format literal lives inside gate_warn_message, so pin the
+    // emit site: the call must sit below the guard for the pin to hold.
+    let announce = SRC[guard..]
+        .find("tracing::warn!(\"{}\", gate_warn_message(")
+        .expect("the gate WARN")
+        + guard;
     assert!(
         guard < announce,
         "the guard at {guard} must return before the announcement at {announce}"
     );
+}
+
+/// The WARN's displayed value must stay consistent with the gate that fired
+/// it. The integer format turned a 65.4% fill into "Context at 65% (>65%)",
+/// a sentence contradicting its own claim (#1733). The message now shows one
+/// decimal and states the threshold as a label, so the shown digits can never
+/// sit below the trigger band and no inequality is left to break.
+#[test]
+fn the_gate_warn_never_displays_below_the_trigger_band() {
+    for pct in [65.01, 65.04, 65.05, 65.4, 65.95, 89.99, 97.3] {
+        let msg = gate_warn_message(pct);
+        let shown: f64 = msg
+            .split("Context at ")
+            .nth(1)
+            .and_then(|rest| rest.split('%').next())
+            .and_then(|digits| digits.parse().ok())
+            .expect("the message must carry a parseable fill percentage");
+        assert!(
+            shown >= 65.0,
+            "{pct}% fired the gate but the message displays {shown}%: {msg}"
+        );
+        assert!(
+            msg.contains("(threshold 65%)"),
+            "the trigger must be a label, not an inequality against the shown value: {msg}"
+        );
+    }
 }

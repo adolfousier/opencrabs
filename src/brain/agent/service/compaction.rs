@@ -141,6 +141,17 @@ pub(crate) fn gate_announces_compaction(state: &PendingState) -> bool {
     matches!(state, PendingState::Empty | PendingState::Failed)
 }
 
+/// The body of the gate WARN, extracted so tests can assert what actually
+/// prints. The value is shown with one decimal and the trigger is stated as a
+/// label: the integer format once turned a 65.4% fill into
+/// "Context at 65% (>65%)", a sentence contradicting its own claim (#1733).
+pub(crate) fn gate_warn_message(usage_pct: f64) -> String {
+    format!(
+        "Context at {:.1}% (threshold 65%) — triggering LLM compaction",
+        usage_pct
+    )
+}
+
 /// Fill level at which a turn stops running ahead of the summariser and waits
 /// for it. Above this there is not enough headroom left to be confident the
 /// next provider call fits, and blocking here is exactly what the code did
@@ -311,10 +322,7 @@ impl AgentService {
             return truncated.then_some(CompactionOutcome::Truncated);
         }
 
-        tracing::warn!(
-            "Context at {:.0}% (>65%) — triggering LLM compaction",
-            usage_pct
-        );
+        tracing::warn!("{}", gate_warn_message(usage_pct));
         self.record_provider_feedback(
             session_id,
             "context_compaction",
