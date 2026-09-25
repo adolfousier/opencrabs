@@ -427,6 +427,7 @@ pub mod shutdown_recovery_row_test;
 #[cfg(feature = "telegram")]
 pub mod start_gate_allowed_user_test;
 pub mod stored_key_test;
+pub mod stream_final_delta_guard_test;
 pub mod systemd_unit_test;
 pub mod tasks_list_test;
 #[cfg(feature = "telegram")]

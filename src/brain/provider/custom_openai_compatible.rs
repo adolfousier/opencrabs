@@ -4067,6 +4067,25 @@ impl Provider for OpenAIProvider {
 
                             if let Some(json_str) = line.strip_prefix("data: ") {
                                 if json_str == "[DONE]" {
+                                    // Single-final-delta guard (#1738): the
+                                    // inline-usage and usage-only-chunk paths set
+                                    // reported_usage when they emit the final
+                                    // MessageDelta+MessageStop pair. Reaching [DONE]
+                                    // after one of those means the stream was already
+                                    // finalized — pushing a second pair re-rendered
+                                    // the same text block twice in the TUI (2026-09-25
+                                    // zai: 604-char block duplicated) and carried a
+                                    // bogus EndTurn default over the real stop reason.
+                                    // Tools are not at risk: any terminal finish_reason
+                                    // flushes st.tool_calls before a usage path can set
+                                    // the flag, so the fallback flush below would be
+                                    // empty by construction in this case.
+                                    if st.reported_usage {
+                                        tracing::info!(
+                                            "[STREAM_RECONCILE] final delta already emitted (reported_usage=true) — suppressing duplicate [DONE] finalize (#1738)"
+                                        );
+                                        continue;
+                                    }
                                     // Close the text block first, if one is still open,
                                     // so helpers.rs can finalize it before tool events.
                                     if st.emitted_content_start && !st.emitted_content_stop {
@@ -4129,14 +4148,12 @@ impl Provider for OpenAIProvider {
                                         reconc_tail
                                     );
                                     // The estimate is a last resort, not a second
-                                    // opinion. Once the provider has reported real
-                                    // counts this delta exists only to carry
-                                    // stop_reason, so it reports zero tokens (#1636).
-                                    let fallback_input = if st.reported_usage {
-                                        0
-                                    } else {
-                                        total_input_tokens as u32
-                                    };
+                                    // opinion: this arm only runs when the
+                                    // provider never reported usage — the #1738
+                                    // guard above suppresses the whole finalize
+                                    // otherwise, so the local estimate is all we
+                                    // have (#36, #1636).
+                                    let fallback_input = total_input_tokens as u32;
                                     tracing::info!(
                                         "[STREAM_USAGE] Final usage (fallback on DONE): input={}, output=0, stop_reason={:?}, provider_already_reported={}",
                                         fallback_input, stop_reason, st.reported_usage
