@@ -128,14 +128,25 @@ pub(crate) fn register_config_dependent_tools(
 
 /// Start the headless daemon.
 ///
-/// Multi-profile: this one process covers EVERY profile's scheduled jobs. The
-/// active profile is run in full by `cmd_chat_inner` below (which also spawns
-/// its own cron scheduler); every OTHER profile under `~/.opencrabs/profiles/`
-/// gets a lightweight cron-only scheduler. No need to run N separate daemons.
+/// Multi-profile: a DEFAULT launch (no `-p`) covers EVERY profile's scheduled
+/// jobs. The active profile is run in full by `cmd_chat_inner` below (which
+/// also spawns its own cron scheduler); every OTHER profile under
+/// `~/.opencrabs/profiles/` gets a lightweight cron-only scheduler. No need to
+/// run N separate daemons.
+///
+/// #1723: an explicitly selected profile (`-p <name>`) scopes this daemon to
+/// THAT profile only: it runs `cmd_chat_inner` for its profile and adopts
+/// nothing. Cross-profile adoption is a default-launch behavior: a
+/// `-p hermes` daemon opening every other profile's DB, running their
+/// migrations, and racing the daemon that already owns them is exactly the
+/// multi-instance mess the scheduler locks exist to prevent.
 pub(crate) async fn cmd_daemon(config: &crate::config::Config) -> Result<()> {
-    let active = crate::config::profile::active_profile()
-        .unwrap_or("default")
-        .to_string();
+    let selected = crate::config::profile::active_profile();
+    let active = selected.unwrap_or("default").to_string();
+    // #1723: -p flows through ACTIVE_PROFILE; OPENCRABS_PROFILE reaches
+    // resolve_profile_home without it, so both count as explicit selection.
+    let explicitly_scoped = selected.is_some()
+        || std::env::var("OPENCRABS_PROFILE").is_ok_and(|v| !v.trim().is_empty());
 
     // Pre-acquire active profile's scheduler lock first (#194).
     // This ensures this daemon owns its own scheduler before attempting to adopt
@@ -143,31 +154,51 @@ pub(crate) async fn cmd_daemon(config: &crate::config::Config) -> Result<()> {
     // The guard is passed into cmd_chat_inner so it is not re-acquired (flock self-denial).
     let active_lock = crate::config::profile::acquire_scheduler_lock(&active);
 
-    match crate::config::profile::list_profiles() {
-        Ok(entries) => {
-            for entry in entries {
-                // The active profile is already covered by cmd_chat_inner's
-                // scheduler. Skipping it here avoids running its jobs twice.
-                if entry.name == active {
-                    continue;
+    if explicitly_scoped {
+        tracing::info!(
+            "Daemon scoped to profile '{active}' (-p given): not adopting other profiles' schedulers"
+        );
+    } else {
+        match crate::config::profile::list_profiles() {
+            Ok(entries) => {
+                let instance_locks = crate::config::profile::base_opencrabs_dir()
+                    .join("locks")
+                    .join("instance");
+                for name in profiles_to_adopt(entries, &active, &instance_locks, false) {
+                    tokio::spawn(spawn_cron_scheduler_for_profile(name));
                 }
-                // #194: Don't adopt a profile's scheduler if that profile already has a
-                // live daemon or TUI instance running.
-                if crate::config::profile::instance_running(&entry.name) {
-                    tracing::info!(
-                        "Multi-profile daemon: '{}' has a live instance — not adopting its scheduler",
-                        entry.name
-                    );
-                    continue;
-                }
-                tokio::spawn(spawn_cron_scheduler_for_profile(entry.name));
             }
-        }
-        Err(e) => {
-            tracing::warn!("daemon: list_profiles failed, running active profile only: {e}");
+            Err(e) => {
+                tracing::warn!("daemon: list_profiles failed, running active profile only: {e}");
+            }
         }
     }
     cmd_chat_inner(config, None, false, true, active_lock).await
+}
+
+/// #1723: adoption candidates from a profile listing, in listing order.
+///
+/// `explicitly_scoped` (a `-p <name>` launch) short-circuits to empty: a
+/// scoped daemon covers ONLY its own profile. Unscoped adoption skips the
+/// active profile (`cmd_chat_inner` already runs its scheduler) and any
+/// profile with a live instance (#194).
+pub(crate) fn profiles_to_adopt(
+    entries: Vec<crate::config::profile::ProfileEntry>,
+    active: &str,
+    instance_locks: &std::path::Path,
+    explicitly_scoped: bool,
+) -> Vec<String> {
+    if explicitly_scoped {
+        return Vec::new();
+    }
+    entries
+        .into_iter()
+        .filter(|e| {
+            e.name != active
+                && !crate::config::profile::instance_running_in(instance_locks, &e.name)
+        })
+        .map(|e| e.name)
+        .collect()
 }
 
 /// Spawn a cron-only scheduler for one profile, pinned to that profile's home.
@@ -177,7 +208,7 @@ pub(crate) async fn cmd_daemon(config: &crate::config::Config) -> Result<()> {
 /// loop there, so the scheduler's own setup (cron session, config reads) and
 /// every job it runs resolve to the right profile home. Logs and returns on any
 /// setup failure so one half-initialized profile never takes the daemon down.
-async fn spawn_cron_scheduler_for_profile(profile_name: String) {
+pub(crate) async fn spawn_cron_scheduler_for_profile(profile_name: String) {
     use crate::channels::ChannelFactory;
     use crate::db::{CronJobRepository, CronJobRunRepository, Database};
     use crate::services::ServiceContext;
@@ -185,9 +216,6 @@ async fn spawn_cron_scheduler_for_profile(profile_name: String) {
     let name = profile_name.clone();
     let result: anyhow::Result<()> =
         crate::config::profile::with_profile_home_async(Some(&profile_name), async move {
-            // Non-active profiles never ran the onboarding wizard — ensure
-            // they still carry a brain before their cron jobs fire (#1382).
-            crate::config::profile::ensure_brain_seeded();
             // One scheduler per profile machine-wide (#444). If another process
             // (a `-p <name>` daemon, or the TUI running this profile) already
             // owns this profile's scheduler, skip — polling the same cron_jobs
@@ -200,6 +228,13 @@ async fn spawn_cron_scheduler_for_profile(profile_name: String) {
                 );
                 return Ok(());
             };
+            // #1723: seeding happens AFTER the lock is won. A profile whose
+            // scheduler is owned elsewhere gets its brain seeded by that
+            // owner (this function, in the winning process); a losing
+            // adopter must not write another profile's home behind its back.
+            // Non-active profiles never ran the onboarding wizard, so ensure
+            // they still carry a brain before their cron jobs fire (#1382).
+            crate::config::profile::ensure_brain_seeded();
             // Each profile has its own config.toml, so it needs its own
             // migration pass — `load()` no longer does this implicitly (#912).
             crate::config::Config::migrate_config_files();
