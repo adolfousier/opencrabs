@@ -238,10 +238,20 @@ fn cache_pricing_no_cache_matches_regular() {
 }
 
 #[test]
-fn cache_pricing_unknown_model_returns_zero() {
+fn cache_pricing_unknown_model_bills_conservative_default() {
     let cfg = test_pricing_config();
+    // #1717: unknown-price models are no longer silently $0.00. They bill
+    // the conservative default rate and the dashboard renders them with the
+    // ~ estimated marker. A genuinely-free model is the only $0.00 path.
     let cost = cfg.calculate_cost_with_cache("unknown-model", 1_000_000, 1_000_000, 50_000, 10_000);
-    assert_eq!(cost, 0.0);
+    let expected = (1_000_000.0 / 1e6 * 3.0)    // default input rate
+        + (1_000_000.0 / 1e6 * 15.0)            // default output rate
+        + (50_000.0 / 1e6 * (3.0 * 1.25))       // cache write at 1.25x input
+        + (10_000.0 / 1e6 * (3.0 * 0.1)); // cache read at 0.1x input
+    assert!(
+        (cost - expected).abs() < 0.0001,
+        "unknown model must bill the conservative default, got {cost} want {expected}"
+    );
 }
 
 #[test]
