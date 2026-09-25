@@ -824,6 +824,10 @@ pub(crate) async fn handle_message(
         && voice_config.stt_enabled
         && let Some(audio_bytes) = download_audio(&msg, &client, &media_ctx).await
     {
+        // Durable copy of the voice note into the channel-attachment store
+        // (#1729), annotated so the agent can re-read the raw audio later.
+        let stored_audio =
+            crate::channels::persist_channel_attachment("whatsapp", "voice-note.ogg", &audio_bytes);
         match crate::channels::voice::transcribe(audio_bytes, &voice_config).await {
             Ok(transcript) => {
                 tracing::info!(
@@ -837,6 +841,9 @@ pub(crate) async fn handle_message(
                 content = text.unwrap_or_default();
             }
         }
+        if let Some(p) = stored_audio {
+            content.push_str(&format!("\n\n[file: {}]", p.display()));
+        }
     } else {
         content = text.unwrap_or_default();
     }
@@ -847,6 +854,11 @@ pub(crate) async fn handle_message(
         && let Some((img_bytes, img_mime, img_fname)) =
             download_image(&msg, &client, &media_ctx).await
     {
+        // Durable copy into the channel-attachment store (#1729) before the
+        // funnel consumes the bytes; the path is annotated onto the final
+        // content below so the agent can re-open the original image.
+        let stored_img =
+            crate::channels::persist_channel_attachment("whatsapp", &img_fname, &img_bytes);
         use crate::utils::{inject_file_content, process_file_with_vision};
         let cfg = crate::config::Config::load();
         if let Ok(cfg) = cfg {
@@ -885,6 +897,12 @@ pub(crate) async fn handle_message(
                 {
                     content = format!("{}\n\n{}", caption.trim(), content);
                 }
+
+                // Annotate the durable copy's path (#1729) so the agent can
+                // re-open the original image bytes later.
+                if let Some(p) = stored_img {
+                    content.push_str(&format!("\n\n[file: {}]", p.display()));
+                }
             }
         }
     }
@@ -895,6 +913,8 @@ pub(crate) async fn handle_message(
         && !has_aud
         && let Some((bytes, mime, fname)) = download_sticker(&msg, &client, &media_ctx).await
     {
+        // Durable copy into the channel-attachment store (#1729).
+        let stored = crate::channels::persist_channel_attachment("whatsapp", &fname, &bytes);
         use crate::utils::{inject_file_content, process_file_with_vision};
         if let Ok(cfg) = crate::config::Config::load() {
             let fc = process_file_with_vision(&bytes, &mime, &fname, &cfg);
@@ -903,6 +923,9 @@ pub(crate) async fn handle_message(
                 content.push_str(&format!("\n\n{injected}"));
             }
         }
+        if let Some(p) = stored {
+            content.push_str(&format!("\n\n[file: {}]", p.display()));
+        }
     }
 
     // Video: stored and analysed through the same funnel as an image (#1410).
@@ -910,6 +933,8 @@ pub(crate) async fn handle_message(
         && !has_aud
         && let Some((bytes, mime, fname)) = download_video(&msg, &client, &media_ctx).await
     {
+        // Durable copy into the channel-attachment store (#1729).
+        let stored = crate::channels::persist_channel_attachment("whatsapp", &fname, &bytes);
         use crate::utils::{inject_file_content, process_file_with_vision};
         if let Ok(cfg) = crate::config::Config::load() {
             let fc = process_file_with_vision(&bytes, &mime, &fname, &cfg);
@@ -917,6 +942,9 @@ pub(crate) async fn handle_message(
             if !injected.is_empty() {
                 content.push_str(&format!("\n\n{injected}"));
             }
+        }
+        if let Some(p) = stored {
+            content.push_str(&format!("\n\n[file: {}]", p.display()));
         }
     }
 
@@ -947,6 +975,8 @@ pub(crate) async fn handle_message(
         && !has_img
         && let Some((bytes, mime, fname)) = download_document(&msg, &client, &media_ctx).await
     {
+        // Durable copy into the channel-attachment store (#1729).
+        let stored = crate::channels::persist_channel_attachment("whatsapp", &fname, &bytes);
         use crate::utils::{inject_file_content, process_file_with_vision};
         let cfg = crate::config::Config::load();
         if let Ok(cfg) = cfg {
@@ -955,6 +985,9 @@ pub(crate) async fn handle_message(
             if !injected.is_empty() {
                 content.push_str(&format!("\n\n{injected}"));
             }
+        }
+        if let Some(p) = stored {
+            content.push_str(&format!("\n\n[file: {}]", p.display()));
         }
     }
 

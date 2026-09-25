@@ -111,15 +111,12 @@ pub(crate) fn attachment_tmp_name(
     format!("{stem}-{chat_id}-{ts}.{ext}")
 }
 
-/// Root of the durable channel-attachment store, profile-resolved via
-/// `opencrabs_home()` so a named-profile instance stores under its OWN home
-/// (`~/.opencrabs/profiles/<name>/channel_attachments/`) rather than the shared
-/// default root — matching every other runtime path (config, logs, plans) and
-/// what `push_known_paths` tells the agent (#681). Single source of truth: the
-/// writer, the migration, and the prompt must all resolve the store the same
-/// way, so they all route through here.
+/// Delegate to the canonical shared store root (`crate::channels`), promoted
+/// there in #1729 so every channel resolves the same documented dir. Kept as a
+/// wrapper because telegram::media's migration and writer call sites bind it
+/// locally.
 pub(crate) fn channel_attachments_dir() -> std::path::PathBuf {
-    crate::config::opencrabs_home().join("channel_attachments")
+    crate::channels::channel_attachments_dir()
 }
 
 /// One-time cleanup: sweep files sitting flat in `channel_attachments/` into
