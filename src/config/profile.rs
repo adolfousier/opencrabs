@@ -1143,10 +1143,64 @@ pub fn preempt_other_profile_instances() -> Vec<PreemptedInstance> {
 /// finds in `lock_dir`, so it must NEVER run against the real
 /// `~/.opencrabs/locks/` from a test (doing so kills the user's running
 /// instances). Tests call this with a TempDir and `stop_services = false`.
+/// Parse `launchctl list` output into the opencrabs-managed labels.
+///
+/// `launchctl list` prints `PID\tStatus\tLabel` per line (tab-separated),
+/// with a literal header line and `-` in the PID column for services that
+/// are loaded but not currently running. We only care about labels under
+/// our prefix, since bootouting anything else would be hostile.
+pub(crate) fn parse_launchctl_labels(output: &str) -> Vec<String> {
+    const PREFIX: &str = "com.opencrabs.";
+    let mut labels = Vec::new();
+    for line in output.lines() {
+        let Some(label) = line.rsplit('\t').next() else {
+            continue;
+        };
+        if label.starts_with(PREFIX) && !labels.iter().any(|l: &String| l == label) {
+            labels.push(label.to_string());
+        }
+    }
+    labels
+}
+
 pub(crate) fn preempt_instances_in(lock_dir: &Path, stop_services: bool) -> Vec<PreemptedInstance> {
     let owners = foreign_lock_owners(lock_dir);
     if owners.is_empty() {
         return Vec::new();
+    }
+
+    // Stop launchd-managed agents first on macOS, same reason as systemd
+    // below: both LaunchAgent templates we ship set KeepAlive=true, so a
+    // bare SIGTERM gets the instance resurrected immediately. `bootout`
+    // removes the service from the gui domain, which stops it AND cancels
+    // the keep-alive. `launchctl list` covers every profile's label
+    // (`com.opencrabs.daemon`, `com.opencrabs.daemon.<profile>`,
+    // `com.opencrabs.agent`) without hardcoding them. Best-effort, matching
+    // the systemd block: harmless (non-zero exit) when launchd has no such
+    // service. Skipped under tests (`stop_services = false`).
+    #[cfg(target_os = "macos")]
+    if stop_services {
+        match std::process::Command::new("launchctl").arg("list").output() {
+            Ok(out) => {
+                let labels = parse_launchctl_labels(&String::from_utf8_lossy(&out.stdout));
+                let uid = unsafe { libc::getuid() };
+                for label in labels {
+                    tracing::info!(label = %label, "preempt: bootouting launchd agent");
+                    let res = std::process::Command::new("launchctl")
+                        .arg("bootout")
+                        .arg(format!("gui/{uid}/{label}"))
+                        .stdout(std::process::Stdio::null())
+                        .stderr(std::process::Stdio::null())
+                        .status();
+                    if let Err(e) = res {
+                        tracing::debug!(label = %label, error = %e, "preempt: launchctl bootout spawn failed");
+                    }
+                }
+            }
+            Err(e) => {
+                tracing::debug!(error = %e, "preempt: launchctl list spawn failed");
+            }
+        }
     }
 
     // Stop a systemd-managed daemon first, so its unit's Restart policy

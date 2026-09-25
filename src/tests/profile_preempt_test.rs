@@ -12,7 +12,9 @@
 
 #![cfg(unix)]
 
-use crate::config::profile::{active_profile, is_pid_alive, preempt_instances_in};
+use crate::config::profile::{
+    active_profile, is_pid_alive, parse_launchctl_labels, preempt_instances_in,
+};
 use std::fs;
 use tempfile::TempDir;
 
@@ -106,5 +108,60 @@ fn preempts_and_kills_a_live_instance() {
     assert!(
         killed,
         "the background process must be gone after preemption"
+    );
+}
+
+#[test]
+fn parses_opencrabs_labels_from_launchctl_list() {
+    // Realistic `launchctl list` shape: header line, foreign services,
+    // our daemon + agent labels, `-` PID for loaded-but-not-running.
+    let out = "PID\tStatus\tLabel\n\
+               812\t0\tcom.apple.Finder\n\
+               4043b\t0\tcom.opencrabs.daemon\n\
+               -\t1\tcom.opencrabs.daemon.hermes\n\
+               221\t0\tcom.opencrabs.agent\n\
+               9\t0\torg.example.thing\n";
+    let labels = parse_launchctl_labels(out);
+    assert_eq!(
+        labels,
+        vec![
+            "com.opencrabs.daemon".to_string(),
+            "com.opencrabs.daemon.hermes".to_string(),
+            "com.opencrabs.agent".to_string(),
+        ],
+        "exactly our labels, in output order, foreign services excluded"
+    );
+}
+
+#[test]
+fn launchctl_parse_dedupes_and_survives_empty_input() {
+    let dupes = "PID\tStatus\tLabel\n\
+                 1\t0\tcom.opencrabs.daemon\n\
+                 2\t0\tcom.opencrabs.daemon\n";
+    assert_eq!(
+        parse_launchctl_labels(dupes),
+        vec!["com.opencrabs.daemon".to_string()],
+        "duplicate rows (two profiles' list snapshots) collapse to one bootout"
+    );
+    assert!(
+        parse_launchctl_labels("").is_empty(),
+        "empty launchctl output parses to nothing"
+    );
+    assert!(
+        parse_launchctl_labels("PID\tStatus\tLabel\n").is_empty(),
+        "bare header line parses to nothing"
+    );
+}
+
+#[test]
+fn launchctl_parse_rejects_lookalike_prefixes() {
+    let sneaky = "PID\tStatus\tLabel\n\
+                  1\t0\txcom.opencrabs.daemon\n\
+                  2\t0\tcom.opencrabsx.evil\n\
+                  3\t0\tcom.opencrabs.daemon\n";
+    assert_eq!(
+        parse_launchctl_labels(sneaky),
+        vec!["com.opencrabs.daemon".to_string()],
+        "prefix must anchor at label start; near-misses are not ours to bootout"
     );
 }
