@@ -153,6 +153,9 @@ pub struct Session {
     pub working_directory: Option<String>,
     pub auto_title_attempted: bool,
     pub project_id: Option<Uuid>,
+    /// Stable channel identity `[chat:<id>]` extracted from the title
+    /// (#1721). NULL for TUI/local sessions; unique across live rows.
+    pub channel_chat_key: Option<String>,
 }
 
 impl Session {
@@ -174,6 +177,7 @@ impl Session {
                 .ok()
                 .flatten()
                 .and_then(|s| Uuid::parse_str(&s).ok()),
+            channel_chat_key: row.get("channel_chat_key")?,
         })
     }
 
@@ -197,6 +201,7 @@ impl Session {
             working_directory: None,
             auto_title_attempted: false,
             project_id: None,
+            channel_chat_key: None,
         }
     }
 

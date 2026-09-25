@@ -735,6 +735,7 @@ pub mod tts_fallback_chain_test;
 pub mod voice_openai_compatible_test;
 pub mod voice_voicebox_test;
 //pub mod streaming_test;
+pub mod channel_chat_key_test;
 pub mod drop_landing_test;
 pub mod drop_transfer_test;
 pub mod eval_baseline_test;

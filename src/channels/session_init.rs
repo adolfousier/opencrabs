@@ -88,7 +88,43 @@ pub async fn create_channel_session(
         );
     }
 
-    session_svc
-        .create_session_with_provider(title, inherited_provider, inherited_model, inherited_wd)
-        .await
+    create_with_chat_identity(
+        session_svc,
+        title,
+        inherited_provider,
+        inherited_model,
+        inherited_wd,
+    )
+    .await
+}
+
+/// Route through the atomic insert-or-resolve path when the title carries a
+/// stable `[chat:<id>]` suffix (#1721): two processes sharing one database
+/// cannot be serialized by the in-process single-flight gate, so the unique
+/// index decides and the loser joins the winner. Titles without a suffix
+/// (should not happen on channel paths, but is legal for direct callers)
+/// fall back to the plain insert.
+async fn create_with_chat_identity(
+    session_svc: &SessionService,
+    title: Option<String>,
+    provider: Option<String>,
+    model: Option<String>,
+    wd: Option<String>,
+) -> Result<Session> {
+    let chat_key = title.as_deref().and_then(|t| {
+        let idx = t.rfind("[chat:")?;
+        Some(t[idx..].to_string())
+    });
+    match chat_key {
+        Some(key) => {
+            session_svc
+                .insert_or_resolve_channel_session(title, provider, model, wd, &key)
+                .await
+        }
+        None => {
+            session_svc
+                .create_session_with_provider(title, provider, model, wd)
+                .await
+        }
+    }
 }

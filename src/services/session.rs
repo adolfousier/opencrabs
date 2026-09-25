@@ -57,6 +57,7 @@ impl SessionService {
             working_directory,
             auto_title_attempted: false,
             project_id: None,
+            channel_chat_key: None,
         };
 
         repo.create(&session)
@@ -65,6 +66,46 @@ impl SessionService {
 
         tracing::info!("Created new session: {}", session.id);
         Ok(session)
+    }
+
+    /// Atomically insert a channel session keyed on its stable `[chat:<id>]`
+    /// identity (#1721). If another writer (another process sharing this
+    /// database) already created a live session for the same chat key, that
+    /// winner is returned so the caller's message routes into it instead of
+    /// forking the chat into two parallel sessions.
+    pub async fn insert_or_resolve_channel_session(
+        &self,
+        title: Option<String>,
+        provider_name: Option<String>,
+        model: Option<String>,
+        working_directory: Option<String>,
+        chat_key: &str,
+    ) -> Result<Session> {
+        let repo = SessionRepository::new(self.context.pool());
+
+        let session = Session {
+            id: Uuid::new_v4(),
+            title,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            archived_at: None,
+            model,
+            provider_name,
+            token_count: 0,
+            total_cost: 0.0,
+            working_directory,
+            auto_title_attempted: false,
+            project_id: None,
+            channel_chat_key: None,
+        };
+
+        let result = repo
+            .insert_or_resolve_channel(&session, chat_key)
+            .await
+            .context("Failed to create channel session")?;
+
+        tracing::info!("Created/resolved channel session: {}", result.id);
+        Ok(result)
     }
 
     /// Get a session by ID

@@ -148,6 +148,87 @@ impl SessionRepository {
         Ok(())
     }
 
+    /// Atomically insert a channel session carrying its stable chat key
+    /// (#1721). On unique-index conflict, another writer already created the
+    /// session for this chat (a second process the single-flight gate cannot
+    /// span): the existing winner is returned so the caller's message routes
+    /// into it instead of forking the chat. Generic `create` never writes
+    /// chat keys; this is the only INSERT path that does.
+    pub async fn insert_or_resolve_channel(
+        &self,
+        session: &Session,
+        chat_key: &str,
+    ) -> Result<Session> {
+        let mut s = session.clone();
+        s.channel_chat_key = Some(chat_key.to_string());
+        let cloned = s.clone();
+        let inserted = self
+            .pool
+            .get()
+            .await
+            .context("Failed to get connection")?
+            .interact(move |conn| {
+                conn.execute(
+                    "INSERT INTO sessions (id, title, model, provider_name, created_at, updated_at,
+                                           archived_at, token_count, total_cost, working_directory,
+                                           auto_title_attempted, project_id, channel_chat_key)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+                     ON CONFLICT(channel_chat_key) WHERE channel_chat_key IS NOT NULL AND archived_at IS NULL DO NOTHING",
+                    params![
+                        cloned.id.to_string(),
+                        cloned.title,
+                        cloned.model,
+                        cloned.provider_name,
+                        cloned.created_at.timestamp(),
+                        cloned.updated_at.timestamp(),
+                        cloned.archived_at.map(|dt| dt.timestamp()),
+                        cloned.token_count,
+                        cloned.total_cost,
+                        cloned.working_directory,
+                        cloned.auto_title_attempted,
+                        cloned.project_id.map(|id| id.to_string()),
+                        cloned.channel_chat_key,
+                    ],
+                )
+            })
+            .await
+            .map_err(interact_err)?
+            .context("Failed to create channel session")?;
+
+        if inserted > 0 {
+            tracing::debug!("Created session: {} (chat key {})", s.id, chat_key);
+            return Ok(s);
+        }
+
+        // Lost the race: resolve the winner by key.
+        let key_row = chat_key.to_string();
+        let winner = self
+            .pool
+            .get()
+            .await
+            .context("Failed to get connection")?
+            .interact(move |conn| {
+                conn.prepare_cached(
+                    "SELECT * FROM sessions WHERE channel_chat_key = ?1 AND archived_at IS NULL \
+                     ORDER BY updated_at DESC LIMIT 1",
+                )?
+                .query_row(params![key_row], Session::from_row)
+                .optional()
+            })
+            .await
+            .map_err(interact_err)?
+            .context("Failed to resolve winning session by chat key")?
+            .with_context(|| {
+                format!("Conflict resolved but no live session carries chat key {chat_key}")
+            })?;
+        tracing::info!(
+            "Channel session insert raced a concurrent creator: routed message to winner {} (chat key {})",
+            winner.id,
+            chat_key
+        );
+        Ok(winner)
+    }
+
     /// Update an existing session
     pub async fn update(&self, session: &Session) -> Result<()> {
         let s = session.clone();

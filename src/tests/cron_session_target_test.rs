@@ -26,6 +26,7 @@ fn session_with_id(id: Uuid) -> crate::db::models::Session {
         working_directory: None,
         auto_title_attempted: false,
         project_id: None,
+        channel_chat_key: None,
     }
 }
 

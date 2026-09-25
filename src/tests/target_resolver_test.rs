@@ -30,6 +30,7 @@ fn sess(id: Uuid, title: &str) -> crate::db::models::Session {
         working_directory: None,
         auto_title_attempted: false,
         project_id: None,
+        channel_chat_key: None,
     };
     s.id = id;
     s.title = Some(title.to_string());

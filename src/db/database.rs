@@ -116,6 +116,10 @@ pub(crate) const MIGRATION_SQL: &[&str] = &[
     // (shadow would-hits, live reuses). Idempotent CREATE, so no heal pass;
     // appended last per the list invariant.
     include_str!("../migrations/20260921000002_add_decision_stats.sql"),
+    // #1721: stable chat identity on sessions (column + backfill + dedup +
+    // unique index). Column add is idempotent-safe; the dedup must run
+    // before the unique index or duplicated keys fail the migration.
+    include_str!("../migrations/20260925220000_add_session_channel_chat_key.sql"),
 ];
 
 pub(crate) fn build_migrations() -> Migrations<'static> {
