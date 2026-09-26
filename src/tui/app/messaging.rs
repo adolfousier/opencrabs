@@ -59,6 +59,50 @@ pub(crate) struct Extraction {
     pub notices: Vec<String>,
 }
 
+/// What a resolved local file classifies as for attachment purposes
+/// (#1740, #1743). Pure extension lookup against the state tables: callers
+/// check existence separately (`resolve_dropped_path`), so a sentence that
+/// merely ends in ".zip" can never classify as a file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AttachmentClass {
+    Image,
+    Video,
+    /// Sound file: pointer-surfaced with a transcription hint, never
+    /// inlined.
+    Audio,
+    /// Archive or disk image: pointer-surfaced, never extracted here.
+    Archive,
+    Document,
+    TextFile,
+    /// A real file whose extension matches no table (#1740). Surfaced as a
+    /// path so the agent sees it instead of the paste silently staying
+    /// prose.
+    UnknownBinary,
+}
+
+/// Classify by extension. The tables are disjoint by construction, so a
+/// single first-match walk is enough; `UnknownBinary` is the deliberate
+/// fall-through (#1740), not an error.
+pub(crate) fn attachment_class_for_path(path: &str) -> AttachmentClass {
+    let lower = path.to_lowercase();
+    let in_table = |table: &[&str]| table.iter().any(|ext| lower.ends_with(ext));
+    if in_table(IMAGE_EXTENSIONS) {
+        AttachmentClass::Image
+    } else if in_table(VIDEO_EXTENSIONS) {
+        AttachmentClass::Video
+    } else if in_table(AUDIO_EXTENSIONS) {
+        AttachmentClass::Audio
+    } else if in_table(ARCHIVE_EXTENSIONS) {
+        AttachmentClass::Archive
+    } else if in_table(DOC_EXTENSIONS) {
+        AttachmentClass::Document
+    } else if in_table(TEXT_EXTENSIONS) {
+        AttachmentClass::TextFile
+    } else {
+        AttachmentClass::UnknownBinary
+    }
+}
+
 impl App {
     /// Read the persisted approval policy from config.toml.
     /// Returns `(auto_session, auto_always)` flags.
@@ -2116,7 +2160,7 @@ impl App {
     /// We try the raw string first (so Windows backslash *separators* are
     /// never mangled), then an unquoted form, then a POSIX-unescaped form,
     /// returning the first that actually exists. `None` means no real file.
-    fn resolve_dropped_path(raw: &str) -> Option<String> {
+    pub(crate) fn resolve_dropped_path(raw: &str) -> Option<String> {
         if raw.is_empty() {
             return None;
         }
@@ -2236,56 +2280,122 @@ impl App {
             }
         }
 
-        // Case 1b: Entire pasted text is a single document path (PDF, DOCX, …).
-        // Binary formats — never inline bytes. Surface the real path and point
-        // the agent at the parsing tools so it can actually read/see it.
-        if DOC_EXTENSIONS.iter().any(|ext| lower.ends_with(ext))
-            && let Some(real) = Self::resolve_dropped_path(trimmed)
-        {
+        // Case 1b: Entire pasted text is a single real file path that is not
+        // an image or video. Route through the shared classifier (#1740, #1743)
+        // so paste, drag-drop and Ctrl+V all agree on what a file is, and any
+        // extension surfaces as an attachment instead of silently staying
+        // prose (#1740).
+        if let Some(real) = Self::resolve_dropped_path(trimmed) {
+            let class = attachment_class_for_path(&real);
             let name = std::path::Path::new(&real)
                 .file_name()
                 .map(|n| n.to_string_lossy().to_string())
                 .unwrap_or_else(|| real.clone());
-            let is_pdf = real.to_lowercase().ends_with(".pdf");
-            let how = if is_pdf {
-                format!(
-                    "Call `parse_document(path='{real}')` to read its text, or \
-                     `pdf_to_images(path='{real}', page_range='N')` then `analyze_image` \
-                     for figures/screenshots/scanned pages."
-                )
-            } else {
-                format!("Call `parse_document(path='{real}')` to read it.")
-            };
-            return Extraction {
-                text: format!("[User attached a document: {name} ({real}). {how}]"),
-                attachments: vec![],
-                notices,
-            };
+            match class {
+                // Defensive: Case 1 above already claimed image/video paths,
+                // but if the two ever drift, honor the classifier rather than
+                // dropping the file on the floor.
+                AttachmentClass::Image | AttachmentClass::Video => {
+                    return Extraction {
+                        text: String::new(),
+                        attachments: vec![ImageAttachment {
+                            name,
+                            path: real,
+                            is_video: class == AttachmentClass::Video,
+                        }],
+                        notices,
+                    };
+                }
+                AttachmentClass::Document => {
+                    // Binary formats — never inline bytes. Surface the real
+                    // path and point the agent at the parsing tools so it can
+                    // actually read/see it.
+                    let is_pdf = real.to_lowercase().ends_with(".pdf");
+                    let how = if is_pdf {
+                        format!(
+                            "Call `parse_document(path='{real}')` to read its text, or \
+                             `pdf_to_images(path='{real}', page_range='N')` then `analyze_image` \
+                             for figures/screenshots/scanned pages."
+                        )
+                    } else {
+                        format!("Call `parse_document(path='{real}')` to read it.")
+                    };
+                    return Extraction {
+                        text: format!("[User attached a document: {name} ({real}). {how}]"),
+                        attachments: vec![],
+                        notices,
+                    };
+                }
+                AttachmentClass::TextFile => {
+                    let path = std::path::Path::new(&real);
+                    if let Ok(content) = std::fs::read_to_string(path) {
+                        const LIMIT: usize = 8_000;
+                        let truncated = if content.len() > LIMIT {
+                            let safe: String = content.chars().take(LIMIT).collect();
+                            format!("{}…[truncated]", safe)
+                        } else {
+                            content
+                        };
+                        return Extraction {
+                            text: format!("[File: {}]\n```\n{}\n```", name, truncated),
+                            attachments: vec![],
+                            notices,
+                        };
+                    }
+                    // Read failed (permissions, invalid UTF-8): fall through
+                    // to the mixed-text scan, same as before the router.
+                }
+                AttachmentClass::Audio => {
+                    return Extraction {
+                        text: format!(
+                            "[User attached an audio file: {name} ({real}). \
+                             It is not transcribed; transcribe it if the request \
+                             needs its content.]"
+                        ),
+                        attachments: vec![],
+                        notices,
+                    };
+                }
+                AttachmentClass::Archive => {
+                    return Extraction {
+                        text: format!(
+                            "[User attached an archive: {name} ({real}). \
+                             It is not extracted; unzip/untar it if the request \
+                             needs its contents.]"
+                        ),
+                        attachments: vec![],
+                        notices,
+                    };
+                }
+                AttachmentClass::UnknownBinary => {
+                    return Extraction {
+                        text: format!(
+                            "[User attached a file: {name} ({real}). \
+                             Unknown type; inspect it with the tools that fit.]"
+                        ),
+                        attachments: vec![],
+                        notices,
+                    };
+                }
+            }
         }
 
-        // Case 1c: Entire pasted text is a single text file path (handles spaces in path)
-        if TEXT_EXTENSIONS.iter().any(|ext| lower.ends_with(ext))
-            && let Some(real) = Self::resolve_dropped_path(trimmed)
-        {
-            let path = std::path::Path::new(&real);
-            let name = path
-                .file_name()
-                .map(|n| n.to_string_lossy().to_string())
-                .unwrap_or_else(|| real.clone());
-            if let Ok(content) = std::fs::read_to_string(path) {
-                const LIMIT: usize = 8_000;
-                let truncated = if content.len() > LIMIT {
-                    let safe: String = content.chars().take(LIMIT).collect();
-                    format!("{}…[truncated]", safe)
-                } else {
-                    content
-                };
-                return Extraction {
-                    text: format!("[File: {}]\n```\n{}\n```", name, truncated),
-                    attachments: vec![],
-                    notices,
-                };
-            }
+        // #1740: a path-shaped whole message that failed to resolve means the
+        // user pasted or dropped a file that is not on this machine (moved,
+        // deleted, not synced). Say so instead of letting it flow as prose.
+        // Media extensions are excluded: Case 2's scan below already emits
+        // its own receipt for those, and two notices for one path is noise.
+        let media_ext = IMAGE_EXTENSIONS
+            .iter()
+            .chain(VIDEO_EXTENSIONS.iter())
+            .any(|ext| lower.ends_with(ext));
+        let looks_like_path = trimmed.contains('/')
+            && std::path::Path::new(trimmed)
+                .extension()
+                .is_some_and(|e| !e.is_empty());
+        if !media_ext && looks_like_path {
+            tracing::warn!("Paste/drop path did not resolve on this machine: {trimmed}");
+            notices.push(format!("[Path not found on this machine: {trimmed}]"));
         }
 
         // Case 2: Mixed text.
