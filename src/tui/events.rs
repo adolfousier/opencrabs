@@ -453,7 +453,13 @@ impl EventHandler {
     /// Uses crossterm's async EventStream instead of blocking poll/read
     /// to avoid starving the tokio runtime during I/O-heavy operations
     /// (e.g. Telegram voice processing, agent responses).
-    pub fn start_terminal_listener(tx: mpsc::UnboundedSender<TuiEvent>) {
+    ///
+    /// Returns the task's `JoinHandle` so the owner can abort it. The editor
+    /// handoff (#1744) MUST stop this reader before suspending the TUI, or
+    /// it races the child process for the same stdin fd.
+    pub fn start_terminal_listener(
+        tx: mpsc::UnboundedSender<TuiEvent>,
+    ) -> tokio::task::JoinHandle<()> {
         use crossterm::event::EventStream;
         use futures::StreamExt;
 
@@ -529,7 +535,7 @@ impl EventHandler {
                     break;
                 }
             }
-        });
+        })
     }
 }
 

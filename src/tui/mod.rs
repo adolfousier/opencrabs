@@ -6,6 +6,7 @@ pub mod app;
 pub(crate) mod capture;
 pub(crate) mod clear_notice;
 pub(crate) mod compact_notice;
+pub mod editor;
 pub mod error;
 pub mod events;
 pub(crate) mod model_order;

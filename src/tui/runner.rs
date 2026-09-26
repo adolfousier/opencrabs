@@ -25,7 +25,7 @@ use std::sync::{LazyLock, Mutex};
 /// The concrete terminal type used everywhere in this module. The backend
 /// wraps the real stdout in [`CaptureWriter`] so every byte the render loop
 /// emits is recorded for the #1719 garble post-mortem.
-type TuiTerminal = Terminal<CrosstermBackend<CaptureWriter<io::Stdout>>>;
+pub(crate) type TuiTerminal = Terminal<CrosstermBackend<CaptureWriter<io::Stdout>>>;
 
 /// Captures location + filtered backtrace of the last panic so the
 /// render loop can correlate a caught panic with its source. `catch_unwind`
@@ -92,7 +92,7 @@ fn first_opencrabs_frame(bt: &std::backtrace::Backtrace) -> Option<String> {
 }
 
 /// Force-restore terminal state. Safe to call from signal handlers and panic hooks.
-fn force_restore_terminal() {
+pub(crate) fn force_restore_terminal() {
     let _ = disable_raw_mode();
     let _ = execute!(
         io::stdout(),
@@ -103,6 +103,32 @@ fn force_restore_terminal() {
         DisableMouseCapture
     );
     let _ = execute!(io::stdout(), crossterm::cursor::Show);
+}
+
+/// Re-establish TUI terminal ownership after an editor handoff (#1744) gave
+/// the real tty to a full-screen child. Mirrors the `run()` startup sequence:
+/// raw mode, alternate screen, paste/focus/mouse capture, kitty flags — then
+/// drains leftover keystrokes so editor escape bytes don't leak into the
+/// input buffer, and clears for a full repaint.
+pub(crate) fn reinit_terminal_for_editor(terminal: &mut TuiTerminal) -> Result<()> {
+    enable_raw_mode()?;
+    let mut stdout = io::stdout();
+    execute!(
+        stdout,
+        EnterAlternateScreen,
+        EnableBracketedPaste,
+        EnableFocusChange,
+        EnableMouseCapture
+    )?;
+    let _ = execute!(
+        stdout,
+        PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES)
+    );
+    while crossterm::event::poll(std::time::Duration::from_millis(10))? {
+        let _ = crossterm::event::read();
+    }
+    terminal.clear()?;
+    Ok(())
 }
 
 /// Run the TUI application
@@ -223,12 +249,13 @@ pub async fn run(mut app: App) -> Result<()> {
     // point inside `initialize_sync`.
     app.initialize().await?;
 
-    // Start terminal event listener
+    // Start terminal event listener — hold the handle so the loop can abort
+    // and restart it around an editor handoff (#1744).
     let event_sender = app.event_sender();
-    EventHandler::start_terminal_listener(event_sender);
+    let mut listener_handle = EventHandler::start_terminal_listener(event_sender);
 
     // Run main loop
-    let result = run_loop(&mut terminal, &mut app, &sigint_flag).await;
+    let result = run_loop(&mut terminal, &mut app, &sigint_flag, &mut listener_handle).await;
 
     // Restore terminal
     crate::utils::fd_suppress::set_tui_active(false);
@@ -242,6 +269,7 @@ async fn run_loop(
     terminal: &mut TuiTerminal,
     app: &mut App,
     sigint_flag: &AtomicBool,
+    listener_handle: &mut tokio::task::JoinHandle<()>,
 ) -> Result<()> {
     use super::events::TuiEvent;
 
@@ -284,6 +312,28 @@ async fn run_loop(
         // Consume pending resize (just clears the flag; ratatui's
         // autoresize inside draw() handles the actual buffer resize).
         app.pending_resize.take();
+
+        // Editor handoff (#1744): the bang allowlist parked the request and
+        // returned; this loop owns the terminal + event reader, so the tty
+        // changes hands here, before the next drain/draw sees any of it.
+        if let Some((cmd, origin_session)) = app.pending_editor_handoff.take() {
+            let result = super::editor::run_editor_handoff(
+                terminal,
+                app.event_sender(),
+                listener_handle,
+                &cmd,
+                &app.working_directory,
+            )
+            .await;
+            // `reinit_terminal_for_editor` always re-enables mouse capture,
+            // so the sync block above must know the applied state is now
+            // "on" and toggle it back if the user had disabled it with F12.
+            mouse_capture_applied = true;
+            let _ = app.event_sender().send(TuiEvent::SystemMessage {
+                session_id: origin_session,
+                text: result.text,
+            });
+        }
 
         // Wrap every frame in synchronized output (DEC private mode
         // 2026) so the terminal buffers all escape sequences and

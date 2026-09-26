@@ -750,6 +750,11 @@ pub struct App {
     /// what just happened without the user having to explain.
     pub pending_context: Vec<String>,
 
+    /// Editor handoff request (#1744): `(command, origin_session_id)` set by
+    /// the bang allowlist branch, consumed by the runner loop (it owns the
+    /// terminal + event reader and can suspend them for a full-screen child).
+    pub pending_editor_handoff: Option<(String, Uuid)>,
+
     /// Brain state
     pub brain_path: PathBuf,
     pub user_commands: Vec<UserCommand>,
@@ -1086,6 +1091,7 @@ impl App {
             input_history_stash: String::new(),
             working_directory: crate::utils::cwd::launch_cwd(),
             pending_context: Vec::new(),
+            pending_editor_handoff: None,
             brain_path,
             user_commands,
             skills,

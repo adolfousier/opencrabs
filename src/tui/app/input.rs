@@ -1767,6 +1767,18 @@ impl App {
                         .as_ref()
                         .map(|s| s.id)
                         .unwrap_or_else(uuid::Uuid::nil);
+                    // Editor handoff (#1744): vi/vim/nano/emacs need the real
+                    // tty — pipe-capturing them dumps escape sequences into
+                    // the chat. Park the request; the runner loop performs
+                    // the terminal handoff before its next draw.
+                    if crate::tui::editor::handoff_target(&shell_cmd).is_some() {
+                        self.pending_editor_handoff = Some((shell_cmd, origin_session));
+                        self.input_buffer.clear();
+                        self.cursor_position = 0;
+                        self.slash_suggestions_active = false;
+                        self.dismiss_emoji_picker();
+                        return Ok(());
+                    }
                     tokio::spawn(async move {
                         use crate::utils::shell::PushShellCommand;
                         let (shell, shell_arg) = crate::utils::shell::shell_pair();
