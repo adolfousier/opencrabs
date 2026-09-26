@@ -362,8 +362,10 @@ pub struct ImageAttachment {
 }
 
 /// Image file extensions for auto-detection
-pub(crate) const IMAGE_EXTENSIONS: &[&str] =
-    &[".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg"];
+pub(crate) const IMAGE_EXTENSIONS: &[&str] = &[
+    ".png", ".jpg", ".jpeg", ".jfif", ".gif", ".webp", ".bmp", ".svg", ".heic", ".heif", ".avif",
+    ".ico", ".tiff", ".tif",
+];
 
 /// Video file extensions for auto-detection — must match the MIME table in
 /// `utils::file_extract::mime_from_ext` so channels and TUI agree on what
@@ -372,11 +374,86 @@ pub(crate) const VIDEO_EXTENSIONS: &[&str] = &[
     ".mp4", ".m4v", ".mov", ".webm", ".mkv", ".avi", ".3gp", ".flv",
 ];
 
+/// Audio file extensions for auto-detection (#1743): surface the path with
+/// a transcription hint: the TUI never inlines or transcribes audio
+/// itself, the agent decides what to do with it.
+pub(crate) const AUDIO_EXTENSIONS: &[&str] = &[
+    ".mp3", ".wav", ".m4a", ".aac", ".ogg", ".oga", ".flac", ".opus", ".wma", ".aiff", ".aif",
+];
+
+/// Archive extensions for auto-detection (#1743): pointer-surfaced, never
+/// extracted by the TUI. `.dmg`/`.iso`/`.pkg` are disk images or installers,
+/// not data archives; they still surface as paths so the agent can decide.
+pub(crate) const ARCHIVE_EXTENSIONS: &[&str] = &[
+    ".zip", ".tar", ".gz", ".tgz", ".bz2", ".tbz2", ".xz", ".txz", ".7z", ".rar", ".dmg", ".iso",
+    ".pkg",
+];
+
 /// Text file extensions for auto-detection (paste a path → inline content)
 pub(crate) const TEXT_EXTENSIONS: &[&str] = &[
-    ".txt", ".md", ".rst", ".log", ".json", ".yaml", ".yml", ".toml", ".xml", ".csv", ".tsv",
-    ".js", ".mjs", ".ts", ".py", ".rb", ".sh", ".rs", ".go", ".java", ".c", ".cpp", ".h", ".html",
-    ".htm", ".css", ".sql",
+    ".txt",
+    ".md",
+    ".rst",
+    ".log",
+    ".json",
+    ".yaml",
+    ".yml",
+    ".toml",
+    ".xml",
+    ".csv",
+    ".tsv",
+    ".js",
+    ".mjs",
+    ".ts",
+    ".py",
+    ".rb",
+    ".sh",
+    ".rs",
+    ".go",
+    ".java",
+    ".c",
+    ".cpp",
+    ".h",
+    ".html",
+    ".htm",
+    ".css",
+    ".sql",
+    // #1743: the most common languages and configs missing from the table.
+    ".swift",
+    ".dart",
+    ".zig",
+    ".tsx",
+    ".jsx",
+    ".kt",
+    ".kts",
+    ".scala",
+    ".lua",
+    ".php",
+    ".pl",
+    ".ex",
+    ".exs",
+    ".elm",
+    ".clj",
+    ".erl",
+    ".nim",
+    ".vue",
+    ".svelte",
+    ".astro",
+    ".graphql",
+    ".proto",
+    ".ini",
+    ".cfg",
+    ".conf",
+    ".env",
+    ".properties",
+    ".bat",
+    ".ps1",
+    ".zsh",
+    ".diff",
+    ".patch",
+    ".ipynb",
+    ".lock",
+    ".gitignore",
 ];
 
 /// Document extensions for auto-detection (paste a path → the agent is given
@@ -384,6 +461,8 @@ pub(crate) const TEXT_EXTENSIONS: &[&str] = &[
 /// formats, so we never inline their bytes — only surface the path.
 pub(crate) const DOC_EXTENSIONS: &[&str] = &[
     ".pdf", ".docx", ".doc", ".pptx", ".xlsx", ".xlsb", ".xlsm", ".ods", ".epub",
+    // #1743: legacy and iWork formats the classifier silently ignored.
+    ".xls", ".ppt", ".rtf", ".odt", ".odp", ".pages", ".numbers", ".key",
 ];
 
 /// A single tool call entry within a grouped display
