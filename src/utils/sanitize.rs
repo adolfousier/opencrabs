@@ -997,7 +997,28 @@ pub fn strip_llm_artifacts(text: &str) -> String {
     {
         result = AgentService::strip_xml_tool_calls(&result);
     }
+    // Typographic dash normalization (#1745): prompt rules do not bind
+    // model output reliably, so em-dashes and en-dashes are normalized
+    // mechanically at this one boundary every channel already funnels
+    // through before display.
+    if result.contains(['\u{2014}', '\u{2013}']) {
+        result = normalize_dashes(&result);
+    }
     result
+}
+
+/// Normalize typographic dashes in assistant prose to plain ASCII (#1745).
+///
+/// Em-dash: the spaced form collapses to a bare colon ("want \u{2014} the"
+/// becomes "want: the"); the other arrangements map to ":" as well. En-dash
+/// becomes a plain hyphen so ranges stay natural ("1\u{2013}3" becomes
+/// "1-3"). Order matters: the spaced forms must run before the glued
+/// fallback.
+fn normalize_dashes(text: &str) -> String {
+    text.replace(" \u{2014}", ":")
+        .replace("\u{2014} ", ": ")
+        .replace('\u{2014}', ":")
+        .replace('\u{2013}', "-")
 }
 
 /// Strip a matched `<tag>...</tag>` block, and handle an unclosed opener
