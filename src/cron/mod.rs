@@ -13,7 +13,5 @@ pub mod trigger;
 
 pub use pipeline::{PipelineExecutor, TriggerOutcome, interpolate_template};
 pub use schedule_util::{format_upcoming, next_run_utc, parse_timezone, upcoming_in_tz};
-pub use scheduler::{
-    CronScheduler, REBUILD_JOB_NAME, SessionNotifier, schedule_background_rebuild,
-};
+pub use scheduler::CronScheduler;
 pub use trigger::{TriggerCondition, TriggerResult, TriggerRunner};

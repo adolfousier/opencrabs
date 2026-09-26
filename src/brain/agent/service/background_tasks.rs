@@ -22,6 +22,23 @@ pub struct CmdResult {
     pub output: String,
 }
 
+/// Everything a completion hook learns about a finished command: the result
+/// plus the wall-clock runtime the generic receipt carries (#15).
+pub struct HookContext {
+    pub result: CmdResult,
+    pub elapsed_secs: f32,
+}
+
+/// Post-completion action run INSTEAD of the generic session delivery
+/// (#1748). The detached rebuild uses it to exec-restart into the fresh
+/// binary: an in-memory enqueue would be orphaned the moment exec()
+/// replaces the process, so the hook delivers its own outcome text through
+/// the routes it needs (session route, channel targets).
+pub type CompletionHook = Box<
+    dyn FnOnce(HookContext) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>
+        + Send,
+>;
+
 /// One in-flight background command.
 #[derive(Debug, Clone)]
 pub struct RunningTask {
@@ -102,6 +119,31 @@ impl BackgroundTaskManager {
         cwd: PathBuf,
         label: String,
         command: String,
+    ) {
+        self.spawn_inner(session_id, cwd, label, command, None);
+    }
+
+    /// Spawn like [`Self::spawn_command`], but hand the outcome to `hook`
+    /// instead of the generic session delivery (#1748). Identical lifecycle:
+    /// timer, status file, DB accounting; only the completion route differs.
+    pub fn spawn_command_with_hook(
+        self: std::sync::Arc<Self>,
+        session_id: Uuid,
+        cwd: PathBuf,
+        label: String,
+        command: String,
+        hook: CompletionHook,
+    ) {
+        self.spawn_inner(session_id, cwd, label, command, Some(hook));
+    }
+
+    fn spawn_inner(
+        self: std::sync::Arc<Self>,
+        session_id: Uuid,
+        cwd: PathBuf,
+        label: String,
+        command: String,
+        hook: Option<CompletionHook>,
     ) {
         self.mark_started(session_id, &label);
         let this = std::sync::Arc::clone(&self);
@@ -185,7 +227,6 @@ impl BackgroundTaskManager {
                     "Could not write detached status for {task_id}: {e}"
                 );
             }
-            let msg = completion_message(&label, &command, &result, elapsed_secs);
             if let Some(repo) = task_repo()
                 && let Err(e) = repo.clear(task_id).await
             {
@@ -207,6 +248,18 @@ impl BackgroundTaskManager {
             // Only touches the in-memory map, so moving it earlier cannot
             // affect what gets delivered.
             this.mark_finished(session_id, &label);
+            if let Some(hook) = hook {
+                // A hook replaces the generic delivery entirely (#1748): the
+                // rebuild exec-replaces the process on success, so an
+                // in-memory enqueue would be orphaned mid-flight. The hook
+                // delivers its own outcome text through the routes it needs.
+                hook(HookContext {
+                    result,
+                    elapsed_secs,
+                })
+                .await;
+                return;
+            }
             // Deliver through the ONE gated route (fork #19): the same
             // `deliver_to_session` that sub-agent completions and the
             // session_notify tool use, so channel-ownership, mid-turn and
@@ -219,6 +272,7 @@ impl BackgroundTaskManager {
             // (#940). interrupt=true: a completion is the origin's own
             // awaited work, exactly like a sub-agent's; it must reach it even
             // mid-turn (fork #13).
+            let msg = completion_message(&label, &command, &result, elapsed_secs);
             let outcome = super::session_routes::deliver_to_session(session_id, msg, true);
             match outcome {
                 super::session_routes::Delivery::Redirected { to } => {

@@ -1325,56 +1325,6 @@ mod scheduler {
         let enabled = repo.list_enabled().await.unwrap();
         assert!(enabled.is_empty());
     }
-
-    /// Background `/rebuild` (2026-06-07): scheduling queues a single
-    /// reserved one-shot job carrying the session id to resume, and
-    /// scheduling again REPLACES it rather than stacking a second build.
-    #[tokio::test]
-    async fn schedule_background_rebuild_queues_one_shot_resumable_job() {
-        use crate::cron::{REBUILD_JOB_NAME, schedule_background_rebuild};
-
-        let (db, repo) = setup().await;
-        let sid = uuid::Uuid::new_v4();
-
-        schedule_background_rebuild(db.pool().clone(), sid, Some("telegram:123".into()))
-            .await
-            .unwrap();
-
-        let rebuilds: Vec<_> = repo
-            .list_all()
-            .await
-            .unwrap()
-            .into_iter()
-            .filter(|j| j.name == REBUILD_JOB_NAME)
-            .collect();
-        assert_eq!(rebuilds.len(), 1, "exactly one rebuild job queued");
-        assert_eq!(
-            rebuilds[0].prompt,
-            sid.to_string(),
-            "carries the originating session id so the restart resumes it"
-        );
-        assert!(
-            rebuilds[0].enabled,
-            "must be enabled so the scheduler runs it"
-        );
-        assert_eq!(rebuilds[0].deliver_to.as_deref(), Some("telegram:123"));
-
-        // Scheduling again must REPLACE, never stack two concurrent builds.
-        let sid2 = uuid::Uuid::new_v4();
-        schedule_background_rebuild(db.pool().clone(), sid2, None)
-            .await
-            .unwrap();
-
-        let rebuilds2: Vec<_> = repo
-            .list_all()
-            .await
-            .unwrap()
-            .into_iter()
-            .filter(|j| j.name == REBUILD_JOB_NAME)
-            .collect();
-        assert_eq!(rebuilds2.len(), 1, "re-scheduling replaces, never stacks");
-        assert_eq!(rebuilds2[0].prompt, sid2.to_string());
-    }
 }
 
 // --- Session Resolution Tests ---

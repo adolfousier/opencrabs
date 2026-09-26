@@ -126,3 +126,65 @@ async fn spawn_command_enqueues_on_completion() {
     // Running count drops back to zero after completion.
     assert_eq!(mgr.running_for(sid), 0);
 }
+
+/// #1748: `spawn_command_with_hook` hands the outcome to the hook INSTEAD of
+/// the generic session delivery; the detached rebuild's hook exec-replaces
+/// the process on success, so an in-memory enqueue would be orphaned
+/// mid-flight. Same lifecycle (timer, status file, DB accounting), different
+/// completion route.
+#[tokio::test]
+#[allow(clippy::await_holding_lock)]
+async fn spawn_command_with_hook_replaces_generic_delivery() {
+    // register_session_route → claim_session touches the process-global
+    // parked-queue state, so serialize against other suites that do too.
+    let _guard = restart_recovery::test_guard();
+    #[allow(clippy::type_complexity)]
+    let recorded: Arc<Mutex<Vec<(Uuid, QueuedUserMessage)>>> = Arc::new(Mutex::new(Vec::new()));
+    let rec = recorded.clone();
+    let enqueue: MessageEnqueueCallback = Arc::new(move |sid, msg| {
+        rec.lock().unwrap().push((sid, msg));
+    });
+
+    let mgr = Arc::new(BackgroundTaskManager::new());
+    let sid = Uuid::new_v4();
+    session_routes::register_session_route(sid, enqueue);
+
+    // The hook records what it learned; the session route must stay silent.
+    let hooked: Arc<Mutex<Option<(bool, bool)>>> = Arc::new(Mutex::new(None));
+    let hk = hooked.clone();
+    let hook: crate::brain::agent::service::background_tasks::CompletionHook = Box::new(
+        move |ctx: crate::brain::agent::service::background_tasks::HookContext| {
+            Box::pin(async move {
+                *hk.lock().unwrap() = Some((ctx.result.success, ctx.elapsed_secs >= 0.0));
+            })
+        },
+    );
+
+    mgr.clone().spawn_command_with_hook(
+        sid,
+        std::env::temp_dir(),
+        "hook probe".to_string(),
+        "echo HOOK_DONE_MARKER".to_string(),
+        hook,
+    );
+
+    // Wait (bounded) for the detached command to finish and fire the hook.
+    let mut waited = 0;
+    while hooked.lock().unwrap().is_none() && waited < 50 {
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        waited += 1;
+    }
+
+    let h = hooked.lock().unwrap();
+    let (success, elapsed_ok) = h.expect("hook must fire on completion");
+    assert!(success, "echo must report success to the hook");
+    assert!(elapsed_ok, "hook carries the command runtime");
+
+    // The generic delivery did NOT run: the session route got nothing.
+    assert!(
+        recorded.lock().unwrap().is_empty(),
+        "a hook replaces generic session delivery"
+    );
+    // Running count drops back to zero after completion.
+    assert_eq!(mgr.running_for(sid), 0);
+}

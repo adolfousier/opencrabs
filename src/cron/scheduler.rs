@@ -29,182 +29,11 @@ fn is_active_profile(job_profile: Option<&str>, active: Option<&str>) -> bool {
     }
 }
 
-/// Reserved cron-job name for a one-shot background `/rebuild`. The scheduler
-/// special-cases this name: instead of running an agent prompt it builds from
-/// source and exec-restarts into the new binary, then the job removes itself.
-/// The originating session id is carried in `prompt` so the restart resumes
-/// the user's session.
-pub const REBUILD_JOB_NAME: &str = "__opencrabs_rebuild__";
 /// Warn-once guard for unparseable cron expressions (#1163): without it an
 /// invalid row warns on every ~60s tick — 1,440 warns/day for a job that
 /// never runs. One warning per process is enough to diagnose.
 static INVALID_EXPR_WARNED: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);
-
-/// Schedule a one-shot background rebuild for `session_id`. Returns once the
-/// job is queued — the build runs out-of-band on the scheduler's next tick
-/// (within ~60s), so the calling session is never blocked. `deliver_to` (if
-/// set) receives a status message; the reload resumes `session_id`.
-pub async fn schedule_background_rebuild(
-    pool: crate::db::Pool,
-    session_id: Uuid,
-    deliver_to: Option<String>,
-) -> anyhow::Result<()> {
-    let repo = CronJobRepository::new(pool);
-    // Remove any stale rebuild job first so we never stack two builds.
-    if let Ok(existing) = repo.list_all().await {
-        for j in existing.iter().filter(|j| j.name == REBUILD_JOB_NAME) {
-            if let Err(e) = repo.delete(&j.id.to_string()).await {
-                tracing::warn!(error = %e, job_id = %j.id, "failed to delete cron job");
-            }
-        }
-    }
-    let now = Utc::now();
-    let job = CronJob {
-        id: Uuid::new_v4(),
-        name: REBUILD_JOB_NAME.to_string(),
-        // Every minute → the next tick (within 60s) picks it up; the job
-        // deletes itself on pickup so it runs exactly once.
-        cron_expr: "* * * * *".to_string(),
-        timezone: "UTC".to_string(),
-        prompt: session_id.to_string(),
-        provider: None,
-        model: None,
-        thinking: "off".to_string(),
-        auto_approve: true,
-        deliver_to,
-        deliver_api_key: None,
-        enabled: true,
-        last_run_at: None,
-        next_run_at: None,
-        created_at: now,
-        updated_at: now,
-        // Stamp the current profile so the guard in `tick()` lets it run here.
-        // current_profile_name() honors the task-local profile scope.
-        profile_name: Some(crate::config::profile::current_profile_name()),
-        trigger_cmd: None,
-        trigger_on: None,
-        set_goal: false,
-        goal_template: None,
-    };
-    repo.insert(&job).await?;
-    tracing::info!("Background rebuild queued for session {session_id}");
-    Ok(())
-}
-
-/// Execute the reserved background-rebuild job: delete it first (one-shot, no
-/// retry on the 60s tick), build from source, then exec-restart into the
-/// freshly-built binary (replaces the whole process). On failure it reports
-/// to `deliver_to` and returns. The originating session id is in `job.prompt`.
-async fn run_rebuild_job(
-    job: &CronJob,
-    ctx: &ServiceContext,
-    session_notifier: Option<&SessionNotifier>,
-) -> anyhow::Result<()> {
-    use crate::brain::SelfUpdater;
-
-    // Delete up front so a long/failed build can't re-trigger next tick.
-    let repo = CronJobRepository::new(ctx.pool());
-    if let Err(e) = repo.delete(&job.id.to_string()).await {
-        tracing::error!("rebuild job: failed to delete self: {e}");
-    }
-
-    let session_id = Uuid::parse_str(job.prompt.trim()).unwrap_or_else(|_| Uuid::nil());
-    tracing::info!("Background rebuild starting (will resume session {session_id})");
-
-    let updater =
-        SelfUpdater::auto_detect().map_err(|e| anyhow::anyhow!("rebuild: auto_detect: {e}"))?;
-
-    match updater
-        .build_streaming(|line| tracing::debug!("rebuild: {line}"))
-        .await
-    {
-        Ok(built_path) => {
-            tracing::info!(
-                "Background rebuild succeeded: {} — reloading",
-                built_path.display()
-            );
-            let handles = deliver_rebuild_status(
-                job,
-                "✅ Rebuilt from source — reloading into the new binary now.",
-            )
-            .await;
-            // Await all delivery tasks before exec() replaces the process (#1105).
-            // Without this, the detached Telegram send is killed mid-flight and
-            // the completion message never arrives.
-            if !handles.is_empty() {
-                tracing::info!(
-                    "Awaiting {} delivery handle(s) before exec()",
-                    handles.len()
-                );
-                futures::future::join_all(handles).await;
-            }
-            // Persist the completion report to the session DB so the agent
-            // sees it on the next turn after the exec restart (#1105).
-            // Without this, the hot-reload wake-up message is orphaned —
-            // the agent responds but has no context about what triggered it.
-            if !session_id.is_nil() {
-                let msg_svc = crate::services::MessageService::new(ctx.clone());
-                let report = format!(
-                    "✅ Background rebuild succeeded — binary at {}. Hot-reloading now.",
-                    built_path.display()
-                );
-                match msg_svc
-                    .create_message(session_id, "assistant".to_string(), report)
-                    .await
-                {
-                    Ok(_) => tracing::info!(
-                        "Persisted rebuild completion report to session {session_id}"
-                    ),
-                    Err(e) => tracing::error!("Failed to persist rebuild completion report: {e}"),
-                }
-            }
-            // exec() replaces the entire process (this scheduler task too).
-            if let Err(e) = SelfUpdater::restart_into(&built_path, session_id) {
-                tracing::error!("Background rebuild restart failed: {e}");
-                return Err(anyhow::anyhow!("rebuild restart failed: {e}"));
-            }
-            Ok(()) // unreachable on success
-        }
-        Err(out) => {
-            tracing::error!("Background rebuild failed: {out}");
-            let msg = format!("⚠️ Background rebuild failed:\n{out}");
-            // TUI (#304): surface the failure in the session that asked. It
-            // was told "reloading automatically when ready" and would
-            // otherwise wait forever on a log-only error.
-            if let Some(notify) = session_notifier {
-                notify(session_id, msg.clone());
-            }
-            let _ = deliver_rebuild_status(job, &msg).await; // detached — no exec follows
-            Ok(())
-        }
-    }
-}
-
-/// Deliver a rebuild status line to the job's configured channels (if any).
-/// Returns spawn handles so the caller can await delivery before exec() (#1105).
-async fn deliver_rebuild_status(job: &CronJob, msg: &str) -> Vec<tokio::task::JoinHandle<()>> {
-    let mut handles = Vec::new();
-    if let Some(ref deliver_to) = job.deliver_to {
-        for target in deliver_to
-            .split(',')
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-        {
-            // Rebuild status messages aren't worth reply recovery — no pool.
-            if let Some(h) =
-                deliver_result(target, &job.name, msg, job.deliver_api_key.as_deref(), None).await
-            {
-                handles.push(h);
-            }
-        }
-    }
-    handles
-}
-
-/// Callback for surfacing scheduler events into a live session UI (the TUI).
-/// Args: originating session id, message text. Daemon callers run without one.
-pub type SessionNotifier = Arc<dyn Fn(Uuid, String) + Send + Sync>;
 
 /// Background cron scheduler that polls the database and executes due jobs.
 pub struct CronScheduler {
@@ -212,10 +41,6 @@ pub struct CronScheduler {
     run_repo: CronJobRunRepository,
     factory: Arc<ChannelFactory>,
     service_context: ServiceContext,
-    /// Surfaces rebuild outcomes into the originating TUI session (#304):
-    /// without it a failed background build was visible only in the log
-    /// while the user waited for a reload that would never come.
-    session_notifier: Option<SessionNotifier>,
 }
 
 impl CronScheduler {
@@ -230,14 +55,7 @@ impl CronScheduler {
             run_repo,
             factory,
             service_context,
-            session_notifier: None,
         }
-    }
-
-    /// Wire a live-session notifier (TUI mode). Daemon callers skip this.
-    pub fn with_session_notifier(mut self, notifier: SessionNotifier) -> Self {
-        self.session_notifier = Some(notifier);
-        self
     }
 
     /// Spawn the scheduler as a background tokio task.
@@ -319,7 +137,6 @@ impl CronScheduler {
                 let factory = self.factory.clone();
                 let ctx = self.service_context.clone();
                 let run_repo = self.run_repo.clone();
-                let notifier = self.session_notifier.clone();
                 let job_name = job.name.clone();
                 let job_id = job.id;
                 tokio::spawn(
@@ -410,7 +227,6 @@ impl CronScheduler {
                                             &ctx,
                                             cron_sid,
                                             &run_repo,
-                                            notifier.as_ref(),
                                         )
                                         .await
                                     }
@@ -427,7 +243,6 @@ impl CronScheduler {
                                         &ctx,
                                         cron_sid,
                                         &run_repo,
-                                        notifier.as_ref(),
                                     )
                                     .await
                                 }
@@ -680,14 +495,7 @@ async fn execute_job(
     ctx: &ServiceContext,
     cron_session_id: Uuid,
     run_repo: &CronJobRunRepository,
-    session_notifier: Option<&SessionNotifier>,
 ) -> anyhow::Result<()> {
-    // Reserved one-shot background rebuild — build + exec-restart, never an
-    // agent prompt.
-    if job.name == REBUILD_JOB_NAME {
-        return run_rebuild_job(job, ctx, session_notifier).await;
-    }
-
     // Resolve the config + agent for this job's profile. A job created in a
     // non-active profile (shared-DB case, #182) runs under its own profile's
     // config + brain, not the process profile's.
@@ -1018,7 +826,7 @@ pub(crate) fn resolve_session_target(
 /// (fork #144: into a session's notify queue through the shared
 /// `notify_policy` path — default mode `turn-end`, cron results are turn
 /// outputs), or an HTTP(S) URL for generic webhook delivery.
-async fn deliver_result(
+pub(crate) async fn deliver_result(
     deliver_to: &str,
     job_name: &str,
     content: &str,

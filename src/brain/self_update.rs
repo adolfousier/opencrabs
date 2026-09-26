@@ -140,7 +140,7 @@ impl SelfUpdater {
 
     /// Ensure the source tree exists at project_root (lazy clone).
     /// Called by build() when the user invokes /rebuild on a pre-built binary.
-    fn ensure_source_tree(&self) -> Result<()> {
+    pub(crate) fn ensure_source_tree(&self) -> Result<()> {
         if self.project_root.join("Cargo.toml").exists() {
             // Already have source. Pull latest.
             tracing::info!("Updating source at {}", self.project_root.display());

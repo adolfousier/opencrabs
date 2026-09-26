@@ -1,6 +1,7 @@
 //! Tests for rebuild outcome delivery (#304/#305): the background build's
 //! completion and failure notices must reach whoever asked — a chat via the
-//! cron `deliver_to` path, the TUI via the scheduler's session notifier.
+//! cron `deliver_to` path, the TUI and channel sessions via the gated
+//! session route in the rebuild completion hook (#1748).
 //! Forum-topic origin rides the #1451 grammar (`telegram:chat:thread`),
 //! captured automatically from the asking turn (#1457).
 
