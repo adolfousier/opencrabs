@@ -459,6 +459,74 @@ async fn read_body_with_retry(
     }
 }
 
+/// Whether a renderer status is transient enough to be worth exactly one
+/// re-send (#1741): server errors plus the two 4xx classes
+/// [`classify_render_failure`] already treats as transient. Any other 4xx
+/// is a deterministic parse rejection of this exact source and is returned
+/// untouched for classification. Kept next to `classify_render_failure` so
+/// the two transient splits stay mirrorable.
+pub(crate) fn is_transient_status(status: u16) -> bool {
+    status >= 500 || status == 408 || status == 429
+}
+
+/// Legible note for a transport-level send failure, matching the split the
+/// connect stage has always logged (timeout vs unreachable).
+pub(crate) fn transport_note(e: &reqwest::Error) -> &'static str {
+    if e.is_timeout() {
+        "diagram renderer timed out"
+    } else {
+        "diagram renderer unreachable"
+    }
+}
+
+/// Send the render request with ONE bounded retry (#1741). The body stage
+/// has had this since #189; the connect stage did not, so a single stalled
+/// handshake degraded a valid diagram to the failure block: 3 of 4 renders
+/// in one 6-minute window failed at `connect` with `timed_out=true` while a
+/// manual GET seconds later returned HTTP 200. The GET is idempotent and
+/// the render deterministic, so one re-send costs an RTT and recovers the
+/// intermittent-stall pattern. A deterministic 4xx (other than 408/429) is
+/// NOT retried: the renderer rejected this exact source and will reject it
+/// again. `stage` labels the rung (`connect` / `connect-clamp`); the retry
+/// rung logs and fails as `{stage}-retry` so the ladder stays legible.
+/// Takes the full URL so tests can point it at a local mock server without
+/// exposing [`MERMAID_INK_BASE`].
+pub(crate) async fn send_with_retry(
+    client: &reqwest::Client,
+    url: &str,
+    source: &str,
+    stage: &str,
+) -> Result<reqwest::Response, MermaidResult> {
+    let retry_stage = format!("{stage}-retry");
+    match client.get(url).send().await {
+        Ok(r) if !is_transient_status(r.status().as_u16()) => return Ok(r),
+        Ok(r) => {
+            tracing::warn!(
+                stage,
+                retry_stage = %retry_stage,
+                status = r.status().as_u16(),
+                source_len = source.len(),
+                "mermaid render request failed transiently; retrying once"
+            );
+        }
+        Err(e) => {
+            tracing::warn!(
+                stage,
+                retry_stage = %retry_stage,
+                timed_out = e.is_timeout(),
+                source_len = source.len(),
+                error = %e,
+                "mermaid render request failed transiently; retrying once"
+            );
+        }
+    }
+    tokio::time::sleep(Duration::from_millis(BODY_RETRY_DELAY_MS)).await;
+    match client.get(url).send().await {
+        Ok(r) => Ok(r),
+        Err(e) => Err(fail(&retry_stage, source, transport_note(&e), Some(&e))),
+    }
+}
+
 /// Pre-validate a single mermaid diagram against the renderer. On HTTP 200
 /// with an `image/*` content type it DOWNLOADS the rendered PNG and returns
 /// [`MermaidResult::ImageBytes`] — Telegram never fetches a URL from us
@@ -495,16 +563,9 @@ pub(crate) async fn resolve(source: &str) -> MermaidResult {
         Err(e) => return fail("client", source, "diagram renderer unavailable", Some(&e)),
     };
 
-    let resp = match client.get(&url).send().await {
+    let resp = match send_with_retry(&client, &url, source, "connect").await {
         Ok(r) => r,
-        Err(e) => {
-            let note = if e.is_timeout() {
-                "diagram renderer timed out"
-            } else {
-                "diagram renderer unreachable"
-            };
-            return fail("connect", source, note, Some(&e));
-        }
+        Err(outcome) => return outcome,
     };
 
     let status = resp.status().as_u16();
@@ -537,19 +598,11 @@ pub(crate) async fn resolve(source: &str) -> MermaidResult {
                     "natural render exceeds the photo box; retrying at the width clamp"
                 );
                 let clamp_url = ink_url_params(source, MERMAID_INK_CLAMP_PARAMS);
-                let cresp = match client.get(&clamp_url).send().await {
-                    Ok(r) => r,
-                    Err(e) => {
-                        return fail(
-                            "clamp-connect",
-                            source,
-                            format!(
-                                "rendered diagram {w}x{h} exceeds the photo box and the width-clamp retry failed"
-                            ),
-                            Some(&e),
-                        );
-                    }
-                };
+                let cresp =
+                    match send_with_retry(&client, &clamp_url, source, "connect-clamp").await {
+                        Ok(r) => r,
+                        Err(outcome) => return outcome,
+                    };
                 let cstatus = cresp.status().as_u16();
                 let ctype = cresp
                     .headers()
@@ -810,6 +863,20 @@ pub(crate) fn markdown_failure_block(err: &str, source: &str) -> String {
     )
 }
 
+/// Markdown for a TRANSIENT failure (#1741): the renderer stalled, 5xx'd,
+/// or dropped the image, which says nothing about the diagram's syntax.
+/// The shared old headline ("could not be rendered") reads as a parse
+/// rejection and sent an agent rewriting a valid diagram three times in
+/// one session (2026-09-25 daemon log) before anyone curled the renderer.
+/// The deterministic [`MermaidResult::ParseError`] path keeps the old
+/// headline via [`markdown_failure_block`] because there the diagram IS
+/// the problem.
+pub(crate) fn markdown_failure_block_transport(err: &str, source: &str) -> String {
+    format!(
+        "> ⚠️ **Renderer failure, not a syntax error: your diagram was NOT modified**\n\n```\n{err}\n\nSource:\n{source}\n```"
+    )
+}
+
 /// #189: the markdown failure block plus a `[svg]` escape hatch, for a
 /// TRANSIENT failure ([`MermaidResult::Failed`]) only. In that case the
 /// response had already passed the `2xx + image/*` check before the body was
@@ -821,7 +888,7 @@ pub(crate) fn markdown_failure_block(err: &str, source: &str) -> String {
 pub(crate) fn markdown_failure_block_with_link(err: &str, source: &str) -> String {
     format!(
         "{}\n\n[svg]({})",
-        markdown_failure_block(err, source),
+        markdown_failure_block_transport(err, source),
         ink_url_svg(source)
     )
 }
@@ -845,6 +912,17 @@ pub(crate) fn svg_link_html(source: &str) -> String {
 pub(crate) fn failure_html(err: &str, source: &str) -> String {
     format!(
         "<b>⚠️ Mermaid diagram could not be rendered</b>\n<blockquote>{}</blockquote>\n<pre><code>{}</code></pre>",
+        escape_html(err),
+        escape_html(source)
+    )
+}
+
+/// HTML headline for a TRANSIENT failure (#1741): same split as
+/// [`markdown_failure_block_transport`]. The renderer choked; the diagram
+/// did not.
+pub(crate) fn failure_html_transport(err: &str, source: &str) -> String {
+    format!(
+        "<b>⚠️ Renderer failure, not a syntax error: your diagram was NOT modified</b>\n<blockquote>{}</blockquote>\n<pre><code>{}</code></pre>",
         escape_html(err),
         escape_html(source)
     )
