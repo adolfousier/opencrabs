@@ -430,6 +430,46 @@ pub(crate) fn is_deliverable_report(content: &str) -> bool {
 /// ceiling, so a long chain truncates instead of growing into a wall.
 pub(crate) const THINKING_EXCERPT_LINES: usize = 3;
 
+/// How many wrapped lines an intermediate narration row may occupy when its
+/// turn is EXPANDED. A folded turn hides these rows entirely; the ceiling
+/// exists for the expanded state, where every row renders and an agentic
+/// night run would otherwise repaint the whole transcript as one wall of
+/// model working-out. Same budget and spirit as THINKING_EXCERPT_LINES.
+pub(crate) const NARRATION_EXCERPT_LINES: usize = 3;
+
+/// The rows of one turn that count as working-out: exactly the complement of
+/// [`visible_when_folded`]. A folded frame hides them; an expanded frame
+/// renders them, capped at [`NARRATION_EXCERPT_LINES`] each, so expanding a
+/// turn can never flood the screen no matter how chatty the run was.
+pub(crate) fn turn_narration_rows(
+    messages: &[DisplayMessage],
+    turn: TurnRange,
+    final_idx: Option<usize>,
+) -> std::collections::HashSet<usize> {
+    (turn.start..turn.end.min(messages.len()))
+        .filter(|&idx| !visible_when_folded(messages, idx, final_idx))
+        .collect()
+}
+
+/// Cap one rendered row's lines to [`NARRATION_EXCERPT_LINES`], appending an
+/// explicit overflow marker. The marker must SAY what happened: a silent cut
+/// reads as eaten content (the #904 trap), so the count of suppressed lines
+/// is spelled out instead of leaving a mysterious truncation.
+pub(crate) fn cap_narration_lines(mut content: Vec<Line<'static>>) -> Vec<Line<'static>> {
+    if content.len() <= NARRATION_EXCERPT_LINES {
+        return content;
+    }
+    let hidden = content.len() - NARRATION_EXCERPT_LINES;
+    content.truncate(NARRATION_EXCERPT_LINES);
+    content.push(Line::from(vec![Span::styled(
+        format!("  … +{hidden} more lines hidden (intermediate narration)"),
+        Style::default()
+            .fg(theme::role(Role::GrayDim))
+            .add_modifier(Modifier::ITALIC),
+    )]));
+    content
+}
+
 /// How many rows the fold actually hides, which is what the header's step
 /// count must report.
 ///
@@ -523,6 +563,10 @@ pub(super) fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
         std::collections::HashMap::new();
     // idx → false when that row is folded away this frame.
     let mut row_visible: std::collections::HashMap<usize, bool> = std::collections::HashMap::new();
+    // Rows that are working-out (the fold's hide set). When their turn is
+    // expanded they still render, but capped, so an expanded turn can never
+    // paint a wall of intermediate narration however long the run was.
+    let mut narration_rows: std::collections::HashSet<usize> = std::collections::HashSet::new();
     for t in &all_turns {
         let Some(anchor_id) = app.messages.get(t.start).map(|m| m.id) else {
             continue;
@@ -537,6 +581,13 @@ pub(super) fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
         );
 
         let hideable = turn_hideable_count(&app.messages, *t, final_idx);
+
+        // Working-out rows of this turn: hidden entirely while folded, capped
+        // while expanded (the two states share one definition, so the two
+        // views can never disagree about what counts as working-out).
+        for idx in turn_narration_rows(&app.messages, *t, final_idx) {
+            narration_rows.insert(idx);
+        }
 
         if folded {
             for idx in t.start..t.end.min(app.messages.len()) {
@@ -906,7 +957,14 @@ pub(super) fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
             );
             app.render_cache.insert(cache_key, parsed);
         }
-        let content_lines = app.render_cache[&cache_key].clone();
+        let content_lines = if narration_rows.contains(&msg_idx) {
+            // Expanded-turn working-out: bounded excerpt, never the full
+            // paragraph wall. The full text stays in the session log; only
+            // the transcript render is capped.
+            cap_narration_lines(app.render_cache[&cache_key].clone())
+        } else {
+            app.render_cache[&cache_key].clone()
+        };
         for (i, line) in content_lines.into_iter().enumerate() {
             let mut padded_spans = if i == 0 {
                 if is_user {

@@ -690,6 +690,7 @@ pub mod tui_events_test;
 pub mod tui_highlight_test;
 pub mod tui_markdown_prose_theme_test;
 pub mod tui_markdown_test;
+pub mod tui_narration_cap_test;
 pub mod tui_no_raw_ansi_colors_test;
 pub mod tui_notice_render_test;
 pub mod tui_notice_test;
