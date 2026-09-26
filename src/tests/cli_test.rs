@@ -108,6 +108,23 @@ fn test_cli_parse_run_with_auto_approve() {
 }
 
 #[test]
+fn test_cli_parse_run_quiet_defaults_false_and_flag_sets_true() {
+    // --quiet (#1673): machine-pure stdout for one-shot callers. Parse-level
+    // pin: off unless asked, on when asked; stdout purity itself is covered
+    // by the issue's NDJSON smoke, not a unit test.
+    let cli = Cli::try_parse_from(["opencrabs", "run", "Test prompt"]).unwrap();
+    match cli.command {
+        Some(Commands::Run { quiet, .. }) => assert!(!quiet),
+        _ => panic!("Expected Run command"),
+    }
+    let cli = Cli::try_parse_from(["opencrabs", "run", "--quiet", "Test prompt"]).unwrap();
+    match cli.command {
+        Some(Commands::Run { quiet, .. }) => assert!(quiet),
+        _ => panic!("Expected Run command"),
+    }
+}
+
+#[test]
 fn test_cli_parse_run_with_yolo_alias() {
     let cli = Cli::try_parse_from(["opencrabs", "run", "--yolo", "Test prompt"]).unwrap();
     match cli.command {

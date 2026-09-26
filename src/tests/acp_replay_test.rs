@@ -114,3 +114,21 @@ fn replay_usage_none_without_assistant_measurements() {
     assert_eq!(replay_usage(&messages), None);
     assert_eq!(replay_usage(&[]), None);
 }
+
+#[test]
+fn replay_usage_null_on_latest_assistant_does_not_fall_back() {
+    // The newest assistant row speaks: a NULL `input_tokens` there means
+    // unknown, even when older assistant rows carried values. Pinning this
+    // so "skip NULLs and use an older measurement" cannot land silently: a
+    // a stale older size would overstate the context the client renders.
+    let earlier = Message {
+        input_tokens: Some(1_200),
+        ..msg("assistant", "first answer", None)
+    };
+    let messages = vec![
+        earlier,
+        msg("user", "more", None),
+        msg("assistant", "second", None),
+    ];
+    assert_eq!(replay_usage(&messages), None);
+}
