@@ -25,6 +25,7 @@ pub mod a2a_notify_handler_test;
 pub mod a2a_server_test;
 pub mod a2a_session_notify_test;
 pub mod a2a_types_test;
+pub mod acp_catalog_test;
 pub mod acp_protocol_test;
 pub mod acp_replay_test;
 pub mod acp_transport_test;
