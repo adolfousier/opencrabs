@@ -1294,6 +1294,33 @@ fn install_daemon_service() -> Result<(), String> {
     }
 }
 
+/// Build the onboarding wizard's systemd user unit.
+///
+/// Pure (no OS calls) so it is unit-testable on every platform; the
+/// `#[cfg(target_os = "linux")]` caller below is the only thing that writes it
+/// to disk. `OOMPolicy=continue` keeps a single child's OOM kill from
+/// terminating the whole daemon: the daemon is the parent of every tool and
+/// cron child, and systemd's default policy (`stop`) would tear the unit down.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+pub(crate) fn build_onboarding_systemd_unit(exe_path: &str) -> String {
+    format!(
+        r#"[Unit]
+Description=OpenCrabs AI Orchestration Agent
+After=network.target
+
+[Service]
+Type=simple
+ExecStart={exe_path} daemon
+Restart=on-failure
+RestartSec=5
+OOMPolicy=continue
+
+[Install]
+WantedBy=default.target
+"#
+    )
+}
+
 #[cfg(target_os = "linux")]
 fn install_systemd_service() -> Result<(), String> {
     let service_dir = dirs::config_dir()
@@ -1320,22 +1347,7 @@ fn install_systemd_service() -> Result<(), String> {
 
     let exe_path = std::env::current_exe().map_err(|e| format!("Failed to get exe path: {}", e))?;
 
-    let service_content = format!(
-        r#"[Unit]
-Description=OpenCrabs AI Orchestration Agent
-After=network.target
-
-[Service]
-Type=simple
-ExecStart={} daemon
-Restart=on-failure
-RestartSec=5
-
-[Install]
-WantedBy=default.target
-"#,
-        exe_path.display()
-    );
+    let service_content = build_onboarding_systemd_unit(&exe_path.display().to_string());
 
     let service_path = service_dir.join("opencrabs.service");
     std::fs::write(&service_path, service_content)
