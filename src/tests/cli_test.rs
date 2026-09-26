@@ -98,7 +98,6 @@ fn test_cli_parse_run_with_auto_approve() {
         Some(Commands::Run {
             prompt,
             auto_approve,
-            format: _,
             ..
         }) => {
             assert_eq!(prompt, "Test prompt");
@@ -115,7 +114,6 @@ fn test_cli_parse_run_with_yolo_alias() {
         Some(Commands::Run {
             prompt,
             auto_approve,
-            format: _,
             ..
         }) => {
             assert_eq!(prompt, "Test prompt");
