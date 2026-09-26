@@ -47,7 +47,9 @@ jobs:
   lint:
     name: Lint
     runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork) && 'ubuntu-latest' || 'self-hosted' }}
-    timeout-minutes: 15
+    # 25: hosted Lint ran 13:43 of its 15 cap on a fork PR (run
+    # 36069934718); one noisy neighbor on the hosted fleet is a false red.
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v5
 
@@ -317,7 +319,11 @@ jobs:
     name: Test
     needs: [lint, audit]
     runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork) && 'ubuntu-latest' || 'self-hosted' }}
-    timeout-minutes: 30
+    # 60: fork PRs run this on hosted runners at roughly 3x self-hosted
+    # speed, and the 30 cap killed cold-cache fork runs twice (runs
+    # 36078125556 and 36069934718, both cancelled at ~30 while green code
+    # waited). Warm hosted fits in 20; 60 is the cold-cache ceiling.
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v5
 
