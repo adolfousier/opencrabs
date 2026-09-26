@@ -218,8 +218,14 @@ fn unrecoverable_human_reply_emits_marker_not_none() {
     let ctx = resolve_reply_context("Carol (@carol), ID 555", "", "", true);
     let text = ctx.expect("a human's unreadable reply target must emit a marker");
     assert!(text.contains("could not be retrieved"), "got: {text}");
-    assert!(text.contains("Carol"), "must name who was replied to: {text}");
-    assert!(text.contains("Do NOT guess"), "must forbid fabrication: {text}");
+    assert!(
+        text.contains("Carol"),
+        "must name who was replied to: {text}"
+    );
+    assert!(
+        text.contains("Do NOT guess"),
+        "must forbid fabrication: {text}"
+    );
 }
 
 #[test]

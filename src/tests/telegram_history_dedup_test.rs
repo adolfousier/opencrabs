@@ -10,7 +10,7 @@
 
 use crate::channels::group_history::{is_content_in_live_context, normalize_for_dedup};
 use crate::channels::telegram::handler::{
-    format_reply_context_pruned, resolve_reply_context_pruned, REPLY_EXCERPT_MAX_CHARS,
+    REPLY_EXCERPT_MAX_CHARS, format_reply_context_pruned, resolve_reply_context_pruned,
 };
 
 #[test]
@@ -98,8 +98,8 @@ fn format_reply_context_pruned_when_full_in_context_without_quote() {
 fn reply_excerpt_is_capped_with_ellipsis() {
     // The prune exists to save tokens, so the excerpt must stay bounded.
     let full = "x".repeat(500);
-    let formatted = format_reply_context_pruned("Alice", &full, "", true)
-        .expect("must emit a pointer");
+    let formatted =
+        format_reply_context_pruned("Alice", &full, "", true).expect("must emit a pointer");
     let excerpt = formatted
         .split("the message beginning: \"")
         .nth(1)
@@ -115,10 +115,16 @@ fn reply_excerpt_is_capped_with_ellipsis() {
 
 #[test]
 fn reply_excerpt_is_not_ellipsised_when_short() {
-    let formatted = format_reply_context_pruned("Alice", "short note", "", true)
-        .expect("must emit a pointer");
-    assert!(formatted.contains("the message beginning: \"short note\""), "got: {formatted}");
-    assert!(!formatted.contains('…'), "no ellipsis on an untruncated excerpt: {formatted}");
+    let formatted =
+        format_reply_context_pruned("Alice", "short note", "", true).expect("must emit a pointer");
+    assert!(
+        formatted.contains("the message beginning: \"short note\""),
+        "got: {formatted}"
+    );
+    assert!(
+        !formatted.contains('…'),
+        "no ellipsis on an untruncated excerpt: {formatted}"
+    );
 }
 
 #[test]
