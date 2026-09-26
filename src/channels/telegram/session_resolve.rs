@@ -104,6 +104,57 @@ pub fn delivery_thread_id(topic: Option<i32>) -> Option<teloxide::types::ThreadI
     }
 }
 
+/// Where a push that BELONGS to a session must be delivered (pure, #1200).
+///
+/// The distinction the delivery paths kept losing is THREE-state, and it has
+/// to survive the trip from the binding to the wire:
+///
+/// * `Bound(Some(topic))` — the session lives in a real forum topic.
+/// * `Bound(None)` — the session lives in the General topic of a forum, or in
+///   a DM / non-forum group. Both are addressed by the ABSENCE of a thread
+///   (#1319): General's `Some(1)` is a scoping key, never an address.
+/// * `Unbound` — no binding exists for this session anywhere, and only then
+///   is the chat's most recent topic the best answer available.
+///
+/// `TelegramState::session_topic` flattens the first two arms into one `None`
+/// (its `.flatten()` collapses `Some(None)` and a missing entry), so a caller
+/// that resolves through it and then falls back to the chat-wide lookup sends
+/// a General-bound session's message into whichever topic spoke last. That is
+/// the defect this function exists to make unrepeatable: on 2026-09-21 the
+/// hourly digest of the "Общее / Неразобранное" topic (session bound to
+/// General) was delivered into the project topic that happened to be the most
+/// recent speaker.
+///
+/// `in_memory` is the live binding (`TelegramState::session_binding`), which
+/// the connect-time re-registration of #1224 fills from the durable rows;
+/// `durable` is the `session_bindings` row itself, read only when the maps
+/// hold nothing for the session (a push can arrive before that re-registration
+/// has run). A binding for a DIFFERENT chat is not this chat's business, so
+/// both are matched against `chat_id`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PushTarget {
+    /// The session's own binding names the address — `Some(topic)` for a real
+    /// topic, `None` for General / a DM / a non-forum group.
+    Bound(Option<i32>),
+    /// No binding for this session: fall back to the chat-wide lookup.
+    Unbound,
+}
+
+/// Decide [`PushTarget`] from the two stores, pure (#1200).
+pub fn push_target(
+    in_memory: Option<(i64, Option<i32>)>,
+    durable: Option<(i64, Option<i32>)>,
+    chat_id: i64,
+) -> PushTarget {
+    if let Some((_, topic)) = in_memory.filter(|(chat, _)| *chat == chat_id) {
+        return PushTarget::Bound(topic);
+    }
+    if let Some((_, topic)) = durable.filter(|(chat, _)| *chat == chat_id) {
+        return PushTarget::Bound(topic);
+    }
+    PushTarget::Unbound
+}
+
 /// #1220: normalize a raw topic resolution for KNOWN forum chats.
 ///
 /// `raw` is the output of [`topic_session_id`]; `known_forum` is the

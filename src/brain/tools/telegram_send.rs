@@ -119,15 +119,18 @@ pub(crate) async fn resolve_input_file(
 ///      agent route messages to a topic OTHER than the most recent
 ///      one (e.g. "post the release notes in #announcements even
 ///      though the last message came from #dev").
-///   2. Session origin topic via `session_topic(session_id)` — ONLY when the
+///   2. Session origin binding via `session_push_thread` — ONLY when the
 ///      resolved target chat IS the session-origin chat (#127). The forum
 ///      topic this interaction started in; makes replies land back in the
 ///      originating topic with no explicit routing, without leaking the
-///      topic into other chats (the #116 poisoning chain).
+///      topic into other chats (the #116 poisoning chain). A session bound
+///      to General resolves to no thread and STOPS here (#478) — it must not
+///      reach step 3, which would post into whichever topic spoke last.
 ///   3. Auto-lookup via `latest_thread_id_for_chat(chat_id)` — the
 ///      fallback that closed #130, picking up the most recently
 ///      stored topic so non-forum chats and routine replies still
-///      land in the right place without the agent having to know.
+///      land in the right place without the agent having to know. Reached
+///      only for a session with no binding at all.
 ///
 /// Returns `None` when no path produces a value (non-forum chat, no
 /// session origin, empty channel history, explicit value outside i32 range).
@@ -159,26 +162,25 @@ pub(crate) async fn resolve_thread_id(
     // across chats is what poisoned cross-chat sends (#116): a session
     // living in group topic 7198, sending to the owner DM with thread_id
     // omitted, had topic 7198 — which does not exist in the DM — put on the
-    // wire. A session bound to General has a KNOWN same-origin address (no
-    // thread), so falling through to the chat-wide lookup below is still
-    // correct for that case (#1319).
-    if let Some(tid) = state.session_topic(session_id).await
-        && state.session_chat(session_id).await == Some(chat_id)
-    {
-        // Returns even when the boundary yields None: a session bound to
-        // General has a KNOWN address (no thread), so falling through to the
-        // chat-wide lookup below would post into whichever topic spoke last
-        // (#1319).
-        //
-        // A remembered topic can outlive its existence on Telegram's side
-        // (deleted while we were away). Its first hard evidence is the send
-        // itself failing with `message thread not found` (#116) — handled at
-        // the send seams (rich + HTML ladder), which evict chat-scoped and
-        // retry unthreaded. Here we just resolve the address; the map
-        // re-registers on the chat's next inbound topic message.
-        return crate::channels::telegram::session_resolve::delivery_thread_id(Some(tid));
-    }
-    crate::channels::telegram::send::latest_thread_id_for_chat(chat_id).await
+    // wire.
+    //
+    // The question here is whether the session has a binding AT ALL, not
+    // whether its topic is non-None. `session_topic` returns `None` for BOTH
+    // "bound to General / a DM" and "not bound", and the connect-time route
+    // restore (#1224) writes a General binding as the durable `NULL` — so
+    // asking it directly fell through to the chat-wide lookup for a session
+    // whose address was known, posting into whichever topic spoke last
+    // (#1319, #478). `session_push_thread` asks the binding instead, and
+    // keeps the same-origin rule: it only honours a binding whose chat is
+    // this one.
+    //
+    // A remembered topic can outlive its existence on Telegram's side
+    // (deleted while we were away). Its first hard evidence is the send
+    // itself failing with `message thread not found` (#116) — handled at
+    // the send seams (rich + HTML ladder), which evict chat-scoped and
+    // retry unthreaded. Here we just resolve the address; the map
+    // re-registers on the chat's next inbound topic message.
+    crate::channels::telegram::send::session_push_thread(state, session_id, chat_id).await
 }
 
 /// A resolved destination for a message-creating Telegram action (#1080).

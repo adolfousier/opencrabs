@@ -80,27 +80,25 @@ pub(crate) fn build_enqueue_callback(
                 return;
             };
             // The topic that OWNS the session, not whichever one spoke last
-            // (#1200). Sessions are per-topic since #215, and
+            // (#1200, #1319). Sessions are per-topic since #215, and
             // `register_session_chat` records the topic, but this path asked
             // the chat instead: in a forum, any traffic in another topic while
             // a detached command ran sent the result there. Both background
             // completions and sub-agent results share this callback, so they
             // were both misrouted.
             //
-            // The chat-wide lookup stays as the fallback. It is still right
-            // for a DM or a non-forum group (where `session_topic` is None
-            // anyway), and it is all we have for a session whose in-memory
-            // topic binding has not been re-registered since a restart.
-            // Bound sessions resolve through the delivery boundary, so a
-            // General-bound one yields NO thread rather than the synthetic 1
-            // (#1319). Note the two arms mean different things: bound-to-
-            // General is a definite "no thread", while unbound falls back to
-            // the chat-wide lookup. Collapsing them would send a General
-            // session's message into whichever topic spoke last.
-            let thread_id = match state.session_topic(session_id).await {
-                Some(topic) => super::session_resolve::delivery_thread_id(Some(topic)),
-                None => super::send::latest_thread_id_for_chat(chat_id).await,
-            };
+            // The resolution is THREE-state, and `session_topic` cannot
+            // express it: its `None` covers both "bound to General / a DM" — a
+            // definite no-thread address — and "not bound at all", which is
+            // the only case the chat-wide lookup is for. Resolving through it
+            // sent the General topic's hourly digest into whichever topic had
+            // spoken last (measured 2026-09-21: session ef52656d, whose
+            // durable binding is `thread_id = NULL` on this chat, was
+            // delivered as msg 16795 into the Голубицкая topic).
+            // `session_push_thread` keeps the two arms apart and reaches the
+            // durable `session_bindings` row when the in-memory maps are still
+            // empty.
+            let thread_id = super::send::session_push_thread(&state, session_id, chat_id).await;
 
             // #1221: announce WHAT arrived before anything else happens — an
             // expandable blockquote echoing the completion output (rich format
@@ -343,27 +341,25 @@ pub(crate) fn build_enqueue_callback(
             };
 
             // The topic that OWNS the session, not whichever one spoke last
-            // (#1200). Sessions are per-topic since #215, and
+            // (#1200, #1319). Sessions are per-topic since #215, and
             // `register_session_chat` records the topic, but this path asked
             // the chat instead: in a forum, any traffic in another topic while
             // a detached command ran sent the result there. Both background
             // completions and sub-agent results share this callback, so they
             // were both misrouted.
             //
-            // The chat-wide lookup stays as the fallback. It is still right
-            // for a DM or a non-forum group (where `session_topic` is None
-            // anyway), and it is all we have for a session whose in-memory
-            // topic binding has not been re-registered since a restart.
-            // Bound sessions resolve through the delivery boundary, so a
-            // General-bound one yields NO thread rather than the synthetic 1
-            // (#1319). Note the two arms mean different things: bound-to-
-            // General is a definite "no thread", while unbound falls back to
-            // the chat-wide lookup. Collapsing them would send a General
-            // session's message into whichever topic spoke last.
-            let thread_id = match state.session_topic(session_id).await {
-                Some(topic) => super::session_resolve::delivery_thread_id(Some(topic)),
-                None => super::send::latest_thread_id_for_chat(chat_id).await,
-            };
+            // The resolution is THREE-state, and `session_topic` cannot
+            // express it: its `None` covers both "bound to General / a DM" — a
+            // definite no-thread address — and "not bound at all", which is
+            // the only case the chat-wide lookup is for. Resolving through it
+            // sent the General topic's hourly digest into whichever topic had
+            // spoken last (measured 2026-09-21: session ef52656d, whose
+            // durable binding is `thread_id = NULL` on this chat, was
+            // delivered as msg 16795 into the Голубицкая topic).
+            // `session_push_thread` keeps the two arms apart and reaches the
+            // durable `session_bindings` row when the in-memory maps are still
+            // empty.
+            let thread_id = super::send::session_push_thread(&state, session_id, chat_id).await;
             if let Err(e) = resume_session_inner(
                 bot,
                 teloxide::types::ChatId(chat_id),
