@@ -1166,32 +1166,44 @@ impl App {
                 true
             }
             "/rebuild" => {
-                // Schedule the build in the BACKGROUND via a one-shot cron job
-                // so the session isn't blocked for the minutes a release build
-                // takes. The scheduler builds from source and exec-restarts
-                // into the new binary when ready, resuming this session.
+                // Run the build DETACHED via the shared BackgroundTaskManager
+                // (#1748): live timer and status file come free, and the
+                // rebuild completion hook exec-restarts into the new binary
+                // when ready, resuming this session.
+                let Some(mgr) = self.agent_service.background_manager() else {
+                    self.push_system_message(
+                        "rebuild: no background task manager wired on this surface".to_string(),
+                    );
+                    return true;
+                };
                 let sid = self
                     .current_session
                     .as_ref()
                     .map(|s| s.id)
                     .unwrap_or(Uuid::nil());
-                let pool = self.agent_service.context().pool();
+                let service_context = self.agent_service.context().clone();
                 let sender = self.event_sender();
                 tokio::spawn(async move {
-                    match crate::cron::schedule_background_rebuild(pool, sid, None).await {
+                    match crate::brain::tools::rebuild::run_detached_rebuild(
+                        &mgr,
+                        sid,
+                        &service_context,
+                    )
+                    .await
+                    {
                         Ok(()) => {
                             let _ = sender.send(TuiEvent::SystemMessage {
                                 session_id: sid,
-                                text: "🔨 Rebuild scheduled in the background — I'll reload \
-                                       into the new binary automatically when it's ready. \
-                                       Keep working."
+                                text: "🔨 Rebuild running detached: live timer above. \
+                                       OpenCrabs reloads into the new binary automatically \
+                                       when it's done. Keep working."
                                     .into(),
                             });
                         }
                         Err(e) => {
                             let _ = sender.send(TuiEvent::Error {
                                 session_id: sid,
-                                message: format!("Failed to schedule rebuild: {e}"),
+                                message: format!("rebuild failed: {e:#}"),
                             });
                         }
                     }

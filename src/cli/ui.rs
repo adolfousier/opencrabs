@@ -2126,26 +2126,12 @@ async fn cmd_chat_inner(
         } else {
             let cron_repo = crate::db::CronJobRepository::new(db.pool().clone());
             let cron_run_repo = crate::db::CronJobRunRepository::new(db.pool().clone());
-            // Rebuild outcomes must reach the session that asked (#304): a
-            // failed background build used to be log-only while the TUI waited
-            // for a reload that never came.
-            let rebuild_notify_tx = app.event_sender();
-            let session_notifier: crate::cron::SessionNotifier =
-                std::sync::Arc::new(move |session_id, text| {
-                    if rebuild_notify_tx
-                        .send(crate::tui::events::TuiEvent::SystemMessage { session_id, text })
-                        .is_err()
-                    {
-                        tracing::warn!("rebuild notifier: TUI event channel closed");
-                    }
-                });
             let cron_scheduler = crate::cron::CronScheduler::new(
                 cron_repo,
                 cron_run_repo,
                 channel_factory.clone(),
                 service_context.clone(),
-            )
-            .with_session_notifier(session_notifier);
+            );
             // Detached task; the JoinHandle isn't awaited or aborted anywhere.
             cron_scheduler.spawn();
             tracing::info!("Cron scheduler spawned");
