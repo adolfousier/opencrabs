@@ -11,6 +11,7 @@
 use crate::brain::agent::service::notify_policy::{
     CONFIRM_CAP, DeliveryMode, confirm_route, resolve_mode,
 };
+use crate::brain::agent::service::session_routes::session_route;
 use crate::brain::tools::error::{Result, ToolError};
 use crate::brain::tools::r#trait::{Tool, ToolCapability, ToolExecutionContext, ToolResult};
 use crate::db::{SessionBindingRepository, SessionRepository};
@@ -284,6 +285,8 @@ impl Tool for SessionNotifyTool {
         use crate::brain::agent::service::quiet_delivery;
         use crate::brain::agent::service::session_routes::{Delivery, deliver_to_session};
 
+        let target_str = target.to_string();
+
         let goal = input
             .get("goal")
             .and_then(Value::as_str)
@@ -321,7 +324,6 @@ impl Tool for SessionNotifyTool {
         // surfaces deliberately fail open: without a pool they retain the
         // daemon's existing notifyability posture. Quiet delivery is checked
         // after this branch so it cannot bank an impossible target either.
-        let mut target_has_binding = true;
         if let Some(service_context) = &context.service_context {
             let pool = service_context.pool().clone();
             let sessions = SessionRepository::new(pool.clone());
@@ -342,15 +344,46 @@ impl Tool for SessionNotifyTool {
                     ));
                 }
                 Ok(Some(_)) => {
-                    match SessionBindingRepository::new(pool)
-                        .by_session(&target.to_string())
-                        .await
-                    {
-                        Ok(binding) => target_has_binding = binding.is_some(),
+                    // #574: the tool already computed whether the target has
+                    // a durable binding, but used it only to pick message
+                    // text — parking an unclaimable target and reporting
+                    // success. Refuse that case here, BEFORE any delivery
+                    // path, so no durable queue row is ever written for a
+                    // target that cannot consume it. The bound-but-unclaimed
+                    // park is untouched (see the `Delivery::Parked` arm).
+                    match SessionBindingRepository::new(pool).by_session(&target_str).await {
+                        Ok(Some(_)) => {}
+                        // #574: no durable binding means no channel can claim
+                        // this session ACROSS A RESTART. A channel may still
+                        // hold it right now through an in-memory route, and
+                        // such a target is reachable, so delivery proceeds
+                        // normally — refusing on the binding alone would
+                        // reject a live, deliverable session. Only a target
+                        // with NEITHER a binding nor a live route is genuinely
+                        // undeliverable.
+                        Ok(None) if session_route(target).is_none() => {
+                            return Ok(verdict(
+                                false,
+                                "undeliverable",
+                                format!(
+                                    "Cannot deliver to session {target}: it exists in this \
+                                     daemon but no channel has ever claimed it, so a headless \
+                                     or cron session can never drain the queue. Address a \
+                                     channel-bound session, or use a2a_send for another \
+                                     profile or daemon."
+                                ),
+                                &[
+                                    ("notify_target", target.to_string()),
+                                    ("notify_reason", "unclaimed_no_binding".into()),
+                                ],
+                            ));
+                        }
+                        // Reachable right now: fall through to delivery.
+                        Ok(None) => {}
                         Err(error) => tracing::warn!(
                             error = %error,
                             session_id = %target,
-                            "session_notify could not verify target binding; preserving park text"
+                            "session_notify could not verify target binding; failing open"
                         ),
                     }
                 }
@@ -434,38 +467,25 @@ impl Tool for SessionNotifyTool {
                     ],
                 ))
             }
-            // Queued, not lost: the target belongs to a channel that has not
-            // claimed it since the last restart (#1206). Reporting this as a
-            // failure would be the opposite of what happened.
+            // Queued, not lost: an existing session WITH a binding may still be
+            // waiting for its channel to claim it after a restart. The unbound
+            // case never reaches this arm — #574 refuses it in the resolution
+            // block above, before any delivery path can run.
             Delivery::Parked => {
                 maybe_set_goal(target, goal, goal_max_turns, context).await;
                 notify_receipts::record_queued(notify_id, target);
-                let reason = if target_has_binding {
-                    "awaiting_channel_claim"
-                } else {
-                    "unclaimed_no_binding"
-                };
-                let detail = if target_has_binding {
+                Ok(verdict(
+                    true,
+                    "queued",
                     format!(
                         "Queued for session {target}. Its channel has not claimed it since the \
                          last restart, so it will be delivered as soon as that channel next \
                          binds the session. Poll action:\"status\" with notify_id."
-                    )
-                } else {
-                    format!(
-                        "Queued for session {target}. No surface has ever claimed this session; \
-                         a headless or cron session does not drain a queue. Poll action:\"status\" \
-                         with notify_id."
-                    )
-                };
-                Ok(verdict(
-                    true,
-                    "queued",
-                    detail,
+                    ),
                     &[
                         ("notify_target", target.to_string()),
                         ("notify_id", notify_id.to_string()),
-                        ("notify_reason", reason.into()),
+                        ("notify_reason", "awaiting_channel_claim".into()),
                     ],
                 ))
             }
