@@ -394,4 +394,37 @@ pub trait Tool: Send + Sync {
         // Default implementation - no validation
         Ok(())
     }
+
+    /// The single path this invocation will write, resolved against the
+    /// working directory. `None` for tools that write nothing.
+    ///
+    /// One per-tool source of truth for "which file does this touch". The
+    /// batch scheduler and the recent-path bookkeeping both ask the tool
+    /// itself instead of keeping a central name table, which drifts as tools
+    /// are added and then silently reports "writes nothing" for a writer it
+    /// does not know (#593).
+    fn write_target(
+        &self,
+        _input: &Value,
+        _working_directory: &std::path::Path,
+    ) -> Option<std::path::PathBuf> {
+        None
+    }
+}
+
+/// Resolve the `path` argument shared by the file-writing tools.
+///
+/// `edit_file`, `write_file`, `hashline_edit` and `write_opencrabs_file` all
+/// address their target through the same `path` key, so the extraction lives
+/// here once. A tool whose input names its target differently overrides
+/// [`Tool::write_target`] itself rather than bending this helper.
+pub(crate) fn write_target_from_path_arg(
+    input: &Value,
+    working_directory: &std::path::Path,
+) -> Option<std::path::PathBuf> {
+    input
+        .get("path")
+        .and_then(|v| v.as_str())
+        .filter(|p| !p.trim().is_empty())
+        .map(|p| super::error::resolve_tool_path(p, working_directory))
 }

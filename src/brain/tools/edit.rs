@@ -108,6 +108,17 @@ impl Tool for EditTool {
         "edit_file"
     }
 
+    /// The one path this invocation writes, resolved against the working
+    /// directory (#593). The batch scheduler asks the tool instead of
+    /// consulting a central name table.
+    fn write_target(
+        &self,
+        input: &Value,
+        working_directory: &std::path::Path,
+    ) -> Option<std::path::PathBuf> {
+        crate::brain::tools::r#trait::write_target_from_path_arg(input, working_directory)
+    }
+
     fn description(&self) -> &str {
         "Edit a file intelligently using various operations: replace text, replace lines, insert lines, delete lines, or regex replace."
     }
@@ -209,6 +220,18 @@ impl Tool for EditTool {
                 path.display()
             )));
         }
+
+        // One writer at a time on this path (#1153), held across the whole
+        // read-modify-write rather than the write alone (#593). The result is
+        // computed from the bytes read below, so a lock taken after that read
+        // leaves the two writers' reads racing: both see the same original and
+        // the later write replaces the file, dropping the earlier edit while
+        // both report success. The guard stays advisory — a contended write
+        // proceeds rather than failing — but the hold is one read and one
+        // write of a single file, far shorter than the wait, so a competing
+        // edit of the same path serialises in practice.
+        let write_lock = super::path_lock::acquire(&path);
+        let contended = write_lock.as_ref().is_some_and(|l| !l.is_held());
 
         // Read file content
         let content = fs::read_to_string(&path).await.map_err(ToolError::Io)?;
@@ -337,16 +360,8 @@ impl Tool for EditTool {
             return Err(ToolError::InvalidInput(msg));
         }
 
-        // One writer at a time on this path (#1153). Agents sharing a working
-        // tree otherwise write the same bytes with no arbitration, which is
-        // the case whenever sub-agent worktree isolation degrades to the
-        // parent's directory. The guard is advisory and held only across the
-        // write, and a contended write proceeds rather than failing: refusing
-        // to save is worse than an interleave the caller is told about.
-        let write_lock = super::path_lock::acquire(&path);
-        let contended = write_lock.as_ref().is_some_and(|l| !l.is_held());
-
-        // Write modified content
+        // Write modified content. The path lock was taken above, before the
+        // read, and is still held here (#593).
         super::fs_util::atomic_write_file(&path, new_content.as_bytes()).await?;
         drop(write_lock);
 

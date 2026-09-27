@@ -35,6 +35,17 @@ impl Tool for WriteTool {
         "write_file"
     }
 
+    /// The one path this invocation writes, resolved against the working
+    /// directory (#593). The batch scheduler asks the tool instead of
+    /// consulting a central name table.
+    fn write_target(
+        &self,
+        input: &Value,
+        working_directory: &std::path::Path,
+    ) -> Option<std::path::PathBuf> {
+        crate::brain::tools::r#trait::write_target_from_path_arg(input, working_directory)
+    }
+
     fn description(&self) -> &str {
         "Write content to a file on the filesystem. Creates the file if it doesn't exist, overwrites if it does. Keep one call under ~300 lines / ~12 KB: the content is generated as a single tool-call argument, and a larger one streams for minutes and gets cut. Split bigger files by concern (see the LARGE FILES rule) and add parts with edit_file."
     }

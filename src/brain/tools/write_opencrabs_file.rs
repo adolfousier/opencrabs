@@ -225,6 +225,24 @@ impl Tool for WriteOpenCrabsFileTool {
         "write_opencrabs_file"
     }
 
+    /// The one path this invocation writes (#593). Unlike the generic
+    /// `path`-keyed tools, this one addresses files under the profile home,
+    /// so it resolves exactly as `execute` does — `home.join(path)` — rather
+    /// than against the working directory. Two calls naming one brain file
+    /// must compare equal here, or the batch would run them concurrently.
+    fn write_target(
+        &self,
+        input: &Value,
+        _working_directory: &std::path::Path,
+    ) -> Option<std::path::PathBuf> {
+        input
+            .get("path")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|p| !p.is_empty())
+            .map(|p| crate::config::opencrabs_home().join(p))
+    }
+
     fn description(&self) -> &str {
         "Write or edit any file within the OpenCrabs home directory. \
          Use this for brain files (MEMORY.md, USER.md, AGENTS.md, SOUL.md, etc.), \
