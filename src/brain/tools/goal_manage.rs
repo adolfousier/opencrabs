@@ -128,12 +128,11 @@ impl Tool for GoalManageTool {
                         )
                         .num_minutes();
                     Ok(ToolResult::success(format!(
-                        "🎯 Active goal ({}):\n\n{}\n\nState: {} | Turns: {}/{} | Elapsed: {}m",
+                        "🎯 Active goal ({}):\n\n{}\n\nState: {} | {} | Elapsed: {}m",
                         goal.id,
                         goal.goal_text,
                         goal.state,
-                        goal.turns_used,
-                        goal.max_turns,
+                        crate::brain::goal::driver_line(&goal),
                         elapsed,
                     )))
                 }

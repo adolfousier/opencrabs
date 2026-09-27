@@ -279,3 +279,25 @@ pub const THINKING_EXCERPT_CHARS: usize = 300;
 pub fn utc_timestamp() -> String {
     chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string()
 }
+
+/// A coarse, human age from a whole number of seconds: `3d 2h`, `5h 12m`,
+/// `42m`, `<1m` (#480).
+///
+/// One home: the RSI staleness line and the goal driver line both render an
+/// age, and two formatters would drift on where the unit boundaries sit.
+/// Negative input clamps to `<1m` rather than rendering a future age.
+pub fn humanize_age(secs: i64) -> String {
+    let secs = secs.max(0);
+    let days = secs / 86_400;
+    let hours = (secs % 86_400) / 3_600;
+    let mins = (secs % 3_600) / 60;
+    if days > 0 {
+        format!("{days}d {hours}h")
+    } else if hours > 0 {
+        format!("{hours}h {mins}m")
+    } else if mins > 0 {
+        format!("{mins}m")
+    } else {
+        "<1m".to_string()
+    }
+}

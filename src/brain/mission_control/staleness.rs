@@ -3,6 +3,8 @@
 //! ledger kept recording, and nothing surfaced it. Pure formatting so the
 //! threshold rules are unit tested without a database.
 
+use crate::utils::string::humanize_age;
+
 /// RSI counts as stale when its last activity is older than this while
 /// tool events kept recording (activity happened, RSI didn't process it).
 pub const RSI_STALE_AFTER_SECS: i64 = 12 * 3600;
@@ -25,22 +27,5 @@ pub fn rsi_staleness_line(now_ts: i64, last_ts: Option<i64>, events_since: i64) 
                 format!("RSI last run {human} ago")
             }
         }
-    }
-}
-
-/// Coarse age: `3d 2h`, `5h 12m`, `42m`, `<1m`.
-fn humanize_age(secs: i64) -> String {
-    let secs = secs.max(0);
-    let days = secs / 86_400;
-    let hours = (secs % 86_400) / 3_600;
-    let mins = (secs % 3_600) / 60;
-    if days > 0 {
-        format!("{days}d {hours}h")
-    } else if hours > 0 {
-        format!("{hours}h {mins}m")
-    } else if mins > 0 {
-        format!("{mins}m")
-    } else {
-        "<1m".to_string()
     }
 }

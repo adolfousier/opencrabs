@@ -6,11 +6,13 @@
 //! the tool loop re-enters. The loop is bounded by a turn budget
 //! (default 20) and auto-pauses on consecutive judge parse failures.
 
+pub mod driver;
 pub mod judge;
 pub mod manager;
 pub mod prompt;
 pub mod types;
 
+pub use driver::{DRIVER_STALE_AFTER_SECS, driver_line};
 pub use manager::GoalManager;
 pub use prompt::{goal_command_prompt, goal_usage_warning, is_bare};
 pub use types::{GoalDecision, GoalVerdict, JudgeDecision};

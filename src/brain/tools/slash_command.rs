@@ -954,12 +954,11 @@ impl SlashCommandTool {
                             )
                             .num_minutes();
                         Ok(ToolResult::success(format!(
-                            "🎯 Active Goal ({}):\n\n{}\n\nState: {} | Turns: {}/{} | Elapsed: {}m",
+                            "🎯 Active Goal ({}):\n\n{}\n\nState: {} | {} | Elapsed: {}m",
                             goal.id,
                             goal.goal_text,
                             goal.state,
-                            goal.turns_used,
-                            goal.max_turns,
+                            crate::brain::goal::driver_line(&goal),
                             elapsed,
                         )))
                     }
