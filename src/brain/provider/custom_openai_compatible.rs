@@ -3142,7 +3142,7 @@ impl OpenAIProvider {
 
     /// Convert OpenAI response to our generic format
     #[allow(clippy::wrong_self_convention)]
-    fn from_openai_response(&self, response: OpenAIResponse) -> LLMResponse {
+    fn from_openai_response(&self, response: OpenAIResponse, requested_model: &str) -> LLMResponse {
         let choice = response
             .choices
             .into_iter()
@@ -3305,7 +3305,7 @@ impl OpenAIProvider {
 
         LLMResponse {
             id: response.id,
-            model: response.model,
+            model: stable_model_id(response.model, requested_model),
             content: content_blocks,
             stop_reason,
             usage: TokenUsage {
@@ -3465,6 +3465,36 @@ impl OpenAIProvider {
     }
 }
 
+/// Keep the model identifier OpenCrabs sent when a compatible gateway reports
+/// a backend-local identifier in its response. The request ID is also the one
+/// used for the provider/model session pair, so replacing it with the response
+/// ID can make the next turn fail when the gateway strips a provider prefix.
+fn stable_model_id(response_model: String, requested_model: &str) -> String {
+    if requested_model.is_empty() {
+        response_model
+    } else {
+        requested_model.to_string()
+    }
+}
+
+#[cfg(test)]
+mod model_id_tests {
+    use super::stable_model_id;
+
+    #[test]
+    fn preserves_provider_prefix_when_gateway_strips_it() {
+        assert_eq!(
+            stable_model_id("gpt-5.6-luna-medium".into(), "codex/gpt-5.6-luna-medium"),
+            "codex/gpt-5.6-luna-medium"
+        );
+    }
+
+    #[test]
+    fn falls_back_to_response_model_without_request_id() {
+        assert_eq!(stable_model_id("backend-model".into(), ""), "backend-model");
+    }
+}
+
 #[async_trait]
 impl Provider for OpenAIProvider {
     async fn complete(&self, request: LLMRequest) -> Result<LLMResponse> {
@@ -3544,7 +3574,8 @@ impl Provider for OpenAIProvider {
                 let request_id = provider_request_id(response.headers());
 
                 let openai_response: OpenAIResponse = response.json().await?;
-                let llm_response = self.from_openai_response(openai_response);
+                let model_for_response = model.clone();
+                let llm_response = self.from_openai_response(openai_response, &model_for_response);
 
                 // Log cache hit/miss for OpenRouter
                 if let Some(ref status) = cache_status {
@@ -3605,7 +3636,8 @@ impl Provider for OpenAIProvider {
                             return Err(self.handle_error(response).await);
                         }
                         let openai_response: OpenAIResponse = response.json().await?;
-                        Ok(self.from_openai_response(openai_response))
+                        let model_for_response = model.clone();
+                        Ok(self.from_openai_response(openai_response, &model_for_response))
                     },
                     &retry_config,
                 )
@@ -3639,7 +3671,8 @@ impl Provider for OpenAIProvider {
                                     return Err(self.handle_error(response).await);
                                 }
                                 let openai_response: OpenAIResponse = response.json().await?;
-                                Ok(self.from_openai_response(openai_response))
+                                let model_for_response = model.clone();
+                                Ok(self.from_openai_response(openai_response, &model_for_response))
                             },
                             &retry_config,
                         )
