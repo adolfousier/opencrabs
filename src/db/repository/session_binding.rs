@@ -9,6 +9,7 @@
 use crate::db::{Pool, database::interact_err};
 use anyhow::{Context, Result};
 use rusqlite::params;
+use rusqlite::OptionalExtension;
 
 /// One persisted binding: "session S lives on channel C, chat X, topic T".
 #[derive(Debug, Clone)]
@@ -139,6 +140,42 @@ impl SessionBindingRepository {
             .await
             .map_err(interact_err)?
             .context("Failed to list recent session bindings")?;
+        Ok(mapped)
+    }
+
+    /// The binding for a single session, if one exists.
+    ///
+    /// Archiving deliberately does NOT filter the row out: whether an archived
+    /// session may still be addressed is the CALLER's policy, not this
+    /// single-row read. A session with no binding can never claim a channel
+    /// route ACROSS A RESTART (#574), which is what the caller tests.
+    pub async fn by_session(&self, session_id: &str) -> Result<Option<SessionBinding>> {
+        let sid = session_id.to_string();
+        let mapped = self
+            .pool
+            .get()
+            .await
+            .context("Failed to get connection")?
+            .interact(move |conn| {
+                conn.prepare(
+                    "SELECT b.session_id, b.channel, b.chat_id, b.thread_id \
+                     FROM session_bindings b \
+                     JOIN sessions s ON s.id = b.session_id \
+                     WHERE b.session_id = ?1",
+                )?
+                .query_row(params![sid], |row| {
+                    Ok(SessionBinding {
+                        session_id: row.get("session_id")?,
+                        channel: row.get("channel")?,
+                        chat_id: row.get("chat_id")?,
+                        thread_id: row.get("thread_id")?,
+                    })
+                })
+                .optional()
+            })
+            .await
+            .map_err(interact_err)?
+            .context("Failed to read session binding")?;
         Ok(mapped)
     }
 }

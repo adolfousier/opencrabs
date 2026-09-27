@@ -13,6 +13,7 @@ use crate::brain::agent::service::notify_policy::{
 };
 use crate::brain::tools::error::{Result, ToolError};
 use crate::brain::tools::r#trait::{Tool, ToolCapability, ToolExecutionContext, ToolResult};
+use crate::db::SessionBindingRepository;
 use async_trait::async_trait;
 use serde_json::Value;
 
@@ -283,6 +284,50 @@ impl Tool for SessionNotifyTool {
         use crate::brain::agent::service::quiet_delivery;
         use crate::brain::agent::service::session_routes::{Delivery, deliver_to_session};
 
+        // #574: a session with no `session_bindings` row can never drain a
+        // queue — no channel can ever claim it ACROSS A RESTART, so the park
+        // is permanent and the receipt is a lie. Refuse it here, BEFORE any
+        // delivery path, so no durable queue row is ever written for a target
+        // that cannot consume it. A session that HAS a binding but whose
+        // channel has not claimed it since restart remains the legitimate park
+        // (see the `Delivery::Parked` arm below).
+        //
+        // A live in-memory route still makes an unbound session reachable, so
+        // the refusal is additionally guarded on there being no route: refusing
+        // on the binding alone would reject a live, deliverable session.
+        let target_str = target.to_string();
+        if let Some(service_context) = &context.service_context {
+            let pool = service_context.pool().clone();
+            let unbound = match SessionBindingRepository::new(pool).by_session(&target_str).await {
+                Ok(binding) => binding.is_none(),
+                Err(error) => {
+                    tracing::warn!(
+                        error = %error,
+                        session_id = %target,
+                        "session_notify could not verify target binding; failing open"
+                    );
+                    false
+                }
+            };
+            if unbound
+                && crate::brain::agent::service::session_routes::session_route(target).is_none()
+            {
+                return Ok(verdict(
+                    false,
+                    "undeliverable",
+                    format!(
+                        "Cannot deliver to session {target}: no channel has ever claimed it, \
+                         so a headless or cron session can never drain the queue. Address a \
+                         channel-bound session, or use a2a_send for another profile or daemon."
+                    ),
+                    &[
+                        ("notify_target", target.to_string()),
+                        ("notify_reason", "unclaimed_no_binding".into()),
+                    ],
+                ));
+            }
+        }
+
         let goal = input
             .get("goal")
             .and_then(Value::as_str)
@@ -384,9 +429,10 @@ impl Tool for SessionNotifyTool {
                     ],
                 ))
             }
-            // Queued, not lost: the target belongs to a channel that has not
-            // claimed it since the last restart (#1206). Reporting this as a
-            // failure would be the opposite of what happened.
+            // Queued, not lost: an existing session WITH a binding may still be
+            // waiting for its channel to claim it after a restart. The unbound
+            // case never reaches this arm — #574 refuses it in the resolution
+            // block above, before any delivery path can run.
             Delivery::Parked => {
                 maybe_set_goal(target, goal, goal_max_turns, context).await;
                 notify_receipts::record_queued(notify_id, target);
