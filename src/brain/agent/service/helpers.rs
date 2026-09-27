@@ -1204,12 +1204,14 @@ impl AgentService {
         Ok((
             LLMResponse {
                 id,
-                // Some providers (e.g. MiniMax) don't include the model name in stream chunks.
-                // Fall back to the request model so pricing lookup never gets an empty string.
-                model: if model.is_empty() {
-                    request_model
-                } else {
+                // OpenAI-compatible gateways may return a backend-local model
+                // ID in stream chunks (for example, without the provider
+                // prefix). Keep the requested ID for the persisted session
+                // pair, just like the non-streaming response path does.
+                model: if request_model.is_empty() {
                     model
+                } else {
+                    request_model
                 },
                 content: content_blocks,
                 stop_reason,
