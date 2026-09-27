@@ -1149,6 +1149,9 @@ pub fn preempt_other_profile_instances() -> Vec<PreemptedInstance> {
 /// with a literal header line and `-` in the PID column for services that
 /// are loaded but not currently running. We only care about labels under
 /// our prefix, since bootouting anything else would be hostile.
+// Only the macOS-gated launchd path calls this outside tests, so on other
+// unix targets the lib build sees it as dead code. Tests exercise it everywhere.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub(crate) fn parse_launchctl_labels(output: &str) -> Vec<String> {
     const PREFIX: &str = "com.opencrabs.";
     let mut labels = Vec::new();
