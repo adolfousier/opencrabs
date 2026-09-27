@@ -78,19 +78,33 @@ fn lock_path_for(target: &Path) -> Option<PathBuf> {
     Some(dir.join(format!("{key}.lock")))
 }
 
-/// Take the write lock for `target`, waiting briefly for another writer.
+/// Resolve `target`'s lock path, on the CALLING task.
+///
+/// This is deliberately separate from [`acquire_at`]. The profile home can be
+/// a `tokio::task_local` override (`resolve_profile_home`), and a
+/// `spawn_blocking` closure runs on a NEW task that cannot see it. Resolving
+/// inside the blocking closure silently keys the lock to the real home, so two
+/// writers sharing one scoped context take two DIFFERENT locks, both report
+/// `is_held()` true, and the arbitration fails without a word — the lock looks
+/// applied and does nothing. Measure the path here, block there.
+pub(crate) fn lock_path(target: &Path) -> Option<PathBuf> {
+    lock_path_for(target)
+}
+
+/// Take the lock at an already-resolved lock-file path, waiting briefly for
+/// another writer.
 ///
 /// Never fails: the returned guard reports whether the lock was actually
 /// acquired, and the caller writes either way. On a platform or filesystem
 /// where locking is unavailable this is a no-op that reports `is_held()`
-/// false, which is exactly today's behaviour.
-pub(crate) fn acquire(target: &Path) -> Option<PathWriteLock> {
-    let lock_path = lock_path_for(target)?;
+/// false, which is exactly today's behaviour. Safe to call from
+/// `spawn_blocking`, since it resolves nothing that lives in a task-local.
+pub(crate) fn acquire_at(lock_path: &Path) -> Option<PathWriteLock> {
     let file = OpenOptions::new()
         .create(true)
         .truncate(false)
         .write(true)
-        .open(&lock_path)
+        .open(lock_path)
         .ok()?;
 
     #[cfg(unix)]
@@ -127,6 +141,14 @@ pub(crate) fn acquire(target: &Path) -> Option<PathWriteLock> {
     {
         Some(PathWriteLock { file, held: false })
     }
+}
+
+/// Take the write lock for `target`, waiting briefly for another writer.
+/// Resolves and locks in one call — the common shape, where the caller is
+/// already on the task that can see the profile home.
+pub(crate) fn acquire(target: &Path) -> Option<PathWriteLock> {
+    let lock_path = lock_path_for(target)?;
+    acquire_at(&lock_path)
 }
 
 /// The note appended to a tool result when a write went ahead without the
