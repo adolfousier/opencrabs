@@ -142,15 +142,15 @@ impl SessionBindingRepository {
         Ok(mapped)
     }
 
-    /// The binding recorded for ONE session, or `None` when that session has no
-    /// binding row (or its `sessions` row is gone).
+    /// The single binding recorded for one session, or `None` if it holds none.
     ///
-    /// The push-target resolver reads a session's OWN binding through this
-    /// accessor: a push has to reach the session's binding rather than the
-    /// topic that spoke last. The INNER JOIN against `sessions` matches
-    /// [`Self::all_for_channel`] (#1224), so a binding whose session was
-    /// deleted never revives a dead route. `session_id` is the table's primary
-    /// key, so at most one row can match.
+    /// A session can exist in the store and still have no route: nothing has
+    /// bound it to a channel yet, or its binding was cleared. Callers that must
+    /// tell "this session cannot be reached" apart from "this session does not
+    /// exist" read this instead of assuming a delivery (#498).
+    ///
+    /// The INNER JOIN against `sessions` matches [`Self::all_for_channel`]: a
+    /// binding whose session was deleted is not a route (#1224).
     pub async fn by_session(&self, session_id: &str) -> Result<Option<SessionBinding>> {
         let sid = session_id.to_string();
         let mapped = self

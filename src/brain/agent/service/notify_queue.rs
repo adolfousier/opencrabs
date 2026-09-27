@@ -112,10 +112,32 @@ pub(crate) async fn redeliver_persisted() -> usize {
     // no channel can ever claim them, so no consume site can ever clear them,
     // and re-offering them would only re-park a push nobody can receive.
     match repo.clear_dead_sessions().await {
-        Ok(n) if n > 0 => tracing::info!(
-            target: "background_task",
-            "Boot notify queue: reaped={n} row(s) whose session no longer exists"
-        ),
+        Ok(reaped) if !reaped.is_empty() => {
+            tracing::info!(
+                target: "background_task",
+                "Boot notify queue: reaped={} row(s) whose session no longer exists",
+                reaped.len()
+            );
+            for row in reaped {
+                let age_h = now_unix().saturating_sub(row.created_at) / 3600;
+                let preview: String = row
+                    .context_text
+                    .replace(['\n', '\r'], " ")
+                    .trim()
+                    .chars()
+                    .take(120)
+                    .collect();
+                tracing::error!(
+                    target: "background_task",
+                    "Notify queue reaper: dropped dead-session push {} for session {} (age {}h, origin={:?}): {}",
+                    row.id,
+                    row.session_id,
+                    age_h,
+                    row.origin,
+                    preview
+                );
+            }
+        }
         Ok(_) => {}
         Err(e) => tracing::warn!(
             target: "background_task",

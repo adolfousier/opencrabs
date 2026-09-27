@@ -233,30 +233,71 @@ impl NotifyQueueRepository {
 
     /// Reap rows whose owning session no longer exists (#111 follow-up, Part B).
     ///
-    /// A row for a session that is gone can never be claimed: no channel will
-    /// ever register a route for it, so no consume site will ever clear it.
-    /// Left alone it survives every boot forever, and boot redelivery keeps
-    /// re-offering it to a target that cannot exist. Returns how many rows
-    /// were dropped.
-    ///
-    /// Failure direction matches every other clear here: the push was already
-    /// undeliverable (its session is gone), so dropping it loses nothing a
-    /// route could have carried.
-    pub async fn clear_dead_sessions(&self) -> Result<usize> {
-        self.pool
+    /// Returns the deleted rows so the boot caller can preserve a per-row
+    /// audit trail before the durable evidence is gone.
+    pub async fn clear_dead_sessions(&self) -> Result<Vec<NotifyQueueRow>> {
+        let raw_rows = self
+            .pool
             .get()
             .await
             .context("Failed to get connection")?
             .interact(move |conn| {
-                conn.execute(
-                    "DELETE FROM notify_queue \
-                     WHERE session_id NOT IN (SELECT id FROM sessions)",
+                let tx = conn.transaction()?;
+                let mapped = {
+                    let mut stmt = tx.prepare(
+                        "SELECT id, session_id, context_text, display_text, origin, bg_meta, created_at \
+                         FROM notify_queue WHERE session_id NOT IN (SELECT id FROM sessions) \
+                         ORDER BY created_at ASC",
+                    )?;
+                    stmt.query_map([], |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, String>(2)?,
+                            row.get::<_, String>(3)?,
+                            row.get::<_, String>(4)?,
+                            row.get::<_, Option<String>>(5)?,
+                            row.get::<_, i64>(6)?,
+                        ))
+                    })?
+                    .collect::<std::result::Result<Vec<_>, _>>()?
+                };
+                tx.execute(
+                    "DELETE FROM notify_queue WHERE session_id NOT IN (SELECT id FROM sessions)",
                     [],
-                )
+                )?;
+                tx.commit()?;
+                Ok::<_, rusqlite::Error>(mapped)
             })
             .await
             .map_err(interact_err)?
-            .context("Failed to reap notify-queue rows for dead sessions")
+            .context("Failed to reap notify-queue rows for dead sessions")?;
+
+        Ok(raw_rows
+            .into_iter()
+            .filter_map(
+                |(id, session_id, context_text, display_text, origin, bg_meta, created_at)| {
+                    let bg_meta = bg_meta.and_then(|json| match serde_json::from_str(&json) {
+                        Ok(meta) => Some(meta),
+                        Err(error) => {
+                            tracing::warn!(
+                                "notify_queue: skipping corrupt bg_meta in dead-session row: {error}"
+                            );
+                            None
+                        }
+                    });
+                    Some(NotifyQueueRow {
+                        id: Uuid::parse_str(&id).ok()?,
+                        session_id: Uuid::parse_str(&session_id).ok()?,
+                        context_text,
+                        display_text,
+                        origin: origin_from_db_str(&origin),
+                        bg_meta,
+                        created_at,
+                    })
+                },
+            )
+            .collect())
     }
 
     /// Reap undelivered rows older than `cutoff_created_at` in an atomic transaction (#182).
