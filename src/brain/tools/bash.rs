@@ -290,8 +290,13 @@ impl Tool for BashTool {
     fn description(&self) -> &str {
         "Execute a shell command. Returns stdout, stderr, and exit code. \
          stdin is /dev/null — interactive commands (git add -p, git rebase -i, \
-         vim/nano/less/top, REPLs like python/node with no script) will not work; \
-         use non-interactive flags (-A, -m, --no-edit) or pipe input via heredoc/echo. \
+         bare editors/pagers/TUIs like vim/less/top, bare REPLs like python/node) \
+         will not work; the non-interactive forms of those same tools are fine \
+         (`less FILE`, `top -b -n 1`, `man TOPIC`, `tmux -V`, `node --version`). \
+         That check is advisory rather than a boundary — it matches the command \
+         word as written, so an absolute path such as /usr/bin/less FILE is not \
+         intercepted. Use non-interactive flags (-A, -m, --no-edit) or pipe \
+         input via heredoc/echo. \
          Each call is a fresh shell — `cd` does not persist across calls; chain with \
          `&&` or use `git -C <path> <cmd>` for cross-directory work. Use carefully \
          as this can modify system state. \
@@ -1583,66 +1588,223 @@ pub(crate) fn check_interactive_command(command: &str) -> Option<&'static str> {
         // Standalone editors / pagers / TUI viewers — reject when they're
         // the actual command (not in the middle of a longer pipeline).
         let first_word = unquoted_seg.split_whitespace().next().unwrap_or("");
+        // Every arm below reads its arguments from the SAME quote-aware view
+        // that produced `first_word`, so one segment is never interpreted two
+        // different ways inside a single predicate (#555).
+        let args: Vec<&str> = unquoted_seg.split_whitespace().skip(1).collect();
+
+        // Editors have no useful non-interactive output mode. Measured with
+        // this tool's stdin/stdout: `vim FILE` and `nano FILE` both fail with
+        // escape-sequence noise, and bare `vim`/`ed` exit having done nothing.
+        // Only the informational queries produce output, so that is the one
+        // shape worth letting through. (Contrast the pagers just below, where
+        // a file operand genuinely works.)
         if matches!(
             first_word,
             "vim" | "vi" | "nvim" | "nano" | "emacs" | "pico" | "ed" | "joe" | "micro"
-        ) {
-            return Some(
-                "Editors (vim/nvim/nano/emacs/...) need a TTY — they will hang on /dev/null stdin. \
-                 Use the `edit_file` or `write_file` tool to modify a file, or pipe content via heredoc: `cat > file.txt <<'EOF' ... EOF`.",
-            );
-        }
-        if matches!(first_word, "less" | "more" | "most" | "man") {
-            return Some(
-                "Pagers (less/more/man) need a TTY. Use `cat`, `head`, `tail`, or pipe to `cat` (e.g. `git log | cat`) so the output streams non-interactively.",
-            );
-        }
-        if matches!(first_word, "top" | "htop" | "btop" | "atop" | "iotop") {
-            return Some(
-                "TUI process viewers (top/htop/btop) need a TTY. Use `ps aux` or `ps -ef` for a snapshot, or `ps aux --sort=-%cpu | head` for top consumers.",
-            );
-        }
-        // REPLs without a script argument
-        if matches!(
-            first_word,
-            "python" | "python3" | "node" | "irb" | "ghci" | "scala"
-        ) && cmd_seg
-            .split_whitespace()
-            .nth(1)
-            .map(|t| t.starts_with('-') && t != "-c" && t != "-e" && t != "-m")
-            .unwrap_or(true)
+        ) && !has_editor_info_flag(&args)
         {
             return Some(
-                "Bare REPLs (python/node/irb/ghci) hang on /dev/null stdin. \
-                 Pass code via `-c \"...\"` (python) / `-e \"...\"` (node), or save to a file and run it.",
-            );
-        }
-        // Database / Redis CLIs without a query
-        if first_word == "psql" && !cmd_seg.contains(" -c ") && !cmd_seg.contains(" -f ") {
-            return Some(
-                "`psql` without `-c` or `-f` opens a REPL — pass `-c \"SQL\"` or `-f script.sql`.",
-            );
-        }
-        if first_word == "mysql" && !cmd_seg.contains(" -e ") {
-            return Some(
-                "`mysql` without `-e` opens a REPL — pass `-e \"SQL\"` to run a single statement.",
-            );
-        }
-        if first_word == "redis-cli" && cmd_seg.split_whitespace().count() == 1 {
-            return Some(
-                "`redis-cli` with no command opens a REPL — pass the command directly, e.g. `redis-cli GET key`.",
+                "Editors (vim/nvim/nano/emacs/...) need a TTY and cannot run here — \
+                 use the `edit_file` or `write_file` tool to modify a file. Informational \
+                 queries such as `vim --version` or `nano -h` are allowed.",
             );
         }
 
-        // Interactive selectors / TUIs commonly invoked by mistake.
-        if matches!(first_word, "fzf" | "gum" | "tmux" | "screen") {
+        // Pagers with no operand read stdin, which is /dev/null. Measured:
+        // bare `less`, `less -R` and `more` all return rc=0 with zero bytes of
+        // output — the silent no-op this guard exists to break. With an operand
+        // they work (`less FILE` prints the file, `man man` prints 36948 bytes),
+        // and `man -w TOPIC` / `less --version` are informational queries that
+        // also produce output, so both shapes are allowed.
+        if matches!(first_word, "less" | "more" | "most" | "man")
+            && !has_operand(&args)
+            && !has_info_flag(&args)
+        {
             return Some(
-                "Interactive TUI tools (fzf/gum/tmux/screen) need a TTY. They cannot be driven from this tool.",
+                "Pagers with nothing to page (less/more/man) read /dev/null stdin and produce \
+                 nothing. Give them a file or topic (`less FILE`, `man TOPIC`), or use `cat`, \
+                 `head`, `tail` — e.g. `git log | cat`.",
+            );
+        }
+
+        // TUI process viewers: measured, bare `top` and bare `htop` fail
+        // immediately without a TTY, while `top -b -n 1` and `htop --version`
+        // both work. Only the argument-less form is the trap.
+        if matches!(first_word, "top" | "htop" | "btop" | "atop" | "iotop") && is_bare(&args) {
+            return Some(
+                "Interactive process viewers (top/htop/...) need a TTY. Use `top -b -n 1`, \
+                 `ps aux` or `ps -ef` for a snapshot, or `ps aux --sort=-%cpu | head`.",
+            );
+        }
+        // REPLs without a script argument, or invoked in explicit interactive
+        // mode (#555). The predicate tests the property that matters —
+        // interactivity — rather than a flag allowlist: with this tool's stdin
+        // detached to /dev/null, a bare invocation and an explicit `-i` both
+        // read EOF, exit 0 having done nothing, and stall the loop on a retry.
+        // Informational and one-shot flags (`--version`, `--help`, `-p`,
+        // `--check`, `-c`, `-e`, `-m`) are genuinely non-interactive: they
+        // produce output and terminate, so they pass.
+        if matches!(
+            first_word,
+            "python" | "python3" | "node" | "irb" | "ghci" | "scala"
+        ) {
+            // `args` is the same quote-aware view that produced `first_word`,
+            // hoisted above, so this arm does not re-parse the segment.
+            let bare = is_bare(&args);
+            let interactive = args.iter().any(|t| *t == "-i" || *t == "--interactive");
+            if bare || interactive {
+                return Some(
+                    "Bare REPLs (python/node/irb/ghci) read /dev/null stdin, exit 0 \
+                     having done nothing, and stall the loop. Run a programme instead: \
+                     `python3 -c \"...\"` / `node -e \"...\"`, or save to a file and run it.",
+                );
+            }
+        }
+        // Database / Redis CLIs without a query. The old tests were substring
+        // matches on " -c " / " -e ", so they rejected the joined and long
+        // forms (`psql -c"SELECT 1"`, `mysql --execute=...`) even though those
+        // are exactly as non-interactive as the spaced ones. Test the property
+        // instead: does the invocation supply a command or a script?
+        if first_word == "psql"
+            && !has_sql_source(&args, "-c", "--command")
+            && !has_sql_source(&args, "-f", "--file")
+        {
+            return Some(
+                "`psql` with no command or script opens a REPL — pass `-c \"SQL\"`, \
+                 `--command=\"SQL\"`, `-f script.sql` or `--file=script.sql`.",
+            );
+        }
+        if first_word == "mysql" && !has_sql_source(&args, "-e", "--execute") {
+            return Some(
+                "`mysql` with no statement opens a REPL — pass `-e \"SQL\"` or `--execute=\"SQL\"`.",
+            );
+        }
+        // `redis-cli` opens a REPL whenever no subcommand is given, INCLUDING
+        // when connection flags are present (`redis-cli -h HOST`). The old test
+        // compared the word count to 1, so it let that case straight through —
+        // the arm's own failure mode — while refusing nothing else.
+        if first_word == "redis-cli" && !redis_cli_has_command(&args) {
+            return Some(
+                "`redis-cli` with no subcommand opens a REPL — pass the command directly, \
+                 e.g. `redis-cli -h HOST GET key`.",
+            );
+        }
+
+        // Interactive selectors / TUIs commonly invoked by mistake. Measured:
+        // bare `tmux` and bare `screen` both fail immediately, while `tmux -V`,
+        // `tmux ls` and `screen -ls` either work or fail with a real diagnostic
+        // the agent can act on — so only the argument-less form is refused.
+        if matches!(first_word, "fzf" | "gum" | "tmux" | "screen") && is_bare(&args) {
+            return Some(
+                "Interactive TUI tools (fzf/gum/tmux/screen) need a TTY and cannot be driven \
+                 from this tool. Non-interactive forms (`tmux -V`, `screen -ls`) are allowed.",
             );
         }
     }
 
     None
+}
+
+/// True when the invocation carries no argument after the command word.
+///
+/// This is the shape that silently does nothing here: with stdin detached to
+/// /dev/null the command reads EOF, exits 0 and produces no output, so the
+/// agent sees "success" and retries the same command. Measured for bare
+/// `less`, `more`, `node`, `python3`, `ed`, `screen` and `htop` (#555).
+fn is_bare(args: &[&str]) -> bool {
+    args.is_empty()
+}
+
+/// True when the invocation is an informational query (`--version`,
+/// `--help`). This is the one shape that reliably produces output with no TTY
+/// and no operand, so it is the escape hatch the pager and editor arms need.
+/// Measured: `less --version` → 285 bytes, `less --help` → 13067,
+/// `more --help` → 899, `man --help` → 3261.
+///
+/// The SHORT `-h` is deliberately NOT accepted here, even though it is help for
+/// several of these binaries: `less -h` measured rc=0 with ZERO bytes of output.
+/// Accepting it would let a silent no-op through — the exact defect this guard
+/// exists to catch — and would be a regression, since the pre-#555 arm refused
+/// it. Families whose short form IS safely informational opt in through
+/// `has_editor_info_flag`.
+fn has_info_flag(args: &[&str]) -> bool {
+    args.iter().any(|t| matches!(*t, "--version" | "--help"))
+}
+
+/// Editors additionally accept `-h`: measured, `vim -h` → 2369 bytes,
+/// `nano -h` → 4365, `ed -h` → 2022, `pico -h` → 4365, all printing usage.
+/// The pager family cannot share this, because `less -h` prints nothing at all.
+fn has_editor_info_flag(args: &[&str]) -> bool {
+    has_info_flag(args) || args.contains(&"-h")
+}
+
+/// True when any argument is a non-flag operand — a file path, a manual topic.
+/// Distinguishes an invocation that acts on something from one that waits on
+/// stdin (which is /dev/null here).
+fn has_operand(args: &[&str]) -> bool {
+    args.iter().any(|t| !t.starts_with('-'))
+}
+
+/// True when `args` supply a command or script through any spelling the client
+/// accepts for the flag pair `short`/`long`: `-c SQL`, `-cSQL`,
+/// `--command SQL`, `--command=SQL`. The previous `contains(" -c ")` matched
+/// only the first of those, so it refused genuinely non-interactive forms
+/// (#555).
+fn has_sql_source(args: &[&str], short: &str, long: &str) -> bool {
+    let long_eq = format!("{}=", long);
+    args.iter().any(|t| {
+        *t == short
+            || *t == long
+            || t.starts_with(long_eq.as_str())
+            || (t.starts_with(short) && t.len() > short.len())
+    })
+}
+
+/// redis-cli flags whose value is the NEXT argument, so that value is not
+/// mistaken for a subcommand.
+fn redis_cli_flag_takes_value(tok: &str) -> bool {
+    matches!(
+        tok,
+        "-h" | "-p" | "-a" | "-u" | "-s" | "-n"
+            | "--host"
+            | "--port"
+            | "--pass"
+            | "--user"
+            | "--dbnum"
+            | "--sock"
+    )
+}
+
+/// True when `args` contain a redis subcommand rather than only connection
+/// flags. `redis-cli` opens a REPL with no subcommand, including
+/// `redis-cli -h HOST` — the case the old word-count test let straight through.
+///
+/// Implemented from the documented CLI contract: redis-cli is not installed on
+/// this host, so unlike every other arm here this one is NOT measured (#555).
+fn redis_cli_has_command(args: &[&str]) -> bool {
+    let mut i = 0;
+    while i < args.len() {
+        let tok = args[i];
+        if !tok.starts_with('-') {
+            // A bare word is the subcommand: `GET key`, `PING`.
+            return true;
+        }
+        // `--host=HOST` assigns inline; `-h HOST` takes the next argument.
+        let head = tok.split('=').next().unwrap_or(tok);
+        if redis_cli_flag_takes_value(head) {
+            i += if tok.contains('=') { 1 } else { 2 };
+        } else if tok.starts_with("--") && !tok.contains('=') {
+            // A long option with neither a known arity nor an inline value is
+            // command-like and runs to completion — `--scan`, `--version`,
+            // `--help`. Treating these as subcommands avoids the false
+            // positives that would otherwise reintroduce #555 in this arm.
+            return true;
+        } else {
+            i += 1;
+        }
+    }
+    false
 }
 
 /// Wrap `s` in POSIX single quotes so it survives /bin/sh expansion verbatim.
