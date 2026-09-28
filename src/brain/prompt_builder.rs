@@ -759,6 +759,125 @@ pub fn strip_followup_suggestions(brain: &str) -> String {
     out
 }
 
+/// Marker line identifying the Telegram channel capabilities block (fork
+/// #295, upstream #1773). Also the first line of
+/// [`telegram_channel_capabilities`]; use [`has_telegram_channel_capabilities`]
+/// to test a rendered brain for it.
+pub const TELEGRAM_CHANNEL_CAPABILITIES_MARKER: &str = "--- TELEGRAM CHANNEL CAPABILITIES ---";
+
+/// Marker line identifying the generic channel file-delivery block (#1773),
+/// injected for channel-bound sessions whose channel has no renderer
+/// capabilities block of its own yet.
+pub const CHANNEL_FILE_DELIVERY_MARKER: &str = "--- CHANNEL FILE DELIVERY ---";
+
+/// Body of the Telegram capabilities block (everything after the marker
+/// line): renderer facts verified against the Telegram rich renderer, plus
+/// the #1773 file-delivery directive.
+const TELEGRAM_CHANNEL_CAPABILITIES_BODY: &str = "\
+- Mermaid diagrams: native rendering; prefer vertical layouts (tag the fence exactly ```mermaid, no suffix, then open the body with flowchart TD or sequenceDiagram for multi-actor flows).
+- Markdown tables: GFM tables rendered natively as rich Telegram tables (header on own line, blank line before, delimiter row).
+- HTML glyphs / formatting: rich HTML entities, blockquotes (<blockquote>), code, and emoji styling.
+- Image includes: Markdown syntax (![alt](path/or/url)) for local/remote image rendering.";
+
+/// The #1773 file-delivery directive, shared by both capability blocks: a
+/// channel user has no filesystem access, so "tell the user the path"
+/// delivers nothing they can open. Research/report files ride the channel
+/// itself, before the final text (the ORDERING preamble owns the timing).
+const CHANNEL_FILE_DELIVERY_BODY: &str = "\
+- Report/research files: when a task produces a report or research .md file, post the result in the chat AND attach the file to this channel as part of the reply (files before the final text). Naming the path alone delivers nothing to a channel user.";
+
+/// The Telegram channel capabilities preamble injected into the system brain
+/// of a session bound to the Telegram channel (fork #295, upstream #1773).
+pub fn telegram_channel_capabilities() -> String {
+    format!(
+        "{TELEGRAM_CHANNEL_CAPABILITIES_MARKER}\n{TELEGRAM_CHANNEL_CAPABILITIES_BODY}\n{CHANNEL_FILE_DELIVERY_BODY}"
+    )
+}
+
+/// The generic channel file-delivery block for channel-bound sessions whose
+/// channel does not (yet) carry renderer capability lines (#1773).
+pub fn channel_file_delivery_capabilities() -> String {
+    format!("{CHANNEL_FILE_DELIVERY_MARKER}\n{CHANNEL_FILE_DELIVERY_BODY}")
+}
+
+/// True when `brain` already carries the Telegram capabilities block.
+pub fn has_telegram_channel_capabilities(brain: &str) -> bool {
+    brain.contains(TELEGRAM_CHANNEL_CAPABILITIES_MARKER)
+}
+
+/// True when `brain` already carries the generic file-delivery block.
+pub fn has_channel_file_delivery(brain: &str) -> bool {
+    brain.contains(CHANNEL_FILE_DELIVERY_MARKER)
+}
+
+/// Insert `block` into a rendered brain before the `--- Runtime Info ---`
+/// section (or at the end if Runtime Info is not present). Idempotent per
+/// `marker`: a brain already carrying it is returned unchanged.
+fn insert_before_runtime_info(brain: &str, block: &str, marker: &str) -> String {
+    if brain.contains(marker) {
+        return brain.to_string();
+    }
+    const RUNTIME_INFO_HEADER: &str = "--- Runtime Info ---";
+    if let Some(pos) = brain.find(RUNTIME_INFO_HEADER) {
+        let mut out = String::with_capacity(brain.len() + block.len() + 2);
+        out.push_str(brain[..pos].trim_end());
+        out.push_str("\n\n");
+        out.push_str(block);
+        out.push_str("\n\n");
+        out.push_str(&brain[pos..]);
+        out
+    } else {
+        let mut out = String::with_capacity(brain.len() + block.len() + 2);
+        let trimmed = brain.trim_end();
+        out.push_str(trimmed);
+        if !trimmed.is_empty() {
+            out.push_str("\n\n");
+        }
+        out.push_str(block);
+        out.push('\n');
+        out
+    }
+}
+
+/// Inject the Telegram channel capabilities block into a rendered brain
+/// (fork #295, upstream #1773). Idempotent.
+pub fn inject_telegram_channel_capabilities(brain: &str) -> String {
+    insert_before_runtime_info(
+        brain,
+        &telegram_channel_capabilities(),
+        TELEGRAM_CHANNEL_CAPABILITIES_MARKER,
+    )
+}
+
+/// Inject the generic channel file-delivery block into a rendered brain
+/// (#1773). Idempotent.
+pub fn inject_channel_file_delivery(brain: &str) -> String {
+    insert_before_runtime_info(
+        brain,
+        &channel_file_delivery_capabilities(),
+        CHANNEL_FILE_DELIVERY_MARKER,
+    )
+}
+
+/// Per-session channel awareness (#1773): Telegram-bound sessions get the
+/// renderer capabilities block (fork #295); any other channel-bound session
+/// gets the file-delivery block; unbound (TUI, cron) sessions get neither.
+/// `telegram_bound` should come from the Telegram ownership state,
+/// `channel_bound` from the generic channel-ownership probe.
+pub fn inject_channel_capabilities(
+    brain: &str,
+    telegram_bound: bool,
+    channel_bound: bool,
+) -> String {
+    if telegram_bound {
+        inject_telegram_channel_capabilities(brain)
+    } else if channel_bound {
+        inject_channel_file_delivery(brain)
+    } else {
+        brain.to_string()
+    }
+}
+
 /// Runtime information injected into the system brain.
 #[derive(Debug, Clone, Default)]
 pub struct RuntimeInfo {

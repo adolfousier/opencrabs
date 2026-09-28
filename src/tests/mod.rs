@@ -905,6 +905,7 @@ pub mod whatsapp_suggestion_poll_test;
 
 // Channel handler tests (moved from inline #[cfg(test)] modules)
 pub mod brain_tools_whatsapp_send_test;
+pub mod channel_capabilities_preamble_test;
 pub mod channel_commands_test;
 pub mod discord_handler_test;
 pub mod discord_history_dedup_test;

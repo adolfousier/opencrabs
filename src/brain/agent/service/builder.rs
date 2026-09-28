@@ -855,6 +855,27 @@ impl AgentService {
         } else {
             brain
         };
+        // Inject channel capabilities per session (#1773, port of fork #295).
+        // One process serves Telegram, Discord, Slack and cron alike, so the
+        // check is per session: Telegram-bound sessions get the renderer
+        // capabilities block, any other channel-bound session gets the
+        // file-delivery block, unbound sessions get neither. Channel awareness
+        // rides the ownership state; no RuntimeInfo.channel field exists.
+        #[cfg(feature = "telegram")]
+        let telegram_bound = self.channel_manager.as_ref().is_some_and(|mgr| {
+            !matches!(
+                mgr.telegram().channel_ownership_of(session_id),
+                super::session_routes::ChannelOwnership::Unknown
+            )
+        });
+        #[cfg(not(feature = "telegram"))]
+        let telegram_bound = false;
+        let channel_bound = super::session_routes::session_is_channel_bound(session_id);
+        let brain = crate::brain::prompt_builder::inject_channel_capabilities(
+            &brain,
+            telegram_bound,
+            channel_bound,
+        );
         Some(brain)
     }
 

@@ -208,6 +208,17 @@ fn channel_owner_probe(session_id: Uuid) -> Option<ChannelOwnerProbe> {
     }
 }
 
+/// True when any channel registered an ownership probe for `session_id` and
+/// that probe no longer reads `Unknown` (#1773, per-session channel
+/// awareness for the capabilities preamble). A failed probe read counts as
+/// NOT bound: a missing capabilities block is cosmetic, a false one is not.
+pub(super) fn session_is_channel_bound(session_id: Uuid) -> bool {
+    match channel_owner_probe(session_id) {
+        Some(probe) => !matches!(probe(), ChannelOwnership::Unknown),
+        None => false,
+    }
+}
+
 /// What happened to a message handed to [`deliver_to_session`].
 ///
 /// A bare bool used to be enough, because the only two outcomes were "went
