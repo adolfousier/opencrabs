@@ -131,10 +131,9 @@ async fn spawn_command_enqueues_on_completion() {
 }
 
 /// #1748: `spawn_command_with_hook` hands the outcome to the hook INSTEAD of
-/// the generic session delivery; the detached rebuild's hook exec-replaces
-/// the process on success, so an in-memory enqueue would be orphaned
-/// mid-flight. Same lifecycle (timer, status file, DB accounting), different
-/// completion route.
+/// the generic session delivery; a hook that replaces the process on success
+/// would orphan an in-memory enqueue mid-flight. Same lifecycle (timer, status
+/// file, DB accounting), different completion route.
 #[tokio::test]
 #[allow(clippy::await_holding_lock)]
 async fn spawn_command_with_hook_replaces_generic_delivery() {

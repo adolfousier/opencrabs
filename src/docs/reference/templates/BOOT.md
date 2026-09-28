@@ -18,8 +18,6 @@ On every fresh start, do this:
 - Your brain workspace is `~/.opencrabs/`
 - **Path tip:** Always run `echo $HOME` or `ls ~/.opencrabs/` first to confirm the resolved path before file operations.
 - Use `/cd` to change working directory at runtime (persists to config.toml)
-- You can rebuild yourself with `/rebuild` or `cargo build --release`
-- After a successful rebuild, the new binary is the new you
 
 ## Personality on Boot
 - Don't be generic. Be specific about what just happened.
@@ -74,27 +72,11 @@ When a tool call (bash, write, etc.) fails or the user says "it didn't show up t
 4. **If approval keeps timing out**, tell the user: "The approval dialog may not be rendering. Try `/approve` to check your approval policy, or restart the session."
 5. **Never skip verification.** A tool call that returned no output or an error is NOT a success — investigate before moving on.
 
-## Modifying Source Code (Binary Users)
+## Updating
 
-If the user downloaded a pre-built binary (no source directory), and asks you to modify OpenCrabs code:
-
-1. Run `/rebuild` — this auto-clones the repo to `~/.opencrabs/source/` if no source is found
-2. Make your code changes in `~/.opencrabs/source/`
-3. Run `/rebuild` again (or `cargo build --release` from that directory) to compile
-4. The new binary replaces the running one — restart to apply
-
-If source already exists at `~/.opencrabs/source/`, `/rebuild` runs `git pull --ff-only` first to stay up to date.
-
-**Key:** Binary users CAN modify code — they just need the source fetched first. `/rebuild` handles this automatically.
-
-## Rebuild vs Evolve
-
-Two different commands for two different jobs — do not mix them up:
-
-- `/rebuild` (and the `rebuild` tool) COMPILES WHAT IS ON DISK. Maintainer/dev path, rare: use it only to apply local source edits.
 - `/evolve` (and the `evolve` tool) UPGRADES TO THE LATEST PUBLISHED RELEASE. Normal update path for users; it detects the install method and does NOT apply uncommitted local changes.
 
-If the user asks to "update" or "upgrade", that is evolve. If you (or they) just edited OpenCrabs source and want the changes live, that is rebuild.
+If the user asks to "update" or "upgrade", that is evolve.
 
 ## Two Ways to Run: TUI vs Daemon
 
@@ -118,7 +100,7 @@ opencrabs service start
 - The unit runs `opencrabs daemon`, restarts on failure (`Restart=always`, `RestartSec=5`), and starts on boot.
 - Manage it with **`opencrabs service start | stop | restart | uninstall`**.
 - Each profile gets its own unit (`opencrabs-<profile>.service`), so multiple agents can run side by side.
-- After a successful `/evolve` or `/rebuild`, the running service is scheduled to restart automatically onto the new binary.
+- After a successful `/evolve`, the running service is scheduled to restart automatically onto the new binary.
 
 ## Rust-First Policy
 
@@ -132,7 +114,7 @@ When asked about OpenCrabs features, always check the source:
 
 ## Upgrading OpenCrabs
 
-Upgrading is just a `git pull` + rebuild. Your workspace is safe.
+Upgrading is just a `git pull` and a fresh build. Your workspace is safe.
 
 ```bash
 cd /srv/rs/opencrabs    # or wherever your source lives

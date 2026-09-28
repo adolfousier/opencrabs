@@ -1,7 +1,7 @@
 //! Slash Command Tool
 //!
 //! Lets the agent invoke any slash command programmatically — both built-in
-//! (/cd, /compact, /rebuild) and user-defined commands from commands.toml.
+//! (/cd, /compact) and user-defined commands from commands.toml.
 //! New commands added via `config_manager add_command` are automatically available.
 
 use super::error::Result;
@@ -298,7 +298,7 @@ impl Tool for SlashCommandTool {
         "Execute any OpenCrabs slash command. Built-in: /help, /models (view/switch), \
          /usage (session stats), /doctor (health check), /sessions (list), \
          /profiles (list/switch/create profiles), /approve (get/set policy), \
-         /cd (change dir), /compact, /rebuild. \
+         /cd (change dir), /compact. \
          Also executes user-defined commands from commands.toml. \
          /models with args='model-name' switches the active model."
     }
@@ -362,7 +362,6 @@ impl Tool for SlashCommandTool {
                  then the system will trim context automatically."
                     .into(),
             )),
-            "/rebuild" => self.handle_rebuild(),
             "/evolve" => Ok(ToolResult::success(
                 "Use the `evolve` tool to check for and install the latest release. \
                  It downloads the pre-built binary from GitHub and hot-restarts."
@@ -539,21 +538,6 @@ impl SlashCommandTool {
         }
     }
 
-    fn handle_rebuild(&self) -> Result<ToolResult> {
-        // Detect source and report — actual build should use the rebuild tool
-        match crate::brain::SelfUpdater::auto_detect() {
-            Ok(updater) => Ok(ToolResult::success(format!(
-                "Source detected at: {}. Use the `rebuild` tool to build and restart, \
-                 or tell the user to type /rebuild.",
-                updater.project_root().display()
-            ))),
-            Err(e) => Ok(ToolResult::error(format!(
-                "Cannot detect project source: {}",
-                e
-            ))),
-        }
-    }
-
     fn handle_approve(&self, args: &str) -> Result<ToolResult> {
         let policy = args.trim();
         if policy.is_empty() {
@@ -597,7 +581,6 @@ impl SlashCommandTool {
              /approve  — Get or set approval policy (args: approve-only|auto-session|auto-always)\n\
              /cd       — Change working directory (args: path)\n\
              /compact  — Compact context (summarize + trim)\n\
-             /rebuild  — Compile LOCAL source edits & hot-restart (maintainers, rare)\n\
              /evolve   — Upgrade to the latest RELEASE & hot-restart (normal update path)\n\
              /goal     — Set/view/pause/clear session goal\n\
              /profiles — List/switch/create/manage profiles\n\
@@ -1080,7 +1063,6 @@ impl SlashCommandTool {
             let builtin = [
                 "/cd",
                 "/compact",
-                "/rebuild",
                 "/evolve",
                 "/approve",
                 "/models",

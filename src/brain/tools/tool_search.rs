@@ -56,7 +56,7 @@ impl Tool for ToolSearchTool {
          with core tools (file I/O, shell, search, task/plan/context, http, the brain-file loader, \
          config/session basics). For ANYTHING else — browsing/clicking web pages, sending channel \
          messages (Telegram/Discord/Slack/WhatsApp), spawning sub-agents or teams, generating or \
-         analyzing images/video, cron jobs, self-improvement/rebuild/evolve — call this FIRST with \
+         analyzing images/video, cron jobs, self-improvement/evolve — call this FIRST with \
          a short description of what you need. It returns the matching tools' exact schemas and \
          makes them callable for the rest of this session. If a task needs a tool you don't see, \
          search for it here before saying you can't do it."

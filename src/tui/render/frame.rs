@@ -304,7 +304,7 @@ pub fn render(f: &mut Frame, app: &mut App) {
             app.input_area_height = chunks[3].height;
             render_input(f, app, chunks[3]);
             render_status_bar(f, app, chunks[4]);
-            render_restart_dialog(f, app, f.area());
+            render_restart_dialog(f, f.area());
         }
         AppMode::UpdatePrompt => {
             // Overlay the update dialog on top of the normal chat UI.

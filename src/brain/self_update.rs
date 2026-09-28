@@ -5,7 +5,7 @@
 //! After a successful build, `exec()` replaces the current process with the new binary.
 //!
 //! If the binary was downloaded (no source tree), `auto_detect()` automatically
-//! clones the repo into `~/.opencrabs/source/` so `/rebuild` works everywhere.
+//! clones the repo into `~/.opencrabs/source/` so a source build works everywhere.
 
 use anyhow::Result;
 use std::path::PathBuf;
@@ -76,13 +76,13 @@ impl SelfUpdater {
     ///
     /// **Source tree found** (Cargo.toml walks up from exe): uses
     /// `<project_root>/target/release/opencrabs` as the binary path.
-    /// This is the `/rebuild` path.
+    /// This is the source-build path.
     ///
     /// **Pre-built binary** (no Cargo.toml): uses the current executable
     /// path (`std::env::current_exe()`) as the binary path. This is the
     /// `/evolve` path: the download already replaced the binary at this
     /// location, so restart just exec's it. Source is lazily cloned into
-    /// `~/.opencrabs/source/` only when `/rebuild` is invoked.
+    /// `~/.opencrabs/source/` only when a source build is invoked.
     ///
     /// Before this fix, auto_detect() cloned unconditionally then pointed
     /// binary_path at a target/ dir that was never built, causing
@@ -107,10 +107,10 @@ impl SelfUpdater {
     ///
     /// Walking up from `exe`, the FIRST directory containing `Cargo.toml` is
     /// a source tree → `(root, root/target/release/opencrabs)` (the
-    /// `/rebuild` build output). If no `Cargo.toml` is found, this is a
+    /// source-build output). If no `Cargo.toml` is found, this is a
     /// pre-built install → `(source_dir, exe)`: the binary path is the
     /// running exe itself (which `/evolve` replaces in place), and
-    /// `source_dir` is only used as the lazy-clone target for `/rebuild`.
+    /// `source_dir` is only used as the lazy-clone target for a source build.
     ///
     /// The pre-built branch returning `exe` (not a never-built
     /// `source_dir/target/release/opencrabs`) is the #179 fix: restart after
@@ -139,8 +139,8 @@ impl SelfUpdater {
     }
 
     /// Ensure the source tree exists at project_root (lazy clone).
-    /// Called by build() when the user invokes /rebuild on a pre-built binary.
-    pub(crate) fn ensure_source_tree(&self) -> Result<()> {
+    /// Called by build() when a source build is requested on a pre-built binary.
+    fn ensure_source_tree(&self) -> Result<()> {
         if self.project_root.join("Cargo.toml").exists() {
             // Already have source. Pull latest.
             tracing::info!("Updating source at {}", self.project_root.display());
@@ -192,7 +192,7 @@ impl SelfUpdater {
         use tokio::io::{AsyncBufReadExt, BufReader};
         use tokio::process::Command;
 
-        // Lazy clone source tree if needed (pre-built binary + /rebuild).
+        // Lazy clone source tree if needed (pre-built binary + source build).
         if let Err(e) = self.ensure_source_tree() {
             return Err(format!("Failed to prepare source tree: {e}"));
         }
@@ -223,7 +223,7 @@ impl SelfUpdater {
 
         if status.success() {
             // For pre-built binaries, binary_path points at the exe path
-            // (which /evolve replaced). After /rebuild, the binary is at
+            // (which /evolve replaced). After a source build, the binary is at
             // <project_root>/target/release/opencrabs. Use whichever exists.
             let built_path = self
                 .project_root
@@ -283,7 +283,7 @@ impl SelfUpdater {
 
     /// Exec-restart into a SPECIFIC binary path. Used by the RestartReady
     /// handler to launch the exact binary that was just produced (e.g.
-    /// `/rebuild` returns a freshly-built binary that is NOT the running
+    /// A source build returns a freshly-built binary that is NOT the running
     /// exe on a pre-built install). Resolving the path via `auto_detect()`
     /// instead would pick the stale running exe and restart into the old
     /// version (#179 follow-up). Passes `chat --session <id>` to resume the

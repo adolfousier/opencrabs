@@ -193,7 +193,7 @@ pub(crate) struct StreamingState {
     /// Message IDs of every voice note delivered to Telegram via `send_voice`
     /// (TTS responses to voice-input turns). This field exists purely as a
     /// load-bearing invariant: voice-reply IDs live here and MUST NEVER be
-    /// iterated for deletion by any cleanup/cancellation/rebuild path. If a
+    /// iterated for deletion by any cleanup, cancellation, or rebuild path. If a
     /// future contributor adds a bulk cleanup over message IDs they have to
     /// consciously skip this field. The user's TTS voice note is the most
     /// expensive artefact to reproduce — it's a real synthesis call, not a

@@ -26,7 +26,7 @@ pub const LAZY_TOOLS_PROMPT: &str = "\n\n--- Tool Access ---\n\
     sending channel messages (Telegram/Discord/Slack/WhatsApp), spawning sub-agents or teams, \
     generating or analyzing images/video, creating real documents (Excel with live \
     formulas, Word, PDF, PowerPoint via generate_document), parsing documents, cron jobs, \
-    self-improvement/rebuild/evolve — call \
+    self-improvement/evolve — call \
     `tool_search` FIRST with a short description of what you need. It returns the exact tool's \
     schema and makes it callable for the rest of the session. NEVER say you can't do something \
     before searching for the tool.\n";
@@ -150,7 +150,6 @@ pub const EXTENDED_TOOL_INVENTORY: &[(&str, &[&str])] = &[
         "system",
         &[
             "self_improve",
-            "rebuild",
             "evolve",
             "tool_manage",
             "feedback_analyze",
@@ -316,7 +315,6 @@ pub fn tool_category(name: &str) -> &'static str {
         }
         n if n.starts_with("feedback_")
             || n == "self_improve"
-            || n == "rebuild"
             || n == "evolve"
             || n == "tool_manage" =>
         {

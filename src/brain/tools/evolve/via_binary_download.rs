@@ -33,7 +33,7 @@ impl EvolveTool {
             Some(s) => s,
             None => {
                 return Ok(ToolResult::error(format!(
-                    "Unsupported platform: {}/{}. Use /rebuild to build from source.",
+                    "Unsupported platform: {}/{}. Build from source instead.",
                     std::env::consts::OS,
                     std::env::consts::ARCH
                 )));
@@ -51,8 +51,8 @@ impl EvolveTool {
             return Ok(ToolResult::error(
                 "Refusing to self-update while running as root: [agent] evolve_allow_root is \
                  false. A root binary swap means a compromised release would run as root. To \
-                 proceed, set [agent] evolve_allow_root = true (the default), or run /rebuild to \
-                 build from source under a non-root user."
+                 proceed, set [agent] evolve_allow_root = true (the default), or build from source \
+                 under a non-root user."
                     .to_string(),
             ));
         }
@@ -93,7 +93,7 @@ impl EvolveTool {
             None => {
                 return Ok(ToolResult::error(format!(
                     "No binary found for {} in v{}. Expected: {}. \
-                     Available assets: {}. Use /rebuild to build from source.",
+                     Available assets: {}. Build from source instead.",
                     suffix,
                     latest_version,
                     expected_asset,
@@ -113,7 +113,7 @@ impl EvolveTool {
         if !super::verify::is_allowed_download_host(&download_url) {
             return Ok(ToolResult::error(format!(
                 "Refusing to download the release asset from an unexpected host: {download_url}. \
-                 Use /rebuild to build from source."
+                 Build from source instead."
             )));
         }
 
@@ -238,7 +238,7 @@ impl EvolveTool {
                 "evolve: checksum verification failed, refusing to swap"
             );
             return Ok(ToolResult::error(format!(
-                "Refusing to update: {reason}. Use /rebuild to build from source."
+                "Refusing to update: {reason}. Build from source instead."
             )));
         }
         tracing::info!(

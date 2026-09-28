@@ -2588,9 +2588,9 @@ pub(crate) async fn handle_message(
     // this agent call. `turn_guard` is held until the drop below.
 
     let chat_id_str = msg.chat.id.0.to_string();
-    // Origin forum topic for pending-request tracking (#1457): the
-    // rebuild tool reads it back to report completion into the topic
-    // that asked, not the chat default.
+    // Origin forum topic for pending-request tracking (#1457): a
+    // resumed turn reports back into the topic that asked, not the
+    // chat default.
     let origin_thread = msg.thread_id.map(|t| t.0.to_string());
     let result = agent
         .send_message_with_tools_and_display(

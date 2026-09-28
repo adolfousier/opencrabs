@@ -6,7 +6,7 @@
 //!
 //! - **Pre-built binary**: Downloads from GitHub releases, health-checks, swaps.
 //! - **cargo install**: Runs `cargo install opencrabs --force`.
-//! - **Source build**: Suggests using `/rebuild` instead.
+//! - **Source build**: Suggests rebuilding from the source tree instead.
 //!
 //! Before swapping binaries, it health-checks the new binary. If the swap
 //! fails, it rolls back to the previous version automatically.

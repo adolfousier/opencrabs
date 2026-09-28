@@ -41,7 +41,7 @@ fn the_block_stays_within_its_budget() {
         .split("LARGE FILES ARE WRITTEN IN PARTS")
         .nth(1)
         .expect("the block exists")
-        .split("LONG-RUNNING OPERATIONS")
+        .split("UPDATES — the normal path")
         .next()
         .expect("the next block follows");
     let lines = block.lines().filter(|l| !l.trim().is_empty()).count();

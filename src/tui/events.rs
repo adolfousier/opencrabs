@@ -126,7 +126,7 @@ pub enum TuiEvent {
     BuildLine(String),
 
     /// Build completed — restart into the new binary. `binary_path` is the
-    /// exact binary to exec when known (`/rebuild`); `None` means resolve via
+    /// exact binary to exec when known (a source build); `None` means resolve via
     /// `current_exe()` (`/evolve` replaced the running exe in place). Global,
     /// not per-session.
     RestartReady {
@@ -397,7 +397,7 @@ pub enum AppMode {
     /// Model selector dialog (triggered by /models)
     /// Full-screen usage dashboard (triggered by /usage)
     UsageDashboard,
-    /// Restart confirmation pending (after successful /rebuild)
+    /// Restart confirmation pending (after a successful update)
     RestartPending,
     /// Update prompt — ask user to accept or decline update
     UpdatePrompt,

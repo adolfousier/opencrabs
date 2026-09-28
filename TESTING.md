@@ -556,7 +556,6 @@ Born from two real incidents (#646, #1178): hard-coded fixture constants broke o
 | Tests — Reasoning Lines | 7 | `src/tests/reasoning_lines_test.rs` |
 | Tests — Reasoning Run | 6 | `src/tests/reasoning_run_test.rs` |
 | Tests — Reasoning Split | 13 | `src/tests/reasoning_split_test.rs` |
-| Tests — Rebuild Notify | 7 | `src/tests/rebuild_notify_test.rs` |
 | Tests — Recent Paths | 17 | `src/tests/recent_paths_test.rs` |
 | Tests — Redact Scope | 3 | `src/tests/redact_scope_test.rs` |
 | Tests — Rename Session | 7 | `src/tests/rename_session_test.rs` |

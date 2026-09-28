@@ -90,12 +90,12 @@ pub enum ProgressEvent {
     RestartReady {
         status: String,
         /// The binary to exec on restart. `Some` when the producer knows the
-        /// exact path (e.g. `/rebuild` returns the freshly-built binary,
+        /// exact path (e.g. a source build returns the freshly-built binary,
         /// which is NOT the running exe on a pre-built install). `None` when
         /// the running exe was replaced in place (e.g. `/evolve`) — the
-        /// handler resolves it via `current_exe()`. Without this, `/rebuild`
-        /// on a pre-built binary restarted into the stale exe instead of the
-        /// binary it just built (#179 follow-up).
+        /// handler resolves it via `current_exe()`. Without this, a source
+        /// build on a pre-built binary restarted into the stale exe instead of
+        /// the binary it just built (#179 follow-up).
         binary_path: Option<std::path::PathBuf>,
     },
     /// Real-time token count update — fire after every API response and tool execution

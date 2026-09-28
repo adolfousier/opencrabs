@@ -7,7 +7,7 @@
 //!     restart after auto-update hit "exec() failed: No such file or
 //!     directory".
 //!  2. A source tree resolves to `<root>/target/release/opencrabs` (the
-//!     /rebuild output).
+//!     source-build output).
 //!
 //! `resolve_paths` is the pure core of `auto_detect()`, factored out so it
 //! can be tested without depending on the real `current_exe()`.
@@ -76,7 +76,7 @@ fn prebuilt_install_resolves_binary_to_the_running_exe() {
         source_dir.join("target").join("release").join("opencrabs"),
         "must NOT point at the unbuilt source target (the #179 regression)"
     );
-    // project_root is just the lazy-clone target for a future /rebuild.
+    // project_root is just the lazy-clone target for a future source build.
     assert_eq!(root, source_dir);
 }
 

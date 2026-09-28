@@ -1091,7 +1091,7 @@ pub(crate) async fn handle_message(
     //
     // `allowed.is_empty()` used to be an owner condition (OC-02): an empty
     // allowed_phones under response_policy=auto answered everyone AND elevated
-    // every contact to owner, handing them /evolve, /exit, /rebuild, /cd. Open
+    // every contact to owner, handing them /evolve, /exit, /cd. Open
     // DM access (answering an unlisted contact) is a separate policy decision
     // and is not the same as ownership, so it is gone from here. Ownership is
     // now the self-chat, the configured owner number, or the canonical owner

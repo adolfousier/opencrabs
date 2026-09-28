@@ -1243,51 +1243,6 @@ impl App {
                 self.push_system_message(reply);
                 true
             }
-            "/rebuild" => {
-                // Run the build DETACHED via the shared BackgroundTaskManager
-                // (#1748): live timer and status file come free, and the
-                // rebuild completion hook exec-restarts into the new binary
-                // when ready, resuming this session.
-                let Some(mgr) = self.agent_service.background_manager() else {
-                    self.push_system_message(
-                        "rebuild: no background task manager wired on this surface".to_string(),
-                    );
-                    return true;
-                };
-                let sid = self
-                    .current_session
-                    .as_ref()
-                    .map(|s| s.id)
-                    .unwrap_or(Uuid::nil());
-                let service_context = self.agent_service.context().clone();
-                let sender = self.event_sender();
-                tokio::spawn(async move {
-                    match crate::brain::tools::rebuild::run_detached_rebuild(
-                        &mgr,
-                        sid,
-                        &service_context,
-                    )
-                    .await
-                    {
-                        Ok(()) => {
-                            let _ = sender.send(TuiEvent::SystemMessage {
-                                session_id: sid,
-                                text: "🔨 Rebuild running detached: live timer above. \
-                                       OpenCrabs reloads into the new binary automatically \
-                                       when it's done. Keep working."
-                                    .into(),
-                            });
-                        }
-                        Err(e) => {
-                            let _ = sender.send(TuiEvent::Error {
-                                session_id: sid,
-                                message: format!("rebuild failed: {e:#}"),
-                            });
-                        }
-                    }
-                });
-                true
-            }
             "/exit" | "/quit" => {
                 // Same shutdown the runner already drives for Ctrl+C twice,
                 // just reachable by typing it (#923).

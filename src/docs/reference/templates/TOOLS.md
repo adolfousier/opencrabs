@@ -23,7 +23,7 @@ convenience.
 | `agents` | spawn / wait / send-input / close / resume sub-agents, teams | "spawn a sub-agent" |
 | `media` | generate / analyze images, analyze video, provider vision | "generate an image" |
 | `documents` | generate XLSX (live formulas) / DOCX / PDF / PPTX with branding, parse documents, PDF to images | "create a spreadsheet with formulas" |
-| `system` | feedback_record/analyze, self_improve, rebuild, evolve, tool_manage, rsi_proposals | "rebuild from source" |
+| `system` | feedback_record/analyze, self_improve, evolve, tool_manage, rsi_proposals | "upgrade to the latest release" |
 | `utility` | cron_manage, session_search, channel_search, mission_control_report, a2a_send | "create a cron job" |
 
 Rule: if a task needs a non-core tool, call `tool_search` with a plain-words description FIRST —
@@ -68,7 +68,6 @@ A `SKILL.md` may declare `globs:` so its topic is ENFORCED, not advisory: a tool
 ## Build & Runtime Commands
 
 - `/cd <path>` — change the working directory for all tool execution (or `config_tool` `set_working_directory`); persists to config.toml
-- `/rebuild` — Build, test, and hot-restart from source
 - `/check` — Run `cargo clippy` and `cargo test`
 - `/evolve` — Download latest release binary (full procedure → BOOT.md)
 

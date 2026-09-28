@@ -240,8 +240,8 @@ pub(super) fn render_directory_picker(f: &mut Frame, app: &App, area: Rect) {
 }
 
 /// Render restart confirmation dialog
-pub(super) fn render_restart_dialog(f: &mut Frame, app: &App, area: Rect) {
-    let status = app.rebuild_status.as_deref().unwrap_or("Build successful");
+pub(super) fn render_restart_dialog(f: &mut Frame, area: Rect) {
+    let status = "Build successful";
 
     let dialog_width = 50u16.min(area.width.saturating_sub(4));
     let dialog_area = chrome::centered(area, dialog_width, 8);

@@ -70,7 +70,6 @@ pub mod plan_gate;
 pub mod plan_tool;
 pub(crate) mod project_runner;
 pub mod provider_vision;
-pub mod rebuild;
 pub mod rename_session;
 pub mod rsi_proposals;
 pub mod rsi_propose;

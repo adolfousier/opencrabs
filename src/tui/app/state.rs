@@ -240,10 +240,6 @@ pub const SLASH_COMMANDS: &[SlashCommand] = &[
         description: "Tool approval policy",
     },
     SlashCommand {
-        name: "/rebuild",
-        description: "Build & restart from source",
-    },
-    SlashCommand {
         name: "/evolve",
         description: "Download latest release & restart",
     },
@@ -881,9 +877,6 @@ pub struct App {
     /// Active tool call group (during processing)
     pub active_tool_group: Option<ToolCallGroup>,
 
-    /// Self-update state
-    pub rebuild_status: Option<String>,
-
     /// Version string when an update is available (shown in update prompt dialog)
     pub update_available_version: Option<String>,
 
@@ -1156,7 +1149,6 @@ impl App {
             streaming_output_tokens: 0,
             tps_tracker: StreamingTpsTracker::default(),
             active_tool_group: None,
-            rebuild_status: None,
             update_available_version: None,
             resume_session_id: None,
             render_cache: HashMap::new(),
@@ -1473,7 +1465,7 @@ impl App {
 
     /// Initialize the app by loading or creating a session
     pub async fn initialize(&mut self) -> Result<()> {
-        // Resume a specific session (e.g. after /rebuild restart) or load the most recent
+        // Resume a specific session (e.g. after a restart) or load the most recent
         if let Some(session_id) = self.resume_session_id.take() {
             self.load_session(session_id).await?;
             self.mode = AppMode::Chat;
@@ -2862,12 +2854,11 @@ impl App {
                     self.messages.remove(idx);
                 }
                 self.build_lines.clear();
-                self.rebuild_status = None;
                 tracing::info!("RestartReady: {status}");
                 // Auto exec() restart — no prompt, no permission needed.
                 if let Some(session) = &self.current_session {
                     let session_id = session.id;
-                    // Prefer the exact binary the producer built (/rebuild);
+                    // Prefer the exact binary the producer built;
                     // fall back to current_exe() via auto_detect only when no
                     // path was given (/evolve replaced the exe in place).
                     let result = match &binary_path {
@@ -3828,7 +3819,6 @@ impl App {
             }
             AppMode::RestartPending => {
                 if keys::is_cancel(&event) {
-                    self.rebuild_status = None;
                     self.switch_mode(AppMode::Chat).await?;
                 } else if keys::is_enter(&event) {
                     // Perform the restart

@@ -255,8 +255,8 @@ impl Tool for EvolveTool {
         match install_method {
             InstallMethod::Source(_) => {
                 return Ok(ToolResult::success(format!(
-                    "Update available: v{} -> v{}. You're running from source — use /rebuild \
-                     to pull and build the latest version, or `git checkout v{}` to switch.",
+                    "Update available: v{} -> v{}. You're running from source — rebuild from \
+                     the source tree with `cargo build --release`, or `git checkout v{}` to switch.",
                     current_version, latest_version, latest_version
                 )));
             }
