@@ -254,9 +254,11 @@ fn test_enforce_button_fit_ships_fitting_bodies_byte_identical() {
 
 #[test]
 fn test_enforce_button_fit_folds_oversized_labels_keeping_routing() {
-    // 30-char Cyrillic label: past BUTTON_LABEL_MAX_UNITS=20 -> the set
-    // folds; the button keeps its attrs (routing untouched) but shows its
-    // index, and the original label moves into the <ol>.
+    // 35-char Cyrillic label: past BUTTON_LABEL_MAX_UNITS=20 and past the
+    // solo budget (30), so the set folds; the button keeps its attrs
+    // (routing untouched), carries its fold-tier label, and the original
+    // label moves into the <ol>. One button in the set is the Go! tier
+    // (owner order 2026-09-14) — a bare index here was the #396 defect.
     let long = "Проверка ширины кнопки хххххххххЖЖЖ";
     let body = format!(
         "<tg-button-row><tg-button type=\"url\" data=\"https://x/{long}\">{long}\
@@ -267,7 +269,7 @@ fn test_enforce_button_fit_folds_oversized_labels_keeping_routing() {
         out.contains("<tg-button type=\"url\" data=\"https://x/"),
         "{out}"
     );
-    assert!(out.contains(">1</tg-button>"), "{out}");
+    assert!(out.contains(">Go!</tg-button>"), "{out}");
     assert!(out.contains("<li>"), "{out}");
     assert!(out.contains(long), "{out}");
     // Idempotent: the folded body passes through unchanged.
@@ -302,7 +304,8 @@ fn test_enforce_button_fit_reshapes_over_budget_shared_row_to_column() {
 fn test_enforce_button_fit_folds_multi_button_row_when_label_exceeds_solo_budget() {
     // Multi-button row where one button label exceeds SINGLE_BUTTON_MAX_UNITS (30).
     // Column re-shaping cannot accommodate a label > 30 units, so it must fall back
-    // to NumberedProse fold (index digits + <ol>).
+    // to the NumberedProse fold at the owner's 2026-09-14 tier: each button
+    // carries `N. <FirstWord>` while the full labels move into the <ol>.
     let long_label = "Проверка ширины кнопки хххххххххЖЖЖ"; // 35 chars
     let body = format!(
         "<tg-button-row>\
@@ -311,8 +314,8 @@ fn test_enforce_button_fit_folds_multi_button_row_when_label_exceeds_solo_budget
          </tg-button-row>"
     );
     let out = enforce_button_fit(&body);
-    assert!(out.contains(">1</tg-button>"), "{out}");
-    assert!(out.contains(">2</tg-button>"), "{out}");
+    assert!(out.contains(">1. Проверка</tg-button>"), "{out}");
+    assert!(out.contains(">2. OK</tg-button>"), "{out}");
     assert!(out.contains(&format!("<li>{long_label}</li>")), "{out}");
     assert!(out.contains("<li>OK</li>"), "{out}");
     // Idempotent:
@@ -357,8 +360,8 @@ fn test_enforce_button_fit_splits_sets_on_intervening_non_whitespace_text() {
     assert!(out.contains("<tg-button-row><tg-button type=\"callback_data\" data=\"followup:t:0\">Yes</tg-button><tg-button type=\"callback_data\" data=\"followup:t:1\">No</tg-button></tg-button-row>"), "{out}");
     // Set 2 re-shapes into 2 separate rows:
     assert!(out.contains("<tg-button-row><tg-button type=\"callback_data\" data=\"followup:t:2\">Choice Alpha Long</tg-button></tg-button-row>\n<tg-button-row><tg-button type=\"callback_data\" data=\"followup:t:3\">Choice Beta Long</tg-button></tg-button-row>"), "{out}");
-    // Set 3 folds with its own <ol> list:
-    assert!(out.contains("<tg-button-row><tg-button type=\"callback_data\" data=\"followup:t:4\">1</tg-button></tg-button-row>\n<ol><li>Проверка ширины кнопки хххххххххЖЖЖ</li></ol>"), "{out}");
+    // Set 3 folds with its own <ol> list; its one button is the Go! tier:
+    assert!(out.contains("<tg-button-row><tg-button type=\"callback_data\" data=\"followup:t:4\">Go!</tg-button></tg-button-row>\n<ol><li>Проверка ширины кнопки хххххххххЖЖЖ</li></ol>"), "{out}");
     // Intervening text is preserved:
     assert!(out.contains("<p>First question:</p>"), "{out}");
     assert!(out.contains("<p>Second question:</p>"), "{out}");
@@ -467,4 +470,153 @@ fn test_rows_and_trailer_start_a_fresh_markdown_block() {
     append_rows_and_trailer_md(&mut md, &options, "tok", false, None);
     assert!(md.starts_with("Answer.\n\n<tg-button-row>"), "{md}");
     assert!(!md.starts_with("Answer.\n\n\n"), "{md}");
+}
+
+// ── #396 — the funnel must measure the label's DISPLAY width ──────────────
+
+#[test]
+fn test_owner_label_with_ampersand_survives_the_rich_funnel() {
+    // #396: `pick_layout` measured the RAW label (30 units) and approved a
+    // Column layout, but `enforce_button_fit` re-measured the ESCAPED form —
+    // `&` becomes `&amp;`, four units longer — read 34 > 30, and folded the
+    // row, so the button rendered as a bare `1` instead of its label. Both
+    // feeders now measure the same unit (the label's display text), so a row
+    // the emitter approved ships through the funnel untouched.
+    let label = "Acknowledge & stamp gap closed";
+    let raw_units = label.chars().count();
+    let escaped_units = crate::channels::telegram::markdown::escape_html(label).chars().count();
+    assert_eq!(raw_units, 30, "the solo budget is 30 display units");
+    assert_eq!(
+        escaped_units, 34,
+        "the escaped form is what the enforcer used to measure"
+    );
+    // Compare MEASURED values, never two literals: a condition whose operands
+    // are both compile-time constants is resolved before the test runs, proves
+    // nothing, and is rejected by clippy::assertions_on_constants under
+    // `-D warnings`. The property under test is the MISMATCH — the raw label
+    // fits the solo budget while its escaped form does not.
+    assert!(
+        escaped_units > SINGLE_BUTTON_MAX_UNITS && raw_units <= SINGLE_BUTTON_MAX_UNITS,
+        "the overcount tripped the fold: {escaped_units} > {SINGLE_BUTTON_MAX_UNITS} >= {raw_units}"
+    );
+
+    let token = "ab12cd34";
+    let emitted = suggestion_rows_rich_html(&styled_opts(&[label]), token);
+    let shipped = enforce_button_fit(&emitted);
+
+    assert_eq!(
+        shipped, emitted,
+        "a row the emitter approved must ship byte-identical through the funnel"
+    );
+    assert!(
+        shipped.contains("Acknowledge &amp; stamp gap closed"),
+        "the escaped label rides the button verbatim: {shipped}"
+    );
+    assert!(!shipped.contains("<ol>"), "no fold list: {shipped}");
+    assert!(
+        !shipped.contains(">1</tg-button>"),
+        "no bare-digit button: {shipped}"
+    );
+    assert!(
+        shipped.contains(&format!("{FOLLOWUP_PREFIX}{token}:0")),
+        "callback routing is untouched: {shipped}"
+    );
+}
+
+// ── #396 — the fold tier and its width guard ──────────────────────────────
+
+#[test]
+fn test_fold_button_label_decodes_the_first_word_and_re_escapes_it() {
+    // #396, second half: the fold branch used to write a bare `index.to_string()`,
+    // so every folded button rendered as `1`, `2`, … with no hint of its action.
+    // It now writes the owner's 2026-09-14 tier — `N. <FirstWord>` for n>=2 —
+    // taken from the DECODED label and re-escaped for the HTML context.
+    //
+    // `R&D` is the sharp case. Labels are sliced raw out of the HTML, so this
+    // one still reads `R&amp;D` at the enforcer. Taking the first word WITHOUT
+    // decoding yields `1. R&amp;D`, and re-escaping THAT double-escapes to
+    // `1. R&amp;amp;D`. Both wrong shapes are asserted absent below.
+    let a_raw = "R&D review the whole roadmap thing"; // 34 raw units
+    let a_esc = "R&amp;D review the whole roadmap thing"; // 38 escaped units
+    let b = "Escalate to the vendor immediately"; // 34 raw units
+    assert!(
+        a_raw.chars().count() > SINGLE_BUTTON_MAX_UNITS
+            && b.chars().count() > SINGLE_BUTTON_MAX_UNITS,
+        "both labels must exceed the solo budget for the set to fold"
+    );
+    assert_eq!(
+        crate::channels::telegram::markdown::escape_html(a_raw),
+        a_esc,
+        "the enforcer sees the escaped form"
+    );
+
+    let body = format!(
+        "<tg-button-row><tg-button type=\"callback_data\" data=\"followup:t:0\">{a_esc}\
+         </tg-button><tg-button type=\"callback_data\" data=\"followup:t:1\">{b}\
+         </tg-button></tg-button-row>"
+    );
+    let out = enforce_button_fit(&body);
+
+    assert!(
+        out.contains(">1. R&amp;D</tg-button>"),
+        "the fold label is the decoded first word, re-escaped once: {out}"
+    );
+    assert!(out.contains(">2. Escalate</tg-button>"), "{out}");
+    assert!(
+        !out.contains("R&amp;amp;D"),
+        "the fold label must not be double-escaped: {out}"
+    );
+    assert!(
+        !out.contains("1. R&amp;D review"),
+        "the fold label is the first word only, not the whole label: {out}"
+    );
+    // The <ol> keeps the raw (already-escaped) labels, untouched.
+    assert!(out.contains(&format!("<li>{a_esc}</li>")), "{out}");
+    assert!(out.contains(&format!("<li>{b}</li>")), "{out}");
+    assert_eq!(enforce_button_fit(&out), out, "idempotent");
+}
+
+#[test]
+fn test_fold_falls_back_to_the_bare_index_when_the_first_word_overflows() {
+    // The fold label must itself fit the solo budget, or the folded body
+    // re-triggers the fold on the next pass and grows without bound. The only
+    // way to overflow is a long first word: `N. ` costs (digits + 2) units
+    // against the 30-unit budget, so a 28-unit first word overflows at a
+    // single-digit index. The guard then falls back to the no-first-word tier
+    // (`N. ` -> bare index), which always fits.
+    let long_first = format!("{} tail", "x".repeat(28)); // 33 units, 28-unit first word
+    let other = "Escalate to the vendor immediately"; // 34 units
+    let naive = go_button_label(1, &long_first, false);
+    assert_eq!(naive.chars().count(), 31, "`1. ` + 28 units");
+    assert!(
+        !row_fits(&[naive.as_str()]),
+        "the naive fold label overflows the solo budget"
+    );
+    let fallback = go_button_label(1, "", false);
+    assert!(
+        row_fits(&[fallback.as_str()]),
+        "the bare-index fallback always fits"
+    );
+
+    let body = format!(
+        "<tg-button-row><tg-button type=\"callback_data\" data=\"followup:t:0\">{long_first}\
+         </tg-button><tg-button type=\"callback_data\" data=\"followup:t:1\">{other}\
+         </tg-button></tg-button-row>"
+    );
+    let out = enforce_button_fit(&body);
+
+    assert!(
+        out.contains(">1</tg-button>"),
+        "an over-long first word falls back to the bare index: {out}"
+    );
+    assert!(
+        !out.contains(">1. x"),
+        "the overflowing tier label is not written: {out}"
+    );
+    assert!(
+        out.contains(">2. Escalate</tg-button>"),
+        "the sibling button keeps its tier label: {out}"
+    );
+    assert!(out.contains(&format!("<li>{long_first}</li>")), "{out}");
+    assert_eq!(enforce_button_fit(&out), out, "idempotent");
 }

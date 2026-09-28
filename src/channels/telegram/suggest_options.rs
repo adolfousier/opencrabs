@@ -305,9 +305,11 @@ pub(crate) enum SuggestLayout {
     Column,
     /// Some label too long even full-width (#119 owner design): the fold
     /// tier splits by set size (owner order 2026-09-09): n=1 = one bold
-    /// `Go: <label>?` body line + one `Go!` button; n>=2 = the ORIGINAL
-    /// plain numbered list `1. <label>` + plain digit buttons packed
-    /// [`MAX_NUMBERS_PER_ROW`] per row.
+    /// `Go: <label>?` body line + one `Go!` button; n>=2 = the plain
+    /// numbered list `1. <label>` body + buttons labelled `N. <FirstWord>`
+    /// (owner order 2026-09-14), packed [`MAX_NUMBERS_PER_ROW`] per row.
+    /// Both planes build those button labels through [`go_button_label`],
+    /// so the emitter and the [`enforce_button_fit`] fold agree on the tier.
     NumberedProse,
 }
 
@@ -329,8 +331,11 @@ pub(crate) enum SuggestLayout {
 /// - Multi-button rows share keyboard width, so every label must fit
 ///   [`SHARED_ROW_MAX_CHARS`] and the row total [`SHARED_ROW_TOTAL_UNITS`].
 ///
-/// Width is the raw character count of the (already escaped) label text;
-/// entities overcount display width, which errs safe.
+/// Width is the character count of the label's DISPLAY text: callers decode
+/// entities first, so the emitter and the funnel measure the same unit.
+/// Measuring the escaped form instead overcounts by up to 4 units per `&`
+/// — and that is NOT "safe": it rejected a row the emitter had already
+/// approved, folding a 30-unit label that read as 34 (#396).
 pub(crate) fn row_fits(labels: &[&str]) -> bool {
     if labels.len() == 1 {
         labels[0].chars().count() <= SINGLE_BUTTON_MAX_UNITS
@@ -444,8 +449,9 @@ pub(crate) fn go_tier_line(label: &str) -> String {
 /// "back to the way the numbered lists were before the Go button
 /// introduction"): n=1 = one bold `go_tier_line`; n>=2 = the ORIGINAL
 /// plain numbered list `1. <label>` (markdown plane) — byte-identical to
-/// the pre-`c92873b1` `folded_list_markdown`. The n>=2 buttons are digit
-/// buttons whose labels already pair with these lines.
+/// the pre-`c92873b1` `folded_list_markdown`. The n>=2 buttons carry
+/// `N. <FirstWord>` labels ([`go_button_label`], owner order 2026-09-14)
+/// whose numbers pair with these lines.
 pub(crate) fn go_tier_lines(options: &[String]) -> String {
     if options.len() == 1 {
         return go_tier_line(&options[0]);
@@ -495,9 +501,9 @@ pub(crate) fn empty_keyboard() -> teloxide::types::InlineKeyboardMarkup {
 /// row fits, the body ships byte-identical. Otherwise the whole set
 /// folds to the NumberedProse shape (proven cut-free twice in #79):
 /// buttons keep their attributes — callback data and URL routing are
-/// untouched — but render their 1-based index, and the original labels
+/// untouched — but render their fold-tier label, and the original labels
 /// move into an `<ol>` after the last row. Idempotent: a folded body's
-/// digit labels never re-trigger the fold.
+/// tier labels never re-trigger the fold.
 /// Enforces button width budgets across an HTML body.
 ///
 /// Hand-authored multi-button rows exceeding the shared row budget (total >20 or
@@ -507,8 +513,20 @@ pub(crate) fn empty_keyboard() -> teloxide::types::InlineKeyboardMarkup {
 ///
 /// If any button label in the set exceeds 30 units, the set falls back to the
 /// `NumberedProse` shape (proven cut-free twice in #79): buttons keep their attributes
-/// — callback data and URL routing are untouched — but render their 1-based index,
+/// — callback data and URL routing are untouched — but render their fold-tier label,
 /// and the original labels move into an `<ol>` after the last row of that set.
+///
+/// The fold tier is the owner's 2026-09-14 shape (#396): `N. <FirstWord>` for n>=2,
+/// `Go!` for a single-button set — the same tier the emitter's NumberedProse arm
+/// writes, so the two arms agree. The pre-#396 fold wrote a bare index, which told
+/// the owner nothing about what the button did. The tier label is derived from the
+/// DECODED first word and re-escaped for the HTML context; when it cannot fit the
+/// solo budget on its own (a first word of 28+ units), the button falls back to the
+/// bare index, which always fits — without that guard a folded body would re-trigger
+/// the fold on the next pass.
+///
+/// Every verdict below measures the label's DISPLAY width, not its escaped form —
+/// see [`row_fits`] for why the escaped form is the wrong unit (#396).
 ///
 /// Contiguous runs of `<tg-button-row>` blocks (separated only by whitespace) form
 /// a single logical set; intervening non-whitespace text delineates independent sets.
@@ -601,13 +619,26 @@ pub(crate) fn enforce_button_fit(html: &str) -> String {
         });
     }
 
+    // Every verdict below must measure DISPLAY width — the same unit
+    // `pick_layout` measured when it approved the layout. Labels are sliced
+    // raw out of the HTML, so they still carry the entities `escape_html`
+    // wrote, and one `&` alone inflates a label by 4 characters (`&amp;`).
+    // Measuring the escaped form therefore rejects rows that fit their
+    // budget: #396 folded an approved 30-unit label because it read as 34.
+    // One helper keeps all three feeders in lockstep.
+    let display_fits = |buttons: &[EnforcerButton<'_>]| -> bool {
+        let decoded: Vec<String> = buttons
+            .iter()
+            .map(|b| super::markdown::unescape_html(b.label))
+            .collect();
+        let refs: Vec<&str> = decoded.iter().map(|s| s.as_str()).collect();
+        row_fits(&refs)
+    };
+
     // Quick check: if every row in every set satisfies row_fits as-authored, return untouched.
-    let all_as_authored_fit = sets.iter().all(|s| {
-        s.rows.iter().all(|r| {
-            let labels: Vec<&str> = r.buttons.iter().map(|b| b.label).collect();
-            row_fits(&labels)
-        })
-    });
+    let all_as_authored_fit = sets
+        .iter()
+        .all(|s| s.rows.iter().all(|r| display_fits(&r.buttons)));
     if all_as_authored_fit {
         return html.to_string();
     }
@@ -620,10 +651,7 @@ pub(crate) fn enforce_button_fit(html: &str) -> String {
         // Append text preceding this set
         out.push_str(&html[pos..set.set_start]);
 
-        let set_fits_as_authored = set.rows.iter().all(|r| {
-            let labels: Vec<&str> = r.buttons.iter().map(|b| b.label).collect();
-            row_fits(&labels)
-        });
+        let set_fits_as_authored = set.rows.iter().all(|r| display_fits(&r.buttons));
 
         if set_fits_as_authored {
             out.push_str(&html[set.set_start..set.set_end]);
@@ -634,7 +662,7 @@ pub(crate) fn enforce_button_fit(html: &str) -> String {
                 .rows
                 .iter()
                 .flat_map(|r| &r.buttons)
-                .all(|b| row_fits(&[b.label]));
+                .all(|b| display_fits(std::slice::from_ref(b)));
 
             if can_reshape_to_column {
                 // Re-shape into Column layout: one button per row, preserving original labels.
@@ -655,6 +683,14 @@ pub(crate) fn enforce_button_fit(html: &str) -> String {
                 }
             } else {
                 // Fall back to NumberedProse fold, scoped to this set.
+                // The fold button carries the SAME tier the emitter's
+                // NumberedProse arm writes (owner order 2026-09-14):
+                // `N. <FirstWord>` for n>=2, `Go!` for n=1. Writing a bare
+                // index here left every folded button reading `1`, `2`, …
+                // with no hint of what it did — the emitter had already
+                // chosen the right tier and the enforcer threw it away.
+                let total_buttons: usize = set.rows.iter().map(|r| r.buttons.len()).sum();
+                let is_single = total_buttons == 1;
                 let mut index = 0usize;
                 let mut set_labels: Vec<&str> = Vec::new();
                 for row in &set.rows {
@@ -664,7 +700,29 @@ pub(crate) fn enforce_button_fit(html: &str) -> String {
                         set_labels.push(btn.label);
                         out.push_str(btn.open_tag);
                         out.push('>');
-                        out.push_str(&index.to_string());
+                        // The tier label derives from the DECODED text, so
+                        // it must be re-escaped for the HTML context. The
+                        // `<ol>` below keeps the raw (already-escaped)
+                        // label — the two planes are built from different
+                        // sources on purpose.
+                        let decoded = super::markdown::unescape_html(btn.label);
+                        let folded = super::markdown::escape_html(&go_button_label(
+                            index, &decoded, is_single,
+                        ));
+                        // Idempotency guard: a fold label that does not fit
+                        // its own budget would re-trigger the fold on the
+                        // next pass, growing without bound. Only an
+                        // over-long first word can reach here — 28 units at
+                        // a single-digit index, 27 once the index reaches
+                        // two digits (the `N. ` prefix costs digits + 2
+                        // against the 30-unit solo budget). Fall to the
+                        // no-first-word tier (`N. ` → bare index), which
+                        // always fits.
+                        if row_fits(&[folded.as_str()]) {
+                            out.push_str(&folded);
+                        } else {
+                            out.push_str(&go_button_label(index, "", is_single));
+                        }
                         out.push_str(BTN_CLOSE);
                     }
                     out.push_str(ROW_CLOSE);
@@ -837,8 +895,9 @@ pub(crate) async fn render_suggestions(
     // labels get a full-width row each, a lone option rides one
     // full-width button up to its own clip point (#119), and anything
     // longer folds into the body (set-size split, owner order 2026-09-09):
-    // n=1 = bold `Go: <label>?` + a Go! button; n>=2 = the original plain
-    // numbered list with digit buttons (<=4 per row). The absolute index
+    // n=1 = bold `Go: <label>?` + a Go! button; n>=2 = the plain
+    // numbered list with `N. <FirstWord>` buttons (<=4 per row, owner
+    // order 2026-09-14). The absolute index
     // is encoded in the
     // callback data; the option text itself can exceed Telegram's 64-byte
     // callback-data limit, so we never put it there.
