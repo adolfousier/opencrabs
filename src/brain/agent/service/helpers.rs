@@ -1014,10 +1014,32 @@ impl AgentService {
                         }
                     }
                 }
-                // #1776: CLI background-task lifecycle events are informational;
-                // they carry no response content, so the assembler ignores them
-                // (the provider already logged the event at info level).
-                StreamEvent::BackgroundTask { .. } => {}
+                // #1776 seam 2: mirror the CLI's background-task lifecycle into
+                // the session's background manager so surfaces show a
+                // backgrounded claude task as in-flight work. Register on
+                // task_started, remove on completed/failed; label comes from
+                // claude_task_label so both sides key on the same string.
+                // No manager wired (or no task id) = skip silently: the mirror
+                // is cosmetic, never worth failing a turn over.
+                StreamEvent::BackgroundTask {
+                    subtype,
+                    task_id,
+                    status,
+                    ..
+                } => {
+                    if let (Some(mgr), Some(id)) = (self.background_manager(), task_id.as_deref()) {
+                        let label = super::background_tasks::claude_task_label(id);
+                        match (subtype.as_str(), status.as_deref()) {
+                            ("task_started", _) => {
+                                mgr.mirror_started(session_id, &label);
+                            }
+                            ("task_notification", Some("completed" | "failed")) => {
+                                mgr.mirror_finished(session_id, &label);
+                            }
+                            _ => {}
+                        }
+                    }
+                }
                 StreamEvent::Error { error } => {
                     crate::config::health::record_failure(provider.name(), &error);
                     return Err(crate::brain::provider::ProviderError::StreamError(error));

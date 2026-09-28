@@ -110,6 +110,25 @@ impl BackgroundTaskManager {
         }
     }
 
+    /// Mirror an EXTERNAL task's lifecycle into the tracker (#1776 seam 2):
+    /// a claude-cli background task never runs as our spawned process, but
+    /// surfaces still need to show it as in-flight work for the session —
+    /// a backgrounded CLI task takes the turn idle and, without a row here,
+    /// the wait looks like a hang (#762 is the same disease, spawned flavor).
+    /// `label` is the mirror's identity: [`Self::mirror_finished`] removes
+    /// the oldest row carrying it, exactly like [`Self::mark_finished`].
+    pub fn mirror_started(&self, session_id: Uuid, label: &str) {
+        self.mark_started(session_id, label);
+    }
+
+    /// Remove a mirrored external task row (see [`Self::mirror_started`]).
+    /// No-op when nothing matches: a `task_notification` may name a task we
+    /// never saw started (mid-session attach, log replay) — that is not an
+    /// error, there is just nothing to clean up.
+    pub fn mirror_finished(&self, session_id: Uuid, label: &str) {
+        self.mark_finished(session_id, label);
+    }
+
     /// Spawn `command` (via `sh -c`) in `cwd`, detached; on completion enqueue a
     /// system message into `session_id` summarizing the result. Returns
     /// immediately — the caller's turn is free to end.
@@ -378,6 +397,14 @@ pub(crate) fn short_label(command: &str) -> String {
     } else {
         label
     }
+}
+
+/// The mirror row's label for a claude-cli background task (#1776 seam 2):
+/// the source tag plus the CLI's own task id, so a surface can tell a
+/// mirrored CLI task from a spawned command at a glance and the removal
+/// side can key on the identical string.
+pub(crate) fn claude_task_label(task_id: &str) -> String {
+    format!("claude-cli {task_id}")
 }
 
 /// Keep only the last `n` lines of `text`.
