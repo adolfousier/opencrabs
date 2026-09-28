@@ -1557,26 +1557,18 @@ async fn cmd_chat_inner(
                                 // fallback, because in a forum it resolves to
                                 // whichever topic spoke last (#1200).
                                 //
-                                // At startup the in-memory binding is usually
-                                // still empty, so this mostly falls back here.
-                                // That is today's behaviour, not a regression:
-                                // it can only improve once a topic is bound.
-                                let thread_id = match tg.session_topic(session_id).await {
-                                    // Through the delivery boundary: a
-                                    // General-bound session has no thread,
-                                    // not thread 1 (#1319).
-                                    Some(topic) => {
-                                        crate::channels::telegram::session_resolve::delivery_thread_id(
-                                            Some(topic),
-                                        )
-                                    }
-                                    None => {
-                                        crate::channels::telegram::send::latest_thread_id_for_chat(
-                                            chat.0,
-                                        )
-                                        .await
-                                    }
-                                };
+                                // `session_push_thread` reads the
+                                // durable binding when the in-memory maps
+                                // are still empty, which is the usual
+                                // state at startup — a session bound to
+                                // General must stay unthreaded rather
+                                // than fall into the last topic that
+                                // spoke (#1319).
+                                let thread_id =
+                                    crate::channels::telegram::send::session_push_thread(
+                                        &tg, session_id, chat.0,
+                                    )
+                                    .await;
                                 match crate::channels::telegram::handler::resume_session(
                                     bot, chat, thread_id, session_id, prompt, agent, tg,
                                     false, // boot replay of an EXISTING row: resume-of-resume must stay untracked (#729/#12)

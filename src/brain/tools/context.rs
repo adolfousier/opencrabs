@@ -250,10 +250,57 @@ impl Tool for ContextTool {
     async fn execute(&self, input: Value, context: &ToolExecutionContext) -> Result<ToolResult> {
         let input: ContextInput = serde_json::from_value(input)?;
         let store_path = get_store_path(context);
+
+        // Serialise the whole read-modify-write, not just the save (#600).
+        // `ContextStore::save` renames a uniquely-named temp file over the
+        // target, which makes each write atomic but leaves the window between
+        // the load below and that write wide open: two mutations in one
+        // parallel batch both read the same baseline, the later save replaces
+        // the file outright, and both calls return success carrying their own
+        // stale count. The guard is taken BEFORE the read — the #593 lesson
+        // that `edit.rs` applies to the same class of defect. It stays
+        // advisory (a contended writer waits briefly, then proceeds), so any
+        // residual overlap is reported rather than silent. A short hold is
+        // NECESSARY BUT NOT SUFFICIENT, and this comment used to claim the
+        // former as a reason for the latter: measured, a hold far shorter than
+        // the wait still serialised nothing, because the waiter stalled the
+        // task the holder needed to finish on. The two paragraphs below are
+        // what actually makes it work.
+        //
+        // The wait must NOT run on this task. A parallel batch is polled
+        // cooperatively on one task (`buffered` in `parallel_tools.rs`), so a
+        // blocking sleep here stalls every sibling future — including the one
+        // already holding the lock, whose critical section then cannot finish
+        // and whose guard is never released. Measured with the wait inline:
+        // three mutations in one batch, all three read the same baseline, two
+        // lost, and the batch took 1.72 s — two 750 ms waits burned against a
+        // holder that could not make progress. Offloading the wait to the
+        // blocking pool lets the holder complete, and the waiters then contend
+        // against a lock that is actually released.
+        //
+        // But the PATH must be resolved on THIS task, not in the blocking
+        // closure. `resolve_profile_home` reads a `tokio::task_local` override,
+        // and `spawn_blocking` starts a new task that cannot see it: resolving
+        // there keyed the lock to the real profile home while the store stayed
+        // in the scoped one, so contending writers took different lock files,
+        // each reported `is_held()` true, and the arbitration was silently
+        // inert. `a_contended_write_is_reported_not_swallowed` is that defect's
+        // receipt — it failed with a plain success where the notice belongs.
+        let lock_at = super::path_lock::lock_path(&store_path);
+        let write_lock = match lock_at {
+            Some(path) => {
+                tokio::task::spawn_blocking(move || super::path_lock::acquire_at(&path))
+                    .await
+                    .unwrap_or(None)
+            }
+            None => None,
+        };
+        let contended = write_lock.as_ref().is_some_and(|l| !l.is_held());
+
         let session_id_str = context.session_id.to_string();
         let mut store = ContextStore::load(&store_path, &session_id_str).await?;
 
-        let result = match input.operation {
+        let mut result = match input.operation {
             ContextOperation::Set {
                 key,
                 value,
@@ -448,6 +495,15 @@ impl Tool for ContextTool {
                 )
             }
         };
+
+        // An overlapping mutation is reported, not swallowed: the counts above
+        // were computed from the store we read AND wrote under the lock, so
+        // they describe the persisted state — but a contended writer cannot
+        // prove no peer interleaved, and only the caller can decide what that
+        // means. Same idiom as `edit.rs`.
+        if contended {
+            result.push_str(&super::path_lock::contention_notice(&store_path));
+        }
 
         Ok(ToolResult::success(result))
     }

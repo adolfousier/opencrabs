@@ -38,6 +38,13 @@ pub use fetch::{fetch_provider_models, is_first_time};
 // the `fetch` module is reachable. Test access goes through a cfg(test) bridge.
 #[cfg(test)]
 pub(crate) use fetch::{merge_minimax_baseline, xiaomi_baseline_models};
+// build_onboarding_systemd_unit is used by tests via
+// `crate::tui::onboarding::build_onboarding_systemd_unit`; `config` is private,
+// so it needs the same cfg(test) bridge as `fetch` above. The path is `self::`
+// because `config` is also an external crate dependency, which would make a
+// bare `use config::…` ambiguous.
+#[cfg(test)]
+pub(crate) use self::config::build_onboarding_systemd_unit;
 
 /// System prompt sent once after the user completes first-time onboarding.
 /// Starts with `[SYSTEM:` so it's hidden from the user display but processed

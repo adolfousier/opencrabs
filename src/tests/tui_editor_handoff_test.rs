@@ -208,3 +208,16 @@ async fn a_stopped_child_is_coerced_to_exit_instead_of_hanging_the_reap() {
         "reap_editor hung on a stopped child (#1744 regression)"
     );
 }
+
+#[test]
+fn editor_module_is_unix_gated_at_the_mod_declaration() {
+    // #1755: libc waitpid/kill don't exist on the windows libc crate, so the
+    // whole editor module compiles out on Windows and bang commands keep the
+    // pipe-capture path. The Windows runner only builds (never runs tests),
+    // so the gate is pinned by source scan.
+    let decl = include_str!("../tui/mod.rs");
+    assert!(
+        decl.contains("#[cfg(unix)]\npub mod editor;"),
+        "the editor module must stay cfg(unix): its reap path is libc-based (#1755)"
+    );
+}

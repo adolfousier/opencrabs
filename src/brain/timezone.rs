@@ -50,31 +50,15 @@ pub fn format_utc_time(dt: &DateTime<Utc>) -> String {
 /// - `Timezone: America/New_York`
 pub fn parse_timezone_heuristic(text: &str) -> Option<TzInfo> {
     for line in text.lines() {
-        let line_clean = line.trim().trim_start_matches(['-', '*', '#']).trim();
-        let lower = line_clean.to_lowercase();
+        let Some((key, val)) = normalize_declaration(line) else {
+            continue;
+        };
 
-        let is_tz_line = lower.starts_with("timezone:")
-            || lower.starts_with("timezone :")
-            || lower.starts_with("часовой пояс:")
-            || lower.starts_with("часовой пояс :");
-
-        if !is_tz_line
-            && !line_clean.starts_with("**Timezone:**")
-            && !line_clean.starts_with("**Часовой пояс:**")
-        {
+        if !is_tz_key(&key) {
             continue;
         }
 
-        // Extract the value after colon
-        let Some((_, val_part)) = line_clean.split_once(':') else {
-            continue;
-        };
-        let val = val_part
-            .trim()
-            .trim_matches(|c| c == '*' || c == '`' || c == '"' || c == '\'')
-            .trim();
-
-        if let Some(info) = parse_tz_value(val) {
+        if let Some(info) = parse_tz_value(&val) {
             return Some(info);
         }
     }
@@ -89,7 +73,11 @@ pub fn parse_timezone_heuristic(text: &str) -> Option<TzInfo> {
                     c == '(' || c == ')' || c == '[' || c == ']' || c == '`' || c == ',' || c == '.'
                 });
                 if let Ok(tz) = clean_word.parse::<Tz>() {
-                    return Some(TzInfo::new(tz, None));
+                    // A line reaching this arm resolved NOWHERE else, so the
+                    // parenthetical is the only declared label there is. Returning
+                    // `None` here is what rendered `Europe/Moscow (МСК)` as a bare
+                    // `Europe/Moscow` — carry it instead.
+                    return Some(TzInfo::new(tz, parenthetical_label(trimmed)));
                 }
             }
         }
@@ -98,33 +86,134 @@ pub fn parse_timezone_heuristic(text: &str) -> Option<TzInfo> {
     None
 }
 
+/// Declared label carried by the parenthetical group of a free-form line.
+///
+/// The fallback scan matches a zone anywhere in a line, by which point the
+/// declaration key is unknown — so the parenthetical is the only label the line
+/// still offers. Returns `None` when the group is empty or is itself a zone
+/// form (`Europe/Moscow (UTC+3)` declares no label, it declares an offset), so
+/// a zone can never be mistaken for the user's own word.
+fn parenthetical_label(line: &str) -> Option<String> {
+    let (_, rest) = line.split_once('(')?;
+    let inner = rest
+        .trim_end_matches([')', '|', ' ', '\t'])
+        .trim();
+    if inner.is_empty() || inner.parse::<Tz>().is_ok() || parse_utc_offset_or_iana(inner).is_some() {
+        return None;
+    }
+    Some(inner.to_string())
+}
+
+/// Normalise a `USER.md` declaration line into a `(key, value)` pair.
+///
+/// Handles the plain form (`Key: value`), markdown table rows
+/// (`| Key | value |`), list markers (`- Key: value`), and bold/backtick/quote
+/// wrappers around either side. Returns `None` when the line carries no
+/// separator, so callers skip it without guessing.
+///
+/// Order matters: the table frame is stripped BEFORE the split. Splitting a row
+/// like `| **Timezone** | UTC+3 (MSK) |` on its leading pipe yields an empty key
+/// — that ordering is the defect this function exists to avoid.
+fn normalize_declaration(line: &str) -> Option<(String, String)> {
+    let mut s = line.trim();
+
+    // Strip a markdown table frame: one leading and one trailing pipe.
+    if let Some(rest) = s.strip_prefix('|') {
+        s = rest.trim();
+    }
+    if let Some(rest) = s.strip_suffix('|') {
+        s = rest.trim();
+    }
+
+    // Strip list markers (`- `, `* `, `# `) and blockquote markers.
+    s = s.trim_start_matches(['-', '*', '#', '>', ' ']).trim();
+
+    // Split on the FIRST `:` or `|`, whichever comes first.
+    let sep = s.find([':', '|'])?;
+    let key = unwrap_declaration_wrappers(&s[..sep]);
+    let value = unwrap_declaration_wrappers(&s[sep + 1..]);
+
+    if key.is_empty() || value.is_empty() {
+        return None;
+    }
+
+    Some((key, value))
+}
+
+/// Strip emphasis/code/quote wrappers and surrounding whitespace from one side
+/// of a declaration, so `**Timezone**` and `Timezone` compare equal.
+fn unwrap_declaration_wrappers(s: &str) -> String {
+    s.trim()
+        .trim_matches(|c| {
+            c == '*' || c == '_' || c == '`' || c == '"' || c == '\'' || c == '|'
+        })
+        .trim()
+        .to_string()
+}
+
+/// Canonical `USER.md` keys that declare a timezone.
+///
+/// Matched case-insensitively against a key already normalised by
+/// [`normalize_declaration`], so `Timezone`, `**Timezone**`, `TimeZone` and
+/// `Часовой пояс` all resolve to the same declaration.
+const TZ_KEYS: [&str; 3] = ["timezone", "time zone", "часовой пояс"];
+
+/// Whether a normalised declaration key declares a timezone.
+fn is_tz_key(key: &str) -> bool {
+    let lower = key.trim().to_lowercase();
+    TZ_KEYS.contains(&lower.as_str())
+}
+
+/// City-name and abbreviation aliases that resolve to a zone.
+///
+/// Deliberately narrow: the Moscow family only, per the approved design (DP1).
+/// A wider Russian-city set is a follow-up owner decision, not an assumption —
+/// every entry is a claim the parser acts on, so an unreviewed list would
+/// silently resolve user text to the wrong zone.
+const TZ_ALIASES: [(&str, Tz); 4] = [
+    ("мск", Tz::Europe__Moscow),
+    ("msk", Tz::Europe__Moscow),
+    ("москва", Tz::Europe__Moscow),
+    ("moscow", Tz::Europe__Moscow),
+];
+
+/// Resolve a city name or abbreviation to a zone.
+///
+/// Case-insensitive; returns `None` for anything outside [`TZ_ALIASES`].
+fn tz_alias_lookup(s: &str) -> Option<Tz> {
+    let lower = s.trim().to_lowercase();
+    TZ_ALIASES
+        .iter()
+        .find(|(alias, _)| *alias == lower)
+        .map(|(_, tz)| *tz)
+}
+
 /// Parse a timezone value string into TzInfo.
 fn parse_tz_value(val: &str) -> Option<TzInfo> {
-    // Check for "UTC+3 (MSK)" or "UTC-5 (EST)"
-    if let Some((utc_part, rest)) = val.split_once('(') {
-        let label = rest.trim_end_matches(')').trim().to_string();
-        let tz_candidate = utc_part.trim();
-        if let Some(tz) = parse_utc_offset_or_iana(tz_candidate) {
-            return Some(TzInfo::new(
-                tz,
-                if label.is_empty() { None } else { Some(label) },
-            ));
+    let val = val.trim();
+
+    if let Some((outer, inner)) = split_parenthetical(val) {
+        // Precedence is regression-critical. An EXPLICIT zone form — IANA name
+        // or UTC offset — wins its slot over a city alias, in either position,
+        // so `Москва (UTC+3)` keeps resolving to the offset with the label
+        // "Москва" (pinned by parse_russian_timezone_format). Aliases are only
+        // consulted once BOTH explicit slots are ruled out, which is what makes
+        // `Москва (МСК)` resolve without disturbing the offset form.
+        if let Some(tz) = parse_utc_offset_or_iana(outer) {
+            return Some(TzInfo::new(tz, label_of(inner)));
         }
-        // Maybe format is "Москва (UTC+3)"
-        let inner = rest.trim_end_matches(')').trim();
         if let Some(tz) = parse_utc_offset_or_iana(inner) {
-            let outer_label = utc_part.trim().to_string();
-            return Some(TzInfo::new(
-                tz,
-                if outer_label.is_empty() {
-                    None
-                } else {
-                    Some(outer_label)
-                },
-            ));
+            return Some(TzInfo::new(tz, label_of(outer)));
+        }
+        if let Some(tz) = tz_alias_lookup(outer) {
+            return Some(TzInfo::new(tz, label_of(inner)));
+        }
+        if let Some(tz) = tz_alias_lookup(inner) {
+            return Some(TzInfo::new(tz, label_of(outer)));
         }
     }
 
+    // No parenthetical, or nothing in it resolved.
     // Direct IANA parse, e.g. "Europe/Paris"
     if let Ok(tz) = val.parse::<Tz>() {
         return Some(TzInfo::new(tz, None));
@@ -135,7 +224,29 @@ fn parse_tz_value(val: &str) -> Option<TzInfo> {
         return Some(TzInfo::new(tz, None));
     }
 
+    // Bare city name or abbreviation, e.g. "Москва" or "MSK". The alias is its
+    // own label: the user's own word is what should appear in the marker.
+    if let Some(tz) = tz_alias_lookup(val) {
+        return Some(TzInfo::new(tz, label_of(val)));
+    }
+
     None
+}
+
+/// Split `outer (inner)` into its two trimmed parts.
+fn split_parenthetical(val: &str) -> Option<(&str, &str)> {
+    let (outer, rest) = val.split_once('(')?;
+    Some((outer.trim(), rest.trim_end_matches(')').trim()))
+}
+
+/// Label taken from one declaration slot, or `None` when the slot is empty.
+fn label_of(slot: &str) -> Option<String> {
+    let slot = slot.trim();
+    if slot.is_empty() {
+        None
+    } else {
+        Some(slot.to_string())
+    }
 }
 
 /// Parse UTC offset (e.g. "UTC+3", "UTC-5", "UTC+03:00", "+03") or direct IANA string.

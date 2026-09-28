@@ -54,6 +54,46 @@ impl Tool for SleepTool {
     }
 }
 
+/// A writer that names its target through the shared `path` key and reports
+/// it via [`Tool::write_target`] — the shape `edit_file` / `write_file` have.
+/// Two of these on one path are what the batch gate must keep apart (#593):
+/// run concurrently they each read the original and the later write replaces
+/// the file outright, dropping the earlier edit while both report success.
+struct PathWriterTool;
+
+#[async_trait]
+impl Tool for PathWriterTool {
+    fn name(&self) -> &str {
+        "path_writer"
+    }
+    fn description(&self) -> &str {
+        "writes one path"
+    }
+    fn input_schema(&self) -> serde_json::Value {
+        json!({"type": "object", "properties": {"path": {"type": "string"}}})
+    }
+    fn capabilities(&self) -> Vec<crate::brain::tools::ToolCapability> {
+        vec![]
+    }
+    fn requires_approval(&self) -> bool {
+        false
+    }
+    fn write_target(
+        &self,
+        input: &serde_json::Value,
+        working_directory: &std::path::Path,
+    ) -> Option<std::path::PathBuf> {
+        crate::brain::tools::r#trait::write_target_from_path_arg(input, working_directory)
+    }
+    async fn execute(
+        &self,
+        _input: serde_json::Value,
+        _context: &ToolExecutionContext,
+    ) -> crate::brain::tools::Result<crate::brain::tools::ToolResult> {
+        Ok(crate::brain::tools::ToolResult::success("wrote".to_string()))
+    }
+}
+
 async fn service_with_tools() -> AgentService {
     let db = Database::connect_in_memory().await.unwrap();
     db.run_migrations().await.unwrap();
@@ -63,6 +103,7 @@ async fn service_with_tools() -> AgentService {
     registry.register(Arc::new(MockTool));
     registry.register(Arc::new(MockToolRequiresApproval));
     registry.register(Arc::new(SleepTool));
+    registry.register(Arc::new(PathWriterTool));
     // Config::default() derives zero for max_concurrent (serde defaults
     // only apply when parsing config.toml), so set the real default here.
     let mut config = crate::config::Config::default();
@@ -114,6 +155,48 @@ async fn approval_tools_and_small_batches_stay_sequential() {
     let mut auto_ctx = ToolExecutionContext::new(Uuid::new_v4());
     auto_ctx.auto_approve = true;
     assert!(service.batch_is_parallel_eligible(&with_approval, &auto_ctx, false));
+}
+
+/// #593: two calls that write one path must not share a parallel batch. Each
+/// writer is a whole-file read-modify-write, so overlapping them makes both
+/// read the same original and the later write replace the file outright —
+/// the earlier edit vanishes while both calls report success. Refusing
+/// parallelism sends the batch down the sequential path instead, where each
+/// call reads its predecessor's output and both edits land.
+#[tokio::test]
+async fn same_path_writers_stay_sequential() {
+    let service = service_with_tools().await;
+    let ctx = ToolExecutionContext::new(Uuid::new_v4());
+
+    // Two writers, one path: sequential, so each edit builds on the last.
+    let same_path = batch(&[
+        ("path_writer", json!({"path": "shared.txt"})),
+        ("path_writer", json!({"path": "shared.txt"})),
+    ]);
+    assert!(!service.batch_is_parallel_eligible(&same_path, &ctx, false));
+
+    // The gate compares resolved targets, not raw strings: a differently
+    // spelled route to the same file still collides.
+    let respelled = batch(&[
+        ("path_writer", json!({"path": "shared.txt"})),
+        ("path_writer", json!({"path": "./shared.txt"})),
+    ]);
+    assert!(!service.batch_is_parallel_eligible(&respelled, &ctx, false));
+
+    // Two writers, two paths: nothing to lose, so it stays parallel.
+    let distinct_paths = batch(&[
+        ("path_writer", json!({"path": "a.txt"})),
+        ("path_writer", json!({"path": "b.txt"})),
+    ]);
+    assert!(service.batch_is_parallel_eligible(&distinct_paths, &ctx, false));
+
+    // A reader beside a writer on one path reports no write target, so it
+    // never collides — the batch keeps its parallelism.
+    let reader_and_writer = batch(&[
+        ("test_tool", json!({})),
+        ("path_writer", json!({"path": "shared.txt"})),
+    ]);
+    assert!(service.batch_is_parallel_eligible(&reader_and_writer, &ctx, false));
 }
 
 #[tokio::test]

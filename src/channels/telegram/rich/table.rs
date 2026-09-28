@@ -122,6 +122,83 @@ pub(crate) fn ensure_blank_line_before_tables(text: &str) -> String {
     result
 }
 
+/// Block-level HTML tags whose opener must not be swallowed by a preceding
+/// blockquote run (#552). Inline tags — `b`, `i`, `code`, `br`, `a`, `span`, … —
+/// are deliberately absent: after a quote they remain inline content, and
+/// splitting them off would change rendering the message never asked for.
+const BLOCK_HTML_OPENERS: &[&str] = &[
+    "details", "summary", "table", "blockquote", "pre", "ul", "ol", "li", "h1", "h2", "h3", "h4",
+    "h5", "h6", "p",
+];
+
+/// The element name a line's leading `<…>` opener carries, or `None` when the
+/// line opens no element at all (`<!`, `</`, `<?`, or a bare `<`).
+fn html_opener_tag(line: &str) -> Option<&str> {
+    let rest = line.trim_start().strip_prefix('<')?;
+    let end = rest
+        .find(|c: char| !c.is_ascii_alphabetic())
+        .unwrap_or(rest.len());
+    if end == 0 {
+        return None;
+    }
+    Some(&rest[..end])
+}
+
+/// Whether `line` opens a block-level HTML element from [`BLOCK_HTML_OPENERS`].
+/// A quote line never qualifies — the pass must not split inside a blockquote.
+fn is_block_html_opener(line: &str) -> bool {
+    if line.trim_start().starts_with('>') {
+        return false;
+    }
+    let Some(tag) = html_opener_tag(line) else {
+        return false;
+    };
+    BLOCK_HTML_OPENERS
+        .iter()
+        .any(|&t| t.eq_ignore_ascii_case(tag))
+}
+
+/// Insert one blank line before a block-level HTML opener that directly follows
+/// a blockquote run (#552). Telegram's rich parser treats an unbroken line after
+/// a `>` run as a CommonMark *lazy continuation* of that quote, so a `<details>`
+/// opener lands *inside* the blockquote and its `</details>` closers go
+/// unmatched — Telegram then rejects the whole message with
+/// `RICH_MESSAGE_CONTENT_REQUIRED`, the daemon logs `Rich plan card create
+/// failed … falling back to HTML`, and the card loses rich rendering entirely
+/// (measured: 409 rejections from one plan card on 2026-09-24). Detection is by
+/// opener set, not by "any HTML": inline tags stay inline content and are never
+/// split off. Code fences (``` and ~~~) are never mutated, nothing is ever
+/// inserted inside a quote, the pass is idempotent, and a body with no
+/// quote-then-HTML adjacency returns unchanged.
+pub(crate) fn ensure_blank_line_before_block_html(text: &str) -> String {
+    if !text.contains('<') || !text.contains('>') {
+        return text.to_string();
+    }
+    let lines: Vec<String> = text.lines().map(|l| l.to_string()).collect();
+    let mut out: Vec<String> = Vec::with_capacity(lines.len() + 1);
+    let mut in_fence = false;
+    for line in &lines {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
+            in_fence = !in_fence;
+            out.push(line.clone());
+            continue;
+        }
+        if !in_fence
+            && is_block_html_opener(line)
+            && out.last().is_some_and(|prev| prev.trim_start().starts_with('>'))
+        {
+            out.push(String::new());
+        }
+        out.push(line.clone());
+    }
+    let mut result = out.join("\n");
+    if text.ends_with('\n') {
+        result.push('\n');
+    }
+    result
+}
+
 /// If a table begins at `lines[start]` (a pipe row immediately followed by a
 /// separator row), parse it and return the table plus the index just past it.
 pub(super) fn try_parse(lines: &[String], start: usize) -> Option<(Table, usize)> {
@@ -224,7 +301,16 @@ pub(crate) fn normalize_tables(text: &str) -> String {
     let shielded = shield_bare_leading_hashes(&balanced);
     let reflowed = reflow_collapsed_tables(&shielded);
     let inferred = infer_missing_table_separators(&reflowed);
-    ensure_blank_line_before_tables(&inferred)
+    let blank_lined = ensure_blank_line_before_tables(&inferred);
+    // Pass 7 (#552): terminate a blockquote run before a block-level HTML
+    // opener. An unbroken line after a `>` run is a CommonMark lazy
+    // continuation, so a `<details>` opener would land INSIDE the quote and its
+    // unmatched closers make Telegram reject the whole message
+    // (`RICH_MESSAGE_CONTENT_REQUIRED`), silently dropping the card to HTML.
+    // Wired HERE so every rich-build entry point and the structure-detection
+    // gate inherit it — the same single-canonical-entry discipline this
+    // function's own contract states.
+    ensure_blank_line_before_block_html(&blank_lined)
 }
 
 /// Balance unclosed or runaway code fences in markdown text (#240).

@@ -23,6 +23,17 @@ impl Tool for HashlineEditTool {
         "hashline_edit"
     }
 
+    /// The one path this invocation writes, resolved against the working
+    /// directory (#593). The batch scheduler asks the tool instead of
+    /// consulting a central name table.
+    fn write_target(
+        &self,
+        input: &Value,
+        working_directory: &std::path::Path,
+    ) -> Option<std::path::PathBuf> {
+        crate::brain::tools::r#trait::write_target_from_path_arg(input, working_directory)
+    }
+
     fn description(&self) -> &str {
         "Edit a file using hash-anchored line references. Each line is identified by a 4-char \
          content hash (from read_file with hashline=true). Reference lines by hash alone (e.g. \
@@ -108,6 +119,14 @@ impl Tool for HashlineEditTool {
             )));
         }
 
+        // One writer at a time on this path (#593). `hashline_edit` is a
+        // read-modify-write like `edit_file`, so without the lock two
+        // concurrent calls both read the original and the later write
+        // replaces the file, dropping the earlier edit. The guard is
+        // advisory: a contended write proceeds rather than failing.
+        let write_lock = crate::brain::tools::path_lock::acquire(&path);
+        let contended = write_lock.as_ref().is_some_and(|l| !l.is_held());
+
         // Read file
         let content = fs::read_to_string(&path).await.map_err(ToolError::Io)?;
         let original_lines: Vec<&str> = content.lines().collect();
@@ -164,6 +183,8 @@ impl Tool for HashlineEditTool {
         fs::write(&path, &new_content)
             .await
             .map_err(ToolError::Io)?;
+        // Release the path lock taken before the read (#593).
+        drop(write_lock);
 
         // Track file in session (fire and forget, path-only)
         if let Some(ref sc) = context.service_context {
@@ -184,6 +205,11 @@ impl Tool for HashlineEditTool {
             lines_after
         );
         output.push_str(&diff);
+        // An overlapping write is reported, not swallowed: the file may hold
+        // neither writer's intent, and only the caller can decide (#593).
+        if contended {
+            output.push_str(&crate::brain::tools::path_lock::contention_notice(&path));
+        }
 
         Ok(ToolResult::success(output))
     }

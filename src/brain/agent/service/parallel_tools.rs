@@ -51,7 +51,8 @@ impl super::AgentService {
     /// True when every tool in the batch is auto-approved under the current
     /// flags, so the whole batch can run concurrently. Any approval-gated
     /// tool keeps the batch on the sequential path (interactive prompts
-    /// cannot be parallelized sensibly).
+    /// cannot be parallelized sensibly), and so does a batch in which two
+    /// calls write one path (#593).
     pub(crate) fn batch_is_parallel_eligible(
         &self,
         tool_uses: &[(String, String, Value)],
@@ -61,7 +62,7 @@ impl super::AgentService {
         if tool_uses.len() < 2 || self.max_concurrent < 2 {
             return false;
         }
-        tool_uses.iter().all(|(_, name, input)| {
+        let all_auto_approved = tool_uses.iter().all(|(_, name, input)| {
             match self.tool_registry.get(name) {
                 Some(tool) => {
                     let needs_approval = tool.requires_approval_for_input(input)
@@ -72,7 +73,52 @@ impl super::AgentService {
                 // Unknown tool: the sequential path has dedicated handling.
                 None => false,
             }
-        })
+        });
+        if !all_auto_approved {
+            return false;
+        }
+        // Two calls that write one path must not overlap (#593). Each writer
+        // is a whole-file read-modify-write: run concurrently they both read
+        // the same original, and the later write replaces the file outright,
+        // silently dropping the earlier edit while both report success. The
+        // per-path lock is advisory — a contended write waits briefly and
+        // then proceeds anyway — so it cannot order two writers within one
+        // turn; this gate can, and the ordering costs nothing here. Refusing
+        // parallelism sends the batch down the sequential path, where each
+        // call reads its predecessor's output and both edits land.
+        !self.batch_writes_one_path(tool_uses, tool_context)
+    }
+
+    /// True when two calls in the batch resolve to the same write target.
+    ///
+    /// Targets come from [`crate::brain::tools::Tool::write_target`], so a
+    /// tool that addresses its file through a key other than `path` is
+    /// covered by its own implementation rather than by a name table here.
+    /// A reader has no write target and so never collides with a writer.
+    fn batch_writes_one_path(
+        &self,
+        tool_uses: &[(String, String, Value)],
+        tool_context: &ToolExecutionContext,
+    ) -> bool {
+        let working_directory = tool_context.working_dir();
+        let mut seen: Vec<std::path::PathBuf> = Vec::new();
+        for (_, name, input) in tool_uses {
+            let Some(tool) = self.tool_registry.get(name) else {
+                continue;
+            };
+            let Some(target) = tool.write_target(input, &working_directory) else {
+                continue;
+            };
+            // Canonicalise where the file exists, so two spellings of one
+            // file compare equal; a not-yet-created path keeps the resolved
+            // form, which is the same resolution the writing tool applies.
+            let target = std::fs::canonicalize(&target).unwrap_or(target);
+            if seen.contains(&target) {
+                return true;
+            }
+            seen.push(target);
+        }
+        false
     }
 
     /// Run the batch concurrently (capped at `max_concurrent`), preserving

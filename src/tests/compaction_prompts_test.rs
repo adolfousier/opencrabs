@@ -372,3 +372,96 @@ fn silent_arms_never_invite_a_roast() {
         );
     }
 }
+
+// ---------------------------------------------------------------------
+// Issue #499 — a continuation document must never re-bless a COMPLETED
+// obligation as the critical immediate task.
+//
+// Section 0 now carries an explicit status on its first line, and every
+// continuation body defers to it. The population is 5 kinds x 2 modes =
+// 10 bodies: the original design enumerated only four, and the missing
+// kind (Emergency) carried an unconditional resume directive in its
+// silent arm.
+// ---------------------------------------------------------------------
+
+const ALL_KINDS: [CompactionKind; 5] = [
+    CompactionKind::Regular,
+    CompactionKind::MidLoop,
+    CompactionKind::Emergency,
+    CompactionKind::PostTool,
+    CompactionKind::Manual,
+];
+
+/// Positive arm: all 10 bodies must carry the status rule, so no body can
+/// tell the model to continue an obligation unconditionally.
+#[test]
+fn every_body_carries_the_obligation_status_rule() {
+    for kind in ALL_KINDS {
+        for silent in [false, true] {
+            let body = build_continuation(kind, silent, true, PlanRecovery::Active);
+            assert!(
+                body.contains("Obligation status"),
+                "{kind:?} silent={silent} must defer to section 0's obligation \
+                 status — otherwise it re-blesses a completed task: {body}"
+            );
+        }
+    }
+}
+
+/// The rule must name all three statuses, must forbid redoing DONE work,
+/// and must default an ABSENT status line to UNKNOWN — never to OPEN. An
+/// absent status read as OPEN is the original defect with a new coat of
+/// paint.
+#[test]
+fn status_rule_names_all_three_tokens_and_defaults_absent_to_unknown() {
+    let body = build_continuation(CompactionKind::Regular, false, true, PlanRecovery::Active);
+    for token in ["OPEN", "DONE", "UNKNOWN"] {
+        assert!(
+            body.contains(token),
+            "the status rule must name the {token} status: {body}"
+        );
+    }
+    assert!(
+        body.contains("absent status line means UNKNOWN"),
+        "an absent status line must default to UNKNOWN, never OPEN: {body}"
+    );
+    assert!(
+        body.contains("do NOT redo"),
+        "the DONE branch must forbid redoing the completed work: {body}"
+    );
+}
+
+/// Negative arm, in code: no body may carry an UNGATED directive to
+/// continue the obligation. Every directive must sit on a line that also
+/// carries the status gate.
+#[test]
+fn no_body_carries_an_ungated_continue_directive() {
+    const DIRECTIVES: [&str; 5] = [
+        "IMMEDIATELY continue the task described",
+        "Silently continue the IMMEDIATE TASK",
+        "Silently resume from the IMMEDIATE TASK",
+        "Silently resume the IMMEDIATE TASK",
+        "Resume the IMMEDIATE TASK",
+    ];
+    let mut checked = 0usize;
+    for kind in ALL_KINDS {
+        for silent in [false, true] {
+            let body = build_continuation(kind, silent, true, PlanRecovery::Active);
+            for line in body.lines() {
+                if DIRECTIVES.iter().any(|d| line.contains(d)) {
+                    checked += 1;
+                    assert!(
+                        line.contains("Obligation status"),
+                        "{kind:?} silent={silent} continues the obligation without \
+                         an OPEN gate: {line}"
+                    );
+                }
+            }
+        }
+    }
+    assert!(
+        checked >= 9,
+        "the negative arm inspected only {checked} directive lines — the guard is \
+         measuring the wrong surface"
+    );
+}

@@ -233,6 +233,7 @@ pub mod config_write_existing_section_test;
 pub mod config_write_path_test;
 pub mod config_write_types_test;
 pub mod content_vectors_heal_test;
+pub mod context_parallel_mutation_test;
 pub mod context_provider_anchor_test;
 pub mod context_store_concurrent_save_test;
 pub mod context_window_test;
@@ -254,6 +255,7 @@ pub mod cron_test;
 pub mod cron_tool_registry_test;
 pub mod cron_trigger_pipeline_test;
 pub mod cross_provider_model_leak_guard_test;
+pub mod ctrl_c_snap_docs_test;
 pub mod custom_model_paste_test;
 pub mod custom_provider_cache_autoenable_test;
 pub mod custom_provider_key_fetch_test;
@@ -451,6 +453,8 @@ pub mod telegram_intermediate_status_report_test;
 pub mod telegram_mentions_other_bot_test;
 #[cfg(feature = "telegram")]
 pub mod telegram_menu_scope_test;
+#[cfg(feature = "telegram")]
+pub mod telegram_push_target_test;
 #[cfg(feature = "telegram")]
 pub mod telegram_queued_origin_test;
 #[cfg(feature = "telegram")]
@@ -688,7 +692,10 @@ pub mod tui_app_state_test;
 pub mod tui_attachment_router_test;
 pub mod tui_cancel_indicator_test;
 pub mod tui_cd_arg_test;
+pub mod tui_clickable_test;
 pub mod tui_components_logo_test;
+// Unix-only alongside the editor module it exercises (#1755).
+#[cfg(unix)]
 pub mod tui_editor_handoff_test;
 pub mod tui_events_test;
 pub mod tui_highlight_test;

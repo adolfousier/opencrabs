@@ -1344,6 +1344,34 @@ async fn send_trailer_bubble(
 ) {
     use teloxide::prelude::Requester;
 
+    // #583 (residual of #93/#58): a fence-bearing trailer renders its diagrams
+    // via the hooked rich send (media assembly + HTML-dialect fallback
+    // inside). Keep-never-discard (#31) is preserved by the fall-through: any
+    // rich-path failure drops to the legacy HTML send + plain retry below.
+    if super::rich::mermaid::should_render_mermaid(trailer) {
+        match super::rich::send_rich_with_mermaid(
+            bot.api_url().as_str(),
+            bot.token(),
+            chat_id.0,
+            thread_id,
+            trailer,
+            "turn",
+            "#583-trailer",
+        )
+        .await
+        {
+            Ok(()) => {
+                tracing::info!("Telegram: #31 trailer bubble delivered rich (#583) with mermaid");
+                return;
+            }
+            Err(e) => {
+                tracing::warn!(
+                    "Telegram: #31 trailer rich send failed ({e}) — falling back to legacy HTML path"
+                );
+            }
+        }
+    }
+
     let html = super::markdown::markdown_to_telegram_html(trailer);
     let mut req = bot.send_message(chat_id, html).parse_mode(ParseMode::Html);
     if let Some(tid) = thread_id {

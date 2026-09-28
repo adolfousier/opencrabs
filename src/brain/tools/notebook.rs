@@ -90,6 +90,17 @@ impl Tool for NotebookEditTool {
         "notebook_edit"
     }
 
+    /// The one path this invocation writes, resolved against the working
+    /// directory (#593). Same read-modify-write shape as `edit_file`: without
+    /// this, two notebook edits on one path in a parallel batch lose an edit.
+    fn write_target(
+        &self,
+        input: &Value,
+        working_directory: &std::path::Path,
+    ) -> Option<std::path::PathBuf> {
+        crate::brain::tools::r#trait::write_target_from_path_arg(input, working_directory)
+    }
+
     fn description(&self) -> &str {
         "Edit Jupyter notebook files (.ipynb) cell by cell. Supports adding, editing, deleting cells, and clearing outputs."
     }

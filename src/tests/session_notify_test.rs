@@ -14,7 +14,10 @@ use crate::brain::agent::service::session_routes::{
     register_session_route, register_turn_probe,
 };
 use crate::brain::tools::subagent::SessionNotifyTool;
-use crate::brain::tools::r#trait::Tool;
+use crate::brain::tools::r#trait::{Tool, ToolExecutionContext};
+use crate::db::{Database, NotifyQueueRepository, SessionRepository};
+use crate::db::models::Session;
+use crate::services::ServiceContext;
 
 fn msg() -> QueuedUserMessage {
     QueuedUserMessage {
@@ -23,6 +26,82 @@ fn msg() -> QueuedUserMessage {
         origin: crate::brain::agent::PushOrigin::Other,
         bg_meta: None,
     }
+}
+
+#[tokio::test]
+#[expect(clippy::await_holding_lock)]
+async fn absent_session_fails_loudly_without_queue_residue() {
+    let _guard = test_guard();
+    let db = Database::connect_in_memory().await.expect("in-memory DB");
+    db.run_migrations().await.expect("migrations");
+    let absent = Uuid::new_v4();
+    let mut context = ToolExecutionContext::new(Uuid::new_v4());
+    context.service_context = Some(ServiceContext::new(db.pool().clone()));
+
+    let result = SessionNotifyTool
+        .execute(
+            serde_json::json!({"target_session": absent.to_string(), "message": "probe"}),
+            &context,
+        )
+        .await
+        .expect("tool returns a verdict");
+
+    assert!(!result.success, "absent session must fail loudly: {result:?}");
+    assert_eq!(
+        result.metadata.get("notify_state").map(String::as_str),
+        Some("undeliverable")
+    );
+    assert_eq!(
+        result.metadata.get("notify_reason").map(String::as_str),
+        Some("no_such_session")
+    );
+    // A failing verdict carries its text in `error`, not `output`:
+    // `ToolResult::error` deliberately leaves `output` empty, and
+    // `build_tool_result_content` renders `error` to the caller
+    // (tool_loop.rs). Asserting on `output` here would pass on a verdict
+    // that told the model nothing — which is the defect this test exists to
+    // catch, so read the field the caller actually reads.
+    let detail = result.error.as_deref().unwrap_or_default();
+    assert!(detail.contains("a2a_send"), "got: {detail:?}");
+    assert!(
+        NotifyQueueRepository::new(db.pool().clone())
+            .all()
+            .await
+            .expect("queue query")
+            .is_empty(),
+        "a rejected target must never leave durable queue residue"
+    );
+}
+
+#[tokio::test]
+#[expect(clippy::await_holding_lock)]
+async fn existing_unbound_session_reports_unclaimed_no_binding() {
+    let _guard = test_guard();
+    let db = Database::connect_in_memory().await.expect("in-memory DB");
+    db.run_migrations().await.expect("migrations");
+    let target = Session::new(Some("headless target".into()), None, None);
+    SessionRepository::new(db.pool().clone())
+        .create(&target)
+        .await
+        .expect("seed session");
+    crate::brain::agent::service::restart_recovery::expect_channel_route(target.id);
+
+    let mut context = ToolExecutionContext::new(Uuid::new_v4());
+    context.service_context = Some(ServiceContext::new(db.pool().clone()));
+    let result = SessionNotifyTool
+        .execute(
+            serde_json::json!({"target_session": target.id.to_string(), "message": "probe"}),
+            &context,
+        )
+        .await
+        .expect("tool returns a verdict");
+
+    assert!(result.success, "an unbound real session still parks: {result:?}");
+    assert_eq!(
+        result.metadata.get("notify_reason").map(String::as_str),
+        Some("unclaimed_no_binding")
+    );
+    assert!(result.output.contains("No surface has ever claimed"));
 }
 
 #[tokio::test]

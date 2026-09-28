@@ -1944,6 +1944,11 @@ pub(crate) fn build_systemd_unit(
     } else {
         "default.target"
     };
+    // OOMPolicy=continue: this daemon is the parent of every tool call and cron
+    // child, and systemd's default policy (`stop`) terminates the whole unit when
+    // any single child is OOM-killed — turning one tool call's memory spike into a
+    // full daemon restart that takes every agent lane down with it. `continue`
+    // logs the kill and leaves the daemon running.
     format!(
         "[Unit]\n\
          Description=OpenCrabs Daemon [{profile_label}]\n\
@@ -1954,6 +1959,7 @@ pub(crate) fn build_systemd_unit(
          {identity}ExecStart={exec_args}\n\
          Restart=always\n\
          RestartSec=5\n\
+         OOMPolicy=continue\n\
          \n\
          [Install]\n\
          WantedBy={wanted_by}\n"

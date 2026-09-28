@@ -55,6 +55,54 @@ pub async fn latest_thread_id_for_chat(chat_id: i64) -> Option<ThreadId> {
         .and_then(|n| super::session_resolve::delivery_thread_id(Some(n)))
 }
 
+/// The thread a push for `session_id` must be delivered to (#1200, #1319).
+///
+/// A session's OWN binding is authoritative and the chat-wide lookup is the
+/// last resort. [`super::session_resolve::push_target`] holds the decision
+/// (and the reasoning); this is the I/O around it:
+///
+/// 1. The in-memory binding — the same data the ingress path just wrote. The
+///    connect-time re-registration of #1224 loads EVERY persisted row into
+///    these maps, so after connect they mirror the durable ones.
+/// 2. The durable `session_bindings` row, read only when the maps hold
+///    nothing for the session: a push can arrive in the window before that
+///    re-registration has run.
+/// 3. [`latest_thread_id_for_chat`] — correct only for a session with no
+///    binding at all. Reaching it for a BOUND session is the bug: the push
+///    lands in whichever topic spoke last.
+pub async fn session_push_thread(
+    state: &super::TelegramState,
+    session_id: uuid::Uuid,
+    chat_id: i64,
+) -> Option<ThreadId> {
+    let in_memory = state.session_binding(session_id).await;
+    let durable = if in_memory.is_none() {
+        persisted_binding(session_id).await
+    } else {
+        None
+    };
+    match super::session_resolve::push_target(in_memory, durable, chat_id) {
+        super::session_resolve::PushTarget::Bound(topic) => {
+            super::session_resolve::delivery_thread_id(topic)
+        }
+        super::session_resolve::PushTarget::Unbound => latest_thread_id_for_chat(chat_id).await,
+    }
+}
+
+/// A session's persisted `(chat_id, topic)` binding (#1224). `None` when no
+/// pool is initialized (early startup, tests) or the session has no row.
+async fn persisted_binding(session_id: uuid::Uuid) -> Option<(i64, Option<i32>)> {
+    let pool = crate::db::global_pool()?;
+    let repo = crate::db::SessionBindingRepository::new(pool.clone());
+    let row = repo
+        .by_session(&session_id.to_string())
+        .await
+        .ok()
+        .flatten()?;
+    let chat = row.chat_id.parse::<i64>().ok()?;
+    Some((chat, row.thread_id))
+}
+
 /// `bot.send_message(chat_id, text)` with optional `message_thread_id`.
 /// Returns the teloxide request so callers can chain `.parse_mode()`,
 /// `.reply_markup()`, etc. before `.await`.

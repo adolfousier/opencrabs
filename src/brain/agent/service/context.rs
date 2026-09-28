@@ -623,9 +623,12 @@ impl AgentService {
             CompactionScope::SegmentConsolidation => concat!(
                 "SCOPE: The input below is a set of prior compaction segment summaries ",
                 "separated by --- markers. Merge them into ONE comprehensive continuation ",
-                "document that supersedes them all. Preserve section 0 (IMMEDIATE TASK) ",
-                "from the MOST RECENT segment near-verbatim — it is the live task. Do not ",
-                "invent content that is not in the segments.\n\n"
+                "document that supersedes them all. RE-DERIVE section 0 (IMMEDIATE TASK) ",
+                "from the evidence in these segments — never copy it forward verbatim ",
+                "from the most recent one. Set its obligation status to OPEN, DONE or ",
+                "UNKNOWN according to whether the work it names is still owed at wake-up; ",
+                "an obligation already completed must NOT be presented as the live task. ",
+                "Do not invent content that is not in the segments.\n\n"
             )
             .to_string(),
         }
@@ -724,6 +727,16 @@ impl AgentService {
              - What was the user's LAST instruction or request? (quote their exact words)\n\
              - What was the agent doing in response? (exact tool calls, file edits, investigations in progress)\n\
              - What is the EXACT next action the agent should take?\n\n\
+             FIRST LINE OF THIS SECTION, always, before any prose:\n\
+             **Obligation status: OPEN** or **Obligation status: DONE** or **Obligation status: UNKNOWN**\n\
+             Determine it from the completion evidence you record in section 1 below \
+             (\"Whether it was completed, committed, pushed, or still pending\") — do NOT \
+             guess, and do NOT carry a status forward from an earlier summary:\n\
+             - OPEN — the work is still owed. Write the DIRECTIVE exactly as specified below.\n\
+             - DONE — the work is already complete. Say so in one line and name the NEXT \
+             actual work instead. Do NOT restate the completed obligation as a directive.\n\
+             - UNKNOWN — you cannot tell from the conversation. State what must be checked \
+             before acting. Do NOT phrase it as a directive to continue.\n\n\
              Write this as a DIRECTIVE, not a description. Use this format:\n\
              \"CONTINUE THIS TASK: The user asked you to [exact instruction]. \
              You were [exact action in progress — e.g. 'editing file X at line Y', 'running command Z']. \

@@ -8,7 +8,7 @@
 
 use crate::db::{Pool, database::interact_err};
 use anyhow::{Context, Result};
-use rusqlite::params;
+use rusqlite::{OptionalExtension, params};
 
 /// One persisted binding: "session S lives on channel C, chat X, topic T".
 #[derive(Debug, Clone)]
@@ -139,6 +139,45 @@ impl SessionBindingRepository {
             .await
             .map_err(interact_err)?
             .context("Failed to list recent session bindings")?;
+        Ok(mapped)
+    }
+
+    /// The single binding recorded for one session, or `None` if it holds none.
+    ///
+    /// A session can exist in the store and still have no route: nothing has
+    /// bound it to a channel yet, or its binding was cleared. Callers that must
+    /// tell "this session cannot be reached" apart from "this session does not
+    /// exist" read this instead of assuming a delivery (#498).
+    ///
+    /// The INNER JOIN against `sessions` matches [`Self::all_for_channel`]: a
+    /// binding whose session was deleted is not a route (#1224).
+    pub async fn by_session(&self, session_id: &str) -> Result<Option<SessionBinding>> {
+        let sid = session_id.to_string();
+        let mapped = self
+            .pool
+            .get()
+            .await
+            .context("Failed to get connection")?
+            .interact(move |conn| {
+                conn.prepare(
+                    "SELECT b.session_id, b.channel, b.chat_id, b.thread_id \
+                     FROM session_bindings b \
+                     JOIN sessions s ON s.id = b.session_id \
+                     WHERE b.session_id = ?1",
+                )?
+                .query_row(params![sid], |row| {
+                    Ok(SessionBinding {
+                        session_id: row.get("session_id")?,
+                        channel: row.get("channel")?,
+                        chat_id: row.get("chat_id")?,
+                        thread_id: row.get("thread_id")?,
+                    })
+                })
+                .optional()
+            })
+            .await
+            .map_err(interact_err)?
+            .context("Failed to read session binding")?;
         Ok(mapped)
     }
 }

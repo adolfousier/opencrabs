@@ -13,6 +13,7 @@ use crate::brain::agent::service::notify_policy::{
 };
 use crate::brain::tools::error::{Result, ToolError};
 use crate::brain::tools::r#trait::{Tool, ToolCapability, ToolExecutionContext, ToolResult};
+use crate::db::{SessionBindingRepository, SessionRepository};
 use async_trait::async_trait;
 use serde_json::Value;
 
@@ -314,6 +315,55 @@ impl Tool for SessionNotifyTool {
             }
         }
 
+        // #498: a target absent from this daemon's session store can never
+        // claim a route. Reject it before any delivery path can park durable
+        // residue that the boot reaper must later discard. Contextless
+        // surfaces deliberately fail open: without a pool they retain the
+        // daemon's existing notifyability posture. Quiet delivery is checked
+        // after this branch so it cannot bank an impossible target either.
+        let mut target_has_binding = true;
+        if let Some(service_context) = &context.service_context {
+            let pool = service_context.pool().clone();
+            let sessions = SessionRepository::new(pool.clone());
+            match sessions.find_by_id(target).await {
+                Ok(None) => {
+                    return Ok(verdict(
+                        false,
+                        "undeliverable",
+                        format!(
+                            "Cannot deliver to session {target}: this UUID is not a session in \
+                             this daemon, so no local channel can ever claim it. For another \
+                             profile or daemon, use a2a_send."
+                        ),
+                        &[
+                            ("notify_target", target.to_string()),
+                            ("notify_reason", "no_such_session".into()),
+                        ],
+                    ));
+                }
+                Ok(Some(_)) => {
+                    match SessionBindingRepository::new(pool)
+                        .by_session(&target.to_string())
+                        .await
+                    {
+                        Ok(binding) => target_has_binding = binding.is_some(),
+                        Err(error) => tracing::warn!(
+                            error = %error,
+                            session_id = %target,
+                            "session_notify could not verify target binding; preserving park text"
+                        ),
+                    }
+                }
+                Err(error) => {
+                    tracing::warn!(
+                        error = %error,
+                        session_id = %target,
+                        "session_notify could not verify target existence; failing open"
+                    );
+                }
+            }
+        }
+
         // Quiet mode (fork #43/#50): bank the notice, return the id. The
         // deferred verdict is success-by-contract — accepted, not yet
         // delivered; the id is the cancel/list handle from birth.
@@ -390,18 +440,32 @@ impl Tool for SessionNotifyTool {
             Delivery::Parked => {
                 maybe_set_goal(target, goal, goal_max_turns, context).await;
                 notify_receipts::record_queued(notify_id, target);
-                Ok(verdict(
-                    true,
-                    "queued",
+                let reason = if target_has_binding {
+                    "awaiting_channel_claim"
+                } else {
+                    "unclaimed_no_binding"
+                };
+                let detail = if target_has_binding {
                     format!(
                         "Queued for session {target}. Its channel has not claimed it since the \
                          last restart, so it will be delivered as soon as that channel next \
                          binds the session. Poll action:\"status\" with notify_id."
-                    ),
+                    )
+                } else {
+                    format!(
+                        "Queued for session {target}. No surface has ever claimed this session; \
+                         a headless or cron session does not drain a queue. Poll action:\"status\" \
+                         with notify_id."
+                    )
+                };
+                Ok(verdict(
+                    true,
+                    "queued",
+                    detail,
                     &[
                         ("notify_target", target.to_string()),
                         ("notify_id", notify_id.to_string()),
-                        ("notify_reason", "awaiting_channel_claim".into()),
+                        ("notify_reason", reason.into()),
                     ],
                 ))
             }

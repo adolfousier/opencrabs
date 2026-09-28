@@ -753,6 +753,8 @@ pub struct App {
     /// Editor handoff request (#1744): `(command, origin_session_id)` set by
     /// the bang allowlist branch, consumed by the runner loop (it owns the
     /// terminal + event reader and can suspend them for a full-screen child).
+    /// Unix only (#1755): the editor module does not exist on Windows.
+    #[cfg(unix)]
     pub pending_editor_handoff: Option<(String, Uuid)>,
 
     /// Brain state
@@ -1091,6 +1093,7 @@ impl App {
             input_history_stash: String::new(),
             working_directory: crate::utils::cwd::launch_cwd(),
             pending_context: Vec::new(),
+            #[cfg(unix)]
             pending_editor_handoff: None,
             brain_path,
             user_commands,

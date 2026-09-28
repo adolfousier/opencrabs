@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.5.4] - 2026-09-26
 
-103 commits since v0.5.3, 7 contributors. 224 files changed, +18,582 / -1,426 lines.
+104 commits since v0.5.3, 7 contributors. 225 files changed, +18,619 / -1,429 lines.
 
 An agent-experience window. ACP sessions became first-class: the context meter is restored on session load, session/load replays the transcript and restores the per-session model, set_model persists across processes, session/set_mode applies the approval policy server-side, session/compact pushes, and session/new offers a live model catalog. Full-screen editors (!vi, !nano) now get the real terminal through a handoff and return to the chat on exit (#1744). Attachments went universal: paste or drop any file type through one shared router (#1740), with common-type classification (#1743). Three mechanical zero-cost commands landed compiled: /architecture, /attach (#933) and an opt-in audit trail with its /audit viewer (#1705). Search gained a serper_search engine (Google SERP) with by-URL dedup across the web_search fan-out (#1731); generate_image grew a provider chain at parity with vision (#1672, #1675); and the L1 decision cache now serves exact-repeat classification decisions without a model call (decide_cached tool, [decisions] tiers in shadow/live/off, /usage accounting, TTL sweep) (#1648). Usage billing prefers provider-reported cost over table estimates (#1707), unknown-price models are no longer billed as free, and the timeout chain resolves [providers.<name>] -> [agent] -> default across every provider family, with Anthropic and Gemini honouring it (#1688, #1697, #1689, #1698); compaction notices moved behind compaction_notice, off by default (#1686). Reliability: truncation sets inline-code parity flags regardless of last char (#1753), the plan card budgets against real terminal rows (#1750), tool success-rate health surfaces at model selection time (#1706), WhatsApp inbound attachments persist to the durable store (#1729), getUpdates 409 conflicts escalate instead of silently fighting (#1721) over an atomic insert-or-resolve for live channel sessions, the mermaid connect stage retries once (#1741), reply recovery carries an excerpt and stops chasing the topic root (#548), A2A notify retries are reserve-before-deliver idempotent (#199), phantom-announcement detectors catch marker-less bare participles in en/pt/es (#1694) and score fact detectors on mixed iterations (#1693), and the global 429 cooldown tests tolerate deschedule jitter (#1754).
 ### ✨ Features
@@ -96,6 +96,8 @@ An agent-experience window. ACP sessions became first-class: the context meter i
 - `32481db3` **decisions**: merge carries the decisions overlay, stub provider completes the trait
 - `a3cc31eb` **decisions**: collapse nested margin-floor check for clippy
 
+- `0fb15d5a` **Windows release build**: the interactive editor handoff (#1744) called unix-only libc symbols (pid_t, waitpid, kill, SIGCONT/SIGTERM/SIGKILL) with no cfg gate, so the msvc leg of the release workflow failed with 13 E0425 errors; the whole editor module is now #[cfg(unix)] at the mod declaration, parking and consumption sites are gated individually, and Windows bang commands keep the v0.5.3 pipe-capture path (#1759)
+
 ### 📖 Documentation
 
 - `4522cd9e` **audit**: audit recording section and template README for #1705
@@ -129,9 +131,9 @@ An agent-experience window. ACP sessions became first-class: the context meter i
 
 ### 📊 Stats
 
-- 103 commits since v0.5.3
-- 224 files changed, +18,582 / -1,426 lines
-- 9,426 tests (9,388 passed, 0 failed, 38 ignored)
+- 104 commits since v0.5.3
+- 225 files changed, +18,619 / -1,429 lines
+- 9,427 tests (9,389 passed, 0 failed, 38 ignored)
 
 
 ## [0.5.3] - 2026-09-20

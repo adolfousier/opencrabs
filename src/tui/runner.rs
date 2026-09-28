@@ -316,6 +316,8 @@ async fn run_loop(
         // Editor handoff (#1744): the bang allowlist parked the request and
         // returned; this loop owns the terminal + event reader, so the tty
         // changes hands here, before the next drain/draw sees any of it.
+        // Unix only (#1755): nothing is ever parked on Windows.
+        #[cfg(unix)]
         if let Some((cmd, origin_session)) = app.pending_editor_handoff.take() {
             let result = super::editor::run_editor_handoff(
                 terminal,

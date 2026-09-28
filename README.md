@@ -571,7 +571,7 @@ This solves the core UX problem in mention-only groups: previously, tagging the 
 | **Abort Processing** | Escape×2 within 3 seconds to cancel any in-progress request |
 | **Clipboard Image Paste** | Copy an image from a browser, screenshot tool, or any app and paste it directly into the input. Raw image bytes are read from the OS clipboard (macOS: osascript, Linux: wl-paste/xclip), written to a temp file, and attached through the existing image pipeline. No need to save to disk first |
 | **File Drag & Drop** | Drag a file onto the TUI and the terminal inserts its path; OpenCrabs unescapes it and takes it from there. Images attach as vision content, text files (`.txt`, `.md`, `.json`, source code) are read from disk and inlined into the message, and PDFs surface a hint pointing the agent at `pdf_to_images` + `analyze_image`. Over SSH the dropped path names a file on the wrong machine; see [Dropping files into a TUI running on a VPS](#dropping-files-into-a-tui-running-on-a-vps) |
-| **Bang Operator (`!cmd`)** | Run any shell command directly from the input — no LLM round-trip. Output is shown as a system message in the working directory context. Full-screen editors (`!vi`, `!vim`, `!nano`, `!emacs`) are the exception: the TUI hands the real terminal to the editor, so you edit in place and return to the chat when it exits (a mid-edit Ctrl+Z ends the editor instead of hanging the TUI) |
+| **Bang Operator (`!cmd`)** | Run any shell command directly from the input — no LLM round-trip. Output is shown as a system message in the working directory context. Full-screen editors (`!vi`, `!vim`, `!nano`, `!emacs`) are the exception on Unix terminals: the TUI hands the real terminal to the editor, so you edit in place and return to the chat when it exits (a mid-edit Ctrl+Z ends the editor instead of hanging the TUI); on Windows, editors are pipe-captured like any other command |
 | **Auto-Update** | Checks GitHub for new releases on startup and once every 24h in the background. When a new version is found it silently installs and hot-restarts. Disable via `[agent] auto_update = false` in `config.toml` to be prompted instead |
 
 ### Agent Capabilities
@@ -3775,12 +3775,13 @@ Any tool on your `$PATH` works. If it runs in your terminal, OpenCrabs can use i
 
 | Shortcut | Action |
 |----------|--------|
-| `Ctrl+C` | First press clears input, second press (within 3s) quits |
+| `Ctrl+C` | First press: snaps to bottom if scrolled up, else clears input. Second press (within 3s) quits |
 | `Ctrl+N` | New session |
 | `Ctrl+L` | List/switch sessions |
 | `Ctrl+K` | Clear current session |
 | `Page Up/Down` | Scroll chat history |
 | `Mouse Scroll` | Scroll chat history |
+| `Mouse click` | On a URL or an existing file path: open it in the default app (browser, Finder/Explorer, `xdg-open`). Elsewhere: expand/collapse blocks and select messages; click-drag still selects text to copy |
 | `F12` | Toggle mouse capture: off gives native terminal drag-select and copy (browser-style), on restores in-app click, right-click, and scroll. Works even inside dialogs |
 | `Escape` | Clear input / close overlay |
 
@@ -4923,7 +4924,7 @@ cargo build --release
 # Small release build
 cargo build --profile release-small
 
-# Run tests (9,426 tests: 984 test files under src/tests/, where tests
+# Run tests (9,427 tests: 984 test files under src/tests/, where tests
 # belong — zero inline blocks in production files);
 # 38 slower ones are #[ignore]d to keep the default
 # run fast: profile tests that touch ~/.opencrabs, browser end-to-end
