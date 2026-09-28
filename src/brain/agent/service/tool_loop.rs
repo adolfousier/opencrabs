@@ -822,6 +822,16 @@ impl AgentService {
         has_progress_override: bool,
         progress_callback: Option<ProgressCallback>,
     ) -> Result<AgentResponse> {
+        // #1776 seam 3: a fresh turn invalidates the claude-task turn
+        // markers. Notifications arriving this turn for tasks NOT started
+        // this turn are post-exit survivors and get delivered synthetically;
+        // tasks started this turn stay silent (claude sees those natively).
+        // retain, not remove: other sessions' in-flight turns keep theirs.
+        self.claude_turn_tasks
+            .lock()
+            .expect("claude turn-task lock")
+            .retain(|(sid, _)| *sid != session_id);
+
         // Snapshot the manual-switch epoch at turn start. If the user
         // switches provider/model while this turn is in flight, an automatic
         // fallback the turn takes could otherwise stick over their pick. We

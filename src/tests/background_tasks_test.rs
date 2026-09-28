@@ -1,10 +1,12 @@
 //! #722 phase 2: the background-task manager runs a command detached and, on
 //! completion, enqueues a system QueuedUserMessage into the originating session.
 
+use crate::brain::agent::PushOrigin;
 use crate::brain::agent::service::MessageEnqueueCallback;
 use crate::brain::agent::service::QueuedUserMessage;
 use crate::brain::agent::service::background_tasks::{
-    BackgroundTaskManager, CmdResult, claude_task_label, completion_message, format_elapsed,
+    BackgroundTaskManager, ClaudeTurnTasks, CmdResult, claude_completion_message,
+    claude_needs_survival_delivery, claude_task_label, completion_message, format_elapsed,
     short_label, tail_lines,
 };
 use crate::brain::agent::service::restart_recovery;
@@ -251,4 +253,70 @@ fn mirror_finish_removes_oldest_on_duplicate_labels() {
 
     mgr.mirror_finished(sid, &label);
     assert_eq!(mgr.running_for(sid), 0, "second finish clears the survivor");
+}
+
+#[test]
+fn survivor_delivery_fires_only_for_tasks_not_started_this_turn() {
+    let sid = Uuid::new_v4();
+    let other = Uuid::new_v4();
+    let mut turn_started = ClaudeTurnTasks::default();
+
+    // Empty marker set: every notification is a post-exit survivor.
+    assert!(claude_needs_survival_delivery(
+        &turn_started,
+        sid,
+        "bAAA1111"
+    ));
+
+    // Started THIS turn: silent, claude sees the notification natively.
+    turn_started.insert((sid, "bAAA1111".to_string()));
+    assert!(!claude_needs_survival_delivery(
+        &turn_started,
+        sid,
+        "bAAA1111"
+    ));
+
+    // Session isolation: the same task id under another session, or another
+    // task under this session, is still a survivor.
+    turn_started.insert((other, "bAAA1111".to_string()));
+    turn_started.insert((sid, "bBBB2222".to_string()));
+    assert!(claude_needs_survival_delivery(
+        &turn_started,
+        other,
+        "bCCC3333"
+    ));
+    assert!(claude_needs_survival_delivery(
+        &turn_started,
+        sid,
+        "bDDD4444"
+    ));
+}
+
+#[test]
+fn claude_completion_message_carries_status_and_summary_mechanically() {
+    let msg = claude_completion_message("bAAA1111", "completed", Some("tests passed"));
+    assert!(
+        msg.context_text.contains("claude-cli bAAA1111"),
+        "label in context"
+    );
+    assert!(msg.context_text.contains("Status: completed"));
+    assert!(msg.context_text.contains("Summary: tests passed"));
+    assert!(msg.context_text.contains("Do not re-run the task"));
+    assert_eq!(
+        msg.display_text,
+        "🔧 background task finished: claude-cli bAAA1111"
+    );
+    assert_eq!(msg.origin, PushOrigin::BackgroundTask, "#1221 echo tag");
+    assert!(msg.bg_meta.is_none(), "no CmdResult, no fabricated receipt");
+}
+
+#[test]
+fn claude_completion_message_failed_wording_and_summary_fallback() {
+    let msg = claude_completion_message("bBBB2222", "failed", None);
+    assert!(msg.context_text.contains("Status: failed"));
+    assert!(msg.context_text.contains("Summary: (no summary provided)"));
+    assert_eq!(
+        msg.display_text,
+        "🔧 background task failed: claude-cli bBBB2222"
+    );
 }

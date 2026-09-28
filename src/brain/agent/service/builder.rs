@@ -345,6 +345,10 @@ pub struct AgentService {
     /// `[features] audit_recording` once at construction (same policy as
     /// the other flattened flags) so the per-call gate is a bool check.
     pub(super) audit_recording: bool,
+    /// Claude tasks started during the CURRENT turn, per session (#1776
+    /// seam 3). Cleared at turn entry (run_tool_loop_inner); membership at
+    /// notification time decides mid-turn-silent vs post-exit-survivor.
+    pub(super) claude_turn_tasks: std::sync::Mutex<super::background_tasks::ClaudeTurnTasks>,
 
     /// Headless session (#129): no live user surface (CLI one-shot run, cron
     /// daemon execute, sub-agent spawn). Stamped into every
@@ -526,6 +530,7 @@ impl AgentService {
                 &config.agent.approval_policy,
             ),
             audit_recording: config.features.audit_recording,
+            claude_turn_tasks: std::sync::Mutex::default(),
             headless: false,
             silent_compaction: config.agent.silent_compaction,
             background_compaction: config.agent.background_compaction,

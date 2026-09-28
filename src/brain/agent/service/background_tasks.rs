@@ -407,6 +407,60 @@ pub(crate) fn claude_task_label(task_id: &str) -> String {
     format!("claude-cli {task_id}")
 }
 
+/// Per-turn marker set for claude-cli background tasks (#1776 seam 3):
+/// `(session_id, task_id)` pairs started during the CURRENT turn. Cleared at
+/// `run_tool_loop_inner` entry, so a notification for a task absent from the
+/// set is a post-exit survivor and must be delivered synthetically, while a
+/// task present stays silent (claude sees those natively mid-turn).
+pub(crate) type ClaudeTurnTasks = std::collections::HashSet<(Uuid, String)>;
+
+/// The seam-3 discriminator (#1776): a notification whose task was NOT
+/// started during this turn is a post-exit survivor — the turn (and its
+/// claude process) that spawned the task already ended, so nobody but this
+/// synthetic delivery will carry the result to the user.
+pub(crate) fn claude_needs_survival_delivery(
+    turn_started: &ClaudeTurnTasks,
+    session_id: Uuid,
+    task_id: &str,
+) -> bool {
+    !turn_started.contains(&(session_id, task_id.to_string()))
+}
+
+/// The synthetic completion message for a post-exit claude task
+/// notification (#1776 seam 3). Mechanical context only: the summary text is
+/// the CLI's own, never model-judged. No `BgTaskMeta`: there is no
+/// `CmdResult` for a task we never spawned, and a fabricated duration would
+/// lie on the receipt card — the echo falls back to the display line.
+pub(crate) fn claude_completion_message(
+    task_id: &str,
+    status: &str,
+    summary: Option<&str>,
+) -> QueuedUserMessage {
+    let label = claude_task_label(task_id);
+    let context = format!(
+        "[System: a background claude task reported completion after the turn \
+         that started it already ended.\n\
+         Task: {label}\n\
+         Status: {status}\n\
+         Summary: {}\n\n\
+         Deliver this result to the user and continue anything that was \
+         waiting on it. Do not re-run the task.]",
+        summary.unwrap_or("(no summary provided)"),
+    );
+    let display = format!(
+        "🔧 background task {}: {label}",
+        if status == "completed" {
+            "finished"
+        } else {
+            "failed"
+        }
+    );
+    let mut msg = QueuedUserMessage::system(context, display);
+    // #1221: marks this delivery for the Telegram collapsible echo bubble.
+    msg.origin = PushOrigin::BackgroundTask;
+    msg
+}
+
 /// Keep only the last `n` lines of `text`.
 pub(crate) fn tail_lines(text: &str, n: usize) -> String {
     let lines: Vec<&str> = text.lines().collect();

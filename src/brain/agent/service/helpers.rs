@@ -1014,30 +1014,75 @@ impl AgentService {
                         }
                     }
                 }
-                // #1776 seam 2: mirror the CLI's background-task lifecycle into
-                // the session's background manager so surfaces show a
-                // backgrounded claude task as in-flight work. Register on
-                // task_started, remove on completed/failed; label comes from
-                // claude_task_label so both sides key on the same string.
-                // No manager wired (or no task id) = skip silently: the mirror
-                // is cosmetic, never worth failing a turn over.
+                // #1776 seams 2+3: mirror the CLI's background-task lifecycle
+                // into the session's background manager (surfaces show a
+                // backgrounded claude task as in-flight work), and deliver
+                // post-exit survivor notifications synthetically: a
+                // notification for a task started THIS turn is claude's to
+                // see natively (silent); one for an earlier turn's task is a
+                // survivor — the spawning process is gone — so it rides the
+                // ONE gated route (fork #19, interrupt=true per fork #13).
+                // Cosmetic mirror / missing id = skip silently, never fail a
+                // turn over it.
                 StreamEvent::BackgroundTask {
                     subtype,
                     task_id,
                     status,
+                    description,
                     ..
                 } => {
-                    if let (Some(mgr), Some(id)) = (self.background_manager(), task_id.as_deref()) {
-                        let label = super::background_tasks::claude_task_label(id);
-                        match (subtype.as_str(), status.as_deref()) {
-                            ("task_started", _) => {
+                    let Some(id) = task_id.as_deref() else {
+                        continue;
+                    };
+                    let label = super::background_tasks::claude_task_label(id);
+                    match (subtype.as_str(), status.as_deref()) {
+                        ("task_started", _) => {
+                            self.claude_turn_tasks
+                                .lock()
+                                .expect("claude turn-task lock")
+                                .insert((session_id, id.to_string()));
+                            if let Some(mgr) = self.background_manager() {
                                 mgr.mirror_started(session_id, &label);
                             }
-                            ("task_notification", Some("completed" | "failed")) => {
+                        }
+                        ("task_notification", Some(s @ ("completed" | "failed"))) => {
+                            if let Some(mgr) = self.background_manager() {
                                 mgr.mirror_finished(session_id, &label);
                             }
-                            _ => {}
+                            if super::background_tasks::claude_needs_survival_delivery(
+                                &self
+                                    .claude_turn_tasks
+                                    .lock()
+                                    .expect("claude turn-task lock"),
+                                session_id,
+                                id,
+                            ) {
+                                let msg = super::background_tasks::claude_completion_message(
+                                    id,
+                                    s,
+                                    description.as_deref(),
+                                );
+                                match super::session_routes::deliver_to_session(
+                                    session_id, msg, true,
+                                ) {
+                                    super::session_routes::Delivery::NoRoute => {
+                                        tracing::warn!(
+                                            target: "background_task",
+                                            "claude task '{label}' completion for session \
+                                             {session_id} had nowhere to go"
+                                        );
+                                    }
+                                    _ => {
+                                        tracing::info!(
+                                            target: "background_task",
+                                            "delivered post-exit claude task '{label}' \
+                                             completion for session {session_id}"
+                                        );
+                                    }
+                                }
+                            }
                         }
+                        _ => {}
                     }
                 }
                 StreamEvent::Error { error } => {
