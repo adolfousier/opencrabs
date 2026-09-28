@@ -167,6 +167,12 @@ impl CronScheduler {
                                     crate::config::opencrabs_home()
                                 );
 
+                                // #526 — the fired trigger's payload, already substituted
+                                // into the prompt in the arm that owns the TriggerResult.
+                                // None for every non-firing outcome keeps the turn message
+                                // byte-identical to pre-fix behaviour.
+                                let mut fired_prompt: Option<String> = None;
+
                                 // Pre-flight trigger evaluation
                                 match crate::cron::PipelineExecutor::evaluate_trigger(&job).await {
                                     crate::cron::TriggerOutcome::Skipped(ref trig_res) => {
@@ -215,6 +221,12 @@ impl CronScheduler {
                                             )
                                             .await;
                                         }
+                                        // #526 — only the non-empty-prompt half reaches
+                                        // here; the empty-prompt half returned above.
+                                        fired_prompt = Some(crate::cron::interpolate_template(
+                                            &job.prompt,
+                                            trig_res,
+                                        ));
                                     }
                                     crate::cron::TriggerOutcome::NoTrigger => {}
                                 }
@@ -227,6 +239,7 @@ impl CronScheduler {
                                             &ctx,
                                             cron_sid,
                                             &run_repo,
+                                            fired_prompt.as_deref(),
                                         )
                                         .await
                                     }
@@ -243,6 +256,7 @@ impl CronScheduler {
                                         &ctx,
                                         cron_sid,
                                         &run_repo,
+                                        None, // #526: the unscoped path evaluates no trigger
                                     )
                                     .await
                                 }
@@ -495,6 +509,7 @@ async fn execute_job(
     ctx: &ServiceContext,
     cron_session_id: Uuid,
     run_repo: &CronJobRunRepository,
+    fired_prompt: Option<&str>,
 ) -> anyhow::Result<()> {
     // Resolve the config + agent for this job's profile. A job created in a
     // non-active profile (shared-DB case, #182) runs under its own profile's
@@ -612,6 +627,12 @@ async fn execute_job(
     // lives in its session and the scheduler is the only thing that speaks.
     // Scoped across the whole turn so it holds inside every tool call, and
     // task-local so it never reaches a sibling job on the scheduler.
+    // #526 — the caller already substituted a fired trigger's payload into the
+    // prompt. None on every other outcome (and the rebuild path returned before
+    // this line), so the turn message stays byte-identical to pre-fix behaviour
+    // when nothing fired.
+    let turn_prompt = fired_prompt.unwrap_or(job.prompt.as_str());
+
     let permitted_targets: Option<Vec<crate::cron::send_scope::PermittedTarget>> =
         job.deliver_to.as_deref().map(|targets| {
             targets
@@ -653,7 +674,7 @@ async fn execute_job(
         permitted_targets,
         agent.send_message_with_tools_and_callback(
             session_id,
-            job.prompt.clone(),
+            turn_prompt.to_string(),
             effective_model,
             None, // no cancel token
             Some(Arc::new(|_| {

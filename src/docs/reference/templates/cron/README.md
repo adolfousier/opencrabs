@@ -80,7 +80,7 @@ Set it through the `cron_manage` tool at create or update time:
 | `trigger_cmd` | Shell command run under `/bin/sh -c` before the prompt. 30s timeout; a hung trigger is killed, not orphaned. Either `prompt` or `trigger_cmd` must be set. |
 | `trigger_on` | Fire condition (see below). Default `non_empty`. |
 | `set_goal` | On fire, set the active goal in the destination session instead of a plain prompt turn. Requires `deliver_to` to target a session; refused for passive channel deliveries. |
-| `goal_template` | Template for the goal/notification text. Interpolates `{output}`, `{stdout}`, `{stderr}`, `{exit_code}`. |
+| `goal_template` | Template for the goal/notification text. Interpolates `{output}`, `{stdout}`, `{stderr}`, `{exit_code}`. Both prompt and goal_template take the same four placeholders. |
 
 ### `trigger_on` conditions
 
@@ -101,6 +101,11 @@ Set it through the `cron_manage` tool at create or update time:
 - **Empty `prompt` with a trigger** → direct 0-token delivery: the formatted
   trigger output (`goal_template`, or the raw output) is delivered to
   `deliver_to` without an agent turn at all.
+- **Non-empty `prompt` with a fired trigger** → the trigger's result is
+  substituted into the prompt's placeholders (`{output}`, `{stdout}`,
+  `{stderr}`, `{exit_code}`). A prompt carrying no placeholder is passed
+  through byte-identical, as are a job with no trigger and every non-firing
+  outcome (skipped, errored).
 - **`set_goal`** → the fired trigger dispatches into the target session as an
   active goal, so the session's agent works the condition it detected rather
   than just echoing output.

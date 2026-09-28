@@ -401,3 +401,219 @@ async fn test_timed_out_trigger_kills_its_shell() {
         found.trim()
     );
 }
+
+// ===========================================================================
+// #526 — a fired trigger's payload must reach the AGENT-path turn message.
+// ===========================================================================
+//
+// **What these tests can and cannot prove.** The turn-message build lives inside
+// `CronScheduler::tick` -> `execute_job`, which needs a `ChannelFactory`, a
+// `ServiceContext` and a live agent, so it is not unit-reachable — the same
+// limitation the #457 source-shape test above documents. These tests therefore
+// prove two things, and say plainly that they are two:
+//
+//   1. the TRANSFORM — `interpolate_template` substitutes the placeholders and is
+//      the identity on a placeholder-free prompt (cases a, b, f, g, plus the
+//      empty-payload and join-rule edges);
+//   2. the WIRING SHAPE — that ONLY the `Fired` arm builds the substituted
+//      prompt, that the payload is carried to the turn, and that the raw
+//      `job.prompt.clone()` read is gone.
+//
+// Cases c, d and e (NoTrigger / Skipped / Error) are covered by the wiring-shape
+// half rather than by constructing the variants: the contract for a non-firing
+// outcome is "the prompt is unchanged", the mechanism is `fired_prompt == None`,
+// and `None.unwrap_or(prompt)` is asserted directly. Constructing the variants
+// here would prove only that Rust can build an enum.
+//
+// The wiring's BEHAVIORAL proof is the live smoke leg (a real job whose trigger
+// stdout provably reaches the turn), not this file.
+
+/// (a) A fired trigger substitutes every placeholder it finds.
+#[test]
+fn test_fired_prompt_substitutes_all_placeholders() {
+    let res = TriggerResult {
+        stdout: "line 1\nline 2".into(),
+        stderr: "warn".into(),
+        exit_code: 0,
+    };
+
+    assert_eq!(
+        interpolate_template("out={stdout}|err={stderr}|code={exit_code}", &res),
+        "out=line 1\nline 2|err=warn|code=0"
+    );
+
+    // A signal-killed trigger reports exit_code -1 (`trigger.rs` uses
+    // `status.code().unwrap_or(-1)`), and -1 is what must be substituted.
+    let killed = TriggerResult {
+        stdout: String::new(),
+        stderr: String::new(),
+        exit_code: -1,
+    };
+    assert_eq!(interpolate_template("c={exit_code}", &killed), "c=-1");
+}
+
+/// (b) A fired trigger with a placeholder-free prompt changes nothing — this is
+/// the whole contract of the fix: it is opt-in, and its blast radius is nil.
+#[test]
+fn test_fired_prompt_without_placeholder_is_byte_identical() {
+    let res = TriggerResult {
+        stdout: "line 1\nline 2".into(),
+        stderr: "warn".into(),
+        exit_code: 0,
+    };
+    let prompt = "plain prompt with no placeholders at all";
+
+    let out = interpolate_template(prompt, &res);
+
+    assert_eq!(out, prompt);
+    assert_eq!(out.len(), prompt.len(), "length must be unchanged");
+    assert_eq!(out.as_bytes(), prompt.as_bytes(), "bytes must be identical");
+}
+
+/// (f) `interpolate_template` is a SEQUENTIAL replace chain, not a single pass.
+/// `{output}` is expanded first, so a payload that itself contains the literal
+/// `{stdout}` is expanded again by the later step. Pinned as an exact string so
+/// a future move to single-pass semantics is a deliberate edit rather than a
+/// silent behaviour change. This documents pre-existing helper behaviour and
+/// adds no escaping.
+#[test]
+fn test_fired_prompt_output_then_stdout_is_a_sequential_chain() {
+    let res = TriggerResult {
+        stdout: "S{stdout}T".into(),
+        stderr: String::new(),
+        exit_code: 0,
+    };
+
+    assert_eq!(interpolate_template("P{output}Q", &res), "PSS{stdout}TTQ");
+}
+
+/// (g) The identity holds at the top of the size range too, so the fix's blast
+/// radius is pinned at both ends.
+#[test]
+fn test_fired_prompt_large_payload_without_placeholder_is_byte_identical() {
+    let big = "x".repeat(5000);
+    let res = TriggerResult {
+        stdout: big.clone(),
+        stderr: String::new(),
+        exit_code: 0,
+    };
+    let prompt = "no placeholder here";
+
+    assert_eq!(big.len(), 5000);
+    assert_eq!(interpolate_template(prompt, &res), prompt);
+}
+
+/// A fire that produced nothing still substitutes the empty string, so
+/// "fired and found nothing" stays distinguishable from "no trigger at all".
+#[test]
+fn test_fired_prompt_empty_payload_substitutes_the_empty_string() {
+    let res = TriggerResult {
+        stdout: String::new(),
+        stderr: String::new(),
+        exit_code: 0,
+    };
+
+    assert_eq!(interpolate_template("a{stdout}b", &res), "ab");
+}
+
+/// `{output}` follows `combined_output()`'s join rule, not a naive
+/// concatenation: stdout alone, stderr alone, or `stdout\nstderr`.
+#[test]
+fn test_fired_prompt_output_join_rule() {
+    let both = TriggerResult {
+        stdout: "L1".into(),
+        stderr: "L2".into(),
+        exit_code: 0,
+    };
+    let stdout_only = TriggerResult {
+        stdout: "L1".into(),
+        stderr: String::new(),
+        exit_code: 0,
+    };
+    let stderr_only = TriggerResult {
+        stdout: String::new(),
+        stderr: "L2".into(),
+        exit_code: 0,
+    };
+
+    assert_eq!(interpolate_template("o={output}", &both), "o=L1\nL2");
+    assert_eq!(interpolate_template("o={output}", &stdout_only), "o=L1");
+    assert_eq!(interpolate_template("o={output}", &stderr_only), "o=L2");
+}
+
+/// (c) (d) (e) — the substitution is `Fired`-only, and the `None` path is the
+/// identity. A non-firing outcome that started building a prompt would leak a
+/// substitution onto a turn where nothing fired: the likeliest way to get this
+/// fix wrong, and the reason this is asserted against the arms themselves.
+#[test]
+fn test_non_fired_outcomes_never_build_a_prompt() {
+    const SRC: &str = include_str!("../cron/scheduler.rs");
+
+    const SKIPPED: &str = "TriggerOutcome::Skipped(ref trig_res) =>";
+    const ERROR: &str = "TriggerOutcome::Error(err) =>";
+    const FIRED: &str = "TriggerOutcome::Fired(ref trig_res) =>";
+    const NO_TRIGGER: &str = "TriggerOutcome::NoTrigger =>";
+
+    fn arm<'a>(src: &'a str, from: &str, to: &str) -> &'a str {
+        let start = src
+            .find(from)
+            .unwrap_or_else(|| panic!("arm `{from}` not found — did the match move?"));
+        let rest = &src[start..];
+        let end = rest
+            .find(to)
+            .unwrap_or_else(|| panic!("arm `{to}` not found after `{from}` — did the match move?"));
+        &rest[..end]
+    }
+
+    // Only the Fired arm may build the substituted prompt.
+    assert!(
+        !arm(SRC, SKIPPED, ERROR).contains("fired_prompt"),
+        "the Skipped arm must not build a substituted prompt — nothing fired"
+    );
+    assert!(
+        !arm(SRC, ERROR, FIRED).contains("fired_prompt"),
+        "the Error arm must not build a substituted prompt — nothing fired"
+    );
+    assert!(
+        !arm(SRC, NO_TRIGGER, "resolve_or_create_cron_session").contains("fired_prompt"),
+        "the NoTrigger arm must not build a substituted prompt — nothing fired"
+    );
+    assert!(
+        arm(SRC, FIRED, NO_TRIGGER).contains("fired_prompt"),
+        "the Fired arm must build the substituted prompt — that is the fix"
+    );
+
+    // The None path is the identity in PRODUCTION, not in a local literal: the
+    // turn message falls back to the job's own prompt, byte for byte. Asserted
+    // against the real call site. A local `None.unwrap_or(x)` would be a
+    // tautology that can never fail (clippy::unnecessary_literal_unwrap) — the
+    // behavioural identity itself is covered by the placeholder tests above.
+    assert!(
+        SRC.contains("fired_prompt.unwrap_or(job.prompt.as_str())"),
+        "the None path must fall back to the job's own prompt — the turn message \
+         is byte-identical when nothing fired"
+    );
+}
+
+/// The wiring invariant, in the repo's established `include_str!` idiom: the
+/// Fired arm builds the message through the existing helper, the payload is
+/// carried to the turn, and the defect's own signature is gone.
+#[test]
+fn test_agent_turn_message_is_built_through_the_trigger_helper() {
+    const SCHEDULER_SRC: &str = include_str!("../cron/scheduler.rs");
+
+    // The Fired arm builds the message through the existing helper.
+    assert!(SCHEDULER_SRC.contains("interpolate_template("));
+    // The payload is carried to the turn, not dropped at the match.
+    assert!(SCHEDULER_SRC.contains("fired_prompt"));
+    assert!(SCHEDULER_SRC.contains("fired_prompt.as_deref()"));
+    assert!(SCHEDULER_SRC.contains("turn_prompt"));
+    // The defect's own signature: the raw prompt reaching the turn verbatim.
+    assert!(
+        !SCHEDULER_SRC.contains("job.prompt.clone()"),
+        "#526 REGRESSION: the turn message is built from the raw job prompt again — \
+         the fired trigger's payload is being dropped"
+    );
+    // The gate arms must NOT be restructured (edition-2024 match ergonomics).
+    assert!(!SCHEDULER_SRC.contains("match &outcome"));
+}

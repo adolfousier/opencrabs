@@ -269,7 +269,10 @@ pub enum CronCommands {
         #[arg(long, default_value = "UTC")]
         tz: String,
 
-        /// Prompt / instructions for the agent (optional if --trigger-cmd is supplied)
+        /// Prompt / instructions for the agent (optional if --trigger-cmd is supplied). When
+        /// --trigger-cmd fires, {output}, {stdout}, {stderr} and {exit_code} in the prompt are
+        /// substituted with the trigger's result; a prompt with no placeholder is passed through
+        /// unchanged.
         #[arg(long, alias = "message", required_unless_present = "trigger_cmd")]
         prompt: Option<String>,
 
@@ -293,7 +296,9 @@ pub enum CronCommands {
         #[arg(long, alias = "deliver")]
         deliver_to: Option<String>,
 
-        /// Optional pre-flight shell command to run before agent turn
+        /// Optional pre-flight shell command to run before agent turn. When it fires, the job's
+        /// prompt has {output}, {stdout}, {stderr} and {exit_code} substituted with the
+        /// command's result; every fire logs the payload size as output_bytes.
         #[arg(long)]
         trigger_cmd: Option<String>,
 

@@ -34,7 +34,9 @@ impl Tool for CronManageTool {
         "Manage scheduled cron jobs. Jobs run in isolated sessions with configurable provider/model. \
          Use 'create' to schedule a new job, 'list' to see all jobs, 'update' to change fields of an \
          existing job in place (only the fields you pass are touched), 'delete' to remove one, \
-         'enable'/'disable' to toggle a job without deleting it."
+         'enable'/'disable' to toggle a job without deleting it. \
+         Trigger-gated jobs can substitute their trigger's output into the prompt via the \
+         {output}/{stdout}/{stderr}/{exit_code} placeholders."
     }
 
     fn input_schema(&self) -> Value {
@@ -60,7 +62,7 @@ impl Tool for CronManageTool {
                 },
                 "prompt": {
                     "type": "string",
-                    "description": "Instructions for the agent to execute (required for create, optional for update; omitted on update keeps the existing prompt)"
+                    "description": "Instructions for the agent to execute (required for create, optional for update; omitted on update keeps the existing prompt). When 'trigger_cmd' is set and the trigger FIRES, the placeholders {output}, {stdout}, {stderr} and {exit_code} are substituted into the prompt with the trigger's result; a prompt carrying no placeholder is passed through unchanged. A job with no trigger, and every non-firing outcome, pass the prompt through verbatim."
                 },
                 "provider": {
                     "type": "string",
@@ -101,7 +103,7 @@ impl Tool for CronManageTool {
                 },
                 "trigger_cmd": {
                     "type": "string",
-                    "description": "Optional pre-flight shell command. If output is empty / non-zero based on trigger_on, job execution is short-circuited (0 tokens)."
+                    "description": "Optional pre-flight shell command. If output is empty / non-zero based on trigger_on, job execution is short-circuited (0 tokens). When the trigger FIRES and the job's prompt names one of {output}, {stdout}, {stderr}, {exit_code}, the command's result is substituted into the prompt. Every fire logs the payload size (output_bytes)."
                 },
                 "trigger_on": {
                     "type": "string",
