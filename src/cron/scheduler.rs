@@ -128,8 +128,11 @@ impl CronScheduler {
                     },
                 };
                 let next_run_str = next_run.map(|dt| dt.to_rfc3339());
+                // #544: a one-shot retires in this same statement — the
+                // schedule has already moved to next year by the time the job
+                // body runs, so retiring here is the consistent read.
                 self.repo
-                    .update_last_run(&job.id.to_string(), next_run_str.as_deref())
+                    .update_last_run(&job.id.to_string(), next_run_str.as_deref(), job.run_once)
                     .await?;
 
                 // Execute in background so we don't block other jobs

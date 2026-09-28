@@ -71,6 +71,7 @@ pub struct CronJobPatch {
     pub trigger_on: Option<Option<String>>,
     pub set_goal: Option<bool>,
     pub goal_template: Option<Option<String>>,
+    pub run_once: Option<bool>,
 }
 
 impl CronJobPatch {
@@ -93,6 +94,7 @@ impl CronJobPatch {
             && self.trigger_on.is_none()
             && self.set_goal.is_none()
             && self.goal_template.is_none()
+            && self.run_once.is_none()
     }
 }
 
@@ -114,8 +116,8 @@ impl CronJobRepository {
             .context("Failed to get connection")?
             .interact(move |conn| {
                 conn.execute(
-                    "INSERT INTO cron_jobs (id, name, cron_expr, timezone, prompt, provider, model, thinking, auto_approve, deliver_to, deliver_api_key, enabled, next_run_at, created_at, updated_at, profile_name, trigger_cmd, trigger_on, set_goal, goal_template)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)",
+                    "INSERT INTO cron_jobs (id, name, cron_expr, timezone, prompt, provider, model, thinking, auto_approve, deliver_to, deliver_api_key, enabled, next_run_at, created_at, updated_at, profile_name, trigger_cmd, trigger_on, set_goal, goal_template, run_once)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)",
                     params![
                         j.id.to_string(),
                         j.name,
@@ -137,6 +139,7 @@ impl CronJobRepository {
                         j.trigger_on,
                         j.set_goal as i32,
                         j.goal_template,
+                        j.run_once as i32,
                     ],
                 )
             })
@@ -363,6 +366,9 @@ impl CronJobRepository {
                     push(&mut sets, &mut vals, "set_goal", SqlVal::Int(i32::from(v)));
                 }
                 push_opt(&mut sets, &mut vals, "goal_template", patch.goal_template);
+                if let Some(v) = patch.run_once {
+                    push(&mut sets, &mut vals, "run_once", SqlVal::Int(i32::from(v)));
+                }
                 match patch.next_run_at {
                     Some(Some(dt)) => {
                         push(
@@ -421,7 +427,19 @@ impl CronJobRepository {
         Ok(rows > 0)
     }
 
-    pub async fn update_last_run(&self, id: &str, next_run_at: Option<&str>) -> Result<()> {
+    /// Record a fire and advance the schedule.
+    ///
+    /// `retire` (#544): when true, the SAME statement also sets `enabled = 0`,
+    /// so a one-shot job reads disabled the moment it has fired. The clause
+    /// rides this UPDATE deliberately — this statement already advances the
+    /// schedule at dispatch time, so retiring anywhere else would be a second
+    /// write site on the same row, racing the advance.
+    pub async fn update_last_run(
+        &self,
+        id: &str,
+        next_run_at: Option<&str>,
+        retire: bool,
+    ) -> Result<()> {
         let id = id.to_string();
         let next = next_run_at.map(|s| s.to_string());
         self.pool
@@ -430,8 +448,8 @@ impl CronJobRepository {
             .context("Failed to get connection")?
             .interact(move |conn| {
                 conn.execute(
-                    "UPDATE cron_jobs SET last_run_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), next_run_at = ?1, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE id = ?2",
-                    params![next, id],
+                    "UPDATE cron_jobs SET last_run_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), next_run_at = ?1, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), enabled = CASE WHEN ?3 = 1 THEN 0 ELSE enabled END WHERE id = ?2",
+                    params![next, id, retire as i32],
                 )
             })
             .await

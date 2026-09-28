@@ -137,6 +137,11 @@ pub(crate) const MIGRATION_SQL: &[&str] = &[
     // [features] audit_recording = true, and nothing reads them except the
     // /audit viewer. Appended last per the list invariant.
     include_str!("../migrations/20260926000001_add_audit_turn_retrievals.sql"),
+    // FORK (#544): the one-shot retirement flag. A cron job with
+    // `run_once = 1` is disabled by the same dispatch-time schedule advance
+    // that moves every job's `next_run_at`, so a spent one-shot reads
+    // `enabled = 0` instead of parking armed until the same date next year.
+    include_str!("../migrations/20260927000001_add_cron_run_once.sql"),
 ];
 
 pub(crate) fn build_migrations() -> Migrations<'static> {

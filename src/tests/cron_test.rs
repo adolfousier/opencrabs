@@ -451,13 +451,47 @@ mod repository {
         let found = repo.find_by_id(&id).await.unwrap().unwrap();
         assert!(found.last_run_at.is_none());
 
-        // Update with next_run_at
-        repo.update_last_run(&id, Some("2026-03-06T09:00:00Z"))
+        // Update with next_run_at (retire=false: an ordinary recurring job)
+        repo.update_last_run(&id, Some("2026-03-06T09:00:00Z"), false)
             .await
             .unwrap();
         let found = repo.find_by_id(&id).await.unwrap().unwrap();
         assert!(found.last_run_at.is_some());
         assert!(found.next_run_at.is_some());
+        assert!(found.enabled, "a non-one-shot job must stay enabled after firing");
+    }
+
+    /// #544: a one-shot job retires itself in the same statement that advances
+    /// its schedule. The control (retire=false) is asserted in
+    /// `test_update_last_run` directly above.
+    #[tokio::test]
+    async fn test_update_last_run_retires_one_shot() {
+        let (_db, repo) = setup().await;
+        let mut job = make_job("one-shot", "40 17 22 9 *");
+        job.run_once = true;
+        let id = job.id.to_string();
+        repo.insert(&job).await.unwrap();
+
+        let before = repo.find_by_id(&id).await.unwrap().unwrap();
+        assert!(before.enabled, "a freshly created one-shot starts enabled");
+        assert!(before.run_once, "run_once must survive the insert round-trip");
+        assert!(before.last_run_at.is_none());
+
+        // Firing advances the schedule AND retires the job, in one statement.
+        repo.update_last_run(&id, Some("2027-09-22T14:40:00Z"), true)
+            .await
+            .unwrap();
+
+        let after = repo.find_by_id(&id).await.unwrap().unwrap();
+        assert!(!after.enabled, "a spent one-shot must read disabled");
+        assert!(
+            after.last_run_at.is_some(),
+            "the advance must still record the fire"
+        );
+        assert!(
+            after.next_run_at.is_some(),
+            "the advance must still move the schedule"
+        );
     }
 
     #[tokio::test]

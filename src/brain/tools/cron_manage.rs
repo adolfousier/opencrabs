@@ -114,6 +114,10 @@ impl Tool for CronManageTool {
                 "goal_template": {
                     "type": "string",
                     "description": "Template formatting trigger output into goal/notification text. Interpolates {output}, {stdout}, {stderr}, {exit_code}."
+                },
+                "run_once": {
+                    "type": "boolean",
+                    "description": "One-shot job (#544): when true the job retires itself (enabled = 0) the moment it fires — the same dispatch-time advance that moves next_run_at disables it, so a spent one-shot reads disabled in list instead of staying armed until the same date next year. Encode a one-off reminder as a date-pinned expression (e.g. '30 14 21 9 *') plus run_once."
                 }
             },
             "required": ["action"]
@@ -315,6 +319,12 @@ impl CronManageTool {
             goal_template,
         );
         job.next_run_at = crate::cron::next_run_utc(cron_expr, parsed_tz, chrono::Utc::now());
+        // #544: one-shot retirement flag. Set after construction (like
+        // next_run_at above) so the constructor keeps its arity.
+        job.run_once = input
+            .get("run_once")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
 
         let job_id = job.id.to_string();
 
@@ -556,6 +566,16 @@ impl CronManageTool {
             }
         }
 
+        // #544: one-shot retirement flag. Nothing else validates it — a
+        // one-shot is orthogonal to deliver_to and to the trigger gate.
+        if let Some(once) = input.get("run_once").and_then(|v| v.as_bool()) {
+            provided += 1;
+            if once != job.run_once {
+                patch.run_once = Some(once);
+                changed.push(format!("run_once -> {once}"));
+            }
+        }
+
         // Validate set_goal against effective deliver_to on update
         let effective_set_goal = patch.set_goal.unwrap_or(job.set_goal);
         if effective_set_goal {
@@ -675,7 +695,14 @@ impl CronManageTool {
         let lines: Vec<String> = jobs
             .iter()
             .map(|j| {
-                let status = if j.enabled { "enabled" } else { "disabled" };
+                // #544: a one-shot that has fired reads `disabled (spent)` —
+                // its state is legible rather than inferred from the schedule.
+                let status = match (j.enabled, j.run_once) {
+                    (false, true) => "disabled (spent one-shot)",
+                    (false, false) => "disabled",
+                    (true, true) => "enabled (one-shot)",
+                    (true, false) => "enabled",
+                };
                 let deliver = j.deliver_to.as_deref().unwrap_or("none");
                 let last = j
                     .last_run_at

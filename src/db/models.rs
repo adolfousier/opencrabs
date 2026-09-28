@@ -507,6 +507,11 @@ pub struct CronJob {
     pub set_goal: bool,
     /// Template for formatting goal/notification from trigger output.
     pub goal_template: Option<String>,
+    /// One-shot retirement flag (#544): when true, the dispatch-time schedule
+    /// advance (the same UPDATE that moves `next_run_at`) also sets
+    /// `enabled = 0`, so a spent one-shot reads disabled instead of staying
+    /// armed until the same date next year.
+    pub run_once: bool,
 }
 
 impl CronJob {
@@ -541,6 +546,11 @@ impl CronJob {
                 .unwrap_or(0)
                 != 0,
             goal_template: row.get("goal_template").unwrap_or(None),
+            run_once: row
+                .get::<_, Option<i32>>("run_once")
+                .unwrap_or(None)
+                .unwrap_or(0)
+                != 0,
         })
     }
 
@@ -621,6 +631,9 @@ impl CronJob {
             trigger_on: trigger_on.or_else(|| Some("non_empty".to_string())),
             set_goal,
             goal_template,
+            // run_once is set by the caller after construction, the same way
+            // cron_manage sets next_run_at (#544), so this ctor keeps its arity.
+            run_once: false,
         }
     }
 }
