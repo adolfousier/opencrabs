@@ -294,6 +294,7 @@ pub mod doctor_db_snapshot_test;
 pub mod doctor_fix_test;
 pub mod duplicate_submit_test;
 pub mod edit_retry_test;
+pub mod em_dash_guard_test;
 pub mod empty_reasoning_stub_test;
 pub mod epistemic_archive_test;
 pub mod epistemic_decay_test;
