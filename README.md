@@ -2734,6 +2734,15 @@ plan_worker_allow_write = false  # default false: isolated plan workers run READ
 subagent_session_ttl_days = 7    # days a spawned sub-agent's session is kept before pruning. Nothing revisits
                                  # them, so they accumulate with their messages, tool rows and plan files. 0 keeps forever
 
+# ── Cross-session notification (kill switch) ─────────────────────────────────
+session_notify_enabled = false   # default false (#1802): the session_notify tool, the A2A
+                                 # session/notify method and `opencrabs session notify` all refuse.
+                                 # Cross-session notification is an explicit operator opt-in for
+                                 # machine-tooling fan-out only; an unprompted channel into another
+                                 # session's context breaks session isolation. User-directed
+                                 # "notify that session" belongs to the channel send tools
+                                 # (telegram_send / slack_send) with the user's request.
+
 # ── Runaway-reasoning guard ───────────────────────────────────────────────────
 thinking_loop_timeout_secs = 600 # how long a model may stream with zero tool calls. Enforced at this
                                  # default even when absent from this file. A stream still delivering
