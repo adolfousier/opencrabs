@@ -2577,6 +2577,10 @@ pub(crate) async fn cmd_evolve(config: &crate::config::Config, check_only: bool)
         .with_working_directory(std::env::current_dir().unwrap_or_default())
         .with_auto_approve(true);
     context.timeout_secs = 300;
+    // #1802: every surface that builds a context stamps the kill switch.
+    context.session_notify_enabled = crate::config::Config::current()
+        .agent
+        .session_notify_enabled;
 
     let result = tool.execute(input, &context).await?;
     println!("{}", result.output);

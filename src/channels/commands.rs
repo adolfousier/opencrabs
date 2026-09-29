@@ -2336,7 +2336,11 @@ pub async fn run_evolve() -> String {
         }
     });
 
-    let ctx = ToolExecutionContext::new(uuid::Uuid::nil());
+    let ctx = ToolExecutionContext::new(uuid::Uuid::nil()).with_session_notify_enabled(
+        crate::config::Config::current()
+            .agent
+            .session_notify_enabled,
+    );
     let tool = EvolveTool::new(Some(progress_callback));
     let result = match tool
         .execute(serde_json::json!({"check_only": false}), &ctx)

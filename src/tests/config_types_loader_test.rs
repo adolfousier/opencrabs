@@ -16,6 +16,19 @@ fn test_default_config() {
 }
 
 #[test]
+fn session_notify_key_absent_defaults_to_disabled() {
+    // #1802 kill switch: an [agent] section without the key deserializes the
+    // flag as false. Default OFF is the whole point: cross-session
+    // notification is an explicit operator opt-in, never a silent default.
+    let cfg: AgentConfig = serde_json::from_str("{}").expect("empty agent section deserializes");
+    assert!(
+        !cfg.session_notify_enabled,
+        "absent session_notify_enabled must default to disabled"
+    );
+    assert!(!Config::default().agent.session_notify_enabled);
+}
+
+#[test]
 fn test_config_validation() {
     let config = Config::default();
     assert!(config.validate().is_ok());

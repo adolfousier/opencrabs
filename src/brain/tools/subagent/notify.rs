@@ -212,6 +212,22 @@ impl Tool for SessionNotifyTool {
     }
 
     async fn execute(&self, input: Value, context: &ToolExecutionContext) -> Result<ToolResult> {
+        // #1802 kill switch (owner order): cross-session notification is an
+        // explicit operator opt-in, default OFF. An unprompted channel into
+        // another session's context breaks session isolation; the channel
+        // send tools under explicit user request do this job. This gate
+        // outranks the headless guard below. Post-mortem: issue #1203 /
+        // PR #1207.
+        if !context.session_notify_enabled {
+            return Err(ToolError::Execution(
+                "session_notify is disabled by config ([agent] session_notify_enabled is \
+                 not set; default false). Cross-session notification is an explicit \
+                 operator opt-in; put the substance in your final message or use the \
+                 channel send tools with the user's request. Set [agent] \
+                 session_notify_enabled = true to enable machine tooling fan-out."
+                    .into(),
+            ));
+        }
         // #129 belt-and-braces (owner ruling C): a headless session has no
         // turn-end relay to flush parked notifications — the send would die
         // with the one-shot process. Fail LOUDLY; the final message is the
@@ -351,7 +367,10 @@ impl Tool for SessionNotifyTool {
                     // path, so no durable queue row is ever written for a
                     // target that cannot consume it. The bound-but-unclaimed
                     // park is untouched (see the `Delivery::Parked` arm).
-                    match SessionBindingRepository::new(pool).by_session(&target_str).await {
+                    match SessionBindingRepository::new(pool)
+                        .by_session(&target_str)
+                        .await
+                    {
                         Ok(Some(_)) => {}
                         // #574: no durable binding means no channel can claim
                         // this session ACROSS A RESTART. A channel may still

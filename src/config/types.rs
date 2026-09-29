@@ -1636,6 +1636,18 @@ pub struct AgentConfig {
     /// ```
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub goal_max_turns: Option<u32>,
+
+    /// Kill switch for the session_notify family (issue #1802, owner order).
+    /// Default OFF: an unprompted channel into another session's context
+    /// breaks session isolation, so cross-session notification must be an
+    /// explicit operator opt-in. When false, the session_notify tool refuses
+    /// every action, the A2A `session/notify` method refuses, and
+    /// `opencrabs session notify` exits 4. Cross-session "notify" belongs to
+    /// the channel send tools (telegram_send / slack_send) under explicit
+    /// user request; opt in only for deliberate machine tooling fan-out.
+    /// Post-mortem: issue #1203 / PR #1207.
+    #[serde(default)]
+    pub session_notify_enabled: bool,
 }
 
 impl AgentConfig {
@@ -1751,6 +1763,7 @@ impl Default for AgentConfig {
             plan_worker_allow_write: false,
             auto_update: default_auto_update(),
             evolve_allow_root: default_evolve_allow_root(),
+            session_notify_enabled: false,
             subagent_session_ttl_days: default_subagent_session_ttl_days(),
             self_improvement_provider: None,
             rsi_enabled: None,

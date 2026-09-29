@@ -71,6 +71,9 @@ async fn interactive_registry_keeps_session_notify_and_suggest_options() {
 async fn interactive_only_tools_hard_error_on_headless_context() {
     let mut ctx = ToolExecutionContext::new(uuid::Uuid::new_v4());
     ctx.headless = true;
+    // #1802: this suite targets the headless guard, not the kill switch;
+    // opt the flag in so the headless path is what's under test.
+    ctx.session_notify_enabled = true;
 
     let suggest_err = <SuggestOptionsTool as Tool>::execute(
         &SuggestOptionsTool,

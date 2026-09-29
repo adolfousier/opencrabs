@@ -137,6 +137,12 @@ pub struct ToolExecutionContext {
     /// tools read this to hard-error instead of parking a verdict no one will
     /// ever see. `false` by default (interactive).
     pub headless: bool,
+
+    /// session_notify kill switch (issue #1802, owner order). Default OFF:
+    /// cross-session notification is an explicit operator opt-in read from
+    /// `[agent] session_notify_enabled`. Stamped per execution by the same
+    /// surfaces that stamp `headless`.
+    pub session_notify_enabled: bool,
 }
 
 impl std::fmt::Debug for ToolExecutionContext {
@@ -174,7 +180,14 @@ impl ToolExecutionContext {
             world: None,
             parent_tool_registry: None,
             headless: false,
+            session_notify_enabled: false,
         }
+    }
+
+    /// Set the session_notify kill switch (issue #1802).
+    pub fn with_session_notify_enabled(mut self, enabled: bool) -> Self {
+        self.session_notify_enabled = enabled;
+        self
     }
 
     /// Set working directory

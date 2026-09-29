@@ -29,7 +29,12 @@ pub async fn dispatch(
             .await
         }
         "session/notify" => {
-            notify::handle_session_notify(req.id, req.params, service_context).await
+            // #1802: the kill switch rides the config mirror, not the
+            // request, so a caller cannot talk a disabled gateway into it.
+            let enabled = crate::config::Config::current()
+                .agent
+                .session_notify_enabled;
+            notify::handle_session_notify(req.id, req.params, service_context, enabled).await
         }
         "session/notify-status" => notify::handle_notify_status(req.id, req.params),
         "tasks/get" => tasks::handle_get_task(req.id, req.params, store).await,

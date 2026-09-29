@@ -33,8 +33,13 @@ async fn dead_uuid_is_refused_without_touching_the_route_table() {
     // deterministic either way.
     let ctx = placeholder_service_context().await;
     let dead = uuid::Uuid::new_v4();
-    let resp =
-        handle_session_notify(serde_json::json!(1), params(&dead.to_string(), "ping"), ctx).await;
+    let resp = handle_session_notify(
+        serde_json::json!(1),
+        params(&dead.to_string(), "ping"),
+        ctx,
+        true,
+    )
+    .await;
     assert!(
         resp.error.is_none(),
         "dead uuid is a business outcome, not a protocol error: {resp:?}"
@@ -68,8 +73,13 @@ async fn live_uuid_delivers_through_the_claimed_route() {
         }),
     );
 
-    let resp =
-        handle_session_notify(serde_json::json!(2), params(&sid.to_string(), "ping"), ctx).await;
+    let resp = handle_session_notify(
+        serde_json::json!(2),
+        params(&sid.to_string(), "ping"),
+        ctx,
+        true,
+    )
+    .await;
     assert!(resp.error.is_none(), "{resp:?}");
     assert_eq!(outcome_of(&resp), "delivered");
     let queued = captured.lock().unwrap().take().expect("message enqueued");
@@ -106,7 +116,7 @@ async fn sender_override_rides_the_header() {
 
     let mut p = params(&sid.to_string(), "ping");
     p["sender"] = serde_json::json!("oc-deploy");
-    let resp = handle_session_notify(serde_json::json!(7), p, ctx).await;
+    let resp = handle_session_notify(serde_json::json!(7), p, ctx, true).await;
     assert!(resp.error.is_none(), "{resp:?}");
     assert_eq!(outcome_of(&resp), "delivered");
     let queued = captured.lock().unwrap().take().expect("message enqueued");
@@ -131,6 +141,7 @@ async fn malformed_params_are_protocol_errors() {
         serde_json::json!(3),
         params("not-a-uuid", "ping"),
         ctx.clone(),
+        true,
     )
     .await;
     assert_eq!(
@@ -142,6 +153,7 @@ async fn malformed_params_are_protocol_errors() {
         serde_json::json!(4),
         params(&uuid::Uuid::new_v4().to_string(), "   "),
         ctx.clone(),
+        true,
     )
     .await;
     assert_eq!(
@@ -153,7 +165,7 @@ async fn malformed_params_are_protocol_errors() {
     // framing is a protocol error, not a delivery result.
     let mut bad_sender = params(&uuid::Uuid::new_v4().to_string(), "ping");
     bad_sender["sender"] = serde_json::json!("bad]label");
-    let bad_sender_resp = handle_session_notify(serde_json::json!(5), bad_sender, ctx).await;
+    let bad_sender_resp = handle_session_notify(serde_json::json!(5), bad_sender, ctx, true).await;
     assert_eq!(
         bad_sender_resp.error.expect("error response").code,
         error_codes::INVALID_PARAMS
@@ -203,6 +215,7 @@ async fn archived_session_auto_routes_to_its_successor() {
         serde_json::json!(5),
         params(&old.id.to_string(), "ping"),
         ctx,
+        true,
     )
     .await;
     assert!(resp.error.is_none(), "{resp:?}");
@@ -250,7 +263,7 @@ async fn quiet_mode_banks_the_notice_and_returns_the_id() {
 
     let mut p = params(&sid.to_string(), "ping");
     p["delivery"] = serde_json::json!({ "mode": "quiet", "quiet_for_secs": 3600 });
-    let resp = handle_session_notify(serde_json::json!(11), p, ctx).await;
+    let resp = handle_session_notify(serde_json::json!(11), p, ctx, true).await;
     assert!(resp.error.is_none(), "{resp:?}");
     let result = resp.result.expect("success");
     assert_eq!(
@@ -296,7 +309,7 @@ async fn turn_end_mode_queues_instead_of_refusing() {
 
     let mut p = params(&sid.to_string(), "ping");
     p["delivery"] = serde_json::json!({ "mode": "turn-end" });
-    let resp = handle_session_notify(serde_json::json!(13), p, ctx).await;
+    let resp = handle_session_notify(serde_json::json!(13), p, ctx, true).await;
     assert!(resp.error.is_none(), "{resp:?}");
     assert_eq!(outcome_of(&resp), "delivered");
     let _guard = test_guard();
@@ -310,7 +323,7 @@ async fn quiet_contradicting_interrupt_is_invalid_params() {
     let mut p = params(&uuid::Uuid::new_v4().to_string(), "ping");
     p["delivery"] = serde_json::json!({ "mode": "quiet" });
     p["interrupt"] = serde_json::json!(true);
-    let resp = handle_session_notify(serde_json::json!(14), p, ctx).await;
+    let resp = handle_session_notify(serde_json::json!(14), p, ctx, true).await;
     assert_eq!(
         resp.error.expect("error response").code,
         error_codes::INVALID_PARAMS
@@ -345,8 +358,13 @@ async fn surfaceless_session_parks_honestly() {
 
     expect_channel_route(sid);
 
-    let resp =
-        handle_session_notify(serde_json::json!(20), params(&sid.to_string(), "ping"), ctx).await;
+    let resp = handle_session_notify(
+        serde_json::json!(20),
+        params(&sid.to_string(), "ping"),
+        ctx,
+        true,
+    )
+    .await;
     assert!(resp.error.is_none(), "{resp:?}");
     assert_eq!(outcome_of(&resp), "parked");
     let detail = resp
@@ -410,7 +428,7 @@ async fn a_retried_notify_id_delivers_exactly_once() {
     let notify_id = uuid::Uuid::new_v4().to_string();
     let p = params_with_id(&sid.to_string(), "ping", &notify_id);
 
-    let first = handle_session_notify(serde_json::json!(41), p.clone(), ctx.clone()).await;
+    let first = handle_session_notify(serde_json::json!(41), p.clone(), ctx.clone(), true).await;
     assert!(first.error.is_none(), "{first:?}");
     assert_eq!(outcome_of(&first), "delivered");
     let first_body = first.result.expect("success");
@@ -420,7 +438,7 @@ async fn a_retried_notify_id_delivers_exactly_once() {
         "the response must echo the caller's id",
     );
 
-    let second = handle_session_notify(serde_json::json!(42), p, ctx).await;
+    let second = handle_session_notify(serde_json::json!(42), p, ctx, true).await;
     assert!(second.error.is_none(), "{second:?}");
     assert_eq!(
         outcome_of(&second),
@@ -468,7 +486,7 @@ async fn distinct_notify_ids_both_deliver() {
     for seq in [51, 52] {
         let id = uuid::Uuid::new_v4().to_string();
         let p = params_with_id(&sid.to_string(), "ping", &id);
-        let resp = handle_session_notify(serde_json::json!(seq), p, ctx.clone()).await;
+        let resp = handle_session_notify(serde_json::json!(seq), p, ctx.clone(), true).await;
         assert!(resp.error.is_none(), "{resp:?}");
         assert_eq!(outcome_of(&resp), "delivered");
     }

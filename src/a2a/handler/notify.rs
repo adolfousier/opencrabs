@@ -59,7 +59,23 @@ pub async fn handle_session_notify(
     req_id: serde_json::Value,
     params: serde_json::Value,
     service_context: ServiceContext,
+    session_notify_enabled: bool,
 ) -> JsonRpcResponse {
+    // #1802 kill switch (owner order): cross-session notification is an
+    // explicit operator opt-in, default OFF. The tool surface and this A2A
+    // method share the same gate so no path can round-trip an unprompted
+    // notification into another session's context. Post-mortem:
+    // issue #1203 / PR #1207.
+    if !session_notify_enabled {
+        return JsonRpcResponse::error(
+            req_id,
+            error_codes::INVALID_REQUEST,
+            "session_notify is disabled by config ([agent] session_notify_enabled is not \
+             set; default false). Cross-session notification is an explicit operator \
+             opt-in; use the channel send tools with the user's request instead."
+                .to_string(),
+        );
+    }
     let session_id = match params.get("session_id").and_then(serde_json::Value::as_str) {
         Some(raw) => match raw.parse::<uuid::Uuid>() {
             Ok(id) => id,

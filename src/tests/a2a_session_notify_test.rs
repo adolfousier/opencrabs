@@ -63,7 +63,7 @@ async fn a2a_notify_dispatches_goal_to_target_session() {
     p["goal"] = serde_json::json!("converge on clean audit");
     p["goal_max_turns"] = serde_json::json!(5);
 
-    let resp = handle_session_notify(serde_json::json!(42), p, ctx.clone()).await;
+    let resp = handle_session_notify(serde_json::json!(42), p, ctx.clone(), true).await;
     assert!(resp.error.is_none());
     assert_eq!(outcome_of(&resp), "delivered");
 
@@ -87,8 +87,13 @@ async fn dead_uuid_is_refused_without_touching_the_route_table() {
     // deterministic either way.
     let ctx = placeholder_service_context().await;
     let dead = uuid::Uuid::new_v4();
-    let resp =
-        handle_session_notify(serde_json::json!(1), params(&dead.to_string(), "ping"), ctx).await;
+    let resp = handle_session_notify(
+        serde_json::json!(1),
+        params(&dead.to_string(), "ping"),
+        ctx,
+        true,
+    )
+    .await;
     assert!(
         resp.error.is_none(),
         "dead uuid is a business outcome, not a protocol error: {resp:?}"
@@ -122,8 +127,13 @@ async fn live_uuid_delivers_through_the_claimed_route() {
         }),
     );
 
-    let resp =
-        handle_session_notify(serde_json::json!(2), params(&sid.to_string(), "ping"), ctx).await;
+    let resp = handle_session_notify(
+        serde_json::json!(2),
+        params(&sid.to_string(), "ping"),
+        ctx,
+        true,
+    )
+    .await;
     assert!(resp.error.is_none(), "{resp:?}");
     assert_eq!(outcome_of(&resp), "delivered");
     let queued = captured.lock().unwrap().take().expect("message enqueued");
@@ -163,7 +173,7 @@ async fn sender_override_rides_the_header() {
 
     let mut p = params(&sid.to_string(), "ping");
     p["sender"] = serde_json::json!("oc-deploy");
-    let resp = handle_session_notify(serde_json::json!(7), p, ctx).await;
+    let resp = handle_session_notify(serde_json::json!(7), p, ctx, true).await;
     assert!(resp.error.is_none(), "{resp:?}");
     assert_eq!(outcome_of(&resp), "delivered");
     let queued = captured.lock().unwrap().take().expect("message enqueued");
@@ -188,6 +198,7 @@ async fn malformed_params_are_protocol_errors() {
         serde_json::json!(3),
         params("not-a-uuid", "ping"),
         ctx.clone(),
+        true,
     )
     .await;
     assert_eq!(
@@ -199,6 +210,7 @@ async fn malformed_params_are_protocol_errors() {
         serde_json::json!(4),
         params(&uuid::Uuid::new_v4().to_string(), "   "),
         ctx.clone(),
+        true,
     )
     .await;
     assert_eq!(
@@ -210,7 +222,7 @@ async fn malformed_params_are_protocol_errors() {
     // framing is a protocol error, not a delivery result.
     let mut bad_sender = params(&uuid::Uuid::new_v4().to_string(), "ping");
     bad_sender["sender"] = serde_json::json!("bad]label");
-    let bad_sender_resp = handle_session_notify(serde_json::json!(5), bad_sender, ctx).await;
+    let bad_sender_resp = handle_session_notify(serde_json::json!(5), bad_sender, ctx, true).await;
     assert_eq!(
         bad_sender_resp.error.expect("error response").code,
         error_codes::INVALID_PARAMS
@@ -244,7 +256,7 @@ async fn delivery_mode_turn_end_without_interrupt_resolves_cleanly() {
     let mut bad_p = params(&sid.to_string(), "turn-end conflicting ping");
     bad_p["delivery"] = serde_json::json!({ "mode": "turn-end" });
     bad_p["interrupt"] = serde_json::json!(false);
-    let bad_resp = handle_session_notify(serde_json::json!(6), bad_p, ctx.clone()).await;
+    let bad_resp = handle_session_notify(serde_json::json!(6), bad_p, ctx.clone(), true).await;
     assert_eq!(
         bad_resp.error.expect("error response").code,
         error_codes::INVALID_PARAMS,
@@ -254,7 +266,7 @@ async fn delivery_mode_turn_end_without_interrupt_resolves_cleanly() {
     // (2) With `interrupt` omitted (the fix): succeeds cleanly
     let mut good_p = params(&sid.to_string(), "turn-end ping");
     good_p["delivery"] = serde_json::json!({ "mode": "turn-end" });
-    let resp = handle_session_notify(serde_json::json!(7), good_p, ctx).await;
+    let resp = handle_session_notify(serde_json::json!(7), good_p, ctx, true).await;
     assert!(
         resp.error.is_none(),
         "delivery.mode turn-end without interrupt must succeed: {resp:?}"
@@ -264,5 +276,25 @@ async fn delivery_mode_turn_end_without_interrupt_resolves_cleanly() {
     assert_eq!(
         queued.origin,
         crate::brain::agent::PushOrigin::SessionNotify
+    );
+}
+
+/// #1802: the kill switch refuses at protocol level with INVALID_REQUEST.
+#[tokio::test]
+async fn kill_switch_disabled_refuses_at_protocol_level() {
+    let ctx = placeholder_service_context().await;
+    let resp = handle_session_notify(
+        serde_json::json!(9),
+        params(&uuid::Uuid::new_v4().to_string(), "ping"),
+        ctx,
+        false,
+    )
+    .await;
+    let err = resp.error.expect("kill switch must refuse");
+    assert_eq!(err.code, error_codes::INVALID_REQUEST);
+    assert!(
+        err.message.contains("disabled by config"),
+        "got: {}",
+        err.message
     );
 }

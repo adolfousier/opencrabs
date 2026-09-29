@@ -155,6 +155,20 @@ pub(crate) async fn run(
     status: bool,
     format: OutputFormat,
 ) -> Result<()> {
+    // #1802 kill switch (owner order): session notify is an explicit
+    // operator opt-in, default OFF. Machine tooling sets
+    // [agent] session_notify_enabled = true. Cross-session notification
+    // belongs to the channel send tools under explicit user request.
+    if !config.agent.session_notify_enabled {
+        return finish(
+            format,
+            id_raw,
+            "disabled_by_config",
+            EXIT_TRANSPORT,
+            "session notify is disabled by config: set [agent] session_notify_enabled = \
+             true to enable it (issue #1802)",
+        );
+    }
     // Status mode (fork #146): poll a notification receipt by id instead of
     // sending. Rides the same A2A surface (); the id
     // is passed as the positional arg,  is unused.

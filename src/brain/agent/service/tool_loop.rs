@@ -1514,6 +1514,11 @@ impl AgentService {
         // Vision resolves the CURRENT provider first (#1318); a tool cannot
         // ask AgentService for it, and this loop has both.
         tool_context.session_provider = Some(self.provider_name_for_session(session_id));
+        // #1802: the session_notify kill switch rides the same single
+        // stamping site; the mirror reads [agent] session_notify_enabled.
+        tool_context.session_notify_enabled = crate::config::Config::current()
+            .agent
+            .session_notify_enabled;
         // Ambient conversation origin (#148): derived HERE — the single
         // stamping site, mirroring `session_provider` directly above — from
         // the session ownership maps via the channel manager. `None` on

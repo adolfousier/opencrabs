@@ -15,8 +15,8 @@ use crate::brain::agent::service::session_routes::{
 };
 use crate::brain::tools::subagent::SessionNotifyTool;
 use crate::brain::tools::r#trait::{Tool, ToolExecutionContext};
-use crate::db::{Database, NotifyQueueRepository, SessionBindingRepository, SessionRepository};
 use crate::db::models::Session;
+use crate::db::{Database, NotifyQueueRepository, SessionBindingRepository, SessionRepository};
 use crate::services::ServiceContext;
 
 fn msg() -> QueuedUserMessage {
@@ -35,7 +35,7 @@ async fn absent_session_fails_loudly_without_queue_residue() {
     let db = Database::connect_in_memory().await.expect("in-memory DB");
     db.run_migrations().await.expect("migrations");
     let absent = Uuid::new_v4();
-    let mut context = ToolExecutionContext::new(Uuid::new_v4());
+    let mut context = ToolExecutionContext::new(Uuid::new_v4()).with_session_notify_enabled(true);
     context.service_context = Some(ServiceContext::new(db.pool().clone()));
 
     let result = SessionNotifyTool
@@ -46,7 +46,10 @@ async fn absent_session_fails_loudly_without_queue_residue() {
         .await
         .expect("tool returns a verdict");
 
-    assert!(!result.success, "absent session must fail loudly: {result:?}");
+    assert!(
+        !result.success,
+        "absent session must fail loudly: {result:?}"
+    );
     assert_eq!(
         result.metadata.get("notify_state").map(String::as_str),
         Some("undeliverable")
@@ -73,7 +76,6 @@ async fn absent_session_fails_loudly_without_queue_residue() {
     );
 }
 
-
 #[tokio::test]
 // The guard serializes suites touching the process-global parked-queue state
 // (#1206); holding it across the tool `.await` below is the entire point —
@@ -95,7 +97,8 @@ async fn test_notify_pushes_carry_sessionnotify_origin_for_topic_echo() {
         }),
     );
 
-    let context = crate::brain::tools::r#trait::ToolExecutionContext::new(Uuid::new_v4());
+    let context = crate::brain::tools::r#trait::ToolExecutionContext::new(Uuid::new_v4())
+        .with_session_notify_enabled(true);
     let outcome = SessionNotifyTool
         .execute(
             serde_json::json!({"target_session": session.to_string(), "message": "ping"}),
@@ -227,7 +230,8 @@ async fn test_tool_reports_refusal_with_remedy() {
     expect_channel_route(session);
     register_turn_probe(session, std::sync::Arc::new(|| true));
 
-    let context = crate::brain::tools::r#trait::ToolExecutionContext::new(Uuid::new_v4());
+    let context = crate::brain::tools::r#trait::ToolExecutionContext::new(Uuid::new_v4())
+        .with_session_notify_enabled(true);
     let outcome = SessionNotifyTool
         .execute(
             serde_json::json!({"target_session": session.to_string(), "message": "ping"}),
@@ -262,7 +266,8 @@ async fn test_tool_interrupt_param_reaches_delivery() {
     );
     register_turn_probe(session, std::sync::Arc::new(|| true));
 
-    let context = crate::brain::tools::r#trait::ToolExecutionContext::new(Uuid::new_v4());
+    let context = crate::brain::tools::r#trait::ToolExecutionContext::new(Uuid::new_v4())
+        .with_session_notify_enabled(true);
     let outcome = SessionNotifyTool
         .execute(
             serde_json::json!({
@@ -478,7 +483,8 @@ async fn test_tool_reports_redirect_to_occupant() {
     );
     register_session_route(occupant, std::sync::Arc::new(|_id, _queued| {}));
 
-    let context = crate::brain::tools::r#trait::ToolExecutionContext::new(Uuid::new_v4());
+    let context = crate::brain::tools::r#trait::ToolExecutionContext::new(Uuid::new_v4())
+        .with_session_notify_enabled(true);
     let outcome = SessionNotifyTool
         .execute(
             serde_json::json!({"target_session": session.to_string(), "message": "ping"}),
@@ -579,7 +585,7 @@ async fn existing_unbound_session_is_refused_without_queue_residue() {
     // park is ever reached, which is why no queue row may survive.
     crate::brain::agent::service::restart_recovery::expect_channel_route(target.id);
 
-    let mut context = ToolExecutionContext::new(Uuid::new_v4());
+    let mut context = ToolExecutionContext::new(Uuid::new_v4()).with_session_notify_enabled(true);
     context.service_context = Some(ServiceContext::new(db.pool().clone()));
     let result = SessionNotifyTool
         .execute(
@@ -633,17 +639,12 @@ async fn bound_but_unclaimed_session_still_parks_as_awaiting_channel_claim() {
         .await
         .expect("seed session");
     SessionBindingRepository::new(db.pool().clone())
-        .upsert(
-            target.id.to_string(),
-            "telegram",
-            "12345",
-            Some(40695),
-        )
+        .upsert(target.id.to_string(), "telegram", "12345", Some(40695))
         .await
         .expect("seed binding");
     crate::brain::agent::service::restart_recovery::expect_channel_route(target.id);
 
-    let mut context = ToolExecutionContext::new(Uuid::new_v4());
+    let mut context = ToolExecutionContext::new(Uuid::new_v4()).with_session_notify_enabled(true);
     context.service_context = Some(ServiceContext::new(db.pool().clone()));
     let result = SessionNotifyTool
         .execute(
@@ -693,7 +694,7 @@ async fn unbound_session_with_a_live_route_still_delivers() {
         }),
     );
 
-    let mut context = ToolExecutionContext::new(Uuid::new_v4());
+    let mut context = ToolExecutionContext::new(Uuid::new_v4()).with_session_notify_enabled(true);
     context.service_context = Some(ServiceContext::new(db.pool().clone()));
     let result = SessionNotifyTool
         .execute(
@@ -715,5 +716,42 @@ async fn unbound_session_with_a_live_route_still_delivers() {
         delivered.load(std::sync::atomic::Ordering::SeqCst),
         1,
         "the registered route callback must actually have been invoked"
+    );
+}
+
+/// #1802 kill switch: a default context (flag unset) refuses every action.
+#[tokio::test]
+async fn kill_switch_default_off_refuses_send_and_status() {
+    let context = crate::brain::tools::r#trait::ToolExecutionContext::new(Uuid::new_v4());
+
+    let send_err = SessionNotifyTool
+        .execute(
+            serde_json::json!({
+                "target_session": Uuid::new_v4().to_string(),
+                "message": "probe"
+            }),
+            &context,
+        )
+        .await
+        .expect_err("send must refuse while the kill switch is off");
+    assert!(
+        send_err.to_string().contains("disabled by config"),
+        "unexpected error: {send_err:?}"
+    );
+
+    let status_err = SessionNotifyTool
+        .execute(
+            serde_json::json!({
+                "target_session": Uuid::new_v4().to_string(),
+                "action": "status",
+                "notify_id": Uuid::new_v4().to_string()
+            }),
+            &context,
+        )
+        .await
+        .expect_err("status must refuse while the kill switch is off");
+    assert!(
+        status_err.to_string().contains("disabled by config"),
+        "unexpected error: {status_err:?}"
     );
 }

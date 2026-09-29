@@ -3669,7 +3669,11 @@ pub(crate) async fn run_evolve_directly(
         });
 
     let tool = EvolveTool::new(Some(progress));
-    let ctx = ToolExecutionContext::new(session_id);
+    let ctx = ToolExecutionContext::new(session_id).with_session_notify_enabled(
+        crate::config::Config::current()
+            .agent
+            .session_notify_enabled,
+    );
     match tool.execute(serde_json::json!({}), &ctx).await {
         Ok(result) => {
             if !result.success {
