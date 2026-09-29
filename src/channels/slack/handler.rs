@@ -1857,7 +1857,10 @@ async fn handle_message(
                     let thread_ts_heal = thread_ts_inner.clone();
                     tokio::spawn(async move {
                         let session = client.open_session(&token);
-                        let text = format!("🔧 {}", message);
+                        let text = format!(
+                            "🔧 {}",
+                            crate::utils::sanitize::normalize_dashes(&message)
+                        );
                         let mut req = SlackApiChatPostMessageRequest::new(
                             channel,
                             SlackMessageContent::new().with_text(text),

@@ -162,7 +162,10 @@ pub(crate) fn build_progress_cb(
             ProgressEvent::SelfHealingAlert { message } => {
                 if let Ok(mut s) = st.lock() {
                     s.display_queue
-                        .push(DisplayItem::System(format!("🔧 {}", message)));
+                        .push(DisplayItem::System(format!(
+                            "🔧 {}",
+                            crate::utils::sanitize::normalize_dashes(&message)
+                        )));
                 }
             }
             ProgressEvent::RetryAttempt {

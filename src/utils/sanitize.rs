@@ -1014,7 +1014,7 @@ pub fn strip_llm_artifacts(text: &str) -> String {
 /// becomes a plain hyphen so ranges stay natural ("1\u{2013}3" becomes
 /// "1-3"). Order matters: the spaced forms must run before the glued
 /// fallback.
-fn normalize_dashes(text: &str) -> String {
+pub(crate) fn normalize_dashes(text: &str) -> String {
     text.replace(" \u{2014}", ":")
         .replace("\u{2014} ", ": ")
         .replace('\u{2014}', ":")
