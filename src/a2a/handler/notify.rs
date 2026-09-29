@@ -172,7 +172,7 @@ pub async fn handle_session_notify(
                 serde_json::json!({
                     "outcome": "no_route",
                     "detail": format!(
-                        "session {session_id} does not exist — nothing sent, nothing created"
+                        "session {session_id} does not exist: nothing sent, nothing created"
                     ),
                 }),
             );
@@ -285,7 +285,7 @@ pub async fn handle_session_notify(
         notify_receipts::record_queued(notify_id, session_id);
         let detail_str = format!(
             "deferred for session {session_id}: delivers once the session has been \
-             quiet for {}s (hard cap {}s) — notification id {notify_id}",
+             quiet for {}s (hard cap {}s): notification id {notify_id}",
             quiet_for.as_secs(),
             max_delay.as_secs()
         );
@@ -466,7 +466,7 @@ pub fn handle_notify_status(
                         "injected",
                         format!(
                             "notification {id} was INJECTED into session {}'s model \
-                             context at {at} — the receiving machinery consumed it",
+                             context at {at}: the receiving machinery consumed it",
                             receipt.target
                         ),
                     )
@@ -475,7 +475,7 @@ pub fn handle_notify_status(
                     "queued",
                     format!(
                         "notification {id} is routed to session {} but NOT yet observed \
-                         at a tool-loop drain point — delivery != queue acceptance",
+                         at a tool-loop drain point: delivery != queue acceptance",
                         receipt.target
                     ),
                 ),

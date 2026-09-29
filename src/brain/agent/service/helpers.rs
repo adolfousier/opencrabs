@@ -1207,7 +1207,7 @@ impl AgentService {
                             trimmed
                         };
                         let msg = format!(
-                            "Self-heal: provider sent stop after only {} output tokens — \
+                            "Self-heal: provider sent stop after only {} output tokens: \
                              response appears truncated: \"{}\"",
                             output_tokens, preview,
                         );

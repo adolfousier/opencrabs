@@ -173,7 +173,7 @@ pub(super) fn try_emit_truncation_continue(
         cb(
             session_id,
             ProgressEvent::SelfHealingAlert {
-                message: "Response was cut off mid-sentence — asking model to continue".into(),
+                message: CONTINUATION_NUDGE_ALERT.into(),
             },
         );
     }
@@ -222,11 +222,17 @@ pub(crate) enum Continuation {
     Echoed(String),
 }
 
+/// Alert posted when a truncated response is bounced back to the model for
+/// continuation (#1745 follow-up): user-facing, so no em dashes; pinned by
+/// `em_dash_guard_test`.
+pub(crate) const CONTINUATION_NUDGE_ALERT: &str =
+    "Response was cut off mid-sentence: asking model to continue";
+
 /// Note appended to an answer that is still cut off after the continuation
 /// failed. Telling the user is the only honest option left: the alternative is
 /// presenting a sentence that stops at a colon as a completed reply.
 pub(crate) const INCOMPLETE_MARKER: &str =
-    "\n\n_(cut off here — the model did not continue. Ask it to finish this.)_";
+    "\n\n_(cut off here: the model did not continue. Ask it to finish this.)_";
 
 pub(crate) fn join_continuation(partial: &str, continuation: &str) -> Continuation {
     let p = partial.trim_end();

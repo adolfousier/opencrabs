@@ -2802,12 +2802,12 @@ impl Tool for PlanTool {
                         ));
                     } else {
                         msg.push_str(&format!(
-                            "\n\nNext eligible: Task #{no} \u{2014} call 'start' with task_order={no} to begin it."
+                            "\n\nNext eligible: Task #{no}: call 'start' with task_order={no} to begin it."
                         ));
                     }
                 } else {
                     msg.push_str(
-                        "\n\nNo unblocked task is ready next \u{2014} remaining tasks are blocked or \
+                        "\n\nNo unblocked task is ready next: remaining tasks are blocked or \
                          failed. Use 'start' with a task_order to retry a failed task.",
                     );
                 }
