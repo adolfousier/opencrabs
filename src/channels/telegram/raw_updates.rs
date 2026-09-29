@@ -110,9 +110,18 @@ struct RawPollState {
     http: reqwest::Client,
     token: String,
     offset: i64,
-    pending: VecDeque<Update>,
+    pending: VecDeque<RawQueued>,
     flag: StopFlag,
     stop_token: StopToken,
+}
+
+/// An update parked between reception and dispatcher handoff, carrying the
+/// metadata the #1778 receipts need: without the stash instant and raw id,
+/// a stalled drain is indistinguishable from a stalled poll.
+struct RawQueued {
+    update: Update,
+    update_id: i64,
+    queued_at: std::time::Instant,
 }
 
 /// What a failed getUpdates response actually means. Telegram answers 409
@@ -142,10 +151,63 @@ pub(crate) fn classify_poll_failure(value: &Value) -> PollFailure {
     }
 }
 
+/// How a getUpdates HTTP-200 body classifies for the poll-cycle receipt
+/// (#1778). Every branch maps to a distinct log line, so a stall becomes
+/// attributable from logs alone: no receipt lines = the dispatcher stopped
+/// pulling; `Empty` receipts = poller/server healthy and idle;
+/// `MalformedResult`/`NotOk` = the API answered but poisoned the body.
+pub(crate) enum PollOutcome {
+    /// ok=true, result is a non-empty array (count carried separately).
+    Updates,
+    /// ok=true, result is an empty array: healthy long-poll timeout.
+    Empty,
+    /// ok=true but result missing or not an array: malformed 200.
+    MalformedResult,
+    /// ok=false: failure details come from `classify_poll_failure`.
+    NotOk,
+}
+
+/// Pure classification of a getUpdates response body. Testable seam for the
+/// receipt log's branch structure.
+pub(crate) fn classify_poll_outcome(value: &Value) -> PollOutcome {
+    if value.get("ok").and_then(|v| v.as_bool()) != Some(true) {
+        return PollOutcome::NotOk;
+    }
+    match value.get("result").and_then(|v| v.as_array()) {
+        Some(a) if a.is_empty() => PollOutcome::Empty,
+        Some(_) => PollOutcome::Updates,
+        None => PollOutcome::MalformedResult,
+    }
+}
+
+/// One poll cycle with receipt logging (#1778): the call line, the inner
+/// long-poll, and the return line with the received count and elapsed time.
+/// A stalled inbound stream becomes attributable from logs alone — no
+/// receipt lines means the dispatcher stopped pulling the stream, since the
+/// unfold loop only polls when the dispatcher asks for the next update.
+async fn poll_once(st: &mut RawPollState) {
+    tracing::debug!(
+        "Telegram getUpdates call: offset={}, pending_queue={}",
+        st.offset,
+        st.pending.len()
+    );
+    let started = std::time::Instant::now();
+    let received = poll_once_inner(st).await;
+    tracing::debug!(
+        "Telegram getUpdates return: received={received}, pending_queue={}, offset={}, \
+         elapsed_ms={}",
+        st.pending.len(),
+        st.offset,
+        started.elapsed().as_millis()
+    );
+}
+
 /// One getUpdates long-poll: stash raw message payloads, queue the typed
 /// updates. Errors are logged and absorbed with a short backoff — the outer
-/// dispatcher retry loop still guards against total failure.
-async fn poll_once(st: &mut RawPollState) {
+/// dispatcher retry loop still guards against total failure. Returns the
+/// number of updates the batch carried (0 on every failure shape; each
+/// failure shape logs its own distinct line).
+async fn poll_once_inner(st: &mut RawPollState) -> usize {
     let url = format!("https://api.telegram.org/bot{}/getUpdates", st.token);
     let body = serde_json::json!({
         "timeout": 30,
@@ -171,16 +233,17 @@ async fn poll_once(st: &mut RawPollState) {
             Err(e) => {
                 tracing::warn!("Telegram raw poll: body read failed: {e}");
                 tokio::time::sleep(std::time::Duration::from_secs(3)).await;
-                return;
+                return 0;
             }
         },
         Err(e) => {
             tracing::warn!("Telegram raw poll: request failed: {e}");
             tokio::time::sleep(std::time::Duration::from_secs(3)).await;
-            return;
+            return 0;
         }
     };
-    if value.get("ok").and_then(|v| v.as_bool()) != Some(true) {
+    let outcome = classify_poll_outcome(&value);
+    if matches!(outcome, PollOutcome::NotOk) {
         match classify_poll_failure(&value) {
             PollFailure::Conflict => {
                 // #1721: escalate loudly and back off hard. The fight itself
@@ -202,11 +265,21 @@ async fn poll_once(st: &mut RawPollState) {
                 tokio::time::sleep(std::time::Duration::from_secs(3)).await;
             }
         }
-        return;
+        return 0;
     }
-    let Some(updates) = value.get("result").and_then(|v| v.as_array()) else {
-        return;
-    };
+    if matches!(outcome, PollOutcome::MalformedResult) {
+        // #1778: this 200-shape was previously silent — during a stall it
+        // was indistinguishable from a healthy idle poll. Warn with the body.
+        tracing::warn!(
+            "Telegram raw poll: ok=true but result missing/not an array: {}",
+            crate::utils::truncate_str(&value.to_string(), 200)
+        );
+        return 0;
+    }
+    let updates = value
+        .get("result")
+        .and_then(|v| v.as_array())
+        .expect("classified Updates above");
     for u in updates {
         let update_id = u.get("update_id").and_then(|v| v.as_i64()).unwrap_or(-1);
         st.offset = st.offset.max(update_id + 1);
@@ -240,7 +313,11 @@ async fn poll_once(st: &mut RawPollState) {
                     "Telegram raw poll: update {update_id} parsed, kind={}",
                     update_kind_name(&update)
                 );
-                st.pending.push_back(update);
+                st.pending.push_back(RawQueued {
+                    update,
+                    update_id,
+                    queued_at: std::time::Instant::now(),
+                });
             }
             Err(e) => {
                 // The raw payload is stashed; only the typed dispatch is
@@ -260,6 +337,7 @@ async fn poll_once(st: &mut RawPollState) {
             st.offset
         );
     }
+    updates.len()
 }
 
 /// Message JSON keys that count as KNOWN content — if any is present the
@@ -440,8 +518,18 @@ fn raw_update_stream(
             if st.flag.is_stopped() {
                 return None;
             }
-            if let Some(u) = st.pending.pop_front() {
-                return Some((Ok(u), st));
+            if let Some(q) = st.pending.pop_front() {
+                // #1778 handoff receipt: per-update queue wait makes a
+                // stalled drain visible — a flushed backlog shows as a burst
+                // of handoff lines with growing queued_wait_ms.
+                tracing::debug!(
+                    "Telegram update handoff to dispatcher: update_id={}, kind={}, \
+                     queued_wait_ms={}",
+                    q.update_id,
+                    update_kind_name(&q.update),
+                    q.queued_at.elapsed().as_millis()
+                );
+                return Some((Ok(q.update), st));
             }
             poll_once(st).await;
         }
