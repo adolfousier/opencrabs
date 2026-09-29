@@ -652,14 +652,7 @@ async fn sync_step_group<'a>(
     match gts.as_ref() {
         Some(ts) => {
             let group = slack_state
-                .upsert_tool_group(
-                    ts.to_string(),
-                    GroupState {
-                        channel: channel.clone(),
-                        entries,
-                        expanded: false,
-                    },
-                )
+                .upsert_tool_group(ts.to_string(), GroupState::new(channel.clone(), entries))
                 .await;
             let content = super::tool_group::render(&group, ts);
             let upd = SlackApiChatUpdateRequest::new(channel, content, ts.clone());
@@ -670,11 +663,7 @@ async fn sync_step_group<'a>(
         None => {
             // First step: post with a placeholder ts in the button id, then
             // re-render with the real ts.
-            let group = GroupState {
-                channel: channel.clone(),
-                entries,
-                expanded: false,
-            };
+            let group = GroupState::new(channel.clone(), entries);
             let content = super::tool_group::render(&group, &SlackTs::new("0".into()));
             let mut req = SlackApiChatPostMessageRequest::new(channel.clone(), content);
             if let Some(ref ts) = thread_ts {
@@ -762,6 +751,108 @@ async fn append_footer_via_update<'a>(
     }
 }
 
+/// Settle the turn's step group (#1797): stamp the delivery outcome (or the
+/// background-wait state) onto the group and re-render its message once the
+/// answer is out. The Slack mirror of Telegram's settled flow header, fed
+/// the SAME `ctx_footer` string the final answer carries so the two budgets
+/// can never disagree. A no-op when the turn never opened a group (plain
+/// tool-less replies). A Finished turn that ends with detached background
+/// tasks settles into the waiting state instead; the flip back to Finished
+/// happens at the channel's next inbound event (see `flip_waiting_group`),
+/// because a completion IS such an event.
+#[allow(clippy::too_many_arguments)]
+async fn settle_step_group<'a>(
+    session: &SlackClientSession<'a, slack_morphism::hyper_tokio::SlackClientHyperHttpsConnector>,
+    slack_state: &Arc<SlackState>,
+    agent: &crate::brain::agent::AgentService,
+    session_id: Uuid,
+    channel: SlackChannelId,
+    channel_id: &str,
+    group_ts: &Arc<Mutex<Option<SlackTs>>>,
+    outcome: super::tool_group::TurnOutcome,
+    ctx_footer: &str,
+) {
+    let Some(ts) = group_ts.lock().await.clone() else {
+        return;
+    };
+    let bg = agent
+        .background_manager()
+        .map(|bm| bm.running_tasks(session_id).len())
+        .unwrap_or(0);
+    let ctx = (!ctx_footer.is_empty()).then(|| ctx_footer.to_string());
+    let Some(group) = slack_state
+        .settle_tool_group(ts.as_ref(), outcome, bg, ctx)
+        .await
+    else {
+        return;
+    };
+    let content = super::tool_group::render(&group, &ts);
+    let upd = SlackApiChatUpdateRequest::new(channel, content, ts.clone());
+    if let Err(e) = session.chat_update(&upd).await {
+        tracing::warn!("Slack: chat_update failed (step group settle, ts={ts}): {e}");
+    }
+    if group.settled.as_ref().is_some_and(|s| s.waiting) {
+        slack_state
+            .note_waiting_group(channel_id.to_string(), ts.to_string(), session_id)
+            .await;
+    }
+}
+
+/// Flip a background-waiting step group to its terminal line (#1797).
+///
+/// A group that settled while detached tasks were still running reads
+/// "⏳ Waiting for N background tasks" with a rolling clock. A completion is
+/// delivered as the channel's next inbound turn, so this runs at the top of
+/// handle_message: recount the session's tasks — zero flips the line to
+/// `✅ Finished · N tool calls · ctx · ⏱️`, anything else refreshes the
+/// count and stays waiting. The ctx string is the one captured at first
+/// settle, so the budget never changes under the user. Cheap no-op when
+/// nothing on this channel is waiting.
+async fn flip_waiting_group(
+    client: &Arc<SlackHyperClient>,
+    state: &Arc<HandlerState>,
+    channel_id: &str,
+) {
+    let Some((ts, session_id)) = state.slack_state.take_waiting_group_for(channel_id).await else {
+        return;
+    };
+    let bg = state
+        .agent
+        .background_manager()
+        .map(|bm| bm.running_tasks(session_id).len())
+        .unwrap_or(0);
+    let token = SlackApiToken::new(SlackApiTokenValue::from(state.current_bot_token()));
+    let session = client.open_session(&token);
+    let Some(group) = state
+        .slack_state
+        .settle_tool_group(
+            &ts,
+            super::tool_group::TurnOutcome::Finished,
+            bg,
+            None, // keep the ctx stamped at first settle
+        )
+        .await
+    else {
+        // Aged out of retention: nothing left to flip.
+        return;
+    };
+    let content = super::tool_group::render(&group, &SlackTs::new(ts.clone()));
+    let upd = SlackApiChatUpdateRequest::new(
+        SlackChannelId::new(channel_id.to_string()),
+        content,
+        SlackTs::new(ts.clone()),
+    );
+    if let Err(e) = session.chat_update(&upd).await {
+        tracing::warn!("Slack: chat_update failed (waiting-group flip, ts={ts}): {e}");
+    }
+    if group.settled.as_ref().is_some_and(|s| s.waiting) {
+        state
+            .slack_state
+            .note_waiting_group(channel_id.to_string(), ts, session_id)
+            .await;
+    }
+}
+
 async fn handle_message(
     msg: &SlackMessageEvent,
     client: Arc<SlackHyperClient>,
@@ -801,6 +892,11 @@ async fn handle_message(
             return;
         }
     };
+
+    // A previous turn on this channel may have settled with detached
+    // background tasks still running; its step group is waiting on this flip
+    // (#1797). No-op when nothing is waiting.
+    flip_waiting_group(&client, &state, &channel_id).await;
 
     // Resolve user display name via Slack API (cached per conversation turn)
     let user_name = {
@@ -1737,6 +1833,13 @@ async fn handle_message(
     let steps: Arc<Mutex<Vec<super::tool_group::GroupEntry>>> = Arc::new(Mutex::new(Vec::new()));
     let steps_final = steps.clone();
 
+    // ts of the turn's step-group message, shared by the progress callbacks
+    // and the delivery tail: the settle pass (#1797) stamps the group only
+    // after the answer is out, and it reaches the same ts the callbacks
+    // posted.
+    let turn_group_ts: Arc<Mutex<Option<SlackTs>>> = Arc::new(Mutex::new(None));
+    let turn_group_ts_final = turn_group_ts.clone();
+
     // Build progress callback — sends tool call status as Slack messages
     #[allow(clippy::type_complexity)]
     let progress_cb: crate::brain::agent::ProgressCallback = {
@@ -1746,7 +1849,7 @@ async fn handle_message(
 
         let tools = steps;
         // ts of the single grouped tool message for this turn, once posted.
-        let tool_group_ts: Arc<Mutex<Option<SlackTs>>> = Arc::new(Mutex::new(None));
+        let tool_group_ts = turn_group_ts.clone();
         let bot_token_cb = state.current_bot_token();
         let channel_cb = SlackChannelId::new(channel_id.clone());
         let client_cb = client.clone();
@@ -1834,11 +1937,7 @@ async fn handle_message(
                             let group = slack_state_grp
                                 .upsert_tool_group(
                                     ts.to_string(),
-                                    GroupState {
-                                        channel: channel.clone(),
-                                        entries,
-                                        expanded: false,
-                                    },
+                                    GroupState::new(channel.clone(), entries),
                                 )
                                 .await;
                             let content = super::tool_group::render(&group, ts);
@@ -1857,10 +1956,8 @@ async fn handle_message(
                     let thread_ts_heal = thread_ts_inner.clone();
                     tokio::spawn(async move {
                         let session = client.open_session(&token);
-                        let text = format!(
-                            "🔧 {}",
-                            crate::utils::sanitize::normalize_dashes(&message)
-                        );
+                        let text =
+                            format!("🔧 {}", crate::utils::sanitize::normalize_dashes(&message));
                         let mut req = SlackApiChatPostMessageRequest::new(
                             channel,
                             SlackMessageContent::new().with_text(text),
@@ -2154,6 +2251,18 @@ async fn handle_message(
                     if let Some((ts, _hash, text)) = intermediates.last() {
                         append_footer_via_update(&session, &channel_id, ts, text, &footer).await;
                     }
+                    settle_step_group(
+                        &session,
+                        &state.slack_state,
+                        &state.agent,
+                        session_id,
+                        SlackChannelId::new(channel_id.clone()),
+                        &channel_id,
+                        &turn_group_ts_final,
+                        super::tool_group::TurnOutcome::Finished,
+                        &footer,
+                    )
+                    .await;
                     return;
                 }
                 // Nothing was posted standalone, because narration now folds
@@ -2168,6 +2277,18 @@ async fn handle_message(
                     );
                     post_final_text(&session, &channel_id, thread_ts.as_ref(), &answer, &footer)
                         .await;
+                    settle_step_group(
+                        &session,
+                        &state.slack_state,
+                        &state.agent,
+                        session_id,
+                        SlackChannelId::new(channel_id.clone()),
+                        &channel_id,
+                        &turn_group_ts_final,
+                        super::tool_group::TurnOutcome::Finished,
+                        &footer,
+                    )
+                    .await;
                 } else {
                     // Neither a final nor any narration. Say so: a turn that
                     // deliberately posts nothing is indistinguishable from one
@@ -2175,6 +2296,18 @@ async fn handle_message(
                     tracing::warn!(
                         "Slack: turn produced neither a final response nor narration — nothing to post"
                     );
+                    settle_step_group(
+                        &session,
+                        &state.slack_state,
+                        &state.agent,
+                        session_id,
+                        SlackChannelId::new(channel_id.clone()),
+                        &channel_id,
+                        &turn_group_ts_final,
+                        super::tool_group::TurnOutcome::Finished,
+                        &footer,
+                    )
+                    .await;
                 }
                 return;
             }
@@ -2243,6 +2376,18 @@ async fn handle_message(
                 if let Some(ts) = matching_keep.first() {
                     append_footer_via_update(&session, &channel_id, ts, &text_only, &footer).await;
                 }
+                settle_step_group(
+                    &session,
+                    &state.slack_state,
+                    &state.agent,
+                    session_id,
+                    SlackChannelId::new(channel_id.clone()),
+                    &channel_id,
+                    &turn_group_ts_final,
+                    super::tool_group::TurnOutcome::Finished,
+                    &footer,
+                )
+                .await;
                 return;
             }
 
@@ -2397,6 +2542,22 @@ async fn handle_message(
                 }
             }
 
+            // The answer is out: settle the step group into its terminal
+            // line (#1797), before the voice-note detour so the status never
+            // lags the delivery.
+            settle_step_group(
+                &session,
+                &state.slack_state,
+                &state.agent,
+                session_id,
+                SlackChannelId::new(channel_id.clone()),
+                &channel_id,
+                &turn_group_ts_final,
+                super::tool_group::TurnOutcome::Finished,
+                &footer,
+            )
+            .await;
+
             // If input was audio AND TTS is enabled, also upload a voice note
             // (OGG/Opus) alongside the text reply. Slack doesn't have a
             // dedicated "voice note" primitive like Telegram's send_voice —
@@ -2437,6 +2598,20 @@ async fn handle_message(
         }
         Err(ref e) if matches!(e, crate::brain::agent::AgentError::Cancelled) => {
             tracing::info!("Slack: agent call cancelled for session {}", session_id);
+            let token = SlackApiToken::new(SlackApiTokenValue::from(state.current_bot_token()));
+            let session = client.open_session(&token);
+            settle_step_group(
+                &session,
+                &state.slack_state,
+                &state.agent,
+                session_id,
+                SlackChannelId::new(channel_id.clone()),
+                &channel_id,
+                &turn_group_ts_final,
+                super::tool_group::TurnOutcome::Cancelled,
+                "",
+            )
+            .await;
         }
         Err(e) => {
             tracing::error!("Slack: agent error: {}", e);
@@ -2447,7 +2622,7 @@ async fn handle_message(
             // failure messages.
             let error_msg = format!("❌ Error\n\n{}", crate::brain::agent::format_user_error(&e));
             let mut request = SlackApiChatPostMessageRequest::new(
-                SlackChannelId::new(channel_id),
+                SlackChannelId::new(channel_id.clone()),
                 SlackMessageContent::new().with_text(error_msg),
             );
             if let Some(ref ts) = thread_ts {
@@ -2456,6 +2631,28 @@ async fn handle_message(
             if let Err(e) = session.chat_post_message(&request).await {
                 tracing::warn!(error = %e, "failed to post Slack message");
             }
+            settle_step_group(
+                &session,
+                &state.slack_state,
+                &state.agent,
+                session_id,
+                SlackChannelId::new(channel_id.clone()),
+                &channel_id,
+                &turn_group_ts_final,
+                {
+                    // Classify like Telegram's settle: a timeout is its own
+                    // outcome (#1797), everything else is a plain failure.
+                    let es = e.to_string().to_lowercase();
+                    if es.contains("timed out") || es.contains("timeout") || es.contains("deadline")
+                    {
+                        super::tool_group::TurnOutcome::TimedOut
+                    } else {
+                        super::tool_group::TurnOutcome::Failed
+                    }
+                },
+                "",
+            )
+            .await;
         }
     }
 }

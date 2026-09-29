@@ -18,11 +18,9 @@ fn tool(name: &str, status: Option<bool>) -> GroupEntry {
 }
 
 fn group(entries: Vec<GroupEntry>, expanded: bool) -> GroupState {
-    GroupState {
-        channel: SlackChannelId::new("C1".into()),
-        entries,
-        expanded,
-    }
+    let mut g = GroupState::new(SlackChannelId::new("C1".into()), entries);
+    g.expanded = expanded;
+    g
 }
 
 fn text_of(content: &SlackMessageContent) -> String {

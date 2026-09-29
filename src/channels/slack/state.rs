@@ -46,6 +46,12 @@ pub struct SlackState {
     /// Collapse interaction can re-render long after the turn ended.
     /// Insertion-ordered for pruning; bounded at [`Self::TOOL_GROUP_CAP`] (see `tool_group`).
     pub(super) tool_groups: Mutex<(Vec<String>, HashMap<String, tool_group::GroupState>)>,
+    /// The most recent group that settled with detached background tasks
+    /// still running (#1797): (channel id, group message ts, owning
+    /// session). Its "Finished" flip fires when a completion arrives, which
+    /// is the channel's next inbound event, so the flip hook reads this at
+    /// the top of handle_message.
+    pub(super) waiting_group: Mutex<Option<(String, String, Uuid)>>,
 }
 
 impl Default for SlackState {
@@ -66,6 +72,7 @@ impl SlackState {
             pending_followups: Mutex::new(HashMap::new()),
             cancel_tokens: Mutex::new(HashMap::new()),
             tool_groups: Mutex::new((Vec::new(), HashMap::new())),
+            waiting_group: Mutex::new(None),
         }
     }
 }
