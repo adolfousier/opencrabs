@@ -30,8 +30,10 @@ fn the_default_interval_is_five_minutes() {
     // sweep; the 300s figure belongs to an opted-in install. That the default
     // is off is pinned by memory_vector_default_test, and off-means-no-sweep
     // by disabled_vectors_disable_the_sweep_regardless_of_interval below.
-    let mut opted_in = MemoryConfig::default();
-    opted_in.vector_enabled = true;
+    let opted_in = MemoryConfig {
+        vector_enabled: true,
+        ..Default::default()
+    };
     assert_eq!(interval_for(&opted_in).map(|d| d.as_secs()), Some(300));
 }
 
