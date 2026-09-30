@@ -26,10 +26,13 @@ fn cfg(vector_enabled: bool, interval: u64) -> MemoryConfig {
 fn the_default_interval_is_five_minutes() {
     // Chosen against the failure it fixes: a key corrected in config.toml
     // should take effect while the user is still looking at the terminal.
-    assert_eq!(
-        interval_for(&MemoryConfig::default()).map(|d| d.as_secs()),
-        Some(300)
-    );
+    // Vectors are off by default now (#1798), so the bare default carries no
+    // sweep; the 300s figure belongs to an opted-in install. That the default
+    // is off is pinned by memory_vector_default_test, and off-means-no-sweep
+    // by disabled_vectors_disable_the_sweep_regardless_of_interval below.
+    let mut opted_in = MemoryConfig::default();
+    opted_in.vector_enabled = true;
+    assert_eq!(interval_for(&opted_in).map(|d| d.as_secs()), Some(300));
 }
 
 #[test]
