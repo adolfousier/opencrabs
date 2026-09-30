@@ -878,19 +878,19 @@ mod self_improve_tool {
     #[tokio::test]
     async fn apply_writes_to_rsi_improvements() {
         let (_db, ctx) = setup_ctx_with_db().await;
-        // Isolate to a throwaway profile home. `apply` now dedups, so re-runs
+        // Isolate to a per-test temp home: concurrent suites racing one
+        // fixed-name profile dir deleted each other's seeded home mid-test
+        // (#1800). `apply` now dedups, so re-runs
         // against the shared ~/.opencrabs would skip the already-present append
         // and never write improvements.md. Isolation also stops this test
         // polluting the user's real brain files.
-        let profile = "rsi-test-apply-improvements";
-        let home = crate::config::profile::home_for_profile(Some(profile));
-        let _ = std::fs::remove_dir_all(&home);
+        let tmp = tempfile::TempDir::new().expect("per-test temp home");
+        let home = tmp.path().to_path_buf();
         // Seed a realistic brain file + belief base so the Orient gate (#881)
         // verifies the append against valid anchors. Real self_improve always
         // appends into a populated brain file, never an empty one.
-        std::fs::create_dir_all(&home).unwrap();
         crate::config::profile::seed_brain_templates(&home);
-        crate::config::profile::with_profile_home_async(Some(profile), async {
+        crate::config::profile::with_home_override_async(home, async {
             let tool = SelfImproveTool;
             let result = tool
                 .execute(
@@ -917,7 +917,6 @@ mod self_improve_tool {
             assert!(improvements.contains("Frequent transient failures"));
         })
         .await;
-        let _ = std::fs::remove_dir_all(&home);
     }
 
     #[tokio::test]
@@ -1012,16 +1011,14 @@ mod self_improve_tool {
     #[tokio::test]
     async fn apply_valid_brain_file() {
         let (_db, ctx) = setup_ctx_with_db().await;
-        // Isolated profile home — see apply_writes_to_rsi_improvements.
-        let profile = "rsi-test-apply-valid";
-        let home = crate::config::profile::home_for_profile(Some(profile));
-        let _ = std::fs::remove_dir_all(&home);
+        // Per-test temp home, see apply_writes_to_rsi_improvements (#1800).
+        let tmp = tempfile::TempDir::new().expect("per-test temp home");
+        let home = tmp.path().to_path_buf();
         // Seed a realistic brain file + belief base so the Orient gate (#881)
         // verifies the append against valid anchors. Real self_improve always
         // appends into a populated brain file, never an empty one.
-        std::fs::create_dir_all(&home).unwrap();
         crate::config::profile::seed_brain_templates(&home);
-        crate::config::profile::with_profile_home_async(Some(profile), async {
+        crate::config::profile::with_home_override_async(home, async {
             let tool = SelfImproveTool;
             let result = tool
                 .execute(
@@ -1051,7 +1048,6 @@ mod self_improve_tool {
             assert!(improvements.contains("SOUL.md"));
         })
         .await;
-        let _ = std::fs::remove_dir_all(&home);
     }
 
     #[tokio::test]
@@ -1108,16 +1104,14 @@ mod self_improve_tool {
     #[tokio::test]
     async fn apply_without_rationale() {
         let (_db, ctx) = setup_ctx_with_db().await;
-        // Isolated profile home — see apply_writes_to_rsi_improvements.
-        let profile = "rsi-test-apply-no-rationale";
-        let home = crate::config::profile::home_for_profile(Some(profile));
-        let _ = std::fs::remove_dir_all(&home);
+        // Per-test temp home, see apply_writes_to_rsi_improvements (#1800).
+        let tmp = tempfile::TempDir::new().expect("per-test temp home");
+        let home = tmp.path().to_path_buf();
         // Seed a realistic brain file + belief base so the Orient gate (#881)
         // verifies the append against valid anchors. Real self_improve always
         // appends into a populated brain file, never an empty one.
-        std::fs::create_dir_all(&home).unwrap();
         crate::config::profile::seed_brain_templates(&home);
-        crate::config::profile::with_profile_home_async(Some(profile), async {
+        crate::config::profile::with_home_override_async(home, async {
             let tool = SelfImproveTool;
             let result = tool
                 .execute(
@@ -1139,7 +1133,6 @@ mod self_improve_tool {
             assert!(improvements.contains("(none)"));
         })
         .await;
-        let _ = std::fs::remove_dir_all(&home);
     }
 }
 
