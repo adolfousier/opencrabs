@@ -119,6 +119,7 @@ pub mod brain_tools_hashline_types_test;
 pub mod brain_tools_load_brain_file_tests;
 pub mod brain_tools_memory_search_test;
 pub mod brain_tools_profile_list_test;
+pub mod brain_tools_provider_vision_test;
 pub mod brain_tools_read_encoding_test;
 pub mod brain_tools_read_test;
 pub mod brain_tools_registry_test;

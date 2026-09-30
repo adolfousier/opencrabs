@@ -95,6 +95,40 @@ impl ProviderVisionTool {
     }
 }
 
+/// Longest single candidate reason kept in the surfaced failure message
+/// (#1792). An API error body can be a full HTML page; the model, the endpoint
+/// and the head of the reason are what identify a misconfigured candidate.
+pub(crate) const VISION_FAILURE_REASON_LIMIT: usize = 240;
+
+/// Char-safe clip with a marker, so one huge error body cannot drown the rest
+/// of the list.
+pub(crate) fn clip_failure_reason(reason: &str) -> String {
+    if reason.chars().count() <= VISION_FAILURE_REASON_LIMIT {
+        return reason.to_string();
+    }
+    let mut clipped: String = reason.chars().take(VISION_FAILURE_REASON_LIMIT).collect();
+    clipped.push_str("... [truncated]");
+    clipped
+}
+
+/// Aggregate per-candidate failures into the surfaced error (#1792): every
+/// tried model and endpoint with its own reason, numbered. The message used to
+/// carry only the LAST candidate's error, so one endpoint's 400 (an
+/// opencode-go MissingSessionID) read like a blanket failure of the whole
+/// chain and hid which entry was actually wrong.
+pub(crate) fn format_vision_failures(failures: &[String]) -> String {
+    let mut out = format!("All {} provider vision candidates failed:", failures.len());
+    for (i, entry) in failures.iter().enumerate() {
+        out.push_str(&format!("\n  [{}] {}", i + 1, entry));
+    }
+    out.push_str(
+        "\nEach line above is one tried candidate; correct or drop the offending \
+         [providers.*].vision_model or [fallback.vision] entry. Full reasons are \
+         in the log under 'analyze_image: vision candidate'.",
+    );
+    out
+}
+
 #[async_trait]
 impl Tool for ProviderVisionTool {
     fn name(&self) -> &str {
@@ -179,8 +213,10 @@ impl Tool for ProviderVisionTool {
             .map_err(|e| super::error::ToolError::Execution(e.to_string()))?;
 
         // Roll through candidates in order (#430): a failure logs and tries
-        // the next; Gemini runs only after every candidate failed.
-        let mut last_failure = "no vision candidates configured".to_string();
+        // the next; Gemini runs only after every candidate failed. #1792: every
+        // failure is kept, not just the last, so the surfaced error names the
+        // offending candidate instead of blaming the whole chain for it.
+        let mut failures: Vec<String> = Vec::new();
         let candidates = match &self.pinned {
             Some(pinned) => pinned.clone(),
             None => Self::candidates_for(context.session_provider.as_deref()),
@@ -207,19 +243,28 @@ impl Tool for ProviderVisionTool {
                 Err(reason) => {
                     tracing::warn!(
                         "analyze_image: vision candidate model={vision_model} url={base_url} \
-                         failed: {reason} — trying next candidate"
+                         failed: {reason}, trying next candidate"
                     );
-                    last_failure = reason;
+                    failures.push(format!(
+                        "{vision_model} @ {base_url}: {}",
+                        clip_failure_reason(&reason)
+                    ));
                 }
             }
+        }
+        let summary = if failures.is_empty() {
+            "no vision candidates configured".to_string()
+        } else {
+            format_vision_failures(&failures)
+        };
+        if !failures.is_empty() {
+            tracing::error!("analyze_image: {summary}");
         }
         self.fallback_or(
             &input,
             context,
-            ToolResult::error(format!(
-                "All provider vision candidates failed: {last_failure}"
-            )),
-            &last_failure,
+            ToolResult::error(summary.clone()),
+            &summary,
         )
         .await
     }
