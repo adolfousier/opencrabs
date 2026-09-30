@@ -4036,11 +4036,11 @@ Memory search combines two strategies via **Reciprocal Rank Fusion (RRF)** for b
 
 | Mode | How | RAM | Setup |
 |---|---|---|---|
-| **Local** (default) | embeddinggemma-300M GGUF (~300 MB, auto-downloaded) | ~2.9 GB | Zero config, works offline |
+| **Local** (opt-in) | embeddinggemma-300M GGUF (~300 MB, auto-downloaded) | ~2.9 GB | Set `vector_enabled = true` in `[memory]`; works offline |
 | **API** | Any `/v1/embeddings` endpoint (OpenAI, Ollama, Jina, etc.) | ~0 MB | Set `url`, `model`, `api_key` in `[memory.embedding]` |
-| **FTS5-only** | No embeddings, keyword search only | ~0 MB | Set `vector_enabled = false` in `[memory]` |
+| **FTS5-only** (default) | No embeddings, keyword search only | ~0 MB | Nothing to set; `vector_enabled` defaults to `false` (#1798) |
 
-Auto-detects VPS environments and disables local embeddings automatically.
+Vector embeddings are **off by default** (#1798): the GGUF engine crashes on VPS and Windows hosts, so local embeddings are an explicit opt-in that runs well on Apple Silicon and most Linux desktops. Keyword search always works. Startup detection additionally writes an explicit `vector_enabled = false` on VPS/cloud.
 
 ```
 ┌─────────────────────────────────────┐
@@ -4079,7 +4079,7 @@ Auto-detects VPS environments and disables local embeddings automatically.
 | **Privacy** | 100% local | Data sent to API endpoint | 100% local |
 | **Latency** | ~2ms (in-process) | 100-500ms (HTTP) | N/A |
 | **Offline** | Works without internet | Requires internet | Works offline |
-| **Setup** | Automatic, no API key | Set `[memory.embedding]` config | Set `vector_enabled = false` |
+| **Setup** | Set `vector_enabled = true`, no API key | Set `[memory.embedding]` config | Default, no setup |
 | **Quality** | Excellent for code/session recall | Depends on model | Keyword-only |
 | **RAM** | ~2.9 GB | ~0 MB | ~0 MB |
 | **VPS-friendly** | No (needs RAM) | Yes | Yes |
@@ -5129,7 +5129,7 @@ The default release binary requires AVX2 (Haswell 2013+). If you have an older C
 RUSTFLAGS="-C target-cpu=native" cargo build --release
 ```
 
-Pre-built `*-compat` binaries are also available on the [releases page](https://github.com/adolfousier/opencrabs/releases) for AVX-only CPUs. If your CPU lacks AVX entirely (pre-2011), or you're on a low-RAM VPS, set `vector_enabled = false` in `[memory]` to disable vector embeddings and use FTS5-only keyword search.
+Pre-built `*-compat` binaries are also available on the [releases page](https://github.com/adolfousier/opencrabs/releases) for AVX-only CPUs. Vector embeddings are off by default (#1798), so you get FTS5-only keyword search out of the box; set `vector_enabled = true` in `[memory]` only on machines that can run the GGUF engine.
 
 ### macOS
 

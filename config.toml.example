@@ -773,14 +773,17 @@ enabled = false
 # Memory / Embeddings
 # ========================================
 # Controls vector embeddings for semantic memory search.
-# When disabled, only FTS5 (keyword) search is used — no model download,
-# no llama.cpp init, zero GPU/CPU overhead.
+# OFF by default (#1798): the local GGUF engine aborts on VPS and
+# Windows hosts mid-index, so embeddings are opt-in. When disabled,
+# only FTS5 (keyword) search is used: no model download, no llama.cpp
+# init, zero GPU/CPU overhead.
 #
-# Automatically set to false on VPS/cloud (detected at startup).
-# You can also set it manually here.
+# Set vector_enabled = true on capable machines (Apple Silicon, most
+# Linux desktops). Startup detection also writes an explicit false on
+# VPS/cloud as a safety net.
 #
 # [memory]
-# vector_enabled = false
+# vector_enabled = true
 
 # --------------------------------------------
 # External Index Paths (knowledge base)

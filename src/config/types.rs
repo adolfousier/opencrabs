@@ -1933,8 +1933,11 @@ pub struct EmbeddingConfig {
 /// Controls whether vector embeddings are enabled for semantic memory search.
 /// When disabled, only FTS5 (keyword) search is used.
 ///
-/// Automatically set to `vector_enabled = false` when running on a VPS or
-/// system with < 2GB RAM.
+/// OFF by default (#1798): the native GGUF/llama.cpp engine hard-aborts on
+/// VPS and Windows hosts mid-index (exit 0xC0000409), taking the daemon down
+/// with it. Local embeddings still run well on Apple Silicon and most Linux
+/// desktops, so they are a deliberate opt-in here; startup VPS detection also
+/// writes an explicit `vector_enabled = false` on cloud hosts as a safety net.
 ///
 /// When `vector_enabled = true`, embeddings can be generated either:
 /// - **Locally**: via embeddinggemma-300M GGUF model (default, no config needed)
@@ -1951,7 +1954,8 @@ pub struct EmbeddingConfig {
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MemoryConfig {
-    /// Whether vector embeddings are enabled (default: true on desktop, false on VPS)
+    /// Whether vector embeddings are enabled (default: false; opt in with
+    /// `vector_enabled = true`, see #1798)
     #[serde(default = "default_vector_enabled")]
     pub vector_enabled: bool,
 
@@ -2056,8 +2060,15 @@ fn default_external_excludes() -> Vec<String> {
     ]
 }
 
+/// #1798: vector embeddings are OFF by default on every platform.
+///
+/// The native GGUF/llama.cpp engine aborts (0xC0000409) mid-index on
+/// VPS and Windows hosts and used to take the daemon down with it; that
+/// crash is deliberate won't-fix territory, so local embeddings are now an
+/// explicit opt-in (`vector_enabled = true`), which still runs well on
+/// Apple Silicon and capable Linux desktops.
 const fn default_vector_enabled() -> bool {
-    true
+    false
 }
 
 const fn default_backfill_interval_secs() -> u64 {

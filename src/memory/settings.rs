@@ -8,8 +8,9 @@ use super::keys::{memory_embedding_key_from_keys_file, needs_embedding_key};
 use crate::config::{ExtraPath, MemoryConfig};
 
 /// Whether vector embeddings are enabled in the current config.
-/// Reads `[memory].vector_enabled` from config.toml (default: true).
-/// VPS/cloud auto-detection may set this to false.
+/// Reads `[memory].vector_enabled` from config.toml (default: false, the
+/// opt-in flipped in #1798). VPS/cloud auto-detection additionally writes
+/// an explicit false at startup.
 pub(crate) fn vector_enabled() -> bool {
     let config = read_memory_config();
     config.vector_enabled
