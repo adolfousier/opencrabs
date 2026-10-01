@@ -307,7 +307,37 @@ impl SelfUpdater {
         Err(anyhow::anyhow!("exec() failed: {}", err))
     }
 
-    #[cfg(not(unix))]
+    /// Windows: no exec() — spawn the successor with a console of its own
+    /// (ours dies with us; a new TUI needs real console input) and exit(0).
+    /// Destructors do not run, matching the exec() path's semantics on Unix;
+    /// SQLite WAL recovers on next open, so abrupt exit is the same shape.
+    #[cfg(windows)]
+    pub fn restart_into(binary_path: &std::path::Path, session_id: Uuid) -> Result<()> {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NEW_CONSOLE: u32 = 0x0000_0010;
+
+        tracing::info!(
+            "Restarting OpenCrabs: {} chat --session {}",
+            binary_path.display(),
+            session_id
+        );
+
+        let _child = std::process::Command::new(binary_path)
+            .args(["chat", "--session", &session_id.to_string()])
+            .env("OPENCRABS_EVOLVED_FROM", crate::VERSION)
+            // Deliberately NO .stdin() override: when all three stdio knobs
+            // stay at inherit, Rust omits STARTF_USESTDHANDLES and Windows
+            // binds the child's standard handles to its NEW console. Passing
+            // Stdio::null() looked tidy but handed the successor the NUL
+            // device as STD_INPUT, so the restarted TUI could never see a
+            // keystroke.
+            .creation_flags(CREATE_NEW_CONSOLE)
+            .spawn()
+            .map_err(|e| anyhow::anyhow!("restart spawn failed: {e}"))?;
+        std::process::exit(0);
+    }
+
+    #[cfg(not(any(unix, windows)))]
     pub fn restart_into(_binary_path: &std::path::Path, _session_id: Uuid) -> Result<()> {
         Err(anyhow::anyhow!(
             "Hot restart via exec() is only supported on Unix platforms"
