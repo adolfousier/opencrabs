@@ -916,6 +916,7 @@ pub mod web_scrape_tool_test;
 pub mod web_search_test;
 pub mod whatsapp_state_test;
 pub mod whatsapp_suggestion_poll_test;
+pub mod windows_clipboard_test;
 
 // Channel handler tests (moved from inline #[cfg(test)] modules)
 pub mod brain_tools_whatsapp_send_test;

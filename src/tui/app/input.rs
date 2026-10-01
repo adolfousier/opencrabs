@@ -776,45 +776,113 @@ impl App {
         use std::io::Write;
         use std::process::{Command, Stdio};
 
-        // Try pbcopy (macOS)
-        if let Ok(mut child) = Command::new("pbcopy")
-            .stdin(Stdio::piped())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
+        // Windows first, and only its own backends. The old arm fell through
+        // to pbcopy/xclip/xsel, all of which fail to spawn here, so every
+        // copy silently returned false.
+        #[cfg(windows)]
         {
-            if let Some(ref mut stdin) = child.stdin {
-                let _ = stdin.write_all(text.as_bytes());
+            // PowerShell Set-Clipboard, text riding a UTF-8 temp file:
+            // argv quoting is hostile, and the console codepage on stdin
+            // would mangle non-ASCII. The .NET reader gets an explicit
+            // encoding, so Indonesian/emoji payloads survive.
+            let path = std::env::temp_dir().join(format!("oc-clip-{}.txt", std::process::id()));
+            if std::fs::write(&path, text).is_ok() {
+                let ps = format!(
+                    "Set-Clipboard -Value ([IO.File]::ReadAllText('{}', [Text.Encoding]::UTF8))",
+                    // PS single-quoted strings escape ' by doubling; a temp
+                    // path under a profile like C:\Users\O'Brien would
+                    // otherwise break the script line.
+                    path.display().to_string().replace('\'', "''")
+                );
+                use std::os::windows::process::CommandExt;
+                let ok = Command::new("powershell.exe")
+                    .args([
+                        "-NoProfile",
+                        "-NonInteractive",
+                        "-ExecutionPolicy",
+                        "Bypass",
+                        "-Command",
+                        &ps,
+                    ])
+                    // CREATE_NO_WINDOW: no console flash on every Ctrl+C.
+                    .creation_flags(0x0800_0000)
+                    .stdin(Stdio::null())
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .status()
+                    .is_ok_and(|s| s.success());
+                let _ = std::fs::remove_file(&path);
+                if ok {
+                    return true;
+                }
             }
-            return child.wait().is_ok_and(|s| s.success());
+            // clip.exe last resort: it wants UTF-16LE, NUL-terminated, and
+            // eats a trailing newline, which is strictly better than nothing.
+            let mut utf16: Vec<u8> = text.encode_utf16().flat_map(u16::to_le_bytes).collect();
+            utf16.extend(0u16.to_le_bytes());
+            if let Ok(mut child) = Command::new("clip.exe")
+                .stdin(Stdio::piped())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+            {
+                if let Some(stdin) = child.stdin.as_mut() {
+                    let _ = stdin.write_all(&utf16);
+                }
+                // Close the pipe before waiting: clip.exe reads to EOF, and
+                // the child handle keeps stdin open until dropped, so a
+                // wait-with-pipe-open hangs the TUI on the last-resort path.
+                drop(child.stdin.take());
+                return child.wait().is_ok_and(|s| s.success());
+            }
+            return false;
         }
 
-        // Try xclip (Linux)
-        if let Ok(mut child) = Command::new("xclip")
-            .args(["-selection", "clipboard"])
-            .stdin(Stdio::piped())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
+        // Legacy Unix backends, now gated: on Windows the arm above always
+        // returns, and these spawns can never exist here. Compiling them
+        // un-gated produced unreachable-code warnings in windows builds.
+        #[cfg(not(windows))]
         {
-            if let Some(ref mut stdin) = child.stdin {
-                let _ = stdin.write_all(text.as_bytes());
+            // Try pbcopy (macOS)
+            if let Ok(mut child) = Command::new("pbcopy")
+                .stdin(Stdio::piped())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+            {
+                if let Some(ref mut stdin) = child.stdin {
+                    let _ = stdin.write_all(text.as_bytes());
+                }
+                return child.wait().is_ok_and(|s| s.success());
             }
-            return child.wait().is_ok_and(|s| s.success());
-        }
 
-        // Try xsel (Linux fallback)
-        if let Ok(mut child) = Command::new("xsel")
-            .args(["--clipboard", "--input"])
-            .stdin(Stdio::piped())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-        {
-            if let Some(ref mut stdin) = child.stdin {
-                let _ = stdin.write_all(text.as_bytes());
+            // Try xclip (Linux)
+            if let Ok(mut child) = Command::new("xclip")
+                .args(["-selection", "clipboard"])
+                .stdin(Stdio::piped())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+            {
+                if let Some(ref mut stdin) = child.stdin {
+                    let _ = stdin.write_all(text.as_bytes());
+                }
+                return child.wait().is_ok_and(|s| s.success());
             }
-            return child.wait().is_ok_and(|s| s.success());
+
+            // Try xsel (Linux fallback)
+            if let Ok(mut child) = Command::new("xsel")
+                .args(["--clipboard", "--input"])
+                .stdin(Stdio::piped())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+            {
+                if let Some(ref mut stdin) = child.stdin {
+                    let _ = stdin.write_all(text.as_bytes());
+                }
+                return child.wait().is_ok_and(|s| s.success());
+            }
         }
 
         false
@@ -855,9 +923,9 @@ impl App {
     // platform being compiled it reads as the tail, hence the allow.
     #[allow(clippy::needless_return)]
     fn read_clipboard_image() -> Option<Vec<u8>> {
-        // Both clipboard backends below are macOS/Linux; the import is
-        // unused (and warned) on Windows otherwise.
-        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        // Platform backends below (macOS/Linux/Windows) all spawn; the
+        // import would be unused (and warned) on any other target.
+        #[cfg(any(target_os = "macos", target_os = "linux", windows))]
         use std::process::{Command, Stdio};
 
         // macOS: pbpaste is text-only, so dump the clipboard PNG to a scratch
@@ -946,7 +1014,63 @@ impl App {
             return None;
         }
 
-        #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+        // Windows: the clipboard holds an HBITMAP, not bytes — no CLI hands
+        // us a PNG directly. PowerShell marshals GetImage() and encodes PNG
+        // to a scratch file, re-entering the same magic-byte gate as the
+        // macOS arm. -STA is mandatory: PowerShell 7 defaults to MTA and OLE
+        // clipboard calls throw there.
+        #[cfg(windows)]
+        {
+            let scratch =
+                std::env::temp_dir().join(format!("oc-paste-img-{}.png", std::process::id()));
+            let ps = format!(
+                "Add-Type -AssemblyName System.Windows.Forms; $i = [Windows.Forms.Clipboard]::GetImage(); \
+                 if ($i) {{ $i.Save('{}', [System.Drawing.Imaging.ImageFormat]::Png); $i.Dispose(); exit 0 }} \
+                 else {{ exit 1 }}",
+                // PS single-quote escaping is doubling; O'Brien profiles exist.
+                scratch.display().to_string().replace('\'', "''")
+            );
+            let out = {
+                use std::os::windows::process::CommandExt;
+                Command::new("powershell.exe")
+                    .args([
+                        "-STA",
+                        "-NoProfile",
+                        "-NonInteractive",
+                        "-ExecutionPolicy",
+                        "Bypass",
+                        "-Command",
+                        &ps,
+                    ])
+                    .creation_flags(0x0800_0000) // CREATE_NO_WINDOW
+                    .stdin(Stdio::null())
+                    .stderr(Stdio::null())
+                    .output()
+            };
+            let ok = out.is_ok_and(|o| o.status.success());
+            if !ok {
+                tracing::debug!(
+                    "clipboard image: powershell GetImage failed or clipboard has no image"
+                );
+                let _ = std::fs::remove_file(&scratch);
+                return None;
+            }
+            let bytes = std::fs::read(&scratch).ok();
+            let _ = std::fs::remove_file(&scratch);
+            match bytes {
+                Some(b) if Self::looks_like_image(&b) => Some(b),
+                Some(b) => {
+                    tracing::debug!(
+                        "clipboard image: scratch {} bytes are not an image",
+                        b.len()
+                    );
+                    None
+                }
+                None => None,
+            }
+        }
+
+        #[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
         {
             None
         }
@@ -1020,7 +1144,7 @@ impl App {
     // platform being compiled it reads as the tail, hence the allow.
     #[allow(clippy::needless_return)]
     fn read_clipboard_text() -> Option<String> {
-        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        #[cfg(any(target_os = "macos", target_os = "linux", windows))]
         use std::process::{Command, Stdio};
 
         #[cfg(target_os = "macos")]
@@ -1056,7 +1180,57 @@ impl App {
             return None;
         }
 
-        #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+        // Windows: Get-Clipboard. PowerShell's stdout arrives in the console
+        // codepage, which mangles non-ASCII, so route through an explicit
+        // UTF-8 file like the copy path does (Out-File -Encoding utf8 writes
+        // a BOM on 5.1 and none on 7; strip unconditionally).
+        #[cfg(windows)]
+        {
+            let path =
+                std::env::temp_dir().join(format!("oc-paste-txt-{}.txt", std::process::id()));
+            let ps = format!(
+                // -NoNewline: Out-File appends a line terminator by default,
+                // which the reader preserves as a phantom trailing newline in
+                // the user's pasted text. -Raw already carries the exact
+                // clipboard content; do not mutate it.
+                "Get-Clipboard -Raw | Out-File -LiteralPath '{}' -Encoding utf8 -NoNewline",
+                path.display().to_string().replace('\'', "''")
+            );
+            let ran = {
+                use std::os::windows::process::CommandExt;
+                Command::new("powershell.exe")
+                    .args([
+                        "-NoProfile",
+                        "-NonInteractive",
+                        "-ExecutionPolicy",
+                        "Bypass",
+                        "-Command",
+                        &ps,
+                    ])
+                    .creation_flags(0x0800_0000) // CREATE_NO_WINDOW
+                    .stdin(Stdio::null())
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .status()
+                    .is_ok_and(|s| s.success())
+            };
+            let text = if ran {
+                std::fs::read(&path).ok().map(|b| {
+                    String::from_utf8_lossy(&b)
+                        .trim_start_matches('\u{FEFF}')
+                        .to_string()
+                })
+            } else {
+                None
+            };
+            let _ = std::fs::remove_file(&path);
+            match text {
+                Some(s) if !s.trim().is_empty() => Some(s),
+                _ => None,
+            }
+        }
+
+        #[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
         {
             None
         }
