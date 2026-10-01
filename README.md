@@ -1953,7 +1953,7 @@ Then just type `opencrabs` to start. The onboarding wizard handles everything on
 > | OS | What to do |
 > |---|---|
 > | **macOS** | **System Settings → Privacy & Security → Full Disk Access** → toggle your terminal app ON (Alacritty, iTerm2, Terminal, etc.). If not listed, click "+" and add it from `/Applications/`. Without this, macOS repeatedly prompts "would like to access data from other apps". |
-> | **Windows** | Run your terminal (Windows Terminal, PowerShell, cmd) **as Administrator** on first run, or grant the terminal **write access** to `%USERPROFILE%\.opencrabs\` and your project directories. Windows Defender may also prompt — click "Allow". |
+> | **Windows** | No Administrator needed. Make sure your user has **write access** to `%USERPROFILE%\.opencrabs\` and your project directories. Windows Defender may also prompt: click "Allow". |
 > | **Linux** | Ensure your user owns `~/.opencrabs/` and project directories. On SELinux/AppArmor systems, the terminal process needs read/write access to those paths. Flatpak/Snap terminals may need `--filesystem=home` or equivalent permission. |
 
 > **Linux runtime dependencies:** The pre-built binary links against system libraries that may not be installed on minimal/VPS images:
@@ -5157,12 +5157,14 @@ This happens because `llama.cpp` (used for local embeddings) compiles with Metal
 Requires CMake, NASM, and Visual Studio Build Tools for native crypto dependencies:
 
 ```bash
-# Option 1: Install build tools
+# Option 1 (native, recommended): install the build tools
 # - CMake (add to PATH)
 # - NASM (add to PATH)
 # - Visual Studio Build Tools ("Desktop development with C++")
+# Or skip the toolchain entirely: every GitHub Release ships
+# opencrabs-v<version>-windows-amd64.zip with a prebuilt native binary.
 
-# Option 2: Use WSL2 (recommended)
+# Option 2 (WSL2): build the Linux target inside Windows Subsystem for Linux
 sudo apt-get install build-essential pkg-config libssl-dev
 ```
 

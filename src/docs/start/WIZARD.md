@@ -10,7 +10,7 @@ sidebarTitle: "Onboarding: CLI"
 # Opencrab Onboarding Wizard (CLI)
 
 The onboarding wizard is the **recommended** way to set up OpenCrabs on macOS,
-Linux, or Windows (via WSL2; strongly recommended).
+Linux, or Windows (native; WSL2 also works if you prefer it).
 It configures a local Gateway or a remote Gateway connection, plus channels, skills,
 and workspace defaults in one guided flow.
 
@@ -68,6 +68,8 @@ The wizard starts with **QuickStart** (defaults) vs **Advanced** (full control).
 3. **Gateway** — Port, bind address, auth mode, Tailscale exposure.
 4. **Channels** — WhatsApp, Telegram, Discord, Google Chat, Mattermost, Signal, BlueBubbles, or iMessage.
 5. **Daemon** — Installs a LaunchAgent (macOS) or systemd user unit (Linux/WSL2).
+   Native Windows has no daemon installer yet; the wizard reports it as unsupported,
+   so run `opencrabs` in a terminal there (tracked in #1821).
 6. **Health check** — Starts the Gateway and verifies it's running.
 7. **Skills** — Installs recommended skills and optional dependencies.
 
