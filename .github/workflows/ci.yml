@@ -189,57 +189,41 @@ jobs:
           CXXFLAGS: -march=armv8-a+crypto
         run: cargo build --locked --profile ci --target ${{ matrix.target }} ${{ matrix.features }}
 
-  # ── Stage 2b: Windows build (gated on lint, parallel with build) ─────────
-  # Windows is where platform-specific regressions actually ship: the `sh -c`
-  # hardcode in four child-spawn sites lived for months with CI green,
-  # because tests run on Linux (where `sh` exists) and Windows was never
-  # built here (#627 — the old job chronically hit the 40m cap with
-  # --all-features and cold caches). Build-only, no tests: the point is to
-  # catch spawn-path and cfg(windows) compile breakage at PR time. The
-  # release recipe (CMake + NASM) compiles the llama-cpp-sys-2 C++ wrapper;
-  # `--profile ci` (thin LTO, 16 codegen units) plus rust-cache keep the
-  # wall-clock inside the cap that killed the original job.
-  windows-build:
-    name: Build (windows)
-    needs: [lint, audit]
+  # ── Stage 2a2: Windows path filter (decides whether Stage 2b runs) ────────
+  # Path filter, fail-open. A 51-minute GitHub-hosted build on every push
+  # to every PR is the cost that got the original job deleted (#627), and
+  # most PRs here cannot break Windows. Fire on the paths that have
+  # actually produced Windows-only breakage: the dependency graph and
+  # toolchain, the platform abstraction, the spawn and read paths, and
+  # this workflow itself. Anything we cannot determine builds anyway, and
+  # a `windows` label forces a build for the cases this list misses.
+  # Deliberate gap: a new cfg(windows) block in an unlisted file is not
+  # caught here. release.yml's matrix still builds Windows before any tag
+  # ships, which is the coverage #627 relied on; Stage 2b only moves that
+  # signal earlier for the paths where it pays for itself.
+  #
+  # Its own job rather than a step inside Stage 2b (#1831). A step-level
+  # `if:` skips the steps but the job still concludes success, so the merge
+  # box and `gh pr checks` rendered "Build (windows): pass" on a run that
+  # had compiled nothing. A job-level gate on this output is the only shape
+  # that renders the honest "skipped". Hosted Linux because it is a clone
+  # plus a grep: no toolchain, no cache, seconds.
+  windows-filter:
+    name: Windows path filter
+    # Carries the event gate Stage 2b used to own. On a main push neither
+    # job is evaluated, so a routine commit still pays for lint + test +
+    # audit only.
     if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
-    runs-on: windows-latest
-    # 60 min: a COLD windows-latest run needs ~48 (33 compile incl. llama's
-    # cmake C++ + ~15 for the thin-LTO link of a 4-vCPU runner); warm runs
-    # from rust-cache land near 10. The original 40 cap killed a build that
-    # was minutes from linking. Keep a cap so a true hang can't burn 360.
-    timeout-minutes: 60
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      run: ${{ steps.relevant.outputs.run }}
     steps:
-      # fetch-depth 0: the path filter below diffs against the PR base sha.
+      # fetch-depth 0: the filter below diffs against the PR base sha.
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
-      - name: Install Rust (from rust-toolchain.toml)
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: stable
-          components: rustfmt, clippy
-
-      # No `save-if` restriction: this job only runs on PRs and
-      # workflow_dispatch, so a `refs/heads/main`-only save-if never fires —
-      # the cache would stay cold forever. Saving in the run's own scope
-      # lets the 2nd..Nth push of a PR hit warm artifacts.
-      - uses: swatinem/rust-cache@v2
-        with:
-          cache-on-failure: true
-
-      # Path filter, fail-open. A 51-minute GitHub-hosted build on every push
-      # to every PR is the cost that got the original job deleted (#627), and
-      # most PRs here cannot break Windows. Fire on the paths that have
-      # actually produced Windows-only breakage: the dependency graph and
-      # toolchain, the platform abstraction, the spawn and read paths, and
-      # this workflow itself. Anything we cannot determine builds anyway, and
-      # a `windows` label forces a build for the cases this list misses.
-      # Deliberate gap: a new cfg(windows) block in an unlisted file is not
-      # caught here. release.yml's matrix still builds Windows before any tag
-      # ships, which is the coverage #627 relied on; this job only moves that
-      # signal earlier for the paths where it pays for itself.
       - name: Windows-relevant changes?
         id: relevant
         shell: bash
@@ -272,16 +256,53 @@ jobs:
             echo "run=false" >> "$GITHUB_OUTPUT"
           fi
 
+  # ── Stage 2b: Windows build (gated on lint, audit, path filter) ─────────
+  # Windows is where platform-specific regressions actually ship: the `sh -c`
+  # hardcode in four child-spawn sites lived for months with CI green,
+  # because tests run on Linux (where `sh` exists) and Windows was never
+  # built here (#627 — the old job chronically hit the 40m cap with
+  # --all-features and cold caches). Build-only, no tests: the point is to
+  # catch spawn-path and cfg(windows) compile breakage at PR time. The
+  # release recipe (CMake + NASM) compiles the llama-cpp-sys-2 C++ wrapper;
+  # `--profile ci` (thin LTO, 16 codegen units) plus rust-cache keep the
+  # wall-clock inside the cap that killed the original job.
+  windows-build:
+    name: Build (windows)
+    needs: [lint, audit, windows-filter]
+    # Job-level, not step-level (#1831): when the filter says no, GitHub
+    # concludes this job skipped. A needed job that was skipped or failed
+    # also lands here, since outputs.run stays empty.
+    if: needs.windows-filter.outputs.run == 'true'
+    runs-on: windows-latest
+    # 60 min: a COLD windows-latest run needs ~48 (33 compile incl. llama's
+    # cmake C++ + ~15 for the thin-LTO link of a 4-vCPU runner); warm runs
+    # from rust-cache land near 10. The original 40 cap killed a build that
+    # was minutes from linking. Keep a cap so a true hang can't burn 360.
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Rust (from rust-toolchain.toml)
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+
+      # No `save-if` restriction: this job only runs on PRs and
+      # workflow_dispatch, so a `refs/heads/main`-only save-if never fires —
+      # the cache would stay cold forever. Saving in the run's own scope
+      # lets the 2nd..Nth push of a PR hit warm artifacts.
+      - uses: swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+
       - name: Install CMake (Windows)
-        if: steps.relevant.outputs.run == 'true'
         uses: lukka/get-cmake@latest
 
       - name: Install NASM (Windows)
-        if: steps.relevant.outputs.run == 'true'
         uses: ilammy/setup-nasm@v1
 
       - name: Build
-        if: steps.relevant.outputs.run == 'true'
         shell: bash
         env:
           AWS_LC_SYS_CMAKE_BUILDER: '1'
