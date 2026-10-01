@@ -322,6 +322,30 @@ jobs:
         # doesn't pull the esaxx object — the shape that ships releases.
         run: cargo build --locked --profile ci --target x86_64-pc-windows-msvc --all-features
 
+  # ── Windows footgun gate (static, cheap, blocks the merge) ─────────────
+  # The only python step in this workflow, and deliberately not part of the
+  # Windows build lane: it scans source text, so it costs seconds instead
+  # of the 51m09s that keeps windows-build out of the required gate below.
+  # A footgun finding blocks the PR rather than scrolling by as advisory,
+  # which is the whole point of running it on every push.
+  #
+  # `--self-test` runs FIRST and on its own line: it plants every rule and
+  # every cfg shape, so a linter regression fails here instead of turning
+  # the scan green by matching nothing. That is the difference between a
+  # gate and decoration.
+  windows-footguns:
+    name: Windows footguns
+    timeout-minutes: 10
+    runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork) && 'ubuntu-latest' || 'self-hosted' }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Linter proves its own teeth
+        run: python3 scripts/check-windows-footguns.py --self-test
+
+      - name: Scan the tree
+        run: python3 scripts/check-windows-footguns.py --root src
+
   # ── Stage 3: Test on Linux (gated on lint + audit, parallel with build) ──
   # Tests run on Linux only — macOS gets build verification via
   # the `build` job above. ZeroClaw uses the same split because the
@@ -593,7 +617,10 @@ jobs:
     # actually ran in the same window. #627 removed the original job from the
     # gate for exactly that reason. It stays as an advisory signal; Windows
     # remains release-blocking via release.yml's build matrix before any tag.
-    needs: [lint, build, test, audit]
+    # windows-footguns IS in the required set, which is not in tension with
+    # the paragraph above: same class of finding (Windows-specific) at a
+    # python-pass cost, so blocking on it buys certainty for seconds.
+    needs: [lint, build, test, audit, windows-footguns]
     runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork) && 'ubuntu-latest' || 'self-hosted' }}
     steps:
       - name: Check results
