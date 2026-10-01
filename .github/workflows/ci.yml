@@ -248,7 +248,13 @@ jobs:
           files=$(git diff --name-only "$base" HEAD)
           echo "changed files:"
           echo "$files"
-          pattern='^(Cargo\.toml|Cargo\.lock|rust-toolchain\.toml|build\.rs|\.github/workflows/ci\.yml|src/utils/(shell|cwd)\.rs|src/brain/tools/(bash|read)\.rs)$'
+          # The last two paths are #1823: the files whose tests assert
+          # Windows behaviour, so the runtime lane fires when they change.
+          # src/cli/service_windows.rs is deliberately NOT listed: that
+          # carrier belongs to #1821 and does not exist on this tree yet, so
+          # listing it would be a promise this repo cannot keep. Add it in
+          # the PR that adds the file.
+          pattern='^(Cargo\.toml|Cargo\.lock|rust-toolchain\.toml|build\.rs|\.github/workflows/ci\.yml|src/utils/(shell|cwd)\.rs|src/brain/tools/(bash|read)\.rs|src/tui/app/input\.rs|src/config/(winlock|profile)\.rs)$'
           if echo "$files" | grep -qE "$pattern"; then
             echo "run=true" >> "$GITHUB_OUTPUT"
           else
@@ -261,8 +267,12 @@ jobs:
   # hardcode in four child-spawn sites lived for months with CI green,
   # because tests run on Linux (where `sh` exists) and Windows was never
   # built here (#627 — the old job chronically hit the 40m cap with
-  # --all-features and cold caches). Build-only, no tests: the point is to
-  # catch spawn-path and cfg(windows) compile breakage at PR time. The
+  # --all-features and cold caches). It catches spawn-path and cfg(windows)
+  # compile breakage at PR time, and since #1823 it also EXECUTES the binary
+  # it built: the --version smoke step below is the first signal in this
+  # repo's history that opencrabs.exe actually starts, because compile-green
+  # was never starts-green (#1759). Still no full test suite: the ci-gate job
+  # comment carries the #627 cost history behind that decision. The
   # release recipe (CMake + NASM) compiles the llama-cpp-sys-2 C++ wrapper;
   # `--profile ci` (thin LTO, 16 codegen units) plus rust-cache keep the
   # wall-clock inside the cap that killed the original job.
@@ -278,7 +288,11 @@ jobs:
     # cmake C++ + ~15 for the thin-LTO link of a 4-vCPU runner); warm runs
     # from rust-cache land near 10. The original 40 cap killed a build that
     # was minutes from linking. Keep a cap so a true hang can't burn 360.
-    timeout-minutes: 60
+    # 90 (not 60) while the scoped-test step rides along: the cfg(test) lib
+    # compiles on top of the build. The job is NOT in the required gate, so
+    # the extra ceiling is a priced trade for the first-ever Windows
+    # execution receipts, not silent drift.
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v5
 
@@ -321,6 +335,100 @@ jobs:
         # This job uses the release-shaped profile, where the linker
         # doesn't pull the esaxx object — the shape that ships releases.
         run: cargo build --locked --profile ci --target x86_64-pc-windows-msvc --all-features
+
+      # No step-level `if:` on either step below, deliberately. This job is
+      # gated at job level on needs.windows-filter.outputs.run (#1831) and
+      # has no `steps.relevant` context: the fork this is harvested from
+      # keeps the filter as a step inside this job, where that expression
+      # does resolve. Copied verbatim, both steps would evaluate falsy, be
+      # skipped, and the job would still conclude success, which is the
+      # exact fake-green shape #1855 removed from this file.
+      - name: "Smoke (windows): execute the binary it built"
+        shell: bash
+        run: |
+          # Actions' bash runs with -e: without the guard, a failing exe
+          # would die AT the substitution and the echo below would never
+          # run, which is precisely the case whose diagnostic we want.
+          # stderr rides in too (DLL-load failures land there).
+          set +e
+          ver=$(./target/x86_64-pc-windows-msvc/ci/opencrabs.exe --version 2>&1)
+          status=$?
+          set -e
+          echo "exit=$status version=$ver"
+          [ "$status" -eq 0 ] || exit 1
+          echo "$ver" | grep -qi opencrabs
+
+      # Scoped execution: only the modules whose tests assert platform
+      # behaviour. Full-suite Windows was rejected twice (#627 cost, and
+      # POSIX-semantics failures that are not bugs). Every member below
+      # exists on this tree, so Windows gives real receipts on day 1 instead
+      # of a zero-match tripwire:
+      #   config::winlock                     3 tests, cross-handle
+      #                                       contention and fail-closed
+      #                                       terminate proof, cfg(windows):
+      #                                       these run nowhere else
+      #   tests::utils_shell_test            12 tests, the shell_pair probe
+      #                                       contract
+      #   tests::utils_cwd_test               5 tests, drive-letter and
+      #                                       lookalike dirs
+      #   tests::browser_default_windows_test  6 tests, browser path
+      #                                       detection
+      #   tests::profile_test                67 tests, lock-owner stamp
+      #                                       parsing and reused-PID
+      #                                       resolution. The round-9
+      #                                       finding (a Windows-only test
+      #                                       failure) lived in exactly this
+      #                                       module, and no CI job could
+      #                                       have seen it: Windows ran no
+      #                                       tests.
+      # cli::service_windows is NOT in the slice yet: its carrier belongs to
+      # #1821 and does not exist here, so listing it would make this step
+      # permanently red on a zero-match and defeat the flip noted below.
+      # continue-on-error: true is the honest day-1 state, not a dodge: 93
+      # tests here have never executed on Windows in this repo's history, so
+      # their outcome is unknown and must not block a PR. The smoke step
+      # above is NOT soft, because a binary that does not start is a hard
+      # fail. Flip continue-on-error to false once the receipts are green,
+      # in the PR that reports them.
+      - name: "Scoped tests (windows): platform-behaviour slice"
+        continue-on-error: true
+        shell: bash
+        run: |
+          # One filter per module, each individually judged. A combined
+          # `cargo test -- a b c` that silently matches nothing looks green;
+          # per-module zero-detection here is a SCREAM (a module renamed by a
+          # sibling PR), not a pass, the same anti-fake-green principle the
+          # footgun gate's --self-test enforces.
+          # Actions' bash runs with -e, so an unguarded substitution exits AT
+          # the assignment and `rc=$?` below is never reached: the loop would
+          # abort on the first failing module, print none of the captured
+          # output, and skip every module after it. The smoke step carries
+          # the same guard for the same reason. One more trap: with `--lib`,
+          # cargo writes "test result: FAILED. N passed" on failure, so
+          # parsing $out must not assume the ok-form.
+          status=0
+          for m in config::winlock tests::utils_shell_test \
+                   tests::utils_cwd_test tests::browser_default_windows_test \
+                   tests::profile_test; do
+            set +e
+            out=$(cargo test --locked --profile ci --target x86_64-pc-windows-msvc \
+                    --lib -- "$m" 2>&1)
+            rc=$?
+            set -e
+            n=$(printf '%s\n' "$out" | sed -n 's/^test result: [a-z]*\. \([0-9]*\) passed.*/\1/p' | head -n1)
+            failed=$(printf '%s\n' "$out" | sed -n 's/.*; \([0-9]*\) failed.*/\1/p' | head -n1)
+            if [ $rc -ne 0 ]; then
+              echo "::warning::Windows slice FAILS (rc=$rc, failed=${failed:-?}): $m"
+              printf '%s\n' "$out" | tail -20
+              status=1
+            elif [ -z "$n" ] || [ "$n" -eq 0 ]; then
+              echo "::warning::Windows slice ZERO-MATCH: $m names no tests here (renamed by a sibling PR)"
+              status=1
+            else
+              echo "Windows slice PASS: $m ($n tests)"
+            fi
+          done
+          exit $status
 
   # ── Windows footgun gate (static, cheap, blocks the merge) ─────────────
   # The only python step in this workflow, and deliberately not part of the
