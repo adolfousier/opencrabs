@@ -167,7 +167,7 @@ const FLOW_TICKER_CAP: std::time::Duration = std::time::Duration::from_secs(30 *
 /// it the clock freezes between tool events. Waits for the group message to
 /// be born (first tool call), exits on settle/prune/cap, and re-snapshots
 /// after each edit so the settled line keeps the last word.
-fn spawn_flow_ticker(
+pub(super) fn spawn_flow_ticker(
     http: Arc<serenity::http::Http>,
     channel: serenity::model::id::ChannelId,
     group_mid: Arc<Mutex<Option<serenity::model::id::MessageId>>>,
@@ -1259,7 +1259,7 @@ pub(crate) async fn handle_message(
                 }
                 // Optional follow-up suggestions (#598): post tap-to-send
                 // buttons under the response. A tap injects the suggestion as a
-                // new turn via route_interaction_turn.
+                // new turn via route_followup_turn (#1852).
                 ProgressEvent::SuggestedOptions(options) => {
                     let http = http.clone();
                     let state = group_state_cb.clone();

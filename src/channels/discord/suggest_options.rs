@@ -4,7 +4,7 @@
 //! `ProgressEvent::SuggestedOptions`, and we post one Secondary button per
 //! suggestion under the finished response. Tapping a button injects that
 //! suggestion as the user's next message (a fresh turn) via
-//! `interactions::route_interaction_turn`. Typing your own message always
+//! `interactions::route_followup_turn` (#1852). Typing your own message always
 //! works; there is no oneshot or timeout.
 //!
 //! Reuses the existing TTL-bounded select-map (`register_select`/`take_select`)

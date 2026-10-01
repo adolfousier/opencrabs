@@ -316,13 +316,18 @@ impl EventHandler for Handler {
                     .await;
                 let agent = self.agent.clone();
                 let session_svc = self.session_svc.clone();
+                let discord_state = self.discord_state.clone();
                 let idle = self.config_rx.borrow().channels.discord.session_idle_hours;
                 let ctx2 = ctx.clone();
                 tokio::spawn(async move {
-                    super::interactions::route_interaction_turn(
+                    // #1852: tapped suggestions ride the tool-loop display
+                    // path (live status, tools, approvals, chained buttons)
+                    // instead of the bare single-call interaction route.
+                    super::interactions::route_followup_turn(
                         &ctx2,
                         agent,
                         session_svc,
+                        discord_state,
                         is_dm,
                         user,
                         channel_id,
