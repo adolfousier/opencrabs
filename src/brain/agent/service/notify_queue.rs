@@ -37,6 +37,55 @@ const STALE_ROW_SECS: i64 = 24 * 60 * 60;
 /// and only after the current boot has made its own offer.
 pub(crate) const MAX_ROW_AGE_SECS: i64 = 3 * STALE_ROW_SECS; // 72h (259,200s)
 
+/// The busy-lane framing prepended to a push that lands while its target is
+/// mid-turn (fork #13). It lives here, beside the durable-queue text
+/// normalisation it has to survive, because the two are one contract.
+pub(crate) const BUSY_LANE_WRAPPER: &str =
+    "[queued while you were working — re-anchor to your current task after reading this]\n\n";
+
+/// The text a durable row must carry for a push (#439/#366).
+///
+/// The row holds the push's OWN text: the busy-lane framing is presentation
+/// applied when the push is handed to a turn, never part of the push's
+/// identity. Two measured reasons (2026-09-30):
+///
+/// 1. The framing was re-applied on every re-offer, so the stored text grew by
+///    one wrapper per boot — two live rows read `wrappers=2`.
+/// 2. `clear_matching` is content-exact, so a clear issued with the
+///    pre-framing text could never match a framed row. The row then survived
+///    the very delivery that should have retired it, and the next boot
+///    re-delivered it: one duplicate per boot, forever.
+pub(crate) fn durable_context_text(context_text: &str) -> String {
+    strip_busy_wrapper(context_text).to_string()
+}
+
+/// Strip every leading busy-lane framing wrapper.
+///
+/// Repeated, not single-pass: rows written before the framing was excluded
+/// from the durable text can carry two or more, and leaving one behind would
+/// defeat the content-exact match this exists to restore.
+pub(crate) fn strip_busy_wrapper(text: &str) -> &str {
+    let mut rest = text;
+    while let Some(stripped) = rest.strip_prefix(BUSY_LANE_WRAPPER) {
+        rest = stripped;
+    }
+    rest
+}
+
+/// Prepend the busy-lane framing, normalising to EXACTLY one.
+///
+/// The postcondition is "at most once", so input that already carries the
+/// framing must come back with ONE wrapper, not with its original count. A
+/// plain `starts_with` guard is not enough: it passes 0 and 1 through
+/// correctly but leaves two or more untouched, and rows written before the
+/// framing was excluded from the durable text do carry two or more (measured
+/// live 2026-09-30: `wrappers=2`). A push re-offered at boot, or an item
+/// re-queued after a lost turn race, must neither keep nor accumulate a
+/// second one.
+pub(crate) fn wrap_busy_once(context_text: &str) -> String {
+    format!("{BUSY_LANE_WRAPPER}{}", strip_busy_wrapper(context_text))
+}
+
 fn now_unix() -> i64 {
     chrono::Utc::now().timestamp()
 }
@@ -71,7 +120,13 @@ pub(crate) fn persist(session_id: Uuid, msg: &QueuedUserMessage) {
     let Some(repo) = repo() else {
         return;
     };
-    let (context_text, display_text) = (msg.context_text.clone(), msg.display_text.clone());
+    // The row carries the push's OWN text, never the busy-lane framing: see
+    // `durable_context_text`. Without this the framing stacks once per boot and
+    // the content-exact clear can never match the row it must retire.
+    let (context_text, display_text) = (
+        durable_context_text(&msg.context_text),
+        msg.display_text.clone(),
+    );
     let (origin, bg_meta) = (msg.origin, msg.bg_meta.clone());
     spawn_if_runtime(
         async move {
@@ -235,30 +290,170 @@ async fn reap_stale_after_redelivery(repo: &NotifyQueueRepository) {
     }
 }
 
+/// How long a post-delivery clear keeps looking for the row it must retire
+/// (#439/#366, shape A).
+///
+/// The ordering half of the fix, and it exists because `route` CANNOT be
+/// awaited: [`MessageEnqueueCallback`](super::types::MessageEnqueueCallback)
+/// is `Arc<dyn Fn(Uuid, QueuedUserMessage)>` returning `()`, and
+/// `build_enqueue_callback` defers the whole delivery — including its
+/// `enqueue_item` → `persist` INSERT — into a `tokio::spawn` whose first act
+/// is a bounded transport wait. So a clear issued at the hand-off reaches the
+/// pool BEFORE the write it is retiring, which is the measured loop: one fresh
+/// row per boot, one duplicate per boot, forever.
+///
+/// The clear therefore WAITS for its row rather than racing it, for a window
+/// derived from the very budget that defers the write.
+///
+/// The route spends up to `ROUTE_GRACE` waiting for its transport BEFORE it
+/// reaches the streaming branch that persists. A pre-fix measurement put the
+/// twin 20-40 s after a boot for exactly that reason: a window shorter than
+/// the grace expires before the row it is chasing exists, which is why this
+/// is derived rather than fixed.
+const CLEAR_MATCH_MARGIN: std::time::Duration = std::time::Duration::from_secs(5);
+const CLEAR_MATCH_WINDOW: std::time::Duration = std::time::Duration::from_secs(
+    super::restart_recovery::ROUTE_GRACE.as_secs() + CLEAR_MATCH_MARGIN.as_secs(),
+);
+/// Poll interval, matched to the transport-readiness poll so a wake follows
+/// its connect on the cadence it already did.
+const CLEAR_MATCH_STEP: std::time::Duration = std::time::Duration::from_millis(250);
+
 /// Clear the durable twin of a push that was just delivered.
 ///
-/// Exact-content match so any OTHER undelivered push for the same session
-/// survives. Fire-and-forget: a failure costs a stale row replayed at next
-/// boot — a duplicate, never a loss (#111).
+/// Ordering (shape A): the delete must not run before the write that replaces
+/// it, so this re-reads for [`CLEAR_MATCH_WINDOW`] and retires EVERY matching
+/// row it sees — the original row at the first attempt, and the deferred
+/// INSERT of the delivering route when it lands a moment later. Stopping at
+/// the first success would leave exactly that second row behind.
+///
+/// Match is WRAPPER-BLIND (see [`strip_busy_wrapper`]) so a row written before
+/// the #439 normalisation — still carrying the busy-lane framing — is retired
+/// rather than left immortal until the age reaper. Content-exact otherwise:
+/// any OTHER undelivered push for the same session survives.
+///
+/// A clear that retires nothing is LOUD (M4): a chokepoint that returns a
+/// silent success cannot corroborate its own failure. The two shapes are kept
+/// apart in the log — a session with no rows left is benign (another consume
+/// site already retired it); a session whose rows exist and none match is the
+/// defect signal.
 pub(crate) fn clear_on_delivery(session_id: Uuid, msg: &QueuedUserMessage) {
     let Some(repo) = repo() else {
         return;
     };
-    let (context_text, display_text) = (msg.context_text.clone(), msg.display_text.clone());
+    // The row carries the push's OWN text (#439), and the in-memory item may
+    // carry the busy-lane framing: normalise to the identity `persist` wrote.
+    let context_text = durable_context_text(&msg.context_text);
+    let display_text = msg.display_text.clone();
     spawn_if_runtime(
         async move {
-            if let Err(e) = repo
-                .clear_matching(session_id, &context_text, &display_text)
-                .await
+            let retired = match retire_rows_until(
+                &repo,
+                session_id,
+                &context_text,
+                &display_text,
+                CLEAR_MATCH_WINDOW,
+                CLEAR_MATCH_STEP,
+            )
+            .await
             {
-                tracing::warn!(
+                Ok(n) => n,
+                Err(e) => {
+                    tracing::warn!(
+                        target: "background_task",
+                        "Could not clear delivered push from the durable notify queue for \
+                         session {session_id}: next boot may redeliver it (a duplicate, \
+                         never a loss): {e:#}"
+                    );
+                    return;
+                }
+            };
+            if retired > 0 {
+                return;
+            }
+            // Nothing retired: benign if the session has no rows at all
+            // (a sibling consume site already took it), a defect if rows are
+            // there and this push's key matched none of them.
+            match repo.all().await {
+                Ok(rows) if !rows.iter().any(|r| r.session_id == session_id) => {
+                    tracing::debug!(
+                        target: "background_task",
+                        "Delivered push for session {session_id} had no durable row (already \
+                         retired by a sibling consume site)"
+                    );
+                }
+                Ok(rows) => {
+                    let count = rows.iter().filter(|r| r.session_id == session_id).count();
+                    tracing::warn!(
+                        target: "background_task",
+                        "Delivered push for session {session_id} matched NO durable row after \
+                         {:?}, yet {count} row(s) are held for that session — the clear key does \
+                         not match what was persisted; those rows survive to the next boot \
+                         redelivery (a duplicate, never a loss)",
+                        CLEAR_MATCH_WINDOW
+                    );
+                }
+                Err(e) => tracing::warn!(
                     target: "background_task",
-                    "Could not clear delivered push from the durable notify queue for \
-                     session {session_id}: next boot may redeliver it (a duplicate, never \
-                     a loss): {e:#}"
-                );
+                    "Delivered push for session {session_id} retired no durable row and the \
+                     queue could not be read to say why: {e:#}"
+                ),
             }
         },
         "notify_queue clear",
     );
+}
+
+/// Retire this push's durable rows, WAITING for the delivering route's write.
+///
+/// The ordering half of shape A (#439/#366), split out from
+/// [`clear_on_delivery`] so the contract is testable against an in-memory pool
+/// rather than the process-global one. It keeps reading for the whole `window`
+/// and retires every match it sees: the row that was already there, and the
+/// deferred INSERT of the delivery that replaced it. A single pass that
+/// stopped at the first success would leave exactly that second row behind,
+/// which is the row that minted the next boot's duplicate.
+pub(crate) async fn retire_rows_until(
+    repo: &NotifyQueueRepository,
+    session_id: Uuid,
+    context_text: &str,
+    display_text: &str,
+    window: std::time::Duration,
+    step: std::time::Duration,
+) -> anyhow::Result<usize> {
+    let deadline = tokio::time::Instant::now() + window;
+    let mut retired = 0usize;
+    loop {
+        retired += clear_matching_rows(repo, session_id, context_text, display_text).await?;
+        if tokio::time::Instant::now() >= deadline {
+            return Ok(retired);
+        }
+        tokio::time::sleep(step).await;
+    }
+}
+
+/// Retire every row of this session whose identity is this push's own.
+///
+/// Read-then-delete rather than one exact-content `DELETE`: the match has to
+/// be wrapper-blind (a pre-#439 row still carries the framing, and stripping
+/// is not expressible in SQL), and a per-row delete keeps the blast radius to
+/// the rows that actually match. The table is small by construction — its own
+/// 72h reap exists to keep it so.
+async fn clear_matching_rows(
+    repo: &NotifyQueueRepository,
+    session_id: Uuid,
+    context_text: &str,
+    display_text: &str,
+) -> anyhow::Result<usize> {
+    let mut retired = 0usize;
+    for row in repo.all().await? {
+        if row.session_id != session_id || row.display_text != display_text {
+            continue;
+        }
+        if strip_busy_wrapper(&row.context_text) != context_text {
+            continue;
+        }
+        repo.clear(row.id).await?;
+        retired += 1;
+    }
+    Ok(retired)
 }

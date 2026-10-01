@@ -331,10 +331,12 @@ pub(crate) fn build_enqueue_callback(
                 // the interrupt gate's true-branch knowingly accepts. One
                 // plain string tells the receiver to re-anchor after reading.
                 let mut msg = msg;
-                msg.context_text = format!(
-                    "[queued while you were working — re-anchor to your current task after \
-                     reading this]\n\n{}",
-                    msg.context_text
+                // Idempotent framing (#439/#366): a push that already carries
+                // it — a row re-offered at boot, an item re-queued after a lost
+                // turn race — must not accumulate a second wrapper. The literal
+                // and its inverse live together in `notify_queue`.
+                msg.context_text = crate::brain::agent::service::notify_queue::wrap_busy_once(
+                    &msg.context_text,
                 );
                 state.enqueue_detached_result(session_id, msg);
                 return;

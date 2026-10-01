@@ -165,6 +165,13 @@ pub fn claim_session(session_id: Uuid, route: &MessageEnqueueCallback) -> usize 
         // notify_queue twin (#111): clear ONLY the rows matching what was
         // just delivered — a blanket clear-for-session here could eat a
         // never-delivered mid-turn row for the same session.
+        //
+        // Ordering (#439/#366, shape A): these clears run AFTER the routes
+        // above, and `clear_on_delivery` now WAITS for the row in its own
+        // window — because `route` is fire-and-forget and defers its
+        // `persist` into a spawn, the delete would otherwise reach the pool
+        // before the INSERT and the row would survive to mint one fresh
+        // duplicate at the next boot.
         for msg in &mine {
             super::notify_queue::clear_on_delivery(session_id, msg);
         }
