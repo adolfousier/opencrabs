@@ -13,6 +13,7 @@ use crate::brain::agent::service::background_tasks;
 use crate::brain::agent::{AgentService, ProgressCallback, ProgressEvent};
 use crate::config::Config;
 use crate::db::ChannelMessageRepository;
+use crate::utils::echo_budget::{ECHO_BODY_CAP_CHARS, ECHO_BODY_CAP_CHARS_RICH};
 use futures::future::BoxFuture;
 use std::sync::Arc;
 use teloxide::prelude::*;
@@ -1099,10 +1100,6 @@ pub(crate) async fn resume_session_inner(
     Ok(())
 }
 
-/// Cap for the #1221 echo body: classic `sendMessage` caps a message at 4096
-/// chars; header, tags and Telegram's own margin eat the rest of the budget.
-const BG_ECHO_BODY_CAP_CHARS: usize = 3200;
-
 /// Producer stamped into a `[session-notify from=…]` header.
 ///
 /// Cross-session pushes name the real sender session uuid (the agent tool,
@@ -1220,9 +1217,18 @@ pub(crate) enum BubbleWire {
 /// can split a tag and make Telegram strip the formatting entirely
 /// (plan_card lesson).
 pub(crate) fn build_bg_echo_bubble(body: &str, title: &str) -> (BubbleWire, String) {
-    let truncated = body.chars().count() > BG_ECHO_BODY_CAP_CHARS;
-    let body = crate::utils::string::truncate_chars(body, BG_ECHO_BODY_CAP_CHARS);
-    let suffix = if truncated { " (truncated)" } else { "" };
+    // #490: keep BOTH ends. The head-only cut dropped the tail, which is where
+    // a reader's own blocks live; the marker it leaves names the character
+    // count that went, so the ending is visibly missing rather than silently.
+    let (body, dropped) = crate::utils::string::truncate_chars_tail_preserving(
+        body,
+        ECHO_BODY_CAP_CHARS,
+    );
+    // Plain suffix, deliberately WITHOUT the count: the body already carries
+    // `… (truncated N chars) …` at the cut itself, and repeating N here would
+    // re-create the double-reporting #490 exists to remove. The count lives
+    // once, adjacent to the material it describes; this is the headline nudge.
+    let suffix = if dropped > 0 { " (truncated)".to_string() } else { String::new() };
     let markdown = format!("{title}{suffix}\n\n{body}");
     // The title is dynamic (sender label / task display line): escape it for
     // the HTML dialect so a `<` in a label can't corrupt the wrapper.
@@ -1230,7 +1236,7 @@ pub(crate) fn build_bg_echo_bubble(body: &str, title: &str) -> (BubbleWire, Stri
         "<blockquote expandable><b>{}{}</b>\n{}</blockquote>",
         super::markdown::escape_html(title),
         suffix,
-        super::rich::markdown_to_html(body),
+        super::rich::markdown_to_html(&body),
     );
     (BubbleWire::Markdown(markdown), html)
 }
@@ -1430,22 +1436,33 @@ pub(crate) async fn build_notify_receipt_card(
         return (BubbleWire::Markdown(markdown), classic);
     }
     let preview = first_line_preview(body);
-    let truncated = body.chars().count() > BG_ECHO_BODY_CAP_CHARS;
-    let body = crate::utils::string::truncate_chars(body, BG_ECHO_BODY_CAP_CHARS);
-    let suffix = if truncated { " (truncated)" } else { "" };
+    // #490: this body renders onto the RICH Html wire below (Telegram's ~32K
+    // `sendRichMessage`), so it takes the rich budget, not the classic one.
+    // The classic fallback is built by `build_bg_echo_bubble`, which applies
+    // the classic budget itself — that call is handed the body UNCAPPED so
+    // each leg gets exactly one cut, on the leg that needs it.
+    let (rich_body, rich_dropped) = crate::utils::string::truncate_chars_tail_preserving(
+        body,
+        ECHO_BODY_CAP_CHARS_RICH,
+    );
+    let rich_suffix = if rich_dropped > 0 { " (truncated)".to_string() } else { String::new() };
     // Body rendered from markdown with <p> wrapping — the rich HTML dialect
     // chrome surfaces use (#1142); mermaid fences resolve exactly like the
     // final-reply path, gated so a fence-less body costs no HTTP.
-    let body_html = super::rich::markdown_to_html_mermaid_p(body).await;
+    let body_html = super::rich::markdown_to_html_mermaid_p(&rich_body).await;
     // The preview is body-derived: escape it, a `<` in the source must not
     // open a tag inside the summary.
     let rich_html = format!(
         "<details><summary><sub>📨 From <b>{sender}</b>: {}</sub></summary>\n\n\
-         {body_html}{suffix}\n\n</details>",
+         {body_html}{rich_suffix}\n\n</details>",
         super::markdown::escape_html(&preview)
     );
     let flat_title = format!("📨 From {sender}: {preview}");
-    let (_, classic_html) = build_bg_echo_bubble(&format!("{body}{suffix}"), &flat_title);
+    // #490: the classic fallback takes the ORIGINAL body and applies the
+    // classic budget itself (inside `build_bg_echo_bubble`) — so THIS leg
+    // gets exactly one cut and one marker, instead of the old re-cap that
+    // fed an already-cut body back through the same guard.
+    let (_, classic_html) = build_bg_echo_bubble(body, &flat_title);
     (BubbleWire::Html(rich_html), classic_html)
 }
 

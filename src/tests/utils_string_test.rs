@@ -244,3 +244,65 @@ fn thinking_excerpt_keeps_a_multi_step_chain_intact() {
         "nothing to truncate at 300, got: {e}"
     );
 }
+
+/// #490: the tail-preserving sibling keeps BOTH ends and reports the count it
+/// dropped. The head-only cut lost the ending entirely — which is where a
+/// reader's own blocks (Disclosures, What-now/next) live.
+#[test]
+fn tail_preserving_keeps_both_ends_and_reports_the_count() {
+    let head_sentinel = "HEAD-SENTINEL";
+    let tail_sentinel = "TAIL-SENTINEL";
+    let body = format!(
+        "{head_sentinel}{}{tail_sentinel}",
+        "m".repeat(5000)
+    );
+    let (out, dropped) = truncate_chars_tail_preserving(&body, 1000);
+
+    assert!(out.contains(head_sentinel), "head survives: {out:.80}");
+    assert!(
+        out.contains(tail_sentinel),
+        "the TAIL survives — this is the whole point of the #490 change"
+    );
+    assert!(
+        out.contains("(truncated 4066 chars)"),
+        "the marker states the dropped COUNT (5026 chars in, 960 kept as head+tail): {out}"
+    );
+    assert!(dropped > 0, "a cut happened, so the count is non-zero");
+    assert!(
+        out.chars().count() <= 1000,
+        "the output respects its own budget, marker included: got {}",
+        out.chars().count()
+    );
+}
+
+/// The unchanged path: a body that already fits comes back verbatim with zero
+/// dropped, which is what a caller branches on before it owes a warning.
+#[test]
+fn tail_preserving_leaves_a_fitting_body_untouched() {
+    let body = "short body";
+    let (out, dropped) = truncate_chars_tail_preserving(body, 1000);
+    assert_eq!(out, body);
+    assert_eq!(dropped, 0);
+}
+
+/// A budget too small for both ends AND a marker falls back to the head-only
+/// cut rather than emitting a marker that IS the output.
+#[test]
+fn tail_preserving_degrades_to_head_only_at_a_tiny_budget() {
+    let body = "x".repeat(500);
+    let (out, dropped) = truncate_chars_tail_preserving(&body, 20);
+    assert_eq!(out.chars().count(), 20, "output fits the budget");
+    assert_eq!(dropped, 480, "20 kept of 500");
+    assert!(!out.contains("truncated"), "no marker at a tiny budget: {out}");
+}
+
+/// Multi-byte safety: the helper slices by CHARACTER, so a body full of
+/// 4-byte emoji must not panic on a non-boundary byte index.
+#[test]
+fn tail_preserving_is_char_boundary_safe() {
+    let body = "🎯".repeat(3000);
+    let (out, dropped) = truncate_chars_tail_preserving(&body, 500);
+    assert!(out.starts_with('🎯'));
+    assert!(out.ends_with('🎯'));
+    assert!(dropped > 0);
+}

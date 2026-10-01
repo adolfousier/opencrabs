@@ -464,3 +464,220 @@ async fn notify_receipt_card_keeps_tables_native_inside_the_fold() {
     );
     assert!(rich.contains("</details>"), "wrapper closes");
 }
+
+/// #490: a notify past the classic 3200 budget used to lose its TAIL — which
+/// is exactly where the Disclosures and What-now/next blocks live, so the owner
+/// lost the part written for him while the sending lane still read
+/// `Delivered`. The rich Html wire carries ~32K, so it takes
+/// `ECHO_BODY_CAP_CHARS_RICH`; only the classic fallback is cut, and it is
+/// cut exactly ONCE (the old re-cap fed an already-cut body back through the
+/// same guard, which could print a second `(truncated)` marker).
+///
+/// Three sentinels make the leg split observable without parsing markup:
+/// `INSIDE-CAP` at ~2000 (inside the classic budget), `OUTSIDE-CAP!` at ~3300
+/// (outside it), and the tail sentinel in the last 35 chars.
+#[tokio::test]
+async fn notify_receipt_card_keeps_a_4719_char_body_whole_on_the_rich_leg() {
+    // 4719 chars is the issue's own measured instance length (#490).
+    const TOTAL: usize = 4719;
+    let head = "a".repeat(2000);
+    let inside = "INSIDE-CAP";
+    let outside = "OUTSIDE-CAP!";
+    let tail = "TAIL-SENTINEL-#490-DISCLOSURES-HERE";
+    // Place the sentinels so `inside` sits above the classic budget and
+    // `outside` below it, then fill exactly to the measured length. The
+    // arithmetic is recomputed here and asserted below, so a drift in any
+    // piece fails the test loudly instead of silently weakening it.
+    let outside_at = 3300usize;
+    let tail_at = TOTAL - tail.len();
+    let gap1 = "b".repeat(outside_at - (head.len() + inside.len()));
+    let gap2 = "c".repeat(tail_at - (outside_at + outside.len()));
+    let body = format!("{head}{inside}{gap1}{outside}{gap2}{tail}");
+    assert_eq!(body.chars().count(), TOTAL, "fixture is the measured length");
+
+    let (wire, classic) = build_notify_receipt_card("Compiler", &body).await;
+    let BubbleWire::Html(rich) = &wire else {
+        panic!("notify card rides the HTML rich wire (#85)");
+    };
+
+    // RICH LEG — 4719 is under the 30000 rich budget, so no cut fires at all:
+    // the whole body survives, its last 40 characters included.
+    let last40: String = body.chars().skip(TOTAL - 40).collect();
+    assert!(
+        rich.contains(&last40),
+        "rich payload must carry the body's LAST 40 chars: {last40:?}"
+    );
+    assert!(
+        rich.contains(tail),
+        "the tail sentinel survives on the rich leg — this is the #490 defect"
+    );
+    assert!(
+        !rich.contains("(truncated)"),
+        "no cut fires under the rich budget, so the rich leg carries no marker"
+    );
+
+    // CLASSIC FALLBACK — its own budget still governs, and it is cut ONCE.
+    assert!(
+        classic.contains(inside),
+        "content inside the classic budget survives on the fallback"
+    );
+    assert!(
+        !classic.contains(outside),
+        "content past the classic budget is dropped on the fallback, proving the cap still binds at ~3200"
+    );
+    // Task 3 CHANGED THIS ASSERTION. It first read `!classic.contains(tail)`,
+    // pinning the old head-only cut; the tail-preserving helper now keeps both
+    // ends on BOTH legs, so the fallback retains the ending too. Asserting the
+    // new behaviour is the point — the old assertion would have locked the
+    // #490 defect in place on the leg with the smaller budget.
+    assert!(
+        classic.contains(tail),
+        "the classic leg now keeps its tail too; only the MIDDLE is dropped"
+    );
+    assert!(
+        classic.contains("(truncated 1559 chars)"),
+        "the classic leg states the count it dropped (4719 in, 3160 kept as head+tail: 1559 went)"
+    );
+    assert_eq!(
+        classic.matches("(truncated)").count(),
+        1,
+        "the classic fallback carries EXACTLY one truncation marker (the #490 re-cap printed a second)"
+    );
+}
+
+/// #490: when a cap DOES fire, it keeps the tail. The head-only cut dropped the
+/// ending, which is where the Disclosures and What-now/next blocks live — the
+/// part written for the reader. Both legs have budgets, so both must preserve.
+#[test]
+fn a_firing_cap_keeps_the_tail_and_states_the_dropped_count_on_both_legs() {
+    const TOTAL: usize = 5000; // over the classic 3200, under the rich 30000
+    let head = "HEAD-SENTINEL";
+    let tail = "TAIL-SENTINEL-NEEDS-FROM-YOU";
+    let body = format!("{head}{}{tail}", "m".repeat(TOTAL - head.len() - tail.len()));
+    assert_eq!(body.chars().count(), TOTAL);
+
+    let (wire, html) = build_bg_echo_bubble(&body, "⚙️ background task result");
+    let BubbleWire::Markdown(markdown) = &wire else {
+        panic!("plain echo bubble rides the markdown outbox wire");
+    };
+
+    // 5000 in, 3160 kept as head+tail, so 1840 chars went — stated once.
+    for (leg, payload) in [("markdown", markdown), ("classic html", &html)] {
+        assert!(
+            payload.contains(head),
+            "{leg}: the opening survives: {}",
+            &payload[..payload.len().min(120)]
+        );
+        assert!(
+            payload.contains(tail),
+            "{leg}: the TAIL survives a firing cap — the #490 defect was this being dropped"
+        );
+        assert!(
+            payload.contains("(truncated 1840 chars)"),
+            "{leg}: the marker states the dropped COUNT"
+        );
+    }
+    // Wrapper safety: cutting RAW text before conversion is what keeps the
+    // classic wrapper well-formed (the plan_card lesson).
+    assert!(html.starts_with("<blockquote expandable>"));
+    assert!(html.ends_with("</blockquote>"));
+}
+
+/// #490, second case: a body ABOVE the rich budget (30000) is cut — and its
+/// tail STILL survives, which is the behaviour the head-only cut lost at every
+/// budget, not just the classic one.
+#[tokio::test]
+async fn above_the_rich_budget_the_tail_still_survives() {
+    const TOTAL: usize = 40000;
+    let head = "HEAD-SENTINEL";
+    let tail = "TAIL-SENTINEL-DISCLOSURES-BLOCK";
+    let body = format!("{head}{}{tail}", "m".repeat(TOTAL - head.len() - tail.len()));
+    assert_eq!(body.chars().count(), TOTAL);
+
+    let (wire, classic) = build_notify_receipt_card("Compiler", &body).await;
+    let BubbleWire::Html(rich) = &wire else {
+        panic!("notify card rides the HTML rich wire (#85)");
+    };
+
+    assert!(rich.contains(head), "the opening survives the rich cut");
+    assert!(
+        rich.contains(tail),
+        "the tail survives even above the rich budget — 40000 in, 29960 kept, 10040 dropped"
+    );
+    assert!(
+        rich.contains("(truncated 10040 chars)"),
+        "the rich leg states its own dropped count"
+    );
+    assert!(
+        rich.contains("(truncated)"),
+        "the card's headline suffix also flags the cut"
+    );
+    // The suffix states no count, so the number appears exactly ONCE.
+    assert_eq!(
+        rich.matches("(truncated ").count(),
+        1,
+        "one count, adjacent to the material it describes — not repeated as chrome"
+    );
+    // The classic fallback is cut harder, and still keeps its tail.
+    assert!(classic.contains(tail), "classic fallback keeps its tail too");
+}
+
+/// #490 task 4 — the delivery verdict must TELL the sender its payload was
+/// shortened. Before this, a notify whose tail had been cut still answered a
+/// bare `Delivered`, so the sending lane could not learn that the blocks
+/// written FOR the receiving lane (Disclosures, What-now/next) never arrived.
+///
+/// The verdict names BOTH legs with their own budgets, because the leg is not
+/// known at verdict time: the card takes the rich wire and falls back to the
+/// classic one only if that call fails.
+#[tokio::test]
+async fn notify_verdict_reports_what_each_leg_would_drop() {
+    use crate::utils::echo_budget::{
+        ECHO_BODY_CAP_CHARS, ECHO_BODY_CAP_CHARS_RICH, sender_over_cap_signal,
+    };
+
+    // 4719 chars is the issue's own measured instance length (#490).
+    const TOTAL: usize = 4719;
+    // 4719 through the classic cap: 3200 budget less the 40-char marker
+    // reserve = 3160 kept as head+tail (head 2106 / tail 1054), so 1559 go.
+    // Pinned here so a drift in the reserve, the split or the budget fails
+    // loudly instead of quietly weakening the assertion.
+    const DROPPED_ON_CLASSIC: usize = 1559;
+
+    let body: String = "x".repeat(TOTAL);
+
+    // Drive it through the render path exactly as a notify push does.
+    let (wire, classic) = build_notify_receipt_card("Compiler", &body).await;
+    assert!(
+        matches!(wire, BubbleWire::Html(_)),
+        "the notify card rides the rich HTML wire — the leg whose budget #490 split"
+    );
+
+    // THE VERDICT: zero dropped on the rich leg, the real count on the classic
+    // fallback, and each leg named with the budget that governs it.
+    let signal = sender_over_cap_signal(&body);
+    let expected = format!(
+        " Payload {TOTAL} chars \u{2014} rich leg ({ECHO_BODY_CAP_CHARS_RICH} budget) drops 0; \
+         classic fallback ({ECHO_BODY_CAP_CHARS} budget) drops {DROPPED_ON_CLASSIC}."
+    );
+    assert_eq!(
+        signal, expected,
+        "the verdict must expose 0 dropped on the rich leg and the classic count, naming both legs"
+    );
+
+    // The warning must AGREE with the bytes the reader received — a warning
+    // that disagrees with the delivered payload is worse than no warning.
+    assert!(
+        classic.contains(&format!("(truncated {DROPPED_ON_CLASSIC} chars)")),
+        "the verdict's classic count must match the marker the fallback renders"
+    );
+
+    // NO CUT, NO NOISE. A body inside both budgets keeps the verdict it always
+    // had, so the warning stays a signal rather than chrome on every send.
+    assert_eq!(sender_over_cap_signal("short body"), "");
+    assert_eq!(
+        sender_over_cap_signal(&"y".repeat(ECHO_BODY_CAP_CHARS)),
+        "",
+        "a body exactly AT the classic budget is not over it"
+    );
+}

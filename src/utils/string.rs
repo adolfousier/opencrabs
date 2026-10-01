@@ -30,6 +30,48 @@ pub fn truncate_chars(s: &str, max_chars: usize) -> &str {
     &s[..byte_end]
 }
 
+/// Shorten a payload to at most `max_chars` CHARACTERS while keeping BOTH ends,
+/// and report how many characters were dropped (#490).
+///
+/// Sibling of [`truncate_chars`] (head-only) and [`truncate_middle`]
+/// (byte-based, path-oriented, silent). A notify body is prose in the reader's
+/// language, so the head-only cut silently lost its TAIL — which is exactly
+/// where the Disclosures and What-now/next blocks live, the part written for
+/// the reader. The marker names the count, so a reader can tell that material
+/// was removed rather than finding the message simply ends.
+///
+/// Returns the possibly-rewritten string and the dropped character count; a
+/// payload that already fits comes back unchanged with `0` dropped, which is
+/// what a caller branches on to decide whether the sender owes a warning.
+pub fn truncate_chars_tail_preserving(s: &str, max_chars: usize) -> (String, usize) {
+    let total = s.chars().count();
+    if total <= max_chars {
+        return (s.to_string(), 0);
+    }
+    // The marker sits INSIDE the budget, so its own width comes off the top.
+    // The widest form is a six-digit count — "… (truncated 999999 chars) …" is
+    // 30 chars — and the reserve leaves headroom above that.
+    const MARKER_RESERVE: usize = 40;
+    // A budget this small cannot hold both ends AND a marker, so fall back to
+    // the head-only cut rather than emitting a marker that IS the output.
+    if max_chars <= MARKER_RESERVE * 2 {
+        let head = truncate_chars(s, max_chars);
+        return (head.to_string(), total - head.chars().count());
+    }
+    let budget = max_chars - MARKER_RESERVE;
+    // Head-heavy (2:1): the opening carries the headline, the tail carries the
+    // ending that must survive. A third is ample for the Disclosures block.
+    let head_len = budget * 2 / 3;
+    let tail_len = budget - head_len;
+    let head: String = s.chars().take(head_len).collect();
+    let tail: String = s.chars().skip(total - tail_len).collect();
+    let dropped = total - head_len - tail_len;
+    (
+        format!("{head}\n… (truncated {dropped} chars) …\n{tail}"),
+        dropped,
+    )
+}
+
 /// Returns true if `s` looks like a file path rather than a slash command.
 ///
 /// Slash commands are `/` followed by a single word with no additional slashes

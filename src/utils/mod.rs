@@ -9,6 +9,7 @@ pub mod directives;
 pub mod drop_agent;
 pub mod drop_landing;
 pub mod drop_transfer;
+pub mod echo_budget;
 pub mod fd_suppress;
 pub mod file_extract;
 pub mod git_branch;
