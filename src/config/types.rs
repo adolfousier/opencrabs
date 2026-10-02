@@ -814,7 +814,7 @@ impl TelegramConfig {
 }
 
 /// Discord channel configuration
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DiscordConfig {
     #[serde(default)]
     pub enabled: bool,
@@ -850,8 +850,10 @@ pub struct DiscordConfig {
     /// Fold intermediate narration (the text a model writes between tool
     /// calls) into the turn's tool-group bubble as dim subtext lines instead
     /// of posting each as a separate message — one editable "work log" per
-    /// turn (agent-disco-style live trace). Default: false.
-    #[serde(default)]
+    /// turn (agent-disco-style live trace). Default: true (#1871); set
+    /// `trace_narration = false` to post each intermediate as its own
+    /// message.
+    #[serde(default = "default_true")]
     pub trace_narration: bool,
     /// Post answers longer than this many characters as a short teaser in
     /// the channel plus an anchored thread carrying the full body. 0
@@ -865,6 +867,25 @@ pub struct DiscordConfig {
     /// Default: false.
     #[serde(default)]
     pub bang_new_thread: bool,
+}
+
+impl Default for DiscordConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            token: None,
+            allowed_users: Vec::new(),
+            allowed_channels: Vec::new(),
+            allowed_roles: Vec::new(),
+            component_ttl_hours: default_component_ttl_hours(),
+            respond_to: RespondTo::default(),
+            session_idle_hours: None,
+            bot_owner: Vec::new(),
+            trace_narration: default_true(),
+            auto_thread_min_chars: 0,
+            bang_new_thread: false,
+        }
+    }
 }
 
 impl DiscordConfig {
