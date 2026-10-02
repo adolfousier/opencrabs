@@ -246,6 +246,7 @@ pub mod cowork_connect_test;
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 pub mod crash_signal_test;
 pub mod cron_deliver_to_thread_test;
+pub mod cron_discord_forum_test;
 pub mod cron_next_run_at_test;
 pub mod cron_profile_isolation_test;
 pub mod cron_schedule_util_test;

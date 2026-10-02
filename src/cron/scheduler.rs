@@ -651,9 +651,16 @@ async fn execute_job(
                             }
                         })
                     } else if let Some(rest) = t.strip_prefix("discord:") {
-                        Some(crate::cron::send_scope::PermittedTarget {
-                            channel: "discord",
-                            target_id: rest.to_string(),
+                        // `:forum` is a delivery mode, not a second address (#1851): the
+                        // job may post in that channel, so the bare channel id is what the
+                        // scope permits, exactly as a Telegram thread target permits its
+                        // chat. A malformed target permits nothing and is reported loudly
+                        // at delivery time.
+                        parse_discord_target(rest).map(|(channel_id, _)| {
+                            crate::cron::send_scope::PermittedTarget {
+                                channel: "discord",
+                                target_id: channel_id,
+                            }
                         })
                     } else if let Some(rest) = t.strip_prefix("slack:") {
                         Some(crate::cron::send_scope::PermittedTarget {
@@ -808,6 +815,126 @@ pub(crate) fn parse_telegram_target(target: &str) -> Option<(i64, Option<i64>)> 
             Some((chat_id, Some(thread_id)))
         }
     }
+}
+
+/// How a `discord:` `deliver_to` entry says to post the report (#1851).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DiscordDelivery {
+    /// One message into the channel: the behaviour every existing job keeps.
+    Channel,
+    /// One forum post per report in a `GUILD_FORUM`/`GUILD_MEDIA` channel.
+    Forum,
+}
+
+/// Parse the Discord target out of a `deliver_to` entry (#1851).
+/// Grammar: `discord:<channel_id>` -> `(id, Channel)`, what every existing job
+/// stores, unchanged; `discord:<channel_id>:forum` -> `(id, Forum)`, opt-in
+/// delivery as one forum post per report, the Discord shape of the Telegram
+/// topic workflow. Anything else (non-numeric id, unknown mode, a further
+/// component) -> `None`; the caller owns the loud failure, exactly as
+/// [`parse_telegram_target`] does for its own grammar.
+///
+/// The `:forum` suffix is a delivery mode, not a second address: the send scope
+/// keeps the bare channel id, because that is the form `discord_send` checks
+/// (`brain/tools/discord_send.rs:60` passes a numeric `channel_id`).
+pub(crate) fn parse_discord_target(target: &str) -> Option<(String, DiscordDelivery)> {
+    let mut parts = target.split(':');
+    let id = parts.next()?.trim();
+    if id.is_empty() || !id.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    match parts.next() {
+        None => Some((id.to_string(), DiscordDelivery::Channel)),
+        Some(mode) => {
+            // A further component means the target is malformed, not nested.
+            if parts.next().is_some() {
+                return None;
+            }
+            if mode.trim().eq_ignore_ascii_case("forum") {
+                Some((id.to_string(), DiscordDelivery::Forum))
+            } else {
+                None
+            }
+        }
+    }
+}
+
+/// `Channel Flags`: `REQUIRE_TAG = 1 << 4`, "whether a tag is required to be
+/// specified when creating a thread in a `GUILD_FORUM` or a `GUILD_MEDIA`
+/// channel. Tags are specified in the `applied_tags` field"
+/// (discord-api-docs `developers/resources/channel.mdx:98`).
+const CHANNEL_FLAG_REQUIRE_TAG: u64 = 1 << 4;
+
+/// The tag policy this ships with, chosen from the two #1851 offered: posts go
+/// out with **no** `applied_tags`, so a forum carrying `REQUIRE_TAG` is refused
+/// before the request instead of dying on a 400 nobody reads. No
+/// `discord.forum_report_tag` knob is added here; that is the other option and
+/// stays open as its own change.
+///
+/// `flags` is optional on the channel object, so absence means 0: no tag
+/// required.
+pub(crate) fn forum_requires_tag(channel: &serde_json::Value) -> bool {
+    channel
+        .get("flags")
+        .and_then(serde_json::Value::as_u64)
+        .is_some_and(|flags| flags & CHANNEL_FLAG_REQUIRE_TAG != 0)
+}
+
+/// Tag names the channel advertises, so the refusal log says what the operator
+/// is dealing with (`available_tags` at channel.mdx:48, Forum Tag `name` at
+/// :386-388).
+pub(crate) fn forum_tag_names(channel: &serde_json::Value) -> Vec<String> {
+    channel
+        .get("available_tags")
+        .and_then(serde_json::Value::as_array)
+        .map(|tags| {
+            tags.iter()
+                .filter_map(|tag| tag.get("name").and_then(serde_json::Value::as_str))
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// `GUILD_FORUM` = 15 and `GUILD_MEDIA` = 16 (channel.mdx:79-80): the two types
+/// documented as channels that can only contain threads, and the only two
+/// `Start Thread in Forum or Media Channel` accepts. A `:forum` target pointed
+/// at a text channel therefore gets a precise log line instead of a bare 400.
+pub(crate) fn is_thread_only_channel(kind: u64) -> bool {
+    matches!(kind, 15 | 16)
+}
+
+/// Upper bound on a forum post name: `name` is a "1-100 character channel name"
+/// (channel.mdx:681). Serenity's builder documents 2-100
+/// (`builder/create_forum_post.rs:37`), so the crate's tighter floor is
+/// respected too: a name shorter than 2 characters posts under the timestamp
+/// alone rather than as a stub.
+const FORUM_POST_NAME_MAX: usize = 100;
+
+/// Post title: job name plus timestamp, which is what makes the archive
+/// searchable per job. The timestamp is kept whole, because it is what orders
+/// and greps posts, so the job name is the part that gives up room.
+pub(crate) fn forum_post_title(job_name: &str, when: chrono::DateTime<Utc>) -> String {
+    let stamp = when.format("%Y-%m-%d %H:%M UTC").to_string();
+    let joiner = " | ";
+    let budget = FORUM_POST_NAME_MAX.saturating_sub(stamp.len() + joiner.len());
+    let head: String = job_name.trim().chars().take(budget).collect();
+    let head = head.trim_end();
+    if head.chars().count() < 2 {
+        return stamp;
+    }
+    format!("{head}{joiner}{stamp}")
+}
+
+/// Body for `POST /channels/{channel.id}/threads` (channel.mdx:651-652): the
+/// post `name` and the first message of the thread (:676-680, message params at
+/// :684-690). `applied_tags` is deliberately absent; [`forum_requires_tag`] is
+/// the policy that makes sending no tags safe.
+pub(crate) fn forum_post_body(name: &str, content: &str) -> serde_json::Value {
+    serde_json::json!({
+        "name": name,
+        "message": { "content": content },
+    })
 }
 
 /// Parse a session target out of a `deliver_to` entry (fork #144).
@@ -965,8 +1092,25 @@ pub(crate) async fn deliver_result(
         "discord" => {
             #[cfg(feature = "discord")]
             {
-                tracing::info!("Delivering cron result to Discord channel {target_id}");
-                deliver_discord(target_id, &delivery_msg).await;
+                match parse_discord_target(target_id) {
+                    Some((channel_id, DiscordDelivery::Channel)) => {
+                        tracing::info!("Delivering cron result to Discord channel {channel_id}");
+                        deliver_discord(&channel_id, &delivery_msg).await;
+                    }
+                    Some((channel_id, DiscordDelivery::Forum)) => {
+                        tracing::info!(
+                            "Delivering cron result as one forum post in Discord channel {channel_id}"
+                        );
+                        deliver_discord_forum(&channel_id, job_name, &delivery_msg).await;
+                    }
+                    None => {
+                        tracing::error!(
+                            "Invalid Discord deliver_to target '{target_id}' for job '{job_name}' \
+                             (expected 'discord:<channel_id>' or 'discord:<channel_id>:forum'); \
+                             not delivering"
+                        );
+                    }
+                }
             }
             #[cfg(not(feature = "discord"))]
             {
@@ -1292,6 +1436,152 @@ async fn deliver_discord(channel_id: &str, message: &str) {
             "Cron result delivered to Discord channel {channel_id} ({delivered} part(s))"
         );
     }
+}
+
+/// Deliver one cron report as a single forum post (#1851).
+///
+/// `POST /channels/{forum_id}/threads` (channel.mdx:651-652) creates the post
+/// with the report's title and its first 2000-character chunk; any remaining
+/// chunks ride into the thread that call returns, so the parent forum keeps
+/// exactly one post per report instead of a stack of loose messages.
+///
+/// The channel object is read once first (`GET /channels/{id}`, channel.mdx:395
+/// -398) to apply the tag policy in [`forum_requires_tag`] and to confirm the
+/// target is a forum or media channel. Both checks fail loudly in the log
+/// rather than firing a request Discord is going to reject.
+#[cfg(feature = "discord")]
+async fn deliver_discord_forum(forum_id: &str, job_name: &str, message: &str) {
+    let Some(token) = read_channel_secret("discord", "token") else {
+        tracing::warn!("No Discord bot token found in keys.toml; cannot deliver cron result");
+        return;
+    };
+
+    let client = reqwest::Client::new();
+    let base = "https://discord.com/api/v10";
+    let auth = format!("Bot {token}");
+
+    let channel: serde_json::Value = match client
+        .get(format!("{base}/channels/{forum_id}"))
+        .header("Authorization", &auth)
+        .send()
+        .await
+    {
+        Ok(resp) if resp.status().is_success() => match resp.json().await {
+            Ok(json) => json,
+            Err(e) => {
+                tracing::error!(
+                    "Discord forum delivery: unreadable channel object for {forum_id}: {e}"
+                );
+                return;
+            }
+        },
+        Ok(resp) => {
+            tracing::error!(
+                "Discord forum delivery: cannot read channel {forum_id} ({}): {:?}",
+                resp.status(),
+                resp.text().await.unwrap_or_default()
+            );
+            return;
+        }
+        Err(e) => {
+            tracing::error!("Discord forum delivery: HTTP error reading channel {forum_id}: {e}");
+            return;
+        }
+    };
+
+    let Some(kind) = channel.get("type").and_then(serde_json::Value::as_u64) else {
+        tracing::error!(
+            "Discord forum delivery: channel {forum_id} has no type field; not posting"
+        );
+        return;
+    };
+    if !is_thread_only_channel(kind) {
+        tracing::error!(
+            "Discord forum delivery: channel {forum_id} is type {kind}, not GUILD_FORUM (15) or \
+             GUILD_MEDIA (16): 'discord:{forum_id}:forum' has to name a forum channel; not posting"
+        );
+        return;
+    }
+    if forum_requires_tag(&channel) {
+        tracing::error!(
+            "Discord forum delivery: channel {forum_id} sets REQUIRE_TAG, so every post needs \
+             applied_tags and this build sends none (the #1851 policy). Tags on offer: [{}]. \
+             Point the job at a tagless forum, or land the configured-tag option; not posting",
+            forum_tag_names(&channel).join(", ")
+        );
+        return;
+    }
+
+    let title = forum_post_title(job_name, Utc::now());
+    let chunks = split_for_delivery(message, 2000);
+    let first = chunks.first().copied().unwrap_or("");
+
+    let mut posted = 0usize;
+    let thread_id = match client
+        .post(format!("{base}/channels/{forum_id}/threads"))
+        .header("Authorization", &auth)
+        .json(&forum_post_body(&title, first))
+        .send()
+        .await
+    {
+        Ok(resp) if resp.status().is_success() => {
+            posted += 1;
+            resp.json().await.ok().and_then(|json: serde_json::Value| {
+                json.get("id")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_string)
+            })
+        }
+        Ok(resp) => {
+            tracing::error!(
+                "Discord forum delivery to {forum_id} failed ({}): {:?}",
+                resp.status(),
+                resp.text().await.unwrap_or_default()
+            );
+            None
+        }
+        Err(e) => {
+            tracing::error!("Discord forum delivery to {forum_id} HTTP error: {e}");
+            None
+        }
+    };
+
+    let Some(thread_id) = thread_id else {
+        if posted == 0 {
+            tracing::error!(
+                "Discord forum delivery: no post created in {forum_id}; report not delivered"
+            );
+        }
+        return;
+    };
+
+    for chunk in chunks.iter().skip(1) {
+        let body = serde_json::json!({ "content": chunk });
+        match client
+            .post(format!("{base}/channels/{thread_id}/messages"))
+            .header("Authorization", &auth)
+            .json(&body)
+            .send()
+            .await
+        {
+            Ok(resp) if resp.status().is_success() => posted += 1,
+            Ok(resp) => {
+                tracing::warn!(
+                    "Discord forum follow-up to thread {thread_id} failed ({}): {:?}",
+                    resp.status(),
+                    resp.text().await.unwrap_or_default()
+                );
+            }
+            Err(e) => {
+                tracing::error!("Discord forum follow-up to thread {thread_id} HTTP error: {e}");
+            }
+        }
+    }
+
+    tracing::info!(
+        "Cron result delivered as forum post '{title}' in channel {forum_id} \
+         ({posted} message(s), thread {thread_id})"
+    );
 }
 
 /// Deliver via Slack Web API (`chat.postMessage`). The `text` field renders
