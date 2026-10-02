@@ -28,6 +28,8 @@ const LADDER_WAIT: Duration = Duration::from_secs(90);
 /// Long rate-limit (>1 hour) bails immediately without retrying.
 #[tokio::test]
 async fn long_rate_limit_bails_immediately() {
+    let _guard = crate::channels::telegram::governor::test_support::registry_guard().await;
+    let _cooldown = crate::tests::telegram_cooldown_lock::guard().await;
     let attempts = Arc::new(AtomicU32::new(0));
     let attempts_clone = attempts.clone();
 
@@ -57,6 +59,8 @@ async fn long_rate_limit_bails_immediately() {
 /// Short rate-limit (<1 hour) retries normally up to 3 attempts.
 #[tokio::test(start_paused = true)]
 async fn short_rate_limit_retries_normally() {
+    let _guard = crate::channels::telegram::governor::test_support::registry_guard().await;
+    let _cooldown = crate::tests::telegram_cooldown_lock::guard().await;
     let attempts = Arc::new(AtomicU32::new(0));
     let attempts_clone = attempts.clone();
     let start = tokio::time::Instant::now();
@@ -102,6 +106,8 @@ async fn short_rate_limit_retries_normally() {
 /// Rate-limit at exactly 1 hour (3600s) is NOT long yet (boundary check).
 #[tokio::test(start_paused = true)]
 async fn rate_limit_at_threshold_retries() {
+    let _guard = crate::channels::telegram::governor::test_support::registry_guard().await;
+    let _cooldown = crate::tests::telegram_cooldown_lock::guard().await;
     let attempts = Arc::new(AtomicU32::new(0));
     let attempts_clone = attempts.clone();
     let start = tokio::time::Instant::now();

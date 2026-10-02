@@ -42,6 +42,7 @@ macro_rules! rl_config {
 #[tokio::test(start_paused = true)]
 async fn dm_chat_ids_bypass_all_three_governors() {
     let _guard = ts::registry_guard().await;
+    let _cooldown = crate::tests::telegram_cooldown_lock::guard().await;
     ts::reset(1_000);
     rl_config!(enabled: true);
 
@@ -74,6 +75,7 @@ async fn dm_chat_ids_bypass_all_three_governors() {
 #[tokio::test(start_paused = true)]
 async fn negative_peer_stays_ungoverned_until_a_topic_is_seen() {
     let _guard = ts::registry_guard().await;
+    let _cooldown = crate::tests::telegram_cooldown_lock::guard().await;
     ts::reset(2_000);
     rl_config!(
         enabled: true,
@@ -106,6 +108,7 @@ async fn negative_peer_stays_ungoverned_until_a_topic_is_seen() {
 #[tokio::test(start_paused = true)]
 async fn simultaneous_agent_sessions_share_one_typing_budget() {
     let _guard = ts::registry_guard().await;
+    let _cooldown = crate::tests::telegram_cooldown_lock::guard().await;
     ts::reset(3_000);
     // The storm shape from the Aug-25 logs: N concurrent turns in ONE forum,
     // each firing its own indicator refresh into the single per-peer budget.
@@ -154,6 +157,7 @@ async fn simultaneous_agent_sessions_share_one_typing_budget() {
 #[tokio::test(start_paused = true)]
 async fn edit_ladder_drops_in_priority_order_and_queues_latest_wins_finals() {
     let _guard = ts::registry_guard().await;
+    let _cooldown = crate::tests::telegram_cooldown_lock::guard().await;
     ts::reset(4_000);
     rl_config!(
         enabled: true,
@@ -445,6 +449,7 @@ async fn queued_final_drains_over_the_wire_through_mock_bot_api_stress_6x() {
 async fn queued_rich_markdown_final_with_empty_media_drains_as_markdown() {
     ensure_tracing_capture();
     let _guard = ts::registry_guard().await;
+    let _cooldown = crate::tests::telegram_cooldown_lock::guard().await;
     ts::reset(7_000);
     rl_config!(
         enabled: true,
@@ -512,6 +517,7 @@ async fn queued_rich_markdown_final_with_empty_media_drains_as_markdown() {
 async fn queued_rich_html_final_drains_as_html() {
     ensure_tracing_capture();
     let _guard = ts::registry_guard().await;
+    let _cooldown = crate::tests::telegram_cooldown_lock::guard().await;
     ts::reset(8_000);
     rl_config!(
         enabled: true,
@@ -573,6 +579,7 @@ async fn queued_rich_html_final_drains_as_html() {
 #[tokio::test(start_paused = true)]
 async fn send_pacer_delays_then_fails_open_never_drops() {
     let _guard = ts::registry_guard().await;
+    let _cooldown = crate::tests::telegram_cooldown_lock::guard().await;
     ts::reset(6_000);
     rl_config!(
         enabled: true,
@@ -627,6 +634,7 @@ async fn send_pacer_delays_then_fails_open_never_drops() {
 #[tokio::test(start_paused = true)]
 async fn rich_calls_are_paced_once_the_bucket_empties() {
     let _guard = ts::registry_guard().await;
+    let _cooldown = crate::tests::telegram_cooldown_lock::guard().await;
     ts::reset(1_000);
     rl_config!(enabled: true, rich_per_minute: 30, rich_burst: 4);
 
@@ -658,6 +666,7 @@ async fn rich_calls_are_paced_once_the_bucket_empties() {
 #[tokio::test(start_paused = true)]
 async fn rich_pacing_waits_for_refill_without_failing_open() {
     let _guard = ts::registry_guard().await;
+    let _cooldown = crate::tests::telegram_cooldown_lock::guard().await;
     ts::reset(6_000);
     rl_config!(
         enabled: true,
@@ -693,6 +702,7 @@ async fn rich_pacing_waits_for_refill_without_failing_open() {
 #[tokio::test(start_paused = true)]
 async fn rich_pacing_leaves_dms_and_non_forums_alone() {
     let _guard = ts::registry_guard().await;
+    let _cooldown = crate::tests::telegram_cooldown_lock::guard().await;
     ts::reset(1_000);
     rl_config!(enabled: true, rich_burst: 1);
 
@@ -720,6 +730,7 @@ async fn rich_pacing_leaves_dms_and_non_forums_alone() {
 #[tokio::test(start_paused = true)]
 async fn a_disabled_limiter_governs_nothing() {
     let _guard = ts::registry_guard().await;
+    let _cooldown = crate::tests::telegram_cooldown_lock::guard().await;
     ts::reset(1_000);
     rl_config!(enabled: false, rich_burst: 1, typing_burst: 1);
 

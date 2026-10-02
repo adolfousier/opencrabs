@@ -24,6 +24,7 @@ async fn waits_out_rate_limits_then_delivers() {
     // #1832: `wait_out` arms the process-wide GLOBAL_COOLDOWN and advances
     // the shared virtual clock, so this must not run beside guarded tests.
     let _guard = test_support::registry_guard().await;
+    let _cooldown = crate::tests::telegram_cooldown_lock::guard().await;
     let calls = Cell::new(0u32);
     let out = send_retrying_rate_limit("test send", || {
         let n = calls.get() + 1;
@@ -39,6 +40,7 @@ async fn waits_out_rate_limits_then_delivers() {
 async fn exhausted_retries_propagate_the_error() {
     // #1832: arms GLOBAL_COOLDOWN via `wait_out`, see above.
     let _guard = test_support::registry_guard().await;
+    let _cooldown = crate::tests::telegram_cooldown_lock::guard().await;
     let calls = Cell::new(0u32);
     let out: Result<(), _> = send_retrying_rate_limit("test send", || {
         calls.set(calls.get() + 1);
@@ -52,6 +54,8 @@ async fn exhausted_retries_propagate_the_error() {
 
 #[tokio::test]
 async fn non_rate_limit_error_propagates_immediately() {
+    let _guard = test_support::registry_guard().await;
+    let _cooldown = crate::tests::telegram_cooldown_lock::guard().await;
     let calls = Cell::new(0u32);
     let out: Result<(), _> = send_retrying_rate_limit("test send", || {
         calls.set(calls.get() + 1);
@@ -67,6 +71,8 @@ async fn non_rate_limit_error_propagates_immediately() {
 
 #[tokio::test]
 async fn first_try_success_sends_once() {
+    let _guard = test_support::registry_guard().await;
+    let _cooldown = crate::tests::telegram_cooldown_lock::guard().await;
     let calls = Cell::new(0u32);
     let out = send_retrying_rate_limit("test send", || {
         calls.set(calls.get() + 1);
@@ -84,6 +90,8 @@ async fn first_try_success_sends_once() {
 /// total), since retrying burns 90s for no gain when the window is hours long.
 #[tokio::test(start_paused = true)]
 async fn oversized_windows_are_capped_not_slept_in_full() {
+    let _guard = test_support::registry_guard().await;
+    let _cooldown = crate::tests::telegram_cooldown_lock::guard().await;
     let calls = Cell::new(0u32);
     let start = tokio::time::Instant::now();
     let out: Result<(), _> = send_retrying_rate_limit("test send", || {
@@ -117,6 +125,7 @@ async fn oversized_windows_are_capped_not_slept_in_full() {
 async fn small_windows_are_waited_in_full() {
     // #1832: a 5s window arms GLOBAL_COOLDOWN for 7s via `wait_out`, see above.
     let _guard = test_support::registry_guard().await;
+    let _cooldown = crate::tests::telegram_cooldown_lock::guard().await;
     let calls = Cell::new(0u32);
     let start = tokio::time::Instant::now();
     let out = send_retrying_rate_limit("test send", || {

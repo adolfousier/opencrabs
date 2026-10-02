@@ -696,6 +696,7 @@ pub mod rtk_rewrite_test;
 pub mod rtk_tracker_test;
 pub mod stop_intent_test;
 pub mod stream_total_wall_clock_test;
+pub mod telegram_cooldown_discipline_1854_test;
 pub mod telegram_cooldown_lock;
 pub mod theme_global_lock;
 pub mod theme_persist_roundtrip_test;

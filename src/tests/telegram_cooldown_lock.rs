@@ -22,6 +22,13 @@
 //! let _guard = test_support::registry_guard().await;
 //! let _cooldown = telegram_cooldown_lock::guard().await;
 //! ```
+//!
+//! That is not a request, and it is no longer only a comment (#1854):
+//! `crate::tests::telegram_cooldown_discipline_1854_test` reads the test
+//! sources and fails the build when a test body reaches the cooldown or the
+//! shared clock without holding this guard. If the rule changes, the needle
+//! list in that scan changes in the same commit, or the discipline decays
+//! back into prose.
 
 use tokio::sync::{Mutex, MutexGuard};
 
