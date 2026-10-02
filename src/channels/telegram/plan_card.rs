@@ -29,6 +29,83 @@ const CARD_PROSE_BUDGET: usize = 2400;
 /// expanded body, never the visible chrome.
 const GOAL_TEXT_CAP: usize = 600;
 
+/// Record a card render in `channel_messages` (#1684).
+///
+/// The card is a bot bubble like any other, and every other bubble is recorded
+/// for exactly one reason: the NEXT turn has to be able to find it. Reply
+/// context resolves through `content_by_platform_message_id`, a reaction
+/// resolves its session through `bot_message_with_thread`, and group history is
+/// built from `recent()`. None of those ever saw a card, so a user replying to
+/// one was told the agent could not read their message, a reaction on a card
+/// was dropped with no ack, and the agent could not see the plan it was arguing
+/// about.
+///
+/// One bubble, one row: an edit refreshes the existing row in place instead of
+/// appending another, so history shows the card as it looks on screen rather
+/// than every intermediate render of it.
+pub(crate) async fn record_card(
+    state: &TelegramState,
+    chat: ChatId,
+    thread_id: Option<ThreadId>,
+    mid: MessageId,
+    rendered: &str,
+) {
+    let Some(repo) = state.channel_messages().await else {
+        // A surface built without a database still renders cards; it just
+        // cannot record them, the same way it cannot track them durably.
+        return;
+    };
+    let chat_id = chat.0.to_string();
+    let pmid = mid.0.to_string();
+    let content = super::markdown::strip_html_tags(rendered);
+    // One bubble, one row: an edit refreshed the render in place, so the row
+    // already exists and only its content moved.
+    if let Ok(updated) = repo
+        .update_content("telegram", &chat_id, &pmid, &content)
+        .await
+        && updated > 0
+    {
+        return;
+    }
+    let sender_name = state
+        .bot_username()
+        .await
+        .map(|u| format!("@{u}"))
+        .unwrap_or_else(|| "OpenCrabs".to_string());
+    let msg = crate::db::models::ChannelMessage::new(
+        "telegram".to_string(),
+        chat_id,
+        None,
+        "bot:opencrabs".to_string(),
+        sender_name,
+        content,
+        "text".to_string(),
+        Some(pmid),
+    )
+    .with_thread(thread_id.map(|t| t.0.to_string()), None);
+    if let Err(e) = repo.insert(&msg).await {
+        tracing::warn!("failed to record plan card in channel_messages: {e}");
+    }
+}
+
+/// Drop the card's `channel_messages` row when its bubble is deleted (#1684).
+///
+/// Without this, removing a card leaves a row pointing at a message that no
+/// longer exists, and a stale card can be quoted back into a later turn's
+/// context as if it were still on screen. History has to reflect what the chat
+/// actually contains, including its absences.
+pub(crate) async fn forget_card(state: &TelegramState, chat: ChatId, mid: MessageId) {
+    let Some(repo) = state.channel_messages().await else {
+        return;
+    };
+    if let Err(e) = repo
+        .delete_by_platform_message_id("telegram", &chat.0.to_string(), &mid.0.to_string())
+        .await
+    {
+        tracing::warn!("failed to remove plan card row from channel_messages: {e}");
+    }
+}
+
 /// Collapsible wrapper style for prose sections and goals.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum CollapsibleStyle {
@@ -408,6 +485,8 @@ pub(crate) async fn refresh_plan_card(
                 state
                     .set_plan_card(session_id, chat, thread_id, mid, rich_sig)
                     .await;
+                // Queued FINAL: never dropped, lands latest-wins (#1684).
+                record_card(state, chat, thread_id, mid, &rich_html).await;
                 return;
             }
             match super::rich::api::edit_rich_html(
@@ -426,6 +505,7 @@ pub(crate) async fn refresh_plan_card(
                     state
                         .set_plan_card(session_id, chat, thread_id, mid, rich_sig)
                         .await;
+                    record_card(state, chat, thread_id, mid, &rich_html).await;
                     return;
                 }
                 Err(e) => {
@@ -465,6 +545,7 @@ pub(crate) async fn refresh_plan_card(
                 state
                     .set_plan_card(session_id, chat, thread_id, MessageId(mid), rich_sig)
                     .await;
+                record_card(state, chat, thread_id, MessageId(mid), &rich_html).await;
                 return;
             }
             Err(e) => {
@@ -519,6 +600,12 @@ pub(crate) async fn refresh_plan_card(
             state
                 .set_plan_card(session_id, chat, thread_id, mid, signature)
                 .await;
+            // The governor's FINAL class is never dropped: the payload is held
+            // latest-wins and lands on refill, so the queued render is what will
+            // be on screen. Record it now, because a row that only ever matches
+            // an edit that went through directly is a row that silently misses
+            // every throttled refresh (#1684).
+            record_card(state, chat, thread_id, mid, &html).await;
             return;
         }
         let mut req = bot
@@ -532,6 +619,7 @@ pub(crate) async fn refresh_plan_card(
                 state
                     .set_plan_card(session_id, chat, thread_id, mid, signature)
                     .await;
+                record_card(state, chat, thread_id, mid, &html).await;
                 return;
             }
             Err(e) => {
@@ -556,7 +644,7 @@ pub(crate) async fn refresh_plan_card(
     // No live card (or it was unusable): post a fresh one at the bottom.
     // G3 send pacing (#1211): a fresh card is a full message post.
     super::governor::pace_send(chat).await;
-    let mut req = message_in_thread(bot, chat, thread_id, html).parse_mode(ParseMode::Html);
+    let mut req = message_in_thread(bot, chat, thread_id, html.clone()).parse_mode(ParseMode::Html);
     if let Some(ref k) = kb {
         req = req.reply_markup(k.clone());
     }
@@ -564,7 +652,8 @@ pub(crate) async fn refresh_plan_card(
         Ok(m) => {
             state
                 .set_plan_card(session_id, chat, thread_id, m.id, signature)
-                .await
+                .await;
+            record_card(state, chat, thread_id, m.id, &html).await;
         }
         Err(e) => {
             handle_create_failure(&e.to_string(), state, session_id).await;
@@ -757,6 +846,16 @@ async fn finalize_plan_card_locked(
                 "Telegram plan card finalized for session {session_id}: \
                  completed card posted ({new_mid:?})"
             );
+            // #1684: a fresh bubble needs a row like any other post, or the
+            // completion notice is invisible to the next turn's context.
+            record_card(
+                state,
+                chat,
+                thread_id,
+                new_mid,
+                rich.as_deref().unwrap_or(&html),
+            )
+            .await;
             // Delete the buried tracked card best-effort; a delete failure
             // leaves a stale card visible, never a duplicate. Both outcomes
             // are logged — a vanished card must stay forensic (#16).
@@ -765,7 +864,11 @@ async fn finalize_plan_card_locked(
             {
                 match bot.delete_message(chat, mid).await {
                     Ok(_) => {
-                        tracing::info!("Telegram plan card restick deleted stale card ({mid:?})")
+                        tracing::info!("Telegram plan card restick deleted stale card ({mid:?})");
+                        // The bubble is gone: its row must go with it, or
+                        // history keeps quoting a deleted card to the agent
+                        // (#1684).
+                        forget_card(state, chat, mid).await;
                     }
                     Err(e) => {
                         tracing::warn!("Telegram plan card restick delete failed ({mid:?}): {e}")
@@ -829,6 +932,16 @@ async fn finalize_plan_card_locked(
             }
             abort_guard.armed = false;
             if edited {
+                // #1684: the completed card is what is on screen now, in either
+                // dialect, so that is what the row must say.
+                record_card(
+                    state,
+                    chat,
+                    thread_id,
+                    mid,
+                    rich.as_deref().unwrap_or(&html),
+                )
+                .await;
                 // In-place edit LANDED: the completion notice is visible —
                 // consume the flag and untrack (#16).
                 crate::utils::plan_files::take_plan_just_archived(session_id).await;
@@ -936,7 +1049,11 @@ async fn remove_plan_card_locked(
         // outcomes so a removal is always forensic.
         match bot.delete_message(chat, mid).await {
             Ok(_) => {
-                tracing::info!("Telegram plan card deleted ({mid:?}) for session {session_id}")
+                tracing::info!("Telegram plan card deleted ({mid:?}) for session {session_id}");
+                // #1684: the row goes with the bubble. A card removed for real
+                // must not stay readable in history, or the agent quotes a
+                // zombie back to the user.
+                forget_card(state, chat, mid).await;
             }
             Err(e) => tracing::warn!("Telegram plan card delete failed ({mid:?}): {e}"),
         }

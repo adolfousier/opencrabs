@@ -112,4 +112,41 @@ impl PlanCardRepository {
             .context("Failed to delete plan card")?;
         Ok(())
     }
+
+    /// Every card currently tracked in one chat, whichever session owns it.
+    ///
+    /// The read the incident in #1684 needed. `get` is session-scoped, and the
+    /// orphaned card belonged to the chat's no-topic fallback session while the
+    /// plan work finished in another session, so a session-scoped read could
+    /// not see the zombie that was sitting in front of everyone. Chat-scoped is
+    /// the only shape that answers "what cards does this chat have?".
+    pub async fn list_by_chat(&self, chat_id: i64) -> Result<Vec<PlanCard>> {
+        self.pool
+            .get()
+            .await
+            .context("Failed to get connection")?
+            .interact(move |conn| {
+                let mut stmt = conn.prepare(
+                    "SELECT session_id, chat_id, thread_id, message_id, signature \
+                     FROM plan_cards WHERE chat_id = ?1 ORDER BY updated_at DESC",
+                )?;
+                let rows = stmt.query_map(params![chat_id], |row| {
+                    Ok(PlanCard {
+                        session_id: row.get(0)?,
+                        chat_id: row.get(1)?,
+                        thread_id: row.get(2)?,
+                        message_id: row.get(3)?,
+                        signature: row.get(4)?,
+                    })
+                })?;
+                let mut cards = Vec::new();
+                for row in rows {
+                    cards.push(row?);
+                }
+                Ok::<Vec<PlanCard>, rusqlite::Error>(cards)
+            })
+            .await
+            .map_err(interact_err)?
+            .context("Failed to list plan cards for chat")
+    }
 }

@@ -945,6 +945,13 @@ async fn cmd_chat_inner(
             db.pool().clone(),
         ))
         .await;
+    // Plan cards record their renders in `channel_messages` (#1684): without
+    // this the card is the one bot bubble a reply cannot be read against, a
+    // reaction cannot resolve, and group history never shows.
+    #[cfg(feature = "telegram")]
+    telegram_state
+        .set_channel_message_store(crate::db::ChannelMessageRepository::new(db.pool().clone()))
+        .await;
     // Durable follow-up suggestion stash (#1226 item 3): without it a
     // restart orphans every live picker keyboard — buttons stay rendered
     // but taps can only hit the unknown-token strip path.

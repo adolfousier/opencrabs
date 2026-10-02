@@ -101,6 +101,38 @@ impl ChannelMessageRepository {
             .context("Failed to update channel message content")
     }
 
+    /// Drop the stored row for one platform message id.
+    ///
+    /// Used when a bubble is deleted on Telegram: the plan card (#1684) and any
+    /// other bot message the bot removes. Without it, `channel_messages` keeps
+    /// a row for a message that no longer exists, and history or a reply lookup
+    /// can quote a dead bubble back to the agent.
+    pub async fn delete_by_platform_message_id(
+        &self,
+        channel: &str,
+        chat_id: &str,
+        platform_message_id: &str,
+    ) -> Result<usize> {
+        let ch = channel.to_string();
+        let cid = chat_id.to_string();
+        let pmid = platform_message_id.to_string();
+        self.pool
+            .get()
+            .await
+            .context("Failed to get connection")?
+            .interact(move |conn| {
+                conn.execute(
+                    "DELETE FROM channel_messages \
+                     WHERE channel = ?1 AND channel_chat_id = ?2 \
+                       AND platform_message_id = ?3",
+                    params![ch, cid, pmid],
+                )
+            })
+            .await
+            .map_err(interact_err)?
+            .context("Failed to delete channel message by platform id")
+    }
+
     /// Forum-topic dead-key eviction (#116): Telegram answered
     /// `400 Bad Request: message thread not found` for `(channel, chat,
     /// thread)` — the remembered topic no longer exists. Clear the

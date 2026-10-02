@@ -222,6 +222,13 @@ pub struct TelegramState {
     /// surfaces built without a database, which keeps the old in-memory-only
     /// behaviour rather than failing.
     plan_card_store: Mutex<Option<crate::db::repository::PlanCardRepository>>,
+    /// Backing for the plan card's `channel_messages` row (#1684). Every other
+    /// bot bubble is recorded there, which is what lets a later turn read a
+    /// reply to it, resolve a reaction on it, or see it in group history. The
+    /// card path had no such write, so the only bot bubble in Telegram was
+    /// invisible to the agent that posted it. `None` on surfaces built without
+    /// a database: cards still render, nothing is recorded.
+    channel_message_store: Mutex<Option<crate::db::repository::ChannelMessageRepository>>,
     /// Durable backing for `pending_followups` (#1226 item 3): rows are
     /// written when a keyboard arms (and when its merge host attaches),
     /// deleted on tap/drop/clear, and hydrated back into the map at boot so
@@ -433,6 +440,7 @@ impl TelegramState {
             cancel_tokens: Mutex::new(HashMap::new()),
             plan_cards: Mutex::new(HashMap::new()),
             plan_card_store: Mutex::new(None),
+            channel_message_store: Mutex::new(None),
             followup_store: Mutex::new(None),
             binding_store: Mutex::new(None),
             enqueue_callback: Mutex::new(None),
@@ -1259,6 +1267,24 @@ impl TelegramState {
         repo: crate::db::repository::PlanCardRepository,
     ) {
         *self.plan_card_store.lock().await = Some(repo);
+    }
+
+    /// Give the plan-card path a `channel_messages` writer (#1684). Called once
+    /// at startup, next to `set_plan_card_store`: the card is a bot bubble like
+    /// any other, and recording it needs the same repository the reply path
+    /// already uses. Surfaces built without a database leave it `None`.
+    pub(crate) async fn set_channel_message_store(
+        &self,
+        repo: crate::db::repository::ChannelMessageRepository,
+    ) {
+        *self.channel_message_store.lock().await = Some(repo);
+    }
+
+    /// The `channel_messages` writer, when this surface has one.
+    pub(crate) async fn channel_messages(
+        &self,
+    ) -> Option<crate::db::repository::ChannelMessageRepository> {
+        self.channel_message_store.lock().await.clone()
     }
 
     /// Give the follow-up stash durable backing and hydrate what the last

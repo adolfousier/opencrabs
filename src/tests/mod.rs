@@ -1004,6 +1004,7 @@ pub mod telegram_outbox_record_test;
 pub mod telegram_photo_batching_test;
 mod telegram_photo_thread_scope_test;
 pub mod telegram_plan_card_interrupt_restick_test;
+pub mod telegram_plan_card_persistence_1684_test;
 pub mod telegram_plan_finalize_test;
 pub mod telegram_plan_render_test;
 pub mod telegram_pre_tool_rolling_test;

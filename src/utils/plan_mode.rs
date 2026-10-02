@@ -258,7 +258,7 @@ pub async fn show_plan(session_id: Uuid) -> String {
 }
 
 pub async fn show_plan_opt(session_id: Uuid, full: bool) -> String {
-    match plan_files::plan_mode_state(session_id).await {
+    let summary = match plan_files::plan_mode_state(session_id).await {
         PlanModeState::NoPlan => "No active plan for this session.".to_string(),
         PlanModeState::PreInitEditing => {
             "Plan mode is on (pre-init): no design document yet. The agent still \
@@ -302,7 +302,57 @@ pub async fn show_plan_opt(session_id: Uuid, full: bool) -> String {
             };
             format_active_checklist_windowed(&plan, full)
         }
+    };
+    match telegram_card_report(session_id).await {
+        Some(report) => format!("{summary}\n\n{report}"),
+        None => summary,
     }
+}
+
+/// #1684: the plan card this session owns on Telegram, plus any other card live
+/// in the same chat.
+///
+/// The card is the plan as the user sees it, and until the render was recorded
+/// the agent could not read it at all: an orphaned card stayed alive for days
+/// because the only reader was a human with a sqlite prompt. `None` when there
+/// is no database or no tracked card, so every other surface is unchanged.
+///
+/// Chat-scoped as well as session-scoped, on purpose: the incident's card was
+/// tracked under the chat's no-topic fallback session while the plan work ran
+/// in another session, so a session-only read would still have missed it.
+async fn telegram_card_report(session_id: Uuid) -> Option<String> {
+    let pool = crate::db::database::global_pool()?;
+    let repo = crate::db::repository::PlanCardRepository::new(pool.clone());
+    let card = repo.get(&session_id.to_string()).await.ok()??;
+    let topic = match card.thread_id {
+        Some(t) => format!("topic {t}"),
+        None => "no topic".to_string(),
+    };
+    // The stored `signature` is the rendered text plus a `\u{1}`-separated
+    // keyboard debug tail. That tail is a `{:?}` of the inline keyboard: never
+    // something to quote to a model, so the report stops at the separator.
+    let text = card.signature.split('\u{1}').next().unwrap_or_default();
+    let mut lines = vec![format!(
+        "Telegram plan card for this session: message {} in chat {} ({}).",
+        card.message_id, card.chat_id, topic
+    )];
+    if let Ok(cards) = repo.list_by_chat(card.chat_id).await {
+        let others: Vec<String> = cards
+            .iter()
+            .filter(|c| c.session_id != session_id.to_string())
+            .map(|c| format!("session {} on message {}", c.session_id, c.message_id))
+            .collect();
+        if !others.is_empty() {
+            lines.push(format!(
+                "Other sessions also have a card in this chat: {}.",
+                others.join(", ")
+            ));
+        }
+    }
+    if !text.trim().is_empty() {
+        lines.push(format!("Card text as stored:\n{text}"));
+    }
+    Some(lines.join("\n"))
 }
 
 /// The Active-checklist summary shared by `/show-plan` and the TUI plan
