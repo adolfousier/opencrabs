@@ -248,10 +248,20 @@ impl AcpServer {
                 }
                 let current = st.model.lock().await.clone();
                 let models = catalog::models_payload(&state.config, current.as_deref());
+                let config_options =
+                    catalog::config_options_payload(&state.config, current.as_deref());
                 let modes = protocol::modes_payload(*st.mode.lock().await);
+                // A resumed session reached us through session/load, and
+                // LoadSessionResponse has no sessionId field to echo (#1815 F4).
                 state.handle.respond(
                     id,
-                    json!({ "sessionId": acp_id, "models": models, "modes": modes }),
+                    protocol::session_response(
+                        &acp_id,
+                        models,
+                        modes,
+                        config_options,
+                        resume.is_none(),
+                    ),
                 );
                 // Slash-command discovery pushes after the response so the
                 // client's picker fills in as soon as the session exists.

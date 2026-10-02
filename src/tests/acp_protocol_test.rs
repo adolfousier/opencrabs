@@ -10,7 +10,7 @@ use crate::acp::protocol::{
     AcpMode, ClientMessage, EXTENSION_METHODS, SESSION_COMPACT, SESSION_COMPACT_LEGACY,
     SESSION_SET_MODE, SESSION_SET_MODEL, SESSION_SET_MODEL_LEGACY, SESSION_STEER_LEGACY,
     initialize_result, modes_payload, parse_line, permission_outcome, prompt_text, replay_updates,
-    tool_kind,
+    session_response, tool_kind,
 };
 use crate::db::models::Message;
 use chrono::Utc;
@@ -271,4 +271,38 @@ fn initialize_advertises_auth_methods() {
         v.get("authMethods").and_then(|a| a.as_array()).is_some(),
         "authMethods is optional per the ACP v1 schema (required is only protocolVersion); we emit it explicitly so clients and registry validators that expect the field present do not depend on the schema default"
     );
+}
+
+#[test]
+fn new_session_result_carries_the_session_id() {
+    let result = session_response(
+        "acp-sess-1",
+        json!({ "availableModels": [], "currentModelId": "" }),
+        json!({ "availableModes": [] }),
+        json!([]),
+        true,
+    );
+    // NewSessionResponse requires sessionId: it is the only place a client
+    // learns the id of a session it asked us to create.
+    assert_eq!(result["sessionId"], json!("acp-sess-1"));
+    assert!(result["configOptions"].is_array());
+}
+
+#[test]
+fn load_session_result_does_not_echo_the_session_id() {
+    // LoadSessionResponse defines modes, configOptions and _meta and nothing
+    // else. The client supplied the id in the request, so echoing it added a
+    // root field to a type the spec owns (#1815 F4).
+    let result = session_response(
+        "acp-sess-1",
+        json!({ "availableModels": [], "currentModelId": "" }),
+        json!({ "availableModes": [] }),
+        json!([]),
+        false,
+    );
+    assert!(
+        result.get("sessionId").is_none(),
+        "load echoed a sessionId the client already has"
+    );
+    assert!(result["configOptions"].is_array());
 }

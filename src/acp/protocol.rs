@@ -178,6 +178,35 @@ pub fn session_update(session_id: &str, update: Value) -> Value {
     )
 }
 
+/// The result for `session/new` and `session/load`.
+///
+/// `echo_session_id` is what separates them: `NewSessionResponse` requires
+/// `sessionId`, while `LoadSessionResponse` defines only `modes`,
+/// `configOptions` and `_meta`, and an implementation MUST NOT add a root field
+/// to a type the spec owns. Answering a load with the id the client just sent
+/// us is exactly that (#1815 F4).
+///
+/// `models` is passed through untouched and remains a non-schema field. It is
+/// kept on purpose: MonoCode builds its picker from it, so the field is a
+/// documented wart rather than something to drop without warning (#1815 F4).
+pub fn session_response(
+    session_id: &str,
+    models: Value,
+    modes: Value,
+    config_options: Value,
+    echo_session_id: bool,
+) -> Value {
+    let mut response = json!({
+        "models": models,
+        "modes": modes,
+        "configOptions": config_options,
+    });
+    if echo_session_id {
+        response["sessionId"] = Value::from(session_id);
+    }
+    response
+}
+
 /// A text `agent_message_chunk` / `agent_thought_chunk` update body.
 pub fn text_chunk(kind: &str, text: &str) -> Value {
     json!({
