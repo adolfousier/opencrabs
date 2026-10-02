@@ -626,6 +626,11 @@ allowed_channels = ["channel_id"]       # Where the bot operates (empty = all ch
                                         # allowed_users entry on first run; set explicitly to pin the owner.
 # respond_to = "all"                    # "all" | "dm_only" | "mention"
 # session_idle_hours = 24.0             # Archive inactive non-owner sessions after N hours (default: never)
+# trace_narration = true                # Fold intermediate narration (model text between tool
+                                        # calls) into the turn's tool-group bubble as dim subtext
+                                        # instead of posting each as a separate message.
+                                        # Default: true. Set false to post each intermediate as
+                                        # its own message.
 # Slash commands are projected from commands.toml (no knob needed). The bot needs
 # the "applications.commands" OAuth2 scope at invite time, not just "bot": without
 # it the gateway connects and chat works, but every command registration returns
