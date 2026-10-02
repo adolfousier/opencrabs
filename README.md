@@ -647,6 +647,8 @@ OpenCrabs writes structured debug logs to files when debug logging is active. Tw
 
 **Where logs land:** `~/.opencrabs/logs/` by default. Override the directory with the `DEBUG_LOGS_LOCATION` env var.
 
+**Panic records:** the TUI installs a panic hook that appends every panic it sees to `panic.log`, in that same directory (`DEBUG_LOGS_LOCATION` moves it too), with the source location, the first `opencrabs::` backtrace frame and the captured stack, and mirrors a one-line `PANIC <site> [frame] :: <message>` record into the daily log. That file is written directly rather than through the debug gate, so it exists even with `debug_logs = false`, and the age-based cleanup leaves it alone because `cleanup_old_logs` only prunes names matching `opencrabs.YYYY-MM-DD`. A TUI that died with nothing in the daily log has its record here.
+
 **Hot-reload:** edit `debug_logs` in `config.toml` (or ask the agent to flip it via `config_manager`) and the change takes effect on the next event. No restart required.
 
 ### Brain Files — One File, One Job

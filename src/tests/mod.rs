@@ -721,6 +721,7 @@ pub mod tui_narration_cap_test;
 pub mod tui_no_raw_ansi_colors_test;
 pub mod tui_notice_render_test;
 pub mod tui_notice_test;
+pub mod tui_panic_persistence_test;
 pub mod tui_plan_tests_test;
 pub mod tui_process_commands_test;
 pub mod tui_render_utils_test;

@@ -155,13 +155,33 @@ pub async fn run(mut app: App) -> Result<()> {
     // Also stash the panic location so the render `catch_unwind` path can
     // log WHERE a caught render panic happened (the payload only carries
     // the message, not the source location).
+    //
+    // #1791: the stash was the whole story, and it only ever reached the log
+    // through the render path. Everything else unwound out and took the
+    // location, the backtrace and the message with it. So the hook now also
+    // persists the record it already computed, before the terminal is
+    // restored and the default hook hands the text to a stderr that dies with
+    // the window.
     let default_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
+        let mut record = crate::logging::panic_record::PanicRecord {
+            file: None,
+            line: None,
+            column: None,
+            message: crate::logging::panic_record::payload_message(info.payload()),
+            opencrabs_frame: None,
+        };
+        let mut backtrace = String::new();
         if let Some(loc) = info.location() {
+            record.file = Some(loc.file().to_string());
+            record.line = Some(loc.line());
+            record.column = Some(loc.column());
             // Force-capture unconditionally — render panics are rare,
             // and RUST_BACKTRACE=1 is usually unset in TUI sessions.
             let bt = std::backtrace::Backtrace::force_capture();
             let opencrabs_frame = first_opencrabs_frame(&bt);
+            record.opencrabs_frame = opencrabs_frame.clone();
+            backtrace = format!("{bt}");
             if let Ok(mut slot) = LAST_PANIC_LOCATION.lock() {
                 *slot = Some(PanicInfo {
                     file: loc.file().to_string(),
@@ -171,6 +191,7 @@ pub async fn run(mut app: App) -> Result<()> {
                 });
             }
         }
+        crate::logging::panic_record::persist(&record, &backtrace, &crate::logging::log_dir());
         force_restore_terminal();
         default_hook(info);
     }));
