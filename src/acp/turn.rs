@@ -206,13 +206,10 @@ fn progress_callback(
                     "rawOutput": summary,
                 }))
             }
-            ProgressEvent::TokenCount(used) => Some(json!({
-                "sessionUpdate": "usage",
-                "usage": {
-                    "used": used,
-                    "size": agent.context_limit_for_session(session_id),
-                },
-            })),
+            ProgressEvent::TokenCount(used) => Some(protocol::usage_update(
+                used as u64,
+                agent.context_limit_for_session(session_id) as u64,
+            )),
             // Everything else (compaction notices, retry ticker, provider
             // switches, suggestions, stream strips) has no ACP vocabulary —
             // logged by the loop already, not re-broadcast here.

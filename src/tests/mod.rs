@@ -30,6 +30,7 @@ pub mod acp_protocol_test;
 pub mod acp_replay_test;
 pub mod acp_transport_test;
 pub mod acp_turn_test;
+pub mod acp_usage_frame_test;
 pub mod active_skill_tracking_test;
 pub mod agent_approval_policies_test;
 pub mod agent_basic_test;

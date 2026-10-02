@@ -235,13 +235,14 @@ impl AcpServer {
                     if let Some(used) = used {
                         state.handle.send(protocol::session_update(
                             &acp_id,
-                            json!({
-                                "sessionUpdate": "usage",
-                                "usage": {
-                                    "used": used,
-                                    "size": state.agent.context_limit_for_session(session.id),
-                                },
-                            }),
+                            // `used` comes off a DB column typed i64; the
+                            // schema field is uint64 with minimum 0, so a
+                            // nonsensical negative reads as an empty meter
+                            // instead of a frame a strict client rejects.
+                            protocol::usage_update(
+                                used.max(0) as u64,
+                                state.agent.context_limit_for_session(session.id) as u64,
+                            ),
                         ));
                     }
                 }

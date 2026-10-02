@@ -170,6 +170,27 @@ pub fn text_chunk(kind: &str, text: &str) -> Value {
     })
 }
 
+/// `usage_update` body: the context meter.
+///
+/// The shape is pinned to the official v1 schema (`SessionUpdate.oneOf` in
+/// `schema/v1/schema.json`, fetched 2026-10-02, 247168 bytes): the tag is
+/// `usage_update`, and `UsageUpdate` is folded in with `allOf`, so `used` and
+/// `size` are FLAT siblings of `sessionUpdate`, both required, both `uint64`
+/// with `minimum: 0`. The frame this replaced,
+/// `{"sessionUpdate":"usage","usage":{...}}`, exists in no schema version: a
+/// client generated from the schema sees an unknown tagged variant and drops
+/// the notification, which means the meter never moves (#1815 F1).
+///
+/// `cost` is optional upstream and this path has no per-session money total,
+/// so it stays absent rather than being guessed at.
+pub fn usage_update(used: u64, size: u64) -> Value {
+    json!({
+        "sessionUpdate": "usage_update",
+        "used": used,
+        "size": size,
+    })
+}
+
 /// Transcript replay for `session/load`: an agent advertising `loadSession`
 /// re-sends the stored conversation as session/update notifications before
 /// answering the load. Rows map to live-turn chunk shapes: user →
