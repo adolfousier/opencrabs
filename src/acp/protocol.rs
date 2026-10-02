@@ -20,16 +20,32 @@ pub const INITIALIZE: &str = "initialize";
 pub const SESSION_NEW: &str = "session/new";
 pub const SESSION_LOAD: &str = "session/load";
 pub const SESSION_PROMPT: &str = "session/prompt";
-pub const SESSION_SET_MODEL: &str = "session/set_model";
+/// Custom model selection. Not a v1 or v2 method, and v1 reserves every
+/// unprefixed name for future protocol versions, so the custom request carries
+/// the `_opencrabs/` prefix (#1815 F3).
+pub const SESSION_SET_MODEL: &str = "_opencrabs/set_model";
+/// Pre-prefix spelling, accepted as an alias for one release.
+pub const SESSION_SET_MODEL_LEGACY: &str = "session/set_model";
 /// Runtime mode selection: `plan` denies mutations, `auto-accept-edits`
 /// pre-approves edit-kind tools, `auto`/`full-access` pre-approve everything,
 /// and `supervised` routes approvals to the client.
 pub const SESSION_SET_MODE: &str = "session/set_mode";
 pub const SESSION_CANCEL: &str = "session/cancel";
-pub const SESSION_COMPACT: &str = "session/compact";
+/// Custom manual-compaction request, prefixed for the same reason as
+/// `SESSION_SET_MODEL` (#1815 F3).
+pub const SESSION_COMPACT: &str = "_opencrabs/compact";
+/// Pre-prefix spelling, accepted as an alias for one release.
+pub const SESSION_COMPACT_LEGACY: &str = "session/compact";
 pub const SESSION_STEER: &str = "_session/steer";
 /// Pre-ext-prefix spelling, accepted as an alias for older adapters.
 pub const SESSION_STEER_LEGACY: &str = "session/steer";
+
+/// The custom methods this agent accepts, in canonical form. Advertised in the
+/// `initialize` result under `_meta`, which is the one place the spec lets an
+/// implementation say so without claiming a reserved name (#1815 F3). The
+/// legacy spellings still dispatch but are deliberately not advertised: a new
+/// client should not be pointed at a name we intend to retire.
+pub const EXTENSION_METHODS: &[&str] = &[SESSION_SET_MODEL, SESSION_COMPACT, SESSION_STEER];
 
 // Outbound frames (agent -> client).
 pub const SESSION_UPDATE: &str = "session/update";
@@ -262,6 +278,13 @@ pub fn initialize_result() -> Value {
         "agentInfo": {
             "name": "opencrabs",
             "version": env!("CARGO_PKG_VERSION"),
+        },
+        // Custom methods live in `_meta`, never in reserved root names: the
+        // extensibility rule is that a custom request must start with an
+        // underscore, and implementations MUST NOT add custom fields at the
+        // root of a spec type (#1815 F3).
+        "_meta": {
+            "extensions": EXTENSION_METHODS,
         },
     })
 }

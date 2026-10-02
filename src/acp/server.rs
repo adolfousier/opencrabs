@@ -136,13 +136,13 @@ impl AcpServer {
                     ),
                 }
             }
-            protocol::SESSION_SET_MODEL => {
+            protocol::SESSION_SET_MODEL | protocol::SESSION_SET_MODEL_LEGACY => {
                 Self::session_set_model(state, id, params).await;
             }
             protocol::SESSION_SET_MODE => {
                 Self::session_set_mode(state, id, params).await;
             }
-            protocol::SESSION_COMPACT => {
+            protocol::SESSION_COMPACT | protocol::SESSION_COMPACT_LEGACY => {
                 Self::session_compact(state, id, params).await;
             }
             protocol::SESSION_PROMPT => {
