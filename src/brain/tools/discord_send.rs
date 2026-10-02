@@ -1,8 +1,9 @@
 //! Discord Send Tool
 //!
 //! Agent-callable tool for full Discord control: send, reply, react, edit, delete,
-//! pin/unpin, threads, embeds, message history, channel listing, and moderation.
-//! Always prefer this tool over http_request — credentials are handled securely.
+//! pin/unpin, threads, embeds, message history, channel listing, moderation, and
+//! native polls. Always prefer this tool over http_request — credentials are
+//! handled securely.
 
 use super::error::Result;
 use super::r#trait::{Tool, ToolCapability, ToolExecutionContext, ToolHints, ToolResult};
@@ -11,7 +12,7 @@ use async_trait::async_trait;
 use serde_json::Value;
 use std::sync::Arc;
 
-/// Tool for comprehensive Discord bot control (16 actions).
+/// Tool for comprehensive Discord bot control (20 actions).
 pub struct DiscordSendTool {
     discord_state: Arc<DiscordState>,
 }
@@ -94,7 +95,8 @@ impl Tool for DiscordSendTool {
     fn description(&self) -> &str {
         "Full Discord control: send messages, reply, react, edit, delete, pin/unpin, create \
          threads, send embeds, fetch message history, list channels, manage roles, kick and ban \
-         members. Always use discord_send instead of http_request — credentials handled securely."
+         members, and post native polls (send_poll). Always use discord_send instead of \
+         http_request — credentials handled securely."
     }
 
     fn input_schema(&self) -> Value {
@@ -107,7 +109,7 @@ impl Tool for DiscordSendTool {
                         "send", "reply", "react", "unreact", "edit", "delete",
                         "pin", "unpin", "create_thread", "send_embed", "get_messages",
                         "list_channels", "add_role", "remove_role", "kick", "ban",
-                        "send_file", "send_select", "send_form"
+                        "send_file", "send_select", "send_form", "send_poll"
                     ],
                     "description": "The Discord action to perform"
                 },
@@ -179,6 +181,23 @@ impl Tool for DiscordSendTool {
                         "required": ["label"]
                     },
                     "description": "Form fields for send_form (max 5). Submitted values are routed back to you as a new turn."
+                },
+                "poll_question": {
+                    "type": "string",
+                    "description": "Poll question text for send_poll. Discord caps it at 300 chars; longer is truncated"
+                },
+                "poll_options": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "description": "Poll answer strings for send_poll. Discord allows up to 10 answers; blank entries are dropped and labels over 55 chars are truncated"
+                },
+                "poll_duration_hours": {
+                    "type": "integer",
+                    "description": "How long a send_poll stays open, in hours (1-768, the platform 32-day ceiling). Defaults to 24"
+                },
+                "multi_select": {
+                    "type": "boolean",
+                    "description": "For send_poll: let voters pick several answers. Default false (single choice)"
                 },
                 "file_path": {
                     "type": "string",
@@ -630,6 +649,70 @@ impl Tool for DiscordSendTool {
                 }
             }
 
+            // send_poll (#1848: parity with Telegram and WhatsApp)
+            "send_poll" => {
+                use crate::channels::discord::poll::{answer_builders, build_spec};
+                use serenity::builder::{CreateMessage, CreatePoll};
+                use std::time::Duration;
+                let channel_id = pget!(channel_or_err(channel_id_opt));
+                let question = pget!(get_str(&input, "poll_question")).to_string();
+                let options: Vec<String> = input
+                    .get("poll_options")
+                    .and_then(|v| v.as_array())
+                    .map(|a| {
+                        a.iter()
+                            .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                let duration = input.get("poll_duration_hours").and_then(|v| v.as_i64());
+                let multi_select = input
+                    .get("multi_select")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+                // Validation and clamping live in poll.rs so the platform limits
+                // carry tests; the builder chain below is typestate-guarded.
+                let spec = match build_spec(&question, &options, duration, multi_select) {
+                    Ok(spec) => spec,
+                    Err(e) => return Ok(ToolResult::error(e.message())),
+                };
+                let mut poll = CreatePoll::new()
+                    .question(spec.question.clone())
+                    .answers(answer_builders(&spec))
+                    .duration(Duration::from_secs(u64::from(spec.duration_hours) * 3600));
+                if spec.allow_multiselect {
+                    poll = poll.allow_multiselect();
+                }
+                match ChannelId::new(channel_id)
+                    .send_message(&http, CreateMessage::new().poll(poll))
+                    .await
+                {
+                    Ok(_) => {
+                        let mut note = format!(
+                            "Poll posted to channel {channel_id}: {} answers, {}h, {}.",
+                            spec.answers.len(),
+                            spec.duration_hours,
+                            if spec.allow_multiselect {
+                                "multi-select"
+                            } else {
+                                "single-select"
+                            }
+                        );
+                        if spec.dropped_answers > 0 {
+                            note.push_str(&format!(
+                                " {} option(s) past Discord's 10-answer limit were dropped.",
+                                spec.dropped_answers
+                            ));
+                        }
+                        if spec.duration_clamped {
+                            note.push_str(" Requested duration was clamped to the platform limit.");
+                        }
+                        Ok(ToolResult::success(note))
+                    }
+                    Err(e) => Ok(ToolResult::error(format!("Failed to send poll: {e}"))),
+                }
+            }
+
             // ── send_form (#383) ─────────────────────────────────────────────
             "send_form" => {
                 use serenity::builder::{CreateActionRow, CreateButton, CreateMessage};
@@ -735,8 +818,8 @@ impl Tool for DiscordSendTool {
 
             unknown => Ok(ToolResult::error(format!(
                 "Unknown action '{unknown}'. Valid: send, reply, react, unreact, edit, delete, send_select, send_form, \
-                 pin, unpin, create_thread, send_embed, get_messages, list_channels, \
-                 add_role, remove_role, kick, ban, send_file"
+                 send_poll, pin, unpin, create_thread, send_embed, get_messages, \
+                 list_channels, add_role, remove_role, kick, ban, send_file"
             ))),
         }
     }

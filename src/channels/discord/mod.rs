@@ -8,8 +8,9 @@
 //! (`approval`, `cancel`, `connection`, `pending_interactions`,
 //! `sessions`, and the tool-group methods in `tool_group`); `agent` runs
 //! the gateway, `handler` routes inbound messages, `interactions` /
-//! `reactions` / `suggest_options` / `typing` handle their UI surfaces and
-//! `resume` re-delivers background results. This file is declarations
+//! `reactions` / `suggest_options` / `typing` handle their UI surfaces,
+//! `poll` validates the native-poll spec (#1848), and `resume` re-delivers
+//! background results. This file is declarations
 //! only — no function definitions live here (CONTRIBUTING.md).
 
 mod agent;
@@ -19,6 +20,7 @@ mod connection;
 pub(crate) mod handler;
 pub(crate) mod interactions;
 mod pending_interactions;
+pub(crate) mod poll;
 pub(crate) mod reactions;
 pub(crate) mod resume;
 mod sessions;
