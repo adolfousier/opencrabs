@@ -25,6 +25,19 @@ pub struct DiscordState {
     pub(super) bot_user_id: Mutex<Option<u64>>,
     /// Guild ID of the last guild message — needed for guild-scoped actions
     pub(super) guild_id: Mutex<Option<u64>>,
+    /// Comparison key of the application command set currently registered with
+    /// Discord (the command set plus guild membership), which also tells us
+    /// whether the watcher that keeps it in sync has been started: `ready`
+    /// fires on every reconnect and the watcher must not be started twice.
+    /// `None` until a sync succeeds, and set back to `None` when every guild
+    /// refused, so a failed attempt is retried rather than remembered as done.
+    /// See `commands::sync_commands`.
+    pub(super) commands_sig: Mutex<Option<u64>>,
+    /// Whether the config watcher that keeps [`Self::commands_sig`] in sync has
+    /// been started. Separate from the key itself because a failed sync leaves
+    /// the key `None`, and `ready` would otherwise spawn a new watcher on every
+    /// reconnect.
+    pub(super) commands_watcher_started: Mutex<bool>,
     /// Maps session_id → channel_id for approval routing
     pub(super) session_channels: Mutex<HashMap<Uuid, u64>>,
     /// Reverse ownership map (#148): channel_id → session_id, written in
@@ -59,6 +72,8 @@ impl DiscordState {
             owner_channel_id: Mutex::new(None),
             bot_user_id: Mutex::new(None),
             guild_id: Mutex::new(None),
+            commands_sig: Mutex::new(None),
+            commands_watcher_started: Mutex::new(false),
             session_channels: Mutex::new(HashMap::new()),
             channel_sessions: Mutex::new(HashMap::new()),
             pending_approvals: Mutex::new(HashMap::new()),

@@ -113,6 +113,9 @@ fn tap_path_renders_chained_suggestions() {
 /// The other interaction routes stay on their bare contract on purpose:
 /// modal forms and select-menu picks are synthetic steering prompts, not
 /// user-intent turns (#1852 scoped the routing change to the tap only).
+/// #1850 added the second user-intent caller: a picked slash command rebuilds
+/// its invocation and joins the tap on the display path, which is why the bare
+/// count is still exactly two.
 #[test]
 fn bare_route_still_serves_the_synthetic_steering_callers() {
     let interactions = include_str!("../channels/discord/interactions.rs");
@@ -133,7 +136,9 @@ fn bare_route_still_serves_the_synthetic_steering_callers() {
     );
     assert_eq!(
         agent.matches("route_followup_turn(").count(),
-        1,
-        "the follow-up tap branch is the single route_followup_turn caller"
+        2,
+        "the follow-up tap and the slash-command arm (#1850) are the two \
+         user-intent callers of the tool-loop display path; anything routed \
+         off these is single-completion code running a request to do work"
     );
 }

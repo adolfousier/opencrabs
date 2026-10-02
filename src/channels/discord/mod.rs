@@ -16,6 +16,7 @@
 mod agent;
 mod approval;
 mod cancel;
+pub(crate) mod commands;
 mod connection;
 pub(crate) mod handler;
 pub(crate) mod interactions;

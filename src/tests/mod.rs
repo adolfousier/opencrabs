@@ -924,6 +924,7 @@ pub mod brain_tools_whatsapp_send_test;
 pub mod channel_capabilities_preamble_test;
 pub mod channel_commands_test;
 pub mod discord_activity_text_test;
+pub mod discord_application_commands_test;
 pub mod discord_flow_ticker_test;
 pub mod discord_followup_tap_tool_loop_test;
 pub mod discord_footer_placement_test;

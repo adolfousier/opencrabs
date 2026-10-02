@@ -168,6 +168,54 @@ impl EventHandler for Handler {
         self.discord_state
             .set_bot_user_id(ready.user.id.get())
             .await;
+
+        // Application commands (#1850): project `commands.toml` onto Discord's
+        // slash-command list so the catalog the TUI completes and Telegram
+        // menus is the same one this channel autocompletes. `ready` is the only
+        // hook holding both an HTTP handle and the guild list, and the retry
+        // loop above rebuilds the client (not the handler) after a gateway
+        // drop, so a reconnect re-plans and the key comparison decides whether
+        // anything is actually sent. A guild that was joined while the process
+        // was down appears in `ready.guilds` on the next connect and moves the
+        // key, so it gets the menu without a config write. A guild joined while
+        // we are connected is covered the same way, on the next reconnect: the
+        // watcher below only knows the guild list this `ready` reported.
+        let guilds: Vec<serenity::model::id::GuildId> =
+            ready.guilds.iter().map(|guild| guild.id).collect();
+        let http = ctx.http.clone();
+        let state = self.discord_state.clone();
+        let mut config_rx = self.config_rx.clone();
+
+        // First `ready` of the process: sync unconditionally, because the stored
+        // key is `None`. A reconnect hands back that stored key instead, so a
+        // gateway that flaps on a short retry loop does not re-PUT
+        // the whole command tree to every guild on each pass; it costs one
+        // `commands.toml` read and nothing else, unless the catalog or the guild
+        // set actually moved.
+        let stored = *state.commands_sig.lock().await;
+        let key = super::commands::sync_commands(&http, &guilds, stored).await;
+        *state.commands_sig.lock().await = key;
+        let start_watcher = !*state.commands_watcher_started.lock().await;
+        if start_watcher {
+            *state.commands_watcher_started.lock().await = true;
+            tokio::spawn(async move {
+                // The ConfigWatcher re-publishes on any config write, which
+                // covers `commands.toml` (see the same contract documented in
+                // `telegram::menu_refresh`). Each publish re-plans and compares
+                // the key, so an unrelated config edit costs a file read and no
+                // API call. Guild membership is folded into that key, so a
+                // publish after the bot joined a server re-sends to all of them
+                // rather than only the ones listed here.
+                loop {
+                    if config_rx.changed().await.is_err() {
+                        break;
+                    }
+                    let last = *state.commands_sig.lock().await;
+                    let next = super::commands::sync_commands(&http, &guilds, last).await;
+                    *state.commands_sig.lock().await = next;
+                }
+            });
+        }
     }
 
     async fn message(&self, ctx: Context, msg: Message) {
@@ -190,6 +238,159 @@ impl EventHandler for Handler {
     }
 
     async fn interaction_create(&self, ctx: Context, interaction: Interaction) {
+        // Slash commands (#1850): rebuild the invocation as the text the user
+        // would have typed and route it through the same display path a tapped
+        // suggestion uses. Parity is structural: the agent receives `/check
+        // args`, exactly what a hand-typed message produces, so there is one
+        // command implementation and the arguments survive inside the text.
+        //
+        // Deliberately NOT the bare `route_interaction_turn`. Its own contract
+        // is a single completion with no tool loop (see `interactions.rs`), so
+        // `/check` picked from the menu would come back saying it cannot run
+        // cargo. The two synthetic branches that stay on it are synthetic: a
+        // modal fill and a select pick are steering prompts, an invoked command
+        // is a request to do work.
+        if let Interaction::Command(command) = &interaction {
+            let mut invocation = format!("/{}", command.data.name);
+            for option in &command.data.options {
+                if option.name == super::commands::ARGS_OPTION
+                    && let serenity::model::application::CommandDataOptionValue::String(value) =
+                        &option.value
+                    && !value.is_empty()
+                {
+                    invocation.push(' ');
+                    invocation.push_str(value.as_str());
+                } else if option.name != super::commands::ARGS_OPTION {
+                    // One option is all this registers (see `commands.rs`), so
+                    // anything else means the client sent a set we did not ask
+                    // for. Worth a log line rather than silently swallowing the
+                    // argument text.
+                    tracing::warn!(
+                        "Discord: unexpected option {:?} on command {:?}",
+                        option.name,
+                        command.data.name
+                    );
+                }
+            }
+            let user = command.user.id.get();
+            let user_name = command.user.name.clone();
+            let is_dm = command.guild_id.is_none();
+            let channel_id = command.channel_id.get();
+
+            // OC-02: Discord shows the command list to every member of the
+            // guild, so an interaction is an entry point like any other message
+            // and gets the same deny-by-default gate `handle_message` applies.
+            // Roles count in guilds only, mirroring that path.
+            let cfg = self.config_rx.borrow().clone();
+            let dc = &cfg.channels.discord;
+            let role_ids: Vec<u64> = if is_dm {
+                Vec::new()
+            } else {
+                command
+                    .member
+                    .as_ref()
+                    .map(|m| m.roles.iter().map(|r| r.get()).collect())
+                    .unwrap_or_default()
+            };
+            let owner =
+                crate::config::owner::is_owner(&dc.allowed_users, &dc.bot_owner, &user.to_string());
+            let in_allowlist = dc
+                .allowed_users
+                .iter()
+                .filter_map(|s| s.parse::<i64>().ok())
+                .any(|u| u == user as i64);
+            let admitted = super::commands::identity_admitted(
+                dc.allowed_users.is_empty()
+                    && dc.allowed_roles.is_empty()
+                    && dc.bot_owner.is_empty(),
+                owner,
+                in_allowlist,
+                !is_dm && super::commands::holds_allowed_role(&dc.allowed_roles, &role_ids),
+            );
+
+            // Channel scope, with the parent fallback: a thread or forum post
+            // carries its own id, so allow-listing a forum admits its posts.
+            let channel_str = channel_id.to_string();
+            let mut channel_ok = dc.allowed_channels.is_empty()
+                || dc.allowed_channels.iter().any(|c| c == &channel_str);
+            if !channel_ok && !is_dm {
+                channel_ok = match command.channel_id.to_channel(&ctx.http).await {
+                    Ok(serenity::model::channel::Channel::Guild(gc)) => {
+                        gc.parent_id.is_some_and(|p| {
+                            dc.allowed_channels
+                                .iter()
+                                .any(|c| c == &p.get().to_string())
+                        })
+                    }
+                    _ => false,
+                };
+            }
+            // `respond_to` filters unsolicited messages; an invoked command is
+            // solicited by definition, so only `dm_only` applies, and it means
+            // the operator told this bot not to speak in guild channels.
+            let inside_dm_policy =
+                is_dm || !matches!(dc.respond_to, crate::config::RespondTo::DmOnly);
+
+            if !admitted || !channel_ok || !inside_dm_policy {
+                tracing::warn!(
+                    "Discord: refused /{} from user {} (allowed={}, channel={}, dm_only={})",
+                    command.data.name,
+                    user,
+                    admitted,
+                    channel_ok,
+                    inside_dm_policy
+                );
+                let _ = command
+                    .create_response(
+                        &ctx.http,
+                        serenity::builder::CreateInteractionResponse::Message(
+                            serenity::builder::CreateInteractionResponseMessage::new()
+                                .content("This bot is not enabled for you or this channel.")
+                                .ephemeral(true),
+                        ),
+                    )
+                    .await;
+                return;
+            }
+
+            let idle = dc.session_idle_hours;
+            // History keeps the invocation the way a typed message would:
+            // `Sender: /cmd args` in a guild, bare in the owner's DM, the same
+            // rule `handler.rs` uses. `context_text` is the invocation itself,
+            // which is what the model sees when you type it.
+            let history_line = if owner && is_dm {
+                invocation.clone()
+            } else {
+                format!("{user_name}: {invocation}")
+            };
+            let _ack = command
+                .create_response(
+                    &ctx.http,
+                    serenity::builder::CreateInteractionResponse::Acknowledge,
+                )
+                .await;
+            let agent = self.agent.clone();
+            let session_svc = self.session_svc.clone();
+            let discord_state = self.discord_state.clone();
+            let ctx2 = ctx.clone();
+            tokio::spawn(async move {
+                super::interactions::route_followup_turn(
+                    &ctx2,
+                    agent,
+                    session_svc,
+                    discord_state,
+                    is_dm,
+                    user,
+                    channel_id,
+                    idle,
+                    invocation,
+                    history_line,
+                )
+                .await;
+            });
+            return;
+        }
+
         // Modal submissions (#383): route the filled fields back as a turn.
         if let Interaction::Modal(modal) = &interaction {
             let custom_id = modal.data.custom_id.clone();

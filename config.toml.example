@@ -626,6 +626,10 @@ allowed_channels = ["channel_id"]       # Where the bot operates (empty = all ch
                                         # allowed_users entry on first run; set explicitly to pin the owner.
 # respond_to = "all"                    # "all" | "dm_only" | "mention"
 # session_idle_hours = 24.0             # Archive inactive non-owner sessions after N hours (default: never)
+# Slash commands are projected from commands.toml (no knob needed). The bot needs
+# the "applications.commands" OAuth2 scope at invite time, not just "bot": without
+# it the gateway connects and chat works, but every command registration returns
+# 403 and "/" stays empty. See src/docs/reference/DISCORD_COMMANDS.md.
 
 [channels.telegram]
 enabled = false
