@@ -932,6 +932,7 @@ pub mod discord_norm_key_test;
 pub mod discord_split_message_test;
 pub mod discord_table_convert_test;
 pub mod discord_thread_title_test;
+pub mod discord_voice_message_test;
 #[cfg(unix)]
 pub mod flock_retry_test;
 pub mod flow_progress_key_test;

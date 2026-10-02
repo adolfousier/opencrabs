@@ -19,7 +19,9 @@ use tokio::sync::Mutex;
 use uuid::Uuid;
 
 use serenity::builder::{CreateAttachment, CreateMessage};
-use serenity::model::channel::Message;
+use serenity::http::Http;
+use serenity::model::channel::{Message, MessageFlags};
+use serenity::model::id::ChannelId;
 use serenity::prelude::*;
 
 /// Split a message into chunks that fit Discord's 2000 char limit.
@@ -1574,14 +1576,7 @@ pub(crate) async fn handle_message(
             if is_voice && voice_config.tts_enabled {
                 match crate::channels::voice::synthesize(&response.content, &voice_config).await {
                     Ok(audio_bytes) => {
-                        let file = CreateAttachment::bytes(audio_bytes.as_slice(), "response.ogg");
-                        if let Err(e) = msg
-                            .channel_id
-                            .send_message(&ctx.http, CreateMessage::new().add_file(file))
-                            .await
-                        {
-                            tracing::error!("Discord: failed to send TTS voice: {e}");
-                        }
+                        send_tts_voice(&ctx.http, msg.channel_id, &audio_bytes).await;
                     }
                     Err(e) => tracing::error!("Discord: TTS error: {e}"),
                 }
@@ -1600,6 +1595,64 @@ pub(crate) async fn handle_message(
             if let Err(e) = target.say(&ctx.http, error_msg).await {
                 tracing::warn!(error = %e, "failed to send Discord message");
             }
+        }
+    }
+}
+
+/// Filename the synthesized reply is uploaded under (#1849). The `ogg`
+/// extension is load-bearing, not cosmetic: serenity derives the part's
+/// `Content-Type` from the filename (`http/multipart.rs:10-12`) and mime_guess
+/// 2.0.5 maps `ogg` to `audio/ogg` (`src/mime_types.rs:829`), which is the
+/// `audio/` prefix the voice-message contract requires.
+const TTS_ATTACHMENT_NAME: &str = "response.ogg";
+
+/// The message that carries a synthesized TTS reply: a native Discord voice
+/// bubble (#1849).
+///
+/// The bubble only renders when `IS_VOICE_MESSAGE` (`1 << 13`) is set on create.
+/// It is one of the four flags a create request may set (`discord-api-docs`,
+/// `developers/resources/message.mdx:1093`), and a voice message must carry a
+/// single audio attachment and no content (same file, "Voice Messages",
+/// `:433-438`). Both hold here: the text half of a TTS reply is sent before this
+/// builder runs, and the opus file is the only attachment. serenity refuses to
+/// `edit()` a flagged message (`model/channel/message.rs:400`), which matches the
+/// documented "cannot be edited" property instead of fighting it.
+///
+/// Known gap, stated rather than hidden: the same docs list `duration_secs` and
+/// `waveform` in the Attachment Request Structure (`:685-686`) as required for
+/// voice messages, while serenity 0.12.5 `CreateAttachment` exposes only `bytes`
+/// and `description`, so neither field can be sent from this crate version.
+/// Whether a client draws a waveform from an upload that omits it is a live-bot
+/// check tracked on #1849. [`plain_attachment_builder`] is the fallback if the
+/// flagged send is rejected outright.
+pub(crate) fn voice_reply_builder(audio: &[u8]) -> CreateMessage {
+    CreateMessage::new()
+        .add_file(CreateAttachment::bytes(audio, TTS_ATTACHMENT_NAME))
+        .flags(MessageFlags::IS_VOICE_MESSAGE)
+}
+
+/// The shape this path had before #1849: the same audio as a plain file entry,
+/// no voice flag. Kept as the fallback so a TTS reply cannot be lost.
+pub(crate) fn plain_attachment_builder(audio: &[u8]) -> CreateMessage {
+    CreateMessage::new().add_file(CreateAttachment::bytes(audio, TTS_ATTACHMENT_NAME))
+}
+
+/// Send a synthesized reply, preferring the native voice bubble (#1849).
+///
+/// A rejected flagged send is retried once as a plain attachment and logged at
+/// warn with the original error: the flag's behaviour without an
+/// uploader-supplied waveform is unverified against a live bot, and a TTS reply
+/// that silently vanishes is worse than one that renders as a file.
+pub(crate) async fn send_tts_voice(http: &Http, channel: ChannelId, audio: &[u8]) {
+    if let Err(e) = channel.send_message(http, voice_reply_builder(audio)).await {
+        tracing::warn!(
+            "Discord: voice-flagged TTS send rejected ({e}); retrying as a plain attachment (#1849)"
+        );
+        if let Err(e2) = channel
+            .send_message(http, plain_attachment_builder(audio))
+            .await
+        {
+            tracing::error!("Discord: failed to send TTS voice: {e2}");
         }
     }
 }
