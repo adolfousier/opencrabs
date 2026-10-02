@@ -34,6 +34,7 @@ pub(crate) mod parallel_tools;
 pub(crate) mod phantom;
 pub(crate) mod phantom_lang;
 pub(crate) mod plan_mode_provider;
+pub(crate) mod queued_fold;
 pub(crate) mod quiet_delivery;
 pub(crate) mod reasoning_run;
 pub(crate) mod repetition;

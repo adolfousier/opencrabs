@@ -4877,36 +4877,38 @@ impl AgentService {
                 };
                 if let Some(queued_msg) = queued_msg {
                     tracing::info!("Injecting queued user message (from_buf={})", from_buf);
-                    // Emit assistant's intermediate text FIRST so it appears
-                    // before the queued user message in the TUI
+                    // #1784: the draft this round finished is NOT relayed. On a
+                    // text-only round `iteration_text` is the complete answer to
+                    // the PREVIOUS request, and a deliverable `IntermediateText`
+                    // lands in the channel as a regular message, so the user got
+                    // the superseded draft and then the folded final: two replies
+                    // for one burst. The text still goes into the model's context
+                    // below, so nothing is lost, and the next round produces the
+                    // single final reply.
+                    //
+                    // The Kimi-coding reroute (#616) stays. On that endpoint this
+                    // text is reasoning, and an event with an empty `text` is not
+                    // deliverable by any channel: it renders in the reasoning pane
+                    // and the draft stays visible where it does no harm.
                     if !iteration_text.is_empty()
                         && let Some(ref cb) = progress_callback
+                        && crate::brain::provider::kimi_reasoning::streams_reasoning_inline(
+                            self.provider_for_session(session_id).base_url(),
+                        )
                     {
-                        // Same Kimi-coding inline-reasoning reroute as the
-                        // pre-tool site (#616): this mid-turn text is reasoning,
-                        // not a chat message, on that endpoint.
-                        let reasoning_inline =
-                            crate::brain::provider::kimi_reasoning::streams_reasoning_inline(
-                                self.provider_for_session(session_id).base_url(),
-                            );
-                        let event = if reasoning_inline {
-                            let combined = match reasoning_text.as_deref() {
-                                Some(r) if !r.trim().is_empty() => {
-                                    format!("{r}\n{iteration_text}")
-                                }
-                                _ => iteration_text.clone(),
-                            };
+                        let combined = match reasoning_text.as_deref() {
+                            Some(r) if !r.trim().is_empty() => {
+                                format!("{r}\n{iteration_text}")
+                            }
+                            _ => iteration_text.clone(),
+                        };
+                        cb(
+                            session_id,
                             ProgressEvent::IntermediateText {
                                 text: String::new(),
                                 reasoning: Some(combined),
-                            }
-                        } else {
-                            ProgressEvent::IntermediateText {
-                                text: iteration_text,
-                                reasoning: reasoning_text,
-                            }
-                        };
-                        cb(session_id, event);
+                            },
+                        );
                     }
                     // Emit QueuedUserMessage — always here, never in stream_complete
                     if let Some(ref cb) = progress_callback {
@@ -4927,8 +4929,15 @@ impl AgentService {
                         })
                         .collect::<Vec<_>>()
                         .join("\n");
+                    let had_draft = !assistant_text.trim().is_empty();
                     context.add_message(Message::assistant(assistant_text));
-                    let injected = Message::user(queued_msg.context_text.clone());
+                    // #1784: say out loud that the draft above was never sent, so
+                    // the model writes one complete final reply instead of a delta
+                    // pointing at an answer nobody received.
+                    let injected = Message::user(super::queued_fold::injected_context(
+                        had_draft,
+                        &queued_msg.context_text,
+                    ));
                     context.add_message(injected);
                     if let Err(e) = message_service
                         .create_message(session_id, "user".to_string(), queued_msg.display_text)
