@@ -7,9 +7,65 @@ use crate::brain::provider::StopReason;
 fn stop_reasons_map_to_acp() {
     assert_eq!(stop_reason(Some(StopReason::EndTurn)), "end_turn");
     assert_eq!(stop_reason(Some(StopReason::MaxTokens)), "max_tokens");
-    assert_eq!(stop_reason(Some(StopReason::StopSequence)), "stop_sequence");
+    // #1815 F2: this asserted "stop_sequence", which is not a v1 `StopReason`
+    // variant. The test was guarding the deviation, so the assertion moved
+    // with the fix rather than being deleted.
+    assert_eq!(stop_reason(Some(StopReason::StopSequence)), "end_turn");
     assert_eq!(stop_reason(Some(StopReason::ToolUse)), "end_turn");
     assert_eq!(stop_reason(None), "end_turn");
+}
+
+/// The v1 `StopReason` enum, copied from `schema/v1/schema.json` (247168
+/// bytes, fetched 2026-10-02). `PromptResponse.stopReason` is required, so
+/// every string this function can return has to be one of these five.
+const V1_STOP_REASONS: &[&str] = &[
+    "end_turn",
+    "max_tokens",
+    "max_turn_requests",
+    "refusal",
+    "cancelled",
+];
+
+#[test]
+fn every_mapped_stop_reason_is_a_v1_variant() {
+    for reason in [
+        Some(StopReason::EndTurn),
+        Some(StopReason::MaxTokens),
+        Some(StopReason::StopSequence),
+        Some(StopReason::ToolUse),
+        None,
+    ] {
+        let mapped = stop_reason(reason);
+        assert!(
+            V1_STOP_REASONS.contains(&mapped),
+            "`{mapped}` is not in the v1 StopReason enum; a strict client may \
+             reject the whole PromptResponse over one required-field value"
+        );
+    }
+}
+
+#[test]
+fn stop_sequence_is_no_longer_emitted() {
+    // Pinned as its own test so a future "helpful" re-specialization of the
+    // provider's StopSequence has to pass a deliberate edit here, not a
+    // silent one.
+    assert!(!V1_STOP_REASONS.contains(&"stop_sequence"));
+    for reason in [
+        Some(StopReason::EndTurn),
+        Some(StopReason::MaxTokens),
+        Some(StopReason::StopSequence),
+        Some(StopReason::ToolUse),
+        None,
+    ] {
+        // `Option<StopReason>` is not `Copy` and `stop_reason` takes it by
+        // value, so the label has to be built before the move.
+        let label = format!("{reason:?}");
+        assert_ne!(
+            stop_reason(reason),
+            "stop_sequence",
+            "StopReason({label}) invented a variant again"
+        );
+    }
 }
 
 #[test]

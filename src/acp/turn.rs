@@ -95,10 +95,20 @@ pub async fn run_turn(
 }
 
 /// ACP stop reasons from the provider's.
+///
+/// The output is constrained to the v1 `StopReason` enum: `end_turn`,
+/// `max_tokens`, `max_turn_requests`, `refusal`, `cancelled`. `stopReason` is
+/// a required field on `PromptResponse`, so a value outside that list does not
+/// degrade one frame, it hands a strict client grounds to reject the whole
+/// prompt response (#1815 F2).
 pub(crate) fn stop_reason(reason: Option<StopReason>) -> &'static str {
     match reason {
         Some(StopReason::MaxTokens) => "max_tokens",
-        Some(StopReason::StopSequence) => "stop_sequence",
+        // A provider stop sequence is a normal completion of the turn: the
+        // model produced what we asked and stopped where we told it to. v1
+        // has no `stop_sequence` variant, and inventing one put an
+        // out-of-enum value on a required field for every client.
+        Some(StopReason::StopSequence) => "end_turn",
         // EndTurn/ToolUse/None: the turn completed — ToolUse means the loop
         // ended after tool execution, which from the client's seat is a
         // finished turn.
