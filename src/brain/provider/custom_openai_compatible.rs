@@ -1453,7 +1453,6 @@ pub(crate) const KNOWN_TOOL_NAMES: &[&str] = &[
     "feedback_record",
     "feedback_analyze",
     "self_improve",
-    "rebuild",
     "evolve",
     "tool_manage",
     "spawn_agent",

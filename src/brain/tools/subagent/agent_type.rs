@@ -36,7 +36,6 @@ pub const ALWAYS_EXCLUDED: &[&str] = &[
     "team_create",
     "team_delete",
     "team_broadcast",
-    "rebuild",
     "evolve",
     "session_notify",
     "suggest_options",

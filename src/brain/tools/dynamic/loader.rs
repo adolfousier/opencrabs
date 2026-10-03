@@ -75,7 +75,6 @@ impl DynamicToolLoader {
             "http_request",
             "web_scrape",
             "evolve",
-            "rebuild",
             "cron_manage",
             "tool_manage",
         ];

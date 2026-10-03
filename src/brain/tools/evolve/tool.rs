@@ -51,9 +51,9 @@ impl Tool for EvolveTool {
          UPGRADE path for users: it fetches what was RELEASED. \
          Automatically detects the install method (pre-built binary, \
          cargo install, or source) and uses the right update strategy. \
-         Hot-restarts into the new version after installation. To compile \
-         local source edits instead (rare, maintainers), use the `rebuild` \
-         tool — evolve does not apply uncommitted local changes."
+         Hot-restarts into the new version after installation. It does not \
+         apply uncommitted local changes — build from the source tree with \
+         `cargo build --release` first if you carry local edits."
     }
 
     fn input_schema(&self) -> Value {

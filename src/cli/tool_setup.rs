@@ -19,7 +19,7 @@ use crate::db::Database;
 /// created inline and used nowhere else), so both entry points can share one
 /// registry definition.
 ///
-/// Browser, channel-send, media, and rebuild/evolve tools are registered
+/// Browser, channel-send, media, and evolve tools are registered
 /// separately by the interactive path — they need managers the daemon lacks.
 ///
 /// `headless` gates the two tools that are meaningless without a live user
@@ -236,7 +236,7 @@ pub(crate) fn register_core_agent_tools(
 ///   would yield dead tools that always answer "not connected". Cron jobs reach
 ///   channels through the job's config-based `deliver_to` path instead, which
 ///   builds its own client from the API key and needs no live state.
-/// - **evolve / rebuild**: binary self-update is owned by the primary daemon;
+/// - **evolve**: binary self-update is owned by the primary daemon;
 ///   letting concurrent secondary profiles self-update would race on one binary.
 pub(crate) fn register_runtime_tools(tool_registry: &Arc<ToolRegistry>, config: &Config) {
     // User-defined dynamic tools from the profile-aware ~/.opencrabs/tools.toml.
