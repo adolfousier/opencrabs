@@ -13,9 +13,15 @@ jobs:
       - uses: actions/github-script@v8
         with:
           script: |
+            // Issues opened by the maintainer are assigned back to the
+            // maintainer; every other issue goes to the default owner.
+            const author = context.payload.issue.user.login;
+            const assignees = author === 'leshchenko1979'
+              ? ['leshchenko1979']
+              : ['adolfousier'];
             await github.rest.issues.addAssignees({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.issue.number,
-              assignees: ['adolfousier']
+              assignees
             });
