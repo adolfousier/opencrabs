@@ -81,6 +81,11 @@ impl CronJobRunRepository {
     /// Every status this table ever holds, and the single writer of each:
     /// - `running`: set by [`Self::insert`] when the run starts
     /// - `success`: set by [`Self::complete_success`] when execution finished
+    ///   with its report delivered. The agent-turn path only earns it with
+    ///   execution evidence (#1703); direct-trigger runs use it without tools
+    ///   by design.
+    /// - `no_op`: set by [`Self::complete_no_op`] when the turn completed but
+    ///   executed zero tools; the ledger refuses to vouch for it
     /// - `error`: set here, when execution failed
     /// - `interrupted`: set by `doctor --fix`, for an aged `running` row whose
     ///   process is gone, so a watchdog sweep is never mistaken for a failure
@@ -105,6 +110,37 @@ impl CronJobRunRepository {
             .await
             .map_err(interact_err)?
             .context("Failed to update cron job run error")?;
+        Ok(())
+    }
+
+    /// Mark a run as completed without execution evidence (#1703). The agent
+    /// turn returned normally but started zero tools, so its report cannot be
+    /// told apart from a stale-context replay: the produced content stays in
+    /// the row for forensics and the tokens/cost are recorded (they were
+    /// really spent), yet the status is deliberately not `success`.
+    pub async fn complete_no_op(
+        &self,
+        run_id: &str,
+        content: &str,
+        input_tokens: i64,
+        output_tokens: i64,
+        cost: f64,
+    ) -> Result<()> {
+        let id = run_id.to_string();
+        let content = content.to_string();
+        self.pool
+            .get()
+            .await
+            .context("Failed to get connection")?
+            .interact(move |conn| {
+                conn.execute(
+                    "UPDATE cron_job_runs SET status = 'no_op', content = ?1, input_tokens = ?2, output_tokens = ?3, cost = ?4, completed_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE id = ?5",
+                    params![content, input_tokens, output_tokens, cost, id],
+                )
+            })
+            .await
+            .map_err(interact_err)?
+            .context("Failed to update cron job run no-op")?;
         Ok(())
     }
 

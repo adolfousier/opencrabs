@@ -679,6 +679,11 @@ async fn execute_job(
                 .collect()
         });
 
+    // #1703: execution evidence probe. Count every tool that actually
+    // starts inside this run; the completion path refuses a `success`
+    // verdict without at least one start.
+    let (tool_starts, evidence_cb) = tool_start_counter();
+
     // Execute with auto-approved tools (no interactive user)
     let result = crate::cron::send_scope::with_permitted_targets(
         permitted_targets,
@@ -691,7 +696,7 @@ async fn execute_job(
                 // Auto-approve all tools for cron jobs
                 Box::pin(async { Ok((true, false)) })
             })),
-            None, // no progress callback
+            Some(evidence_cb),
             "cron",
             None,
             None,
@@ -702,27 +707,62 @@ async fn execute_job(
     match result {
         Ok(response) => {
             let clean = crate::utils::sanitize::strip_llm_artifacts(&response.content);
+            // #1703: a `success` verdict requires execution evidence. A turn
+            // that started zero tools cannot be told apart from a stale
+            // context replay, so the row is recorded `no_op` and every
+            // destination receives a timestamped one-line notice instead of
+            // the report.
+            let starts = tool_starts.load(std::sync::atomic::Ordering::Relaxed);
 
             tracing::info!(
-                "Cron job '{}' completed — {} tokens, ${:.6}",
+                "Cron job '{}' completed — {} tokens, ${:.6}, {} tool start(s)",
                 job.name,
                 response.usage.input_tokens + response.usage.output_tokens,
-                response.cost
+                response.cost,
+                starts
             );
 
-            // Save result to DB
-            if let Err(e) = run_repo
-                .complete_success(
-                    &run_id,
-                    &clean,
-                    response.usage.input_tokens as i64,
-                    response.usage.output_tokens as i64,
-                    response.cost,
-                )
-                .await
-            {
-                tracing::error!("Failed to save cron run result to DB: {e}");
-            }
+            let at = Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string();
+            let deliver = match classify_turn_outcome(starts, &job.name, &run_id, &at) {
+                TurnOutcome::Success => {
+                    // Save result to DB
+                    if let Err(e) = run_repo
+                        .complete_success(
+                            &run_id,
+                            &clean,
+                            response.usage.input_tokens as i64,
+                            response.usage.output_tokens as i64,
+                            response.cost,
+                        )
+                        .await
+                    {
+                        tracing::error!("Failed to save cron run result to DB: {e}");
+                    }
+                    clean
+                }
+                TurnOutcome::NoOp(notice) => {
+                    tracing::warn!(
+                        "Cron job '{}' executed no tools this run, recorded as no_op, report suppressed (#1703)",
+                        job.name
+                    );
+                    // The produced report stays on the row for forensics: a
+                    // replay is only diagnosable when its text survives the
+                    // gate.
+                    if let Err(e) = run_repo
+                        .complete_no_op(
+                            &run_id,
+                            &clean,
+                            response.usage.input_tokens as i64,
+                            response.usage.output_tokens as i64,
+                            response.cost,
+                        )
+                        .await
+                    {
+                        tracing::error!("Failed to save cron no-op run to DB: {e}");
+                    }
+                    notice
+                }
+            };
 
             // Optionally deliver to configured channels too
             if let Some(ref deliver_to) = job.deliver_to {
@@ -734,7 +774,7 @@ async fn execute_job(
                     let _ = deliver_result(
                         target,
                         &job.name,
-                        &clean,
+                        &deliver,
                         job.deliver_api_key.as_deref(),
                         Some(ctx.pool()),
                     )
@@ -743,7 +783,7 @@ async fn execute_job(
             }
 
             // Maybe dispatch goal to session
-            let _ = crate::cron::PipelineExecutor::maybe_dispatch_goal(job, ctx, &clean).await;
+            let _ = crate::cron::PipelineExecutor::maybe_dispatch_goal(job, ctx, &deliver).await;
         }
         Err(e) => {
             tracing::error!("Cron job '{}' agent error: {e}", job.name);
@@ -977,6 +1017,65 @@ pub(crate) fn resolve_session_target(
 /// (fork #144: into a session's notify queue through the shared
 /// `notify_policy` path — default mode `turn-end`, cron results are turn
 /// outputs), or an HTTP(S) URL for generic webhook delivery.
+/// Ledger outcome of a completed cron agent turn (#1703 hole 1). A
+/// `success` verdict requires execution evidence: at least one tool must
+/// have started inside the run. Zero starts is indistinguishable from a
+/// stale context replay, so the turn is recorded `no_op` and its report is
+/// replaced by a timestamped notice.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum TurnOutcome {
+    /// At least one tool executed: the report is stored and delivered.
+    Success,
+    /// Zero tools executed: the produced report stays on the row for
+    /// forensics, and the carried notice is what every destination gets.
+    NoOp(String),
+}
+
+/// Pure decision behind the evidence gate: `starts` counts the tool
+/// executions observed inside this run, `at` is the completion timestamp
+/// written into the notice.
+pub(crate) fn classify_turn_outcome(
+    starts: usize,
+    job_name: &str,
+    run_id: &str,
+    at: &str,
+) -> TurnOutcome {
+    if starts == 0 {
+        TurnOutcome::NoOp(not_executed_notice(job_name, run_id, at))
+    } else {
+        TurnOutcome::Success
+    }
+}
+
+/// The one-line notice that replaces the report of a zero-evidence run
+/// (#1703). Timestamped and run-stamped so a reader can anchor it.
+pub(crate) fn not_executed_notice(job_name: &str, run_id: &str, at: &str) -> String {
+    format!(
+        "Cron job '{job_name}' not executed: no tool ran in this run ({at}, run {run_id}). The report was suppressed."
+    )
+}
+
+/// Execution-evidence probe for one cron run (#1703): a shared counter fed
+/// by a progress callback that only counts `ToolStarted`. Streaming chunks,
+/// intermediate text and completions must never inflate the evidence.
+pub(crate) fn tool_start_counter() -> (
+    Arc<std::sync::atomic::AtomicUsize>,
+    crate::brain::agent::ProgressCallback,
+) {
+    use crate::brain::agent::{ProgressCallback, ProgressEvent};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let starts = Arc::new(AtomicUsize::new(0));
+    let cb: ProgressCallback = {
+        let starts = starts.clone();
+        Arc::new(move |_sid: Uuid, event: ProgressEvent| {
+            if matches!(event, ProgressEvent::ToolStarted { .. }) {
+                starts.fetch_add(1, Ordering::Relaxed);
+            }
+        })
+    };
+    (starts, cb)
+}
+
 pub(crate) async fn deliver_result(
     deliver_to: &str,
     job_name: &str,
