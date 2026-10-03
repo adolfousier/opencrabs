@@ -1089,6 +1089,8 @@ pub mod whatsapp_rate_limit_test;
 pub mod whatsapp_reaction_test;
 pub mod whatsapp_recent_test;
 pub mod whatsapp_store_test;
+pub mod vision_candidate_auth_gate_1792_test;
+pub mod vision_opencode_session_header_1792_test;
 pub mod whatsapp_stream_test;
 pub mod whatsapp_voice_note_test;
 pub mod word_delete_keybinding_test;

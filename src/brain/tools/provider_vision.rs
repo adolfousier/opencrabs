@@ -9,6 +9,7 @@ use super::analyze_image::{AnalyzeImageTool, base64_encode, detect_mime_type};
 use super::r#trait::{Tool, ToolCapability, ToolExecutionContext, ToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
+use uuid::Uuid;
 
 /// What to tell the user when no vision backend resolves at all.
 ///
@@ -236,6 +237,10 @@ impl Tool for ProviderVisionTool {
                 vision_model,
                 &question,
                 &image_url,
+                // The conversation id, so a gateway that asks to be told which
+                // conversation a call belongs to gets the same one the chat
+                // path sends for it (#1792).
+                Some(context.session_id),
             )
             .await
             {
@@ -270,6 +275,37 @@ impl Tool for ProviderVisionTool {
     }
 }
 
+/// The complete header set for one vision call: auth, then the gateway's
+/// client-identification contract.
+///
+/// Split out so the contract is testable without a live endpoint. The identity
+/// half is [`crate::brain::provider::identity::headers_for`], the very same
+/// call the chat path makes (`custom_openai_compatible.rs`), on the same
+/// per-conversation id. That parity is the fix for #1792: `analyze_image`
+/// hand-rolled its request with `Content-Type` and `Authorization` only, so it
+/// was the one path that reached a gateway anonymously. OpenCode Go was the
+/// gateway that acted on it, answering the image call with
+/// `400 Request is missing x-opencode-session` while chat on the same provider
+/// worked, because chat went through `headers_for` and vision did not.
+///
+/// Hosts with no identity contract get nothing extra, which is `headers_for`'s
+/// deliberate opt-in (see its module docs on gateway fingerprinting); this
+/// must not become a blanket header dump.
+pub(crate) fn vision_headers(
+    base_url: &str,
+    api_key: &str,
+    session: Option<Uuid>,
+) -> Vec<(String, String)> {
+    let mut headers = vec![
+        ("Content-Type".to_string(), "application/json".to_string()),
+        ("Authorization".to_string(), format!("Bearer {api_key}")),
+    ];
+    headers.extend(crate::brain::provider::identity::headers_for(
+        base_url, session,
+    ));
+    headers
+}
+
 /// One OpenAI-compatible vision call. `Err` carries the reason so the
 /// caller can log it and roll to the next candidate.
 async fn try_vision_candidate(
@@ -279,6 +315,7 @@ async fn try_vision_candidate(
     vision_model: &str,
     question: &str,
     image_url: &str,
+    session: Option<Uuid>,
 ) -> std::result::Result<String, String> {
     let body = serde_json::json!({
         "model": vision_model,
@@ -292,10 +329,15 @@ async fn try_vision_candidate(
         "max_tokens": 1024
     });
 
-    let response = client
-        .post(base_url)
-        .header("Content-Type", "application/json")
-        .header("Authorization", format!("Bearer {api_key}"))
+    // Auth plus the gateway's client identification, from one place: an
+    // opencode endpoint answers a request without `X-Opencode-Session` with a
+    // flat 400, which is what made every candidate in the chain look broken
+    // (#1792).
+    let mut request = client.post(base_url);
+    for (key, value) in vision_headers(base_url, api_key, session) {
+        request = request.header(key.as_str(), value.as_str());
+    }
+    let response = request
         .json(&body)
         .send()
         .await
