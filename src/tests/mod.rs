@@ -28,6 +28,7 @@ pub mod a2a_types_test;
 pub mod acp_catalog_test;
 pub mod acp_protocol_test;
 pub mod acp_replay_test;
+pub mod acp_session_lifecycle_1815_test;
 pub mod acp_transport_test;
 pub mod acp_turn_test;
 pub mod acp_usage_frame_test;
