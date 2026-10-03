@@ -49,7 +49,9 @@ fn copy_to_clipboard_has_windows_backend_and_gated_unix_arms() {
     // before the first pbcopy spawn. Ungated, they compile on Windows and
     // reintroduce the silent fall-through this issue is about.
     let gate = src.find("#[cfg(not(windows))]").expect("unix arms gated");
-    let pbcopy = src.find("Command::new(\"pbcopy\")").expect("pbcopy arm present");
+    let pbcopy = src
+        .find("Command::new(\"pbcopy\")")
+        .expect("pbcopy arm present");
     assert!(
         gate < pbcopy,
         "not(windows) gate must precede pbcopy (gate @ {gate}, pbcopy @ {pbcopy})"

@@ -19,6 +19,15 @@ pub const INTERNAL_ERROR: i64 = -32603;
 pub const INITIALIZE: &str = "initialize";
 pub const SESSION_NEW: &str = "session/new";
 pub const SESSION_LOAD: &str = "session/load";
+/// Session lifecycle methods from the official v1 schema (#1815 F5). These are
+/// unprefixed on purpose: they are spec names, not extensions, and v1 reserves
+/// every unprefixed name for the protocol itself. `session/set_config_option`
+/// is the official write half of the config-option picker F4 only displayed.
+pub const SESSION_LIST: &str = "session/list";
+pub const SESSION_RESUME: &str = "session/resume";
+pub const SESSION_SET_CONFIG_OPTION: &str = "session/set_config_option";
+pub const SESSION_CLOSE: &str = "session/close";
+pub const SESSION_DELETE: &str = "session/delete";
 pub const SESSION_PROMPT: &str = "session/prompt";
 /// Custom model selection. Not a v1 or v2 method, and v1 reserves every
 /// unprefixed name for future protocol versions, so the custom request carries
@@ -221,6 +230,41 @@ pub fn plan_update(entries: Vec<Value>) -> Value {
     })
 }
 
+/// `session/list` result: a `ListSessionsResponse`. `sessions` is the only
+/// required field; `nextCursor` is present exactly when more pages exist
+/// (#1815 F5).
+pub fn list_sessions_payload(sessions: Vec<Value>, next_cursor: Option<String>) -> Value {
+    let mut response = json!({ "sessions": sessions });
+    if let Some(cursor) = next_cursor {
+        response["nextCursor"] = Value::from(cursor);
+    }
+    response
+}
+
+/// One `SessionInfo` entry: `sessionId` and `cwd` are required by v1, `title`
+/// and `updatedAt` are optional and omitted rather than sent as null.
+pub fn session_info(
+    session_id: &str,
+    cwd: &str,
+    title: Option<&str>,
+    updated_at: Option<&str>,
+) -> Value {
+    let mut info = json!({ "sessionId": session_id, "cwd": cwd });
+    if let Some(title) = title {
+        info["title"] = Value::from(title);
+    }
+    if let Some(updated_at) = updated_at {
+        info["updatedAt"] = Value::from(updated_at);
+    }
+    info
+}
+
+/// `session/set_config_option` result: `SetSessionConfigOptionResponse`, whose
+/// only required field is the full `configOptions` set with current values.
+pub fn config_options_response(config_options: Value) -> Value {
+    json!({ "configOptions": config_options })
+}
+
 /// A text `agent_message_chunk` / `agent_thought_chunk` update body.
 pub fn text_chunk(kind: &str, text: &str) -> Value {
     json!({
@@ -316,6 +360,22 @@ pub fn initialize_result() -> Value {
             // before answering, so clients without their own transcript
             // store (Zed et al.) render history on resume.
             "loadSession": true,
+            // #1815 F5: the four lifecycle capabilities v1 gates behind
+            // `sessionCapabilities`. Each is an empty object meaning "supported"
+            // (`{}` is the whole advertisement; there are no fields to set).
+            // `additionalDirectories` is deliberately absent: this server accepts
+            // and ignores the field on new/load/resume, so advertising it would
+            // promise a workspace behavior we do not implement.
+            //
+            // `session/set_config_option` has no capability bit at all -- it is
+            // implied by sending `configOptions` in the session/new response,
+            // which F4 already does.
+            "sessionCapabilities": {
+                "list": {},
+                "resume": {},
+                "close": {},
+                "delete": {},
+            },
             "promptCapabilities": { "text": true, "image": false, "embeddedContext": false },
         },
         "agentInfo": {

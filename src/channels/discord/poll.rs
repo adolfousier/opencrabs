@@ -56,9 +56,7 @@ impl PollError {
     /// arm can wrap it in `ToolResult::error` without a `String` round trip.
     pub fn message(&self) -> String {
         match self {
-            Self::EmptyQuestion => {
-                "send_poll requires a non-empty 'poll_question'.".to_string()
-            }
+            Self::EmptyQuestion => "send_poll requires a non-empty 'poll_question'.".to_string(),
             Self::TooFewAnswers(n) => format!(
                 "send_poll needs at least {MIN_ANSWERS} non-empty options in 'poll_options', got {n}."
             ),
@@ -130,10 +128,7 @@ pub fn build_spec(
     let (duration_hours, duration_clamped) = match duration_hours {
         None => (DEFAULT_DURATION_HOURS, false),
         Some(h) if (1..=MAX_DURATION_HOURS as i64).contains(&h) => (h as u16, false),
-        Some(h) => (
-            if h < 1 { 1 } else { MAX_DURATION_HOURS },
-            true,
-        ),
+        Some(h) => (if h < 1 { 1 } else { MAX_DURATION_HOURS }, true),
     };
 
     Ok(PollSpec {
@@ -303,7 +298,9 @@ mod tests {
         let mut poll = CreatePoll::new()
             .question(spec.question.clone())
             .answers(builders)
-            .duration(std::time::Duration::from_secs(u64::from(spec.duration_hours) * 3600));
+            .duration(std::time::Duration::from_secs(
+                u64::from(spec.duration_hours) * 3600,
+            ));
         if spec.allow_multiselect {
             poll = poll.allow_multiselect();
         }

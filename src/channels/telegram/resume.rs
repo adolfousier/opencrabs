@@ -335,9 +335,8 @@ pub(crate) fn build_enqueue_callback(
                 // it — a row re-offered at boot, an item re-queued after a lost
                 // turn race — must not accumulate a second wrapper. The literal
                 // and its inverse live together in `notify_queue`.
-                msg.context_text = crate::brain::agent::service::notify_queue::wrap_busy_once(
-                    &msg.context_text,
-                );
+                msg.context_text =
+                    crate::brain::agent::service::notify_queue::wrap_busy_once(&msg.context_text);
                 state.enqueue_detached_result(session_id, msg);
                 return;
             };

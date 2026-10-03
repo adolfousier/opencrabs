@@ -14,6 +14,11 @@ use serde_json::{Value, json};
 
 use crate::config::{Config, types::ProviderConfig};
 
+/// The config-option id this agent publishes, and the only `configId`
+/// `session/set_config_option` accepts (#1815 F5). Named here so the payload
+/// builder and the setter cannot disagree about the key.
+pub const CONFIG_OPTION_MODEL: &str = "model";
+
 /// Slash commands for the ACP `available_commands_update` push: the built-in
 /// table the TUI autocompletes from, the installed skills, and the user's
 /// commands.toml entries. Names are normalised to ACP shape (no leading
@@ -105,15 +110,25 @@ pub fn models_payload(config: &Config, current_override: Option<&str>) -> Value 
     })
 }
 
-/// Build the official v1 `configOptions` payload for the same catalog: a single
-/// select option with `category: "model"`, values grouped per provider.
+/// Build the `configOptions` payload for the same catalog: a single select
+/// option with `category: "model"`, values grouped per provider.
 ///
 /// Emitted alongside `models` because a client generated strictly from the
 /// schema drops unknown root fields, which made the model picker invisible
-/// outside the MonoCode pairing (#1815 F4). Selection still travels through
-/// `_opencrabs/set_model`: the official counterpart `session/set_config_option`
-/// is not implemented (F5), so this is the display half of the contract and
-/// does not pretend to be the write half.
+/// outside the MonoCode pairing (#1815 F4).
+///
+/// Both halves of the contract exist now: selection travels through
+/// `session/set_config_option` (the official write path, #1815 F5) and through
+/// `_opencrabs/set_model`, and both call the same switch.
+///
+/// SHAPE HONESTY: official v1 `SessionConfigOption` requires only `id` and
+/// `name`, and defines nothing but `id`, `name`, `description`, `category` and
+/// `_meta`. The `type`, `currentValue` and grouped `options` fields below come
+/// from the UNSTABLE schema (`schema.unstable.json` / `v2/schema.json`), which
+/// is what #1815 was filed against and what MonoCode reads today. They are not
+/// v1-stable, so a strict v1 client sees a labeled option it cannot enumerate
+/// and keeps working: every extra field is additive. Do not cite this as the
+/// v1 shape.
 pub fn config_options_payload(config: &Config, current_override: Option<&str>) -> Value {
     let entries = collect_models(config);
     if entries.is_empty() {
@@ -139,7 +154,7 @@ pub fn config_options_payload(config: &Config, current_override: Option<&str>) -
         }
     }
     json!([{
-        "id": "model",
+        "id": CONFIG_OPTION_MODEL,
         "name": "Model",
         "description": "Provider and model used for this session",
         "category": "model",
