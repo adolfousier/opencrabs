@@ -88,6 +88,48 @@ refactor(memory): mod.rs is declarations-only
 
 A bare area prefix (`TUI:`, `z.ai:`, `Reasoning stream:`) is not the convention. The type makes the tracker filterable and lets the fixing commit reuse the title verbatim. Add labels on creation (`--label bug --label tui`), one for the type and one for the area.
 
+## Where Issues Go
+
+OpenCrabs is developed alongside a **dev factory** — the tooling, CI, and automation that build, test, and release the binary. Issues are split by what they describe:
+
+- **The binary** — runtime behaviour, channels, providers, TUI, memory, tools — belongs in this repository.
+- **The dev factory** — its tooling, CI, release automation, and process — belongs in [`leshchenko1979/opencrabs-dev-factory`](https://github.com/leshchenko1979/opencrabs-dev-factory).
+
+The historical issue portfolio lives at `leshchenko1979/opencrabs` and is read-only; new issues do not go there.
+
+### Sweep for duplicates first
+
+**Search before you file** — open *and* closed, issues *and* PRs:
+
+```bash
+gh search issues --repo adolfousier/opencrabs "<terms>" --state all
+gh search prs --repo adolfousier/opencrabs "<terms>" --state all
+```
+
+A closed hit that already fixed the same defect means *reference it*, not *re-file it*. A duplicate costs a review cycle and splits the record across two threads.
+
+### Mark core-surface changes
+
+A change that touches a core runtime surface — the agent loop, provider layer, channels, memory, config, migrations — is reviewed more carefully than docs or tooling. Mark it in the title so triage can route it:
+
+```
+fix core(provider): tool-call arguments drop the final delta
+feat core(memory): expose vector index stats to /doctor
+```
+
+`fix core` and `feat core` are the two core prefixes; every other change uses the plain type.
+
+## Issue & PR Lifecycle
+
+1. **File one atomic issue** — one issue, one piece of work (see above).
+2. **Wait for a maintainer to confirm** it is real and not a duplicate.
+3. **Get assigned** — assignment is the public signal that the issue is claimed. Do not comment "I'll take this"; the assignment says it.
+4. **Branch and fix** — a short-lived branch off `main` in your fork, with atomic commits.
+5. **Open the PR** — reference the issue in the body, explain *why* the change is needed, and add the `core` prefix if it applies.
+6. **Merge closes the issue** — because the issue and the PR live in the same repository, `Fixes #N` closes it on merge.
+
+**Commenting:** the only comments expected on an issue are the approved design (for non-trivial work) and per-commit implementation notes. Status chatter — "working on it", "+1", "any update?" — belongs nowhere.
+
 ## Step-by-Step: Submitting a Bug Fix
 
 1. **Find or create the issue** — Check existing issues first. If none exists, create one.
