@@ -937,6 +937,7 @@ pub mod discord_footer_placement_test;
 pub mod discord_forward_snapshot_test;
 pub mod discord_handler_test;
 pub mod discord_history_dedup_test;
+pub mod discord_mention_only_test;
 pub mod discord_norm_key_test;
 pub mod discord_split_message_test;
 pub mod discord_table_convert_test;

@@ -250,6 +250,71 @@ pub(crate) fn forwarded_snapshot_text(snapshots: &[MessageSnapshot]) -> String {
     out
 }
 
+/// Combine a message's own text with its forwarded payloads (#1891 shape),
+/// reused for replied-to messages so a bare mention reading a forwarded
+/// original sees the payload too (#1890).
+pub(crate) fn folded_message_text(content: &str, snapshots: &[MessageSnapshot]) -> String {
+    let fwd = forwarded_snapshot_text(snapshots);
+    if fwd.is_empty() {
+        content.to_string()
+    } else if content.trim().is_empty() {
+        fwd.trim_start().to_string()
+    } else {
+        format!("{content}{fwd}")
+    }
+}
+
+/// What to do with a message that is empty of text and attachments after
+/// stripping. Pure so the branch contract from #1890 is testable without a
+/// live Context.
+pub(crate) enum EmptyContentDecision {
+    /// The message qualified (mention mode) despite coming up empty:
+    /// dispatch with this visible context instead of vanishing.
+    DispatchWith(String),
+    /// Nothing qualified; drop it, but leave a reason the caller can log.
+    Drop(&'static str),
+}
+
+pub(crate) fn decide_empty_content(
+    in_mention_mode: bool,
+    replied_folded: Option<&str>,
+) -> EmptyContentDecision {
+    if in_mention_mode {
+        EmptyContentDecision::DispatchWith(bare_mention_content(replied_folded))
+    } else {
+        EmptyContentDecision::Drop("no content, no attachments, and no qualifying mention")
+    }
+}
+
+/// Content for a bare @mention whose tag was just stripped (#1890). When the
+/// mention rode a reply, the replied-to text is the payload the user meant to
+/// send; without it, the ping itself is still a dispatchable turn.
+pub(crate) fn bare_mention_content(replied_folded: Option<&str>) -> String {
+    match replied_folded.map(str::trim).filter(|s| !s.is_empty()) {
+        Some(text) => format!("The user mentioned you in reply to this message:\n\n{text}"),
+        None => "The user mentioned you with no other content.".to_string(),
+    }
+}
+
+/// Fetch the message a bare mention replied to and fold its forwards in.
+/// `None` when there is no reply reference or the fetch fails — the caller
+/// still dispatches the ping, just without extra context.
+async fn resolve_replied_folded(ctx: &Context, msg: &Message) -> Option<String> {
+    let reference = msg.message_reference.as_ref()?;
+    let referenced = reference.message_id?;
+    let channel = reference.channel_id;
+    match ctx.http.get_message(channel, referenced).await {
+        Ok(replied) => Some(folded_message_text(
+            &replied.content,
+            &replied.message_snapshots,
+        )),
+        Err(e) => {
+            tracing::warn!(error = %e, "Discord: could not resolve reply target of a bare mention (#1890)");
+            None
+        }
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn handle_message(
     ctx: &Context,
@@ -487,15 +552,30 @@ pub(crate) async fn handle_message(
     // Surface forwarded payloads before the emptiness guard (#1891): a
     // mention + pure forward has empty content and no top-level attachments,
     // and used to be dropped here as noise before ever reaching the agent.
-    if !forwarded_history.is_empty() {
-        if content.is_empty() {
-            content = forwarded_history.trim_start().to_string();
-        } else {
-            content.push_str(&forwarded_history);
-        }
-    }
+    content = folded_message_text(&content, &msg.message_snapshots);
     if content.is_empty() && msg.attachments.is_empty() {
-        return;
+        // The strip above can empty a message that DID qualify at the gate:
+        // a bare @mention, usually a reply to a missed message (#1890).
+        // Resolve what it replied to and dispatch anyway; everything else
+        // keeps dropping, but never silently.
+        let in_mention_mode = !is_dm && respond_to == &RespondTo::Mention;
+        let replied_folded = if in_mention_mode {
+            resolve_replied_folded(ctx, msg).await
+        } else {
+            None
+        };
+        match decide_empty_content(in_mention_mode, replied_folded.as_deref()) {
+            EmptyContentDecision::DispatchWith(text) => {
+                tracing::debug!(
+                    "Discord: bare mention after tag-strip resolved to a dispatch (#1890)"
+                );
+                content = text;
+            }
+            EmptyContentDecision::Drop(reason) => {
+                tracing::debug!("Discord: dropping empty message: {reason}");
+                return;
+            }
+        }
     }
 
     // Handle attachments — vision-first pipeline
