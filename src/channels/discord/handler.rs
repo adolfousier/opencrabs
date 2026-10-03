@@ -20,7 +20,7 @@ use uuid::Uuid;
 
 use serenity::builder::{CreateAttachment, CreateMessage};
 use serenity::http::Http;
-use serenity::model::channel::{Message, MessageFlags};
+use serenity::model::channel::{Message, MessageFlags, MessageSnapshot};
 use serenity::model::id::ChannelId;
 use serenity::prelude::*;
 
@@ -220,6 +220,36 @@ pub(super) fn spawn_flow_ticker(
     });
 }
 
+/// Fold forwarded payloads into display text (#1891).
+///
+/// Discord message forwards never touch `Message::content` or the top-level
+/// attachments; the payload lives in `message_snapshots`, which this handler
+/// used to ignore entirely, so a pure forward was invisible both to the agent
+/// turn and to the channel history. Images keep the vision-first
+/// `<<IMG:url>>` marker format used for regular attachments; other files carry
+/// their name and CDN URL so the agent can fetch them on demand.
+pub(crate) fn forwarded_snapshot_text(snapshots: &[MessageSnapshot]) -> String {
+    let mut out = String::new();
+    for snap in snapshots {
+        let text = snap.content.trim();
+        if !text.is_empty() {
+            out.push_str(&format!("\n\n[forwarded message]: {text}"));
+        }
+        for att in &snap.attachments {
+            let mime = att.content_type.as_deref().unwrap_or("");
+            if mime.starts_with("image/") {
+                out.push_str(&format!(" <<IMG:{}>>", att.url));
+            } else {
+                out.push_str(&format!(
+                    "\n[forwarded attachment]: {} {}",
+                    att.filename, att.url
+                ));
+            }
+        }
+    }
+    out
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn handle_message(
     ctx: &Context,
@@ -246,9 +276,14 @@ pub(crate) async fn handle_message(
 
     let user_id = msg.author.id.get() as i64;
 
+    // Forwarded payloads belong in history too, not just in the agent's turn
+    // (#1891) — the raw `msg.content` of a pure forward is empty.
+    let forwarded_history = forwarded_snapshot_text(&msg.message_snapshots);
+
     // Helper: passively capture a channel message for history
     let store_channel_msg = |text: String| {
         let repo = channel_msg_repo.clone();
+        let fwd = forwarded_history.clone();
         let channel_chat_id = msg.channel_id.get().to_string();
         let guild_name = msg
             .guild_id
@@ -258,6 +293,14 @@ pub(crate) async fn handle_message(
         let sender_name = msg.author.name.clone();
         let msg_id = msg.id.get().to_string();
         async move {
+            let mut text = text;
+            if !fwd.is_empty() {
+                if text.is_empty() {
+                    text = fwd.trim_start().to_string();
+                } else {
+                    text.push_str(&fwd);
+                }
+            }
             if text.is_empty() {
                 return;
             }
@@ -440,6 +483,16 @@ pub(crate) async fn handle_message(
     {
         let mention_tag = format!("<@{}>", bot_id);
         content = content.replace(&mention_tag, "").trim().to_string();
+    }
+    // Surface forwarded payloads before the emptiness guard (#1891): a
+    // mention + pure forward has empty content and no top-level attachments,
+    // and used to be dropped here as noise before ever reaching the agent.
+    if !forwarded_history.is_empty() {
+        if content.is_empty() {
+            content = forwarded_history.trim_start().to_string();
+        } else {
+            content.push_str(&forwarded_history);
+        }
     }
     if content.is_empty() && msg.attachments.is_empty() {
         return;

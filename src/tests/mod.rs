@@ -933,6 +933,7 @@ pub mod discord_application_commands_test;
 pub mod discord_flow_ticker_test;
 pub mod discord_followup_tap_tool_loop_test;
 pub mod discord_footer_placement_test;
+pub mod discord_forward_snapshot_test;
 pub mod discord_handler_test;
 pub mod discord_history_dedup_test;
 pub mod discord_norm_key_test;
