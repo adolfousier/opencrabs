@@ -1122,13 +1122,29 @@ fn builtin_vision_candidate(
 /// Candidate for a custom provider: customs carry their own `base_url`
 /// (skipped when missing — never guessed) and may be keyless local
 /// endpoints (Ollama, llama.cpp, LM Studio).
+///
+/// The credential rule matches [`builtin_vision_candidate`] exactly, and for
+/// the same reason (#1792): a remote endpoint we hold no key for cannot
+/// satisfy vision auth, so `Bearer ` with nothing after it is not a candidate,
+/// it is a guaranteed 401. Before this, every `analyze_image` call walked the
+/// chain burning a round trip per keyless entry and came back with one merged
+/// error naming only the last failure.
 fn custom_vision_candidate(
     cfg: &ProviderConfig,
     vision_model: &str,
 ) -> Option<(String, String, String)> {
     let base_url = normalize_vision_url(cfg.base_url.clone()?);
+    let api_key = cfg.api_key.clone().filter(|k| !k.is_empty());
+    if api_key.is_none() && !is_local_base_url(&base_url) {
+        tracing::debug!(
+            base_url = %base_url,
+            vision_model = %vision_model,
+            "vision: skipping custom candidate, no API key for a remote endpoint (#1792)"
+        );
+        return None;
+    }
     Some((
-        cfg.api_key.clone().unwrap_or_default(),
+        api_key.unwrap_or_default(),
         base_url,
         vision_model.to_string(),
     ))
