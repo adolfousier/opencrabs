@@ -34,7 +34,7 @@ fn usage_dashboard_footer_is_canonical_key_colon_verb() {
 
     let buf = terminal.backend().buffer().clone();
     let row: String = (0..buf.area.width)
-        .map(|x| buf.get(x, 1).symbol().to_string())
+        .map(|x| buf[(x, 1)].symbol().to_string())
         .collect();
     assert!(
         row.starts_with("Tab: switch"),
@@ -56,7 +56,7 @@ fn usage_dashboard_footer_is_canonical_key_colon_verb() {
 
     // Key span styling: bold. Find the 'T' of "Tab" at x=0 and check the
     // modifier survived into the cell.
-    let cell = buf.get(0, 1);
+    let cell = &buf[(0, 1)];
     assert!(
         cell.style()
             .add_modifier

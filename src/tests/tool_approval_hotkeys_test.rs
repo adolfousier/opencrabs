@@ -9,7 +9,6 @@
 use std::sync::Arc;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use ratatui::text::Line;
 use tokio::sync::mpsc;
 use uuid::Uuid;
 

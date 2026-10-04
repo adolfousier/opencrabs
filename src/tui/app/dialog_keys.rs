@@ -722,8 +722,10 @@ mod tests {
     #[test]
     fn detail_popup_apply_and_reject_fire() {
         use crossterm::event::KeyCode;
-        let mut state = McState::default();
-        state.detail_open = true;
+        let mut state = McState {
+            detail_open: true,
+            ..Default::default()
+        };
         let count = 2;
         let apply = decide(
             &mut state,

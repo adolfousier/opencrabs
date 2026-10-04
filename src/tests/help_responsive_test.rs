@@ -58,7 +58,7 @@ async fn help_is_single_column_when_narrow_and_keeps_footer() {
     let about = rows.iter().position(|r| r.contains("ABOUT"));
     assert!(about.is_some(), "ABOUT section missing in narrow mode");
     let mid = width / 2;
-    let border_at_mid = (0..height).any(|y| buf.get(mid, y).symbol() == "│");
+    let border_at_mid = (0..height).any(|y| buf[(mid, y)].symbol() == "│");
     assert!(
         !border_at_mid,
         "narrow /help must render a single full-width column, found a pane border at x={mid}"

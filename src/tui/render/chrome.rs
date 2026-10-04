@@ -109,12 +109,12 @@ mod tests {
 
         let buffer = terminal.backend().buffer();
         // Top-left corner of the popup (rounded set uses ╭).
-        let corner = buffer.get(1, 1).symbol().to_string();
+        let corner = buffer[(1, 1)].symbol().to_string();
         assert_eq!(corner, "╭", "modal corners must be rounded, got {corner}");
         // Border cell carries the BorderModal role color, and it differs
         // from the regular border gray so dialogs pop (#1775). Probed at
         // x=20, clear of the left-aligned " Test " title.
-        let border_cell = buffer.get(20, 1);
+        let border_cell = &buffer[(20, 1)];
         assert_eq!(
             border_cell.fg,
             expected_border.expect("role captured during draw"),

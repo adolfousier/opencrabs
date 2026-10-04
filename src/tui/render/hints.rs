@@ -141,9 +141,9 @@ mod tests {
         // the key, char 7 starts the verb, char 16 starts the second
         // key (after the two-space separator at 14..15).
         let buffer = terminal.backend().buffer();
-        let key_cell = buffer.get(0, 1);
-        let verb_cell = buffer.get(7, 1);
-        let second_key_cell = buffer.get(16, 1);
+        let key_cell = &buffer[(0, 1)];
+        let verb_cell = &buffer[(7, 1)];
+        let second_key_cell = &buffer[(16, 1)];
         assert_eq!(key_cell.symbol(), "E");
         assert_eq!(verb_cell.symbol(), "c");
         assert_eq!(second_key_cell.symbol(), "E");
