@@ -862,6 +862,16 @@ async fn finalize_plan_card_locked(
             if let Some((mid, _)) = state.plan_card(session_id).await
                 && new_mid != mid
             {
+                super::telemetry::log_request(
+                    "system",
+                    "plan card restick",
+                    &session_id.to_string(),
+                    "delete",
+                    "deleteMessage",
+                    chat.0,
+                    None,
+                    Some(i64::from(mid.0)),
+                );
                 match bot.delete_message(chat, mid).await {
                     Ok(_) => {
                         tracing::info!("Telegram plan card restick deleted stale card ({mid:?})");
@@ -1047,6 +1057,16 @@ async fn remove_plan_card_locked(
         // #16: deleteMessage success used to be silent — a vanished card was
         // undetectable without cross-referencing a user report. Log both
         // outcomes so a removal is always forensic.
+        super::telemetry::log_request(
+            "system",
+            "plan card drop",
+            &session_id.to_string(),
+            "delete",
+            "deleteMessage",
+            chat.0,
+            None,
+            Some(i64::from(mid.0)),
+        );
         match bot.delete_message(chat, mid).await {
             Ok(_) => {
                 tracing::info!("Telegram plan card deleted ({mid:?}) for session {session_id}");

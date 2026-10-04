@@ -345,6 +345,18 @@ pub(crate) async fn fire_reaction(bot: &Bot, chat_id: ChatId, msg_id: MessageId,
         );
         return;
     }
+    // #721 E1: emitted after the cooldown drop, so a reaction the governor
+    // suppressed is not counted as a request — nothing reached the wire.
+    super::telemetry::log_request(
+        "turn",
+        "ack reaction",
+        "-",
+        "reaction",
+        "setMessageReaction",
+        chat_id.0,
+        None,
+        Some(i64::from(msg_id.0)),
+    );
     let reaction = teloxide::types::ReactionType::Emoji {
         emoji: map_to_allowed_reaction(emoji),
     };
@@ -664,6 +676,19 @@ pub(crate) async fn handle_message(
                 let fs = crate::services::FileService::new(agent_c.context().clone());
                 let marker = format!("<<IMG:{}>>", photo_path.display());
                 let _ = archive_image_markers(&marker, session_id, &fs).await;
+
+                // #721 E1: the request line precedes the call — a delete that
+                // fails is still a delete that was asked for.
+                super::telemetry::log_request(
+                    "system",
+                    "photo feedback",
+                    &session_id.to_string(),
+                    "delete",
+                    "deleteMessage",
+                    chat_id,
+                    None,
+                    feedback_id.map(|m| i64::from(m.0)),
+                );
 
                 // Delete the feedback message (best-effort)
                 if let Some(mid) = feedback_id
@@ -3168,6 +3193,18 @@ pub(crate) async fn handle_reaction(
         let reaction_type = teloxide::types::ReactionType::Emoji {
             emoji: map_to_allowed_reaction(r_emoji),
         };
+        // #721 E1: the turn reaction is a direct call outside `fire_reaction`,
+        // so it needs its own line or it stays invisible.
+        super::telemetry::log_request(
+            "turn",
+            "turn reaction",
+            &session_id.to_string(),
+            "reaction",
+            "setMessageReaction",
+            chat_id.0,
+            None,
+            Some(i64::from(msg_id.0)),
+        );
         if let Err(e) = bot
             .set_message_reaction(chat_id, msg_id)
             .reaction(vec![reaction_type])

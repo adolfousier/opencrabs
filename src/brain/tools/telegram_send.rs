@@ -9,7 +9,9 @@ use super::error::Result;
 use super::r#trait::{Tool, ToolCapability, ToolExecutionContext, ToolHints, ToolResult};
 use crate::channels::telegram::TelegramState;
 use crate::channels::telegram::intermediates::send_retrying_rate_limit;
-use crate::channels::telegram::telemetry::{content_hash8, log_send_failure, log_send_success};
+use crate::channels::telegram::telemetry::{
+    content_hash8, log_request, log_send_failure, log_send_success,
+};
 use async_trait::async_trait;
 use serde_json::Value;
 use std::sync::Arc;
@@ -765,6 +767,18 @@ impl TelegramSendTool {
             chat_id,
             message_id,
         } = pget!(resolve_existing_target(input, context.session_id, &self.telegram_state).await);
+        // #721 E1: the tool path calls `delete_message` DIRECTLY — it does not
+        // go through `best_effort_delete` — so it needs its own request line.
+        log_request(
+            "tool",
+            "delete",
+            &context.session_id.to_string(),
+            "delete",
+            "deleteMessage",
+            chat_id,
+            None,
+            Some(message_id),
+        );
         match send_retrying_rate_limit("telegram_send delete", || {
             bot.delete_message(ChatId(chat_id), MessageId(message_id as i32))
         })
@@ -1560,6 +1574,18 @@ impl TelegramSendTool {
         let reactions = vec![ReactionType::Emoji {
             emoji: emoji.clone(),
         }];
+        // #721 E1: the tool path calls `set_message_reaction` DIRECTLY —
+        // outside `fire_reaction` — so it needs its own request line.
+        log_request(
+            "tool",
+            "set_reaction",
+            &context.session_id.to_string(),
+            "reaction",
+            "setMessageReaction",
+            chat_id,
+            None,
+            Some(message_id),
+        );
         match send_retrying_rate_limit("telegram_send set_reaction", || {
             bot.set_message_reaction(ChatId(chat_id), MessageId(message_id as i32))
                 .reaction(reactions.clone())

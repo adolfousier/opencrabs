@@ -312,6 +312,16 @@ pub(crate) async fn deliver_final_response(
                 let reaction = teloxide::types::ReactionType::Emoji {
                     emoji: mapped.clone(),
                 };
+                super::telemetry::log_request(
+                    "turn",
+                    "delivery reaction",
+                    &session_id.to_string(),
+                    "reaction",
+                    "setMessageReaction",
+                    chat_id.0,
+                    None,
+                    inbound.map(|m| i64::from(m.id.0)),
+                );
                 let react_result = match inbound {
                     Some(m) => bot
                         .set_message_reaction(chat_id, m.id)

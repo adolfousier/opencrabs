@@ -264,6 +264,16 @@ where
     C: Into<ChatId>,
 {
     let chat = chat_id.into();
+    super::telemetry::log_request(
+        "system",
+        why,
+        "-",
+        "delete",
+        "deleteMessage",
+        chat.0,
+        None,
+        Some(i64::from(msg_id.0)),
+    );
     if let Err(e) = bot.delete_message(chat, msg_id).await {
         let text = e.to_string();
         let quiet =
@@ -306,6 +316,19 @@ pub async fn fire_chat_action<C>(
     if !super::governor::admit_chat_action(chat, thread_id.map(|t| t.0.0)).await {
         return;
     }
+    // #721 E1: emitted AFTER the admit gate — a refresh the governor dropped
+    // never goes on the wire, so it is not a request and must not inflate the
+    // rate this line exists to measure.
+    super::telemetry::log_request(
+        "turn",
+        why,
+        "-",
+        "typing",
+        "sendChatAction",
+        chat.0,
+        thread_id.map(|t| i64::from(t.0.0)),
+        None,
+    );
     if let Err(e) = chat_action_in_thread(bot, chat, thread_id, action)
         .await
         .map(|_| ())

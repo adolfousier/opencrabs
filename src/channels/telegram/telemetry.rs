@@ -81,3 +81,68 @@ pub(crate) fn log_send_failure(
          error={error}"
     );
 }
+
+/// One line describing an outbound REQUEST (#721, E1).
+///
+/// The send telemetry above answers "what reached the chat"; this answers
+/// "what did we put ON THE WIRE". A request that fails is still a request, so
+/// the line is emitted BEFORE the API call and its presence says nothing
+/// about the outcome. Without it, typing / delete / reaction traffic is
+/// invisible to the log, and a per-minute rate over the surface cannot be
+/// computed at all — which is why most residual 429 refusals show "no
+/// predecessor".
+///
+/// The prefix is distinct (`Telegram request:`) so a grep for landings never
+/// picks up requests and vice versa. `origin` / `detail` / `session` / `kind`
+/// / `path` / `chat` / `thread` reuse the send schema's correlation fields
+/// verbatim; `len` / `hash8` are DROPPED, because they describe a message
+/// BODY and a request has none.
+///
+/// `msg` is the TARGET message id where the request addresses one (delete,
+/// reaction) and the create-shaped `-` where it cannot (a chat action targets
+/// no message) — the same convention #676 established for rich creates, so
+/// every line carries every field and a reader never guesses a shape.
+///
+/// `info!` and not `debug!`, and the reason is the READER: `oc-log-search`
+/// stages `grep -E ' (INFO|WARN|ERROR) '` by default, so a debug line would
+/// be invisible to the ordinary read and E1 would swap one blind spot for
+/// another.
+#[allow(clippy::too_many_arguments)] // correlation fields per the #721 request schema
+pub(crate) fn request_line(
+    origin: &str,
+    origin_detail: &str,
+    session: &str,
+    kind: &str,
+    path: &str,
+    chat_id: i64,
+    thread_id: Option<i64>,
+    msg_id: Option<i64>,
+) -> String {
+    let msg = match msg_id {
+        Some(id) => id.to_string(),
+        None => "-".to_string(),
+    };
+    format!(
+        "Telegram request: origin={origin} detail={origin_detail} session={session} \
+         kind={kind} path={path} chat={chat_id} thread={thread_id:?} msg={msg}"
+    )
+}
+
+/// Emit [`request_line`] at INFO. Same arguments; one source of truth for the
+/// shape, so a change to the contract cannot drift between the two.
+#[allow(clippy::too_many_arguments)] // correlation fields per the #721 request schema
+pub(crate) fn log_request(
+    origin: &str,
+    origin_detail: &str,
+    session: &str,
+    kind: &str,
+    path: &str,
+    chat_id: i64,
+    thread_id: Option<i64>,
+    msg_id: Option<i64>,
+) {
+    tracing::info!(
+        "{}",
+        request_line(origin, origin_detail, session, kind, path, chat_id, thread_id, msg_id)
+    );
+}
