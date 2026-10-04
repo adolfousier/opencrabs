@@ -609,10 +609,11 @@ pub struct RateLimiterConfig {
     /// so opting out is only needed to restore fully reactive behavior.
     #[serde(default = "default_true")]
     pub enabled: bool,
-    /// G1 typing: minimum spacing between `sendChatAction` calls per forum
-    /// peer. Telegram documents short FLOOD_WAITs when action bursts land
-    /// inside one second; 3 s per topic keeps N concurrent sessions collapsed
-    /// well under the documented regime. Default: 3.
+    /// G1 typing: minimum spacing between `sendChatAction` calls, keyed on the
+    /// CHAT — `governor.rs` buckets one peer per chat id and a thread id only
+    /// sets `forum_seen` — so the sustained ceiling is exactly `60 / interval`
+    /// per chat per minute. 3 s is therefore 20/min: Telegram's documented
+    /// per-group ceiling, with no headroom. Default: 3.
     #[serde(default = "default_typing_min_interval_secs")]
     pub typing_min_interval_secs: u64,
     /// G1 typing: burst capacity of the bucket (refreshes allowed before

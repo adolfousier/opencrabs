@@ -655,22 +655,30 @@ enabled = false
 # Proactive flood governors (#1211): per-forum token buckets applied BEFORE the
 # Bot API answers 429, layered beside the reactive Retry-after backoff. Three
 # independent governors keyed by forum chat id:
-#   G1 typing  — ~1 sendChatAction / 3 s per forum (burst 8); concurrent
-#                sessions in one topic coalesce into that single refresh;
-#                refreshes held past typing_max_hold_secs are dropped.
-#   G2 edits   — ~30 editMessageText / min per forum; when the bucket is empty a
-#                priority drop ladder sheds clock → brain preview → intermediary
-#                flow updates → status line (each self-heals on the next full
-#                render). Finals never drop: settle renders and plan-card
-#                refreshes queue latest-wins per message until budget refills.
+#   G1 typing  — ~1 sendChatAction / 3 s per CHAT (burst 8); the bucket is
+#                keyed on the chat id alone, so concurrent sessions and
+#                separate topics in one group share it. Refreshes held past
+#                typing_max_hold_secs are dropped. At the 3 s default the
+#                sustained rate is 60/3 = 20/min, which is exactly Telegram's
+#                documented per-group ceiling: raise it to leave headroom.
+#                Measured 2026-09-29/30 (#697): cutting typing 89 % (3 s → 30 s)
+#                left the refusal rate unchanged, so this knob is NOT the 429
+#                lever; the trigger is the sub-second interval between
+#                requests, not any per-minute ceiling.
+#   G2 edits   — ~18 editMessageText / min per chat (edits_per_minute); when the
+#                budget is empty a priority drop ladder sheds clock → brain
+#                preview → intermediary flow updates → status line (each
+#                self-heals on the next full render). Finals never drop: settle
+#                renders and plan-card refreshes queue latest-wins per message
+#                until budget refills.
 #   G3 sends   — full messages paced ~1/s per chat under an 18/min group
 #                ceiling (burst 5); pacing delays, it never drops (#297).
 # Enforcement is FORUMS-ONLY: a chat becomes governed once any call is seen
 # carrying a topic id; DMs are untouched. Telemetry lands in one periodic INFO
-# line per active forum ("Telegram rate-limiter chat=…").
+# line per active chat ("Telegram rate-limiter chat=…").
 # [channels.telegram.rate_limiter]
 # enabled = true                        # Master switch. Default: true.
-# typing_min_interval_secs = 3          # G1 spacing per forum peer.
+# typing_min_interval_secs = 3          # G1 spacing per chat: rate = 60 / this.
 # typing_burst = 8                      # G1 burst capacity.
 # typing_max_hold_secs = 30             # G1 longest hold before dropping.
 # edits_per_minute = 18                 # G2 steady-state edit budget (sized under ~20/min group limit).
