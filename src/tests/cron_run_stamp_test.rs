@@ -60,7 +60,7 @@ fn scheduled_delivery_paths_call_the_stamper() {
         .split_once("Err(e) =>")
         .expect("error arm follows the success arm");
     let err_arm = after_err
-        .split_once("// Insert a compaction marker")
+        .split_once("\n    Ok(())")
         .map(|(body, _)| body)
         .expect("end of execute_job match");
     assert!(

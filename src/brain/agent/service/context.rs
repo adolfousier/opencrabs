@@ -277,7 +277,8 @@ impl AgentService {
     /// with the prefix: `CompactionOutcome::marker` (compaction.rs:43),
     /// `AgentContext::hard_truncate_to` (context.rs:346), the tool-loop
     /// persist path (tool_loop.rs:3791), the RSI cycle seal (rsi.rs:1172) and
-    /// the cron boundary (scheduler.rs:1003). A plain `contains` instead
+    /// the cron run boundary (`CRON_RUN_BOUNDARY`, written at run start by
+    /// `open_run_boundary` in `cron/scheduler.rs`). A plain `contains` instead
     /// re-anchored the window on any message that merely QUOTED the prefix —
     /// an assistant row echoing the banner, or a lane reading it out of a log
     /// or a compaction summary. Audit over four live DBs: 1813 `user` marker
