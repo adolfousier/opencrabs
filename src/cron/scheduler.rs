@@ -591,6 +591,9 @@ async fn execute_job(
     if let Err(e) = run_repo.insert(&run).await {
         tracing::error!("Failed to insert cron run record: {e}");
     }
+    // #1703 fix 2: the run's start time, formatted once for the delivery
+    // stamps; the ledger row keeps the full timestamp itself.
+    let run_started_at = run.started_at.format("%Y-%m-%dT%H:%M:%SZ").to_string();
 
     let session_id = cron_session_id;
     tracing::info!(
@@ -738,7 +741,9 @@ async fn execute_job(
                     {
                         tracing::error!("Failed to save cron run result to DB: {e}");
                     }
-                    clean
+                    // #1703 fix 2: the ledger row keeps the raw report; the
+                    // delivered copy carries the run that produced it.
+                    stamp_delivery(&clean, &run_id, &run_started_at)
                 }
                 TurnOutcome::NoOp(notice) => {
                     tracing::warn!(
@@ -796,7 +801,13 @@ async fn execute_job(
 
             // Optionally deliver error to configured channels too
             if let Some(ref deliver_to) = job.deliver_to {
-                let msg = format!("Cron job '{}' failed: {e}", job.name);
+                // #1703 fix 2: scheduled error deliveries are messages the
+                // run produced too, they carry their run stamp as well.
+                let msg = stamp_delivery(
+                    &format!("Cron job '{}' failed: {e}", job.name),
+                    &run_id,
+                    &run_started_at,
+                );
                 for target in deliver_to
                     .split(',')
                     .map(str::trim)
@@ -1053,6 +1064,28 @@ pub(crate) fn not_executed_notice(job_name: &str, run_id: &str, at: &str) -> Str
     format!(
         "Cron job '{job_name}' not executed: no tool ran in this run ({at}, run {run_id}). The report was suppressed."
     )
+}
+
+/// #1703 fix 2: the run stamp carried by every delivered cron message, so a
+/// reader can anchor a message to the ledger row that produced it even when
+/// the writer cannot tell fresh work from a stale replay. Short run id plus
+/// the run's own start time: the start time is what separates two runs of
+/// the same job.
+pub(crate) fn run_stamp(run_id: &str, started_at: &str) -> String {
+    let short = run_id.get(..8).unwrap_or(run_id);
+    format!("[run {short}, started {started_at}]")
+}
+
+/// Append [`run_stamp`] to delivered content, never twice: text already
+/// carrying this run's stamp passes through unchanged, so no call site can
+/// stack stamps by accident (#1703).
+pub(crate) fn stamp_delivery(content: &str, run_id: &str, started_at: &str) -> String {
+    let stamp = run_stamp(run_id, started_at);
+    if content.contains(&stamp) {
+        content.to_string()
+    } else {
+        format!("{content}\n\n{stamp}")
+    }
 }
 
 /// Execution-evidence probe for one cron run (#1703): a shared counter fed
