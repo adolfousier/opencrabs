@@ -2,9 +2,11 @@
 //!
 //! Background task that checks the `cron_jobs` table every 60 seconds,
 //! executes due jobs in a shared "Cron" session, and delivers results
-//! to the configured channel. Each run inserts a compaction marker after
-//! completion so the next run starts with empty context (no cross-job
-//! history contamination). Cron jobs are fully isolated from the TUI —
+//! to the configured channel. Each run inserts its compaction marker at run
+//! START, before the turn reads history, so the next fire starts from an empty
+//! context AND a run the daemon killed mid-flight still leaves a boundary
+//! behind (#149 contamination vector, #1703 stale-context reload). Cron jobs
+//! are fully isolated from the TUI —
 //! they never share or mutate the user's active session.
 
 use crate::channels::ChannelFactory;
@@ -383,11 +385,12 @@ pub(crate) fn cron_session_title_suffix(job: &CronJob) -> String {
 /// every job. That design cross-pollinates whenever jobs overlap in time,
 /// which the 60s tick makes routine, not exceptional:
 ///
-/// 1. **History**: a run inserts its `[CONTEXT COMPACTION]` marker only at
-///    the END of the turn, and context loads from the LAST marker in the
-///    session (`messages_from_last_compaction`). A job B starting while job
-///    A is mid-flight reads A's prompt + partial tool activity as its own
-///    context. Two concurrent turns also interleave writes into one history.
+/// 1. **History**: context loads from the LAST `[CONTEXT COMPACTION]` marker
+///    in the session (`messages_from_last_compaction`). With one shared
+///    session, a fire's own boundary is the only thing that bounds its load,
+///    so job B starting while job A is mid-flight can pick up A's rows that
+///    landed between B's marker and B's load, and two concurrent turns
+///    interleave writes into one history. Per-job sessions remove both.
 /// 2. **Provider/model**: `execute_job` swaps the per-session provider keyed
 ///    to the session id — with one shared id, a concurrent job's swap
 ///    overwrites the running job's provider mid-turn (last writer wins).
@@ -397,9 +400,11 @@ pub(crate) fn cron_session_title_suffix(job: &CronJob) -> String {
 /// (`[chat:N]` suffix) so a user rename of the readable part still resolves
 /// to the same session row while different jobs never share one.
 ///
-/// Cross-RUN contamination within a single job is still bounded by the
-/// end-of-run compaction marker: the job's own next fire starts from an
-/// empty context (deliberate — cron prompts are self-contained).
+/// Cross-RUN contamination within a single job is bounded by the boundary each
+/// run writes at its own START (`open_run_boundary`): the job's next fire
+/// reloads from that newest marker and nothing else, so neither a finished run
+/// nor one the daemon killed mid-flight can hand its stale tool results forward
+/// (deliberate - cron prompts are self-contained).
 ///
 /// There is no per-run single-flight guard here: overlapping fires of the
 /// same job each get a session that ONLY that job writes, so the two
@@ -503,6 +508,45 @@ async fn resolve_job_agent(
     Ok((config, Arc::new(builder)))
 }
 
+/// The compaction boundary that opens a cron run (#1703 fix 3).
+///
+/// Written ONCE per run, at run START, before the turn reads history — never
+/// after it. `messages_from_last_compaction` (`service/context.rs`) walks
+/// backward to the LAST `[CONTEXT COMPACTION]` user row and loads everything
+/// from there forward, so the marker's position in the sequence is the whole
+/// guarantee: a run that wrote its boundary only on completion left NO marker
+/// when the daemon died mid-flight, and the next fire reloaded from the
+/// PREVIOUS run's marker, i.e. the dead run's prompt and half-finished tool
+/// results came back as live context. Opening every run with its own marker
+/// means the newest boundary is always younger than anything the run before
+/// it produced, so a death between the marker and the finish line strands
+/// those rows behind the next fire's own boundary instead.
+///
+/// Must keep the `[CONTEXT COMPACTION` prefix (that is the anchor the loader
+/// searches) and must NOT contain `SEGMENT_SENTINEL` — a segment marker
+/// extends the compaction window instead of restarting it.
+pub(crate) const CRON_RUN_BOUNDARY: &str = "[CONTEXT COMPACTION — Cron job execution boundary]";
+
+/// Stamp the boundary row that bounds this run's history for the NEXT fire.
+///
+/// A failed write is logged, not fatal: without the boundary the next fire of
+/// this job starts from an empty context instead of the previous run's history
+/// (a stale-context regression, not a crash), so a missing marker must not
+/// silently eat the run. Same reasoning as the run-record insert above.
+async fn open_run_boundary(ctx: &ServiceContext, session_id: Uuid) {
+    let message_svc = crate::services::MessageService::new(ctx.clone());
+    if let Err(e) = message_svc
+        .create_message(
+            session_id,
+            "user".to_string(),
+            CRON_RUN_BOUNDARY.to_string(),
+        )
+        .await
+    {
+        tracing::warn!("Failed to insert cron compaction marker: {e}");
+    }
+}
+
 /// Execute a single cron job in its own isolated session.
 /// Isolated from TUI — never touches the user's active session.
 /// Results are always stored in the DB; channel delivery is optional.
@@ -601,6 +645,16 @@ async fn execute_job(
         job.name,
         session_id
     );
+
+    // #1703 fix 3: open the run with its compaction boundary, BEFORE the turn
+    // reads history. The turn loads `[last marker .. new prompt]` inside
+    // send_message_with_tools_and_callback, so this row is already the newest
+    // marker by the time that load runs: this fire sees an empty context, and
+    // if the daemon dies before the run finishes, whatever it managed to write
+    // sits behind this boundary and is discarded by the NEXT fire rather than
+    // reloaded as live tool results. One boundary per run, at start, never at
+    // the end - a run that closed with a marker would double-stamp.
+    open_run_boundary(ctx, session_id).await;
 
     // Swap to cron-specific provider if configured
     if let Some(ref provider_name) = effective_provider {
@@ -826,21 +880,10 @@ async fn execute_job(
         }
     }
 
-    // Insert a compaction marker so the next cron run starts with empty
-    // context. Without this, every job would see the full conversation
-    // history of all previous jobs (the contamination vector).
-    let message_svc = crate::services::MessageService::new(ctx.clone());
-    if let Err(e) = message_svc
-        .create_message(
-            session_id,
-            "user".to_string(),
-            "[CONTEXT COMPACTION — Cron job execution boundary]".to_string(),
-        )
-        .await
-    {
-        tracing::warn!("Failed to insert cron compaction marker: {e}");
-    }
-
+    // No boundary written here on purpose (#1703 fix 3): the run OPENED with
+    // one, before its turn read history. A second marker per run would break
+    // the 1:1 run-to-boundary ratio that makes stale context attributable,
+    // and nothing after the turn needs sealing - the next fire writes its own.
     Ok(())
 }
 

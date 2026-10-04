@@ -70,8 +70,8 @@ async fn different_jobs_get_different_sessions() {
 }
 
 /// The SAME job must resolve to the SAME session across fires, so its own
-/// history stays coherent and its end-of-run compaction marker bounds its
-/// own next fire's context.
+/// history stays coherent and the compaction marker each run writes at its
+/// start bounds its own next fire's context (#1703).
 #[tokio::test]
 async fn same_job_reuses_its_session() {
     let dir = tempfile::tempdir().expect("tempdir");
