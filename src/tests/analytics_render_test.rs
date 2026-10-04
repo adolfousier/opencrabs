@@ -118,7 +118,17 @@ fn tabs_render_all_four_windows_with_hotkey_hint() {
     assert!(text.contains("[W]"), "missing Week tab");
     assert!(text.contains("[M]"), "missing Month tab");
     assert!(text.contains("[All]"), "missing All tab");
-    assert!(text.contains("D/W/M/A to switch"), "missing hotkey hint");
+    // #1775 moved the switch hint out of the panel and into the shared
+    // Mission Control footer table, so the discoverability proof is the
+    // footer's D/W/M/A binding row, not a trailing string in the panel.
+    assert!(
+        crate::tui::app::dialog_keys::dialog_keys(
+            crate::tui::app::dialog_keys::DialogScope::MissionControl
+        )
+        .iter()
+        .any(|key| key.label == "D/W/M/A"),
+        "the Mission Control footer must advertise the window switch hotkeys"
+    );
 }
 
 #[test]
