@@ -459,7 +459,7 @@ profile_id = ""
 # true). Left true so a root daemon keeps updating and a forgotten flag never
 # silently breaks updates. Set false to refuse root swaps; a root binary swap
 # means a compromised release would run as root, so a security-conscious
-# operator may prefer to update under a non-root user via /rebuild.
+# operator may prefer to run the daemon under a non-root user.
 # evolve_allow_root = true
 
 # Redact sensitive data from tool outputs and display (default: true).

@@ -21,12 +21,6 @@ description = "Deploy to staging server"
 action = "prompt"
 prompt = "Run ./deploy.sh staging and report the result."
 
-[[commands]]
-name = "/rebuild"
-description = "Build and restart OpenCrabs from source"
-action = "prompt"
-prompt = 'Run `RUSTFLAGS="-C target-cpu=native" cargo build --release` in /srv/rs/opencrabs. If it succeeds, ask if I want to restart now.'
-
 # ========================================
 # Example: Productivity Commands
 # ========================================
@@ -51,7 +45,7 @@ prompt = "List all TODO/FIXME comments in the current project and any open tasks
 name = "/howto"
 description = "Show quick reference for common commands"
 action = "system"
-prompt = "Common commands: /models (switch model), /sessions (browse history), /usage (cost report), /mission-control (full mission control report), /stop (abort operation), /doctor (health check), /approve (approval policy), /compact (compact context), /whisper (voice-to-text), /rebuild (rebuild from source), /cd (change directory), /onboard (setup wizard), /respond_to (show/switch auto-mention mode), /redact (show/switch scoped secret redaction). Channel commands (Telegram/Discord/Slack): /help, /usage, /mission-control, /models, /stop. Channel history: use channel_search tool (list_chats, recent, search) to browse stored messages across all channels."
+prompt = "Common commands: /models (switch model), /sessions (browse history), /usage (cost report), /mission-control (full mission control report), /stop (abort operation), /doctor (health check), /approve (approval policy), /compact (compact context), /whisper (voice-to-text), /cd (change directory), /onboard (setup wizard), /respond_to (show/switch auto-mention mode), /redact (show/switch scoped secret redaction). Channel commands (Telegram/Discord/Slack): /help, /usage, /mission-control, /models, /stop. Channel history: use channel_search tool (list_chats, recent, search) to browse stored messages across all channels."
 
 # ========================================
 # Example: Channel History Commands
