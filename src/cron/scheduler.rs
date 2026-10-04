@@ -76,12 +76,12 @@ impl CronScheduler {
             "Cron scheduler started — polling every 60s (shared Cron session, compaction-isolated)"
         );
         if let Err(e) = self.backfill_missing_next_run().await {
-            tracing::error!("Failed to backfill missing next_run_at on startup: {e}");
+            tracing::error!("Failed to backfill missing next_run_at on startup: {e:#}");
         }
 
         loop {
             if let Err(e) = self.tick().await {
-                tracing::error!("Cron scheduler tick error: {e}");
+                tracing::error!("Cron scheduler tick error: {e:#}");
             }
             tokio::time::sleep(std::time::Duration::from_secs(60)).await;
         }
@@ -270,7 +270,7 @@ impl CronScheduler {
                         };
 
                         if let Err(e) = result {
-                            tracing::error!("Cron job '{}' failed: {e}", job.name);
+                            tracing::error!("Cron job '{}' failed: {e:#}", job.name);
                         }
                     }
                     .instrument(tracing::info_span!("job", name = %job_name, id = %job_id)),
@@ -543,7 +543,7 @@ async fn open_run_boundary(ctx: &ServiceContext, session_id: Uuid) {
         )
         .await
     {
-        tracing::warn!("Failed to insert cron compaction marker: {e}");
+        tracing::warn!("Failed to insert cron compaction marker: {e:#}");
     }
 }
 
@@ -601,7 +601,7 @@ async fn execute_job(
                     );
                     let run_id = run.id.to_string();
                     if let Err(e) = run_repo.insert(&run).await {
-                        tracing::error!("Failed to insert cron run record: {e}");
+                        tracing::error!("Failed to insert cron run record: {e:#}");
                     }
                     let err_msg = format!(
                         "model '{}' not supported by provider '{}' — cron config invalid",
@@ -616,7 +616,7 @@ async fn execute_job(
             Err(e) => {
                 tracing::warn!(
                     "Cron job '{}' — cannot pre-validate model (provider '{}' creation \
-                     failed: {e}) — proceeding with default validation",
+                     failed: {e:#}) — proceeding with default validation",
                     job.name,
                     provider_name
                 );
@@ -633,7 +633,7 @@ async fn execute_job(
     );
     let run_id = run.id.to_string();
     if let Err(e) = run_repo.insert(&run).await {
-        tracing::error!("Failed to insert cron run record: {e}");
+        tracing::error!("Failed to insert cron run record: {e:#}");
     }
     // #1703 fix 2: the run's start time, formatted once for the delivery
     // stamps; the ledger row keeps the full timestamp itself.
@@ -673,7 +673,7 @@ async fn execute_job(
             }
             Err(e) => {
                 tracing::warn!(
-                    "Cron job '{}' — failed to create provider '{}': {e}, using system default",
+                    "Cron job '{}' — failed to create provider '{}': {e:#}, using system default",
                     job.name,
                     provider_name
                 );
@@ -793,7 +793,7 @@ async fn execute_job(
                         )
                         .await
                     {
-                        tracing::error!("Failed to save cron run result to DB: {e}");
+                        tracing::error!("Failed to save cron run result to DB: {e:#}");
                     }
                     // #1703 fix 2: the ledger row keeps the raw report; the
                     // delivered copy carries the run that produced it.
@@ -817,7 +817,7 @@ async fn execute_job(
                         )
                         .await
                     {
-                        tracing::error!("Failed to save cron no-op run to DB: {e}");
+                        tracing::error!("Failed to save cron no-op run to DB: {e:#}");
                     }
                     notice
                 }
@@ -845,7 +845,7 @@ async fn execute_job(
             let _ = crate::cron::PipelineExecutor::maybe_dispatch_goal(job, ctx, &deliver).await;
         }
         Err(e) => {
-            tracing::error!("Cron job '{}' agent error: {e}", job.name);
+            tracing::error!("Cron job '{}' agent error: {e:#}", job.name);
 
             // Save error to DB
             let error_msg = format!("{e}");
@@ -1325,7 +1325,7 @@ async fn execute_direct_trigger_job(
     );
     let run_id = run.id.to_string();
     if let Err(e) = run_repo.insert(&run).await {
-        tracing::error!("Failed to insert cron run record: {e}");
+        tracing::error!("Failed to insert cron run record: {e:#}");
     }
 
     let raw_output = trig_res.combined_output();
@@ -1344,7 +1344,7 @@ async fn execute_direct_trigger_job(
 
     // Save result to DB (0 tokens)
     if let Err(e) = run_repo.complete_success(&run_id, &clean, 0, 0, 0.0).await {
-        tracing::error!("Failed to save direct cron run result to DB: {e}");
+        tracing::error!("Failed to save direct cron run result to DB: {e:#}");
     }
 
     // Deliver to configured channels
@@ -1398,7 +1398,7 @@ async fn deliver_http(url: &str, job_name: &str, content: &str, api_key: Option<
             );
         }
         Err(e) => {
-            tracing::error!("HTTP delivery to {url} error: {e}");
+            tracing::error!("HTTP delivery to {url} error: {e:#}");
         }
     }
 }
@@ -1497,7 +1497,7 @@ async fn deliver_telegram(
             Err(e) => {
                 tracing::error!(
                     "Cron job '{job_name}': cannot validate chat {chat_id} for thread \
-                     {tid} delivery: {e} — refusing delivery"
+                     {tid} delivery: {e:#} — refusing delivery"
                 );
                 return None;
             }
@@ -1542,13 +1542,15 @@ async fn deliver_telegram(
             Err(e) => {
                 if let Some(t) = thread_id {
                     tracing::error!(
-                        "Cron delivery for '{job_name}' to chat {chat_id} thread {t} failed: {e} — \
+                        "Cron delivery for '{job_name}' to chat {chat_id} thread {t} failed: {e:#} — \
                          if the error is 'message thread not found', topic {t} does not exist \
                          in chat {chat_id}; fix the job's deliver_to (there is no fallback to the \
                          default topic)"
                     );
                 } else {
-                    tracing::error!("Cron delivery for '{job_name}' to chat {chat_id} failed: {e}");
+                    tracing::error!(
+                        "Cron delivery for '{job_name}' to chat {chat_id} failed: {e:#}"
+                    );
                 }
             }
         }
@@ -1602,7 +1604,7 @@ async fn deliver_discord(channel_id: &str, message: &str) {
                 );
             }
             Err(e) => {
-                tracing::error!("Discord delivery to {channel_id} HTTP error: {e}");
+                tracing::error!("Discord delivery to {channel_id} HTTP error: {e:#}");
             }
         }
     }
@@ -1645,7 +1647,7 @@ async fn deliver_discord_forum(forum_id: &str, job_name: &str, message: &str) {
             Ok(json) => json,
             Err(e) => {
                 tracing::error!(
-                    "Discord forum delivery: unreadable channel object for {forum_id}: {e}"
+                    "Discord forum delivery: unreadable channel object for {forum_id}: {e:#}"
                 );
                 return;
             }
@@ -1659,7 +1661,7 @@ async fn deliver_discord_forum(forum_id: &str, job_name: &str, message: &str) {
             return;
         }
         Err(e) => {
-            tracing::error!("Discord forum delivery: HTTP error reading channel {forum_id}: {e}");
+            tracing::error!("Discord forum delivery: HTTP error reading channel {forum_id}: {e:#}");
             return;
         }
     };
@@ -1716,7 +1718,7 @@ async fn deliver_discord_forum(forum_id: &str, job_name: &str, message: &str) {
             None
         }
         Err(e) => {
-            tracing::error!("Discord forum delivery to {forum_id} HTTP error: {e}");
+            tracing::error!("Discord forum delivery to {forum_id} HTTP error: {e:#}");
             None
         }
     };
@@ -1748,7 +1750,7 @@ async fn deliver_discord_forum(forum_id: &str, job_name: &str, message: &str) {
                 );
             }
             Err(e) => {
-                tracing::error!("Discord forum follow-up to thread {thread_id} HTTP error: {e}");
+                tracing::error!("Discord forum follow-up to thread {thread_id} HTTP error: {e:#}");
             }
         }
     }
@@ -1796,7 +1798,7 @@ async fn deliver_slack(channel_id: &str, message: &str) {
                 }
             }
             Err(e) => {
-                tracing::error!("Slack delivery to {channel_id} HTTP error: {e}");
+                tracing::error!("Slack delivery to {channel_id} HTTP error: {e:#}");
             }
         }
     }
