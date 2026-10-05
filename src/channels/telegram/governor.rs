@@ -42,7 +42,7 @@
 //! throttle milliseconds, summarized by one periodic INFO line
 //! ([`summary_loop`]).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -192,6 +192,10 @@ struct Limits {
     rich_rate_per_sec: f64,
     /// G4 burst capacity.
     rich_burst: u32,
+    /// G5 cross-surface minimum spacing between any two admissions to one
+    /// chat (#1927). `Duration::ZERO` disables the floor — deliberately NOT
+    /// clamped to a minimum, unlike every knob above.
+    spacing_floor: Duration,
     /// Spacing of the telemetry summary INFO line.
     summary_log_period: Duration,
 }
@@ -212,6 +216,10 @@ impl Limits {
             send_burst: rl.sends_burst.max(1),
             rich_rate_per_sec: (rl.rich_per_minute.max(1) as f64) / 60.0,
             rich_burst: rl.rich_burst.max(1),
+            // No `.max(1)` here on purpose: 0 ms is the documented way to
+            // disable the floor (#1927), so the clamp the other knobs carry
+            // would silently turn "off" into "1 ms".
+            spacing_floor: Duration::from_millis(rl.spacing_floor_ms),
             summary_log_period: Duration::from_secs(rl.summary_log_secs.max(30)),
         }
     }
@@ -291,6 +299,176 @@ pub(crate) fn ensure_bucket(
 }
 
 // ---------------------------------------------------------------------------
+// G5 — cross-surface spacing floor (#1927)
+// ---------------------------------------------------------------------------
+
+/// How many recent admissions the event-time ring keeps per peer.
+///
+/// 64 samples at the measured ~43 admits/min is ~90 s of history — long enough
+/// to span the 60 s window the group limit is quoted in, and ~24 B per entry
+/// across a handful of peers is immaterial against the daemon's cgroup.
+pub(crate) const RECENT_CAP: usize = 64;
+
+/// Surface labels for the event-time ring. `&'static str` so recording an
+/// admission allocates nothing.
+pub(crate) const SURFACE_TYPING: &str = "typing";
+pub(crate) const SURFACE_EDITS: &str = "edits";
+pub(crate) const SURFACE_SENDS: &str = "sends";
+pub(crate) const SURFACE_RICH: &str = "rich";
+
+/// Sliding window over the last [`RECENT_CAP`] admissions of one peer.
+///
+/// The per-surface buckets answer "is THIS surface over its own budget?"; the
+/// floor needs the complementary question — "was ANYTHING admitted to this
+/// chat in the last second?" — because Telegram's per-chat rule is sub-minute
+/// and surface-blind. Entries carry [`gate_now`] instants, so the ring is a
+/// pure function of the same clock seam the buckets use and is unit-testable
+/// without tokio.
+#[derive(Default)]
+pub(crate) struct Recent {
+    t: VecDeque<(Instant, &'static str)>,
+}
+
+impl Recent {
+    /// Record one admission. Oldest entries fall off past the cap, so the
+    /// 60 s window stays exact only while the peer admits <64/60 s (measured
+    /// p50 is 43/min); under a sustained flood the window saturates and the
+    /// floor reads conservative, never permissive.
+    ///
+    /// `pub(crate)` so the spacing-floor suite can script an exact ring
+    /// without driving a gate; the gates are its only production callers.
+    pub(crate) fn push(&mut self, now: Instant, surface: &'static str) {
+        if self.t.len() == RECENT_CAP {
+            self.t.pop_front();
+        }
+        self.t.push_back((now, surface));
+    }
+
+    /// Admissions of ANY surface inside `window` ending at `now`.
+    pub(crate) fn count_within(&self, now: Instant, window: Duration) -> usize {
+        self.t
+            .iter()
+            .filter(|(t, _)| now.saturating_duration_since(*t) < window)
+            .count()
+    }
+
+    /// Admissions of ONE surface inside `window` ending at `now`.
+    pub(crate) fn count_surface(&self, now: Instant, window: Duration, surface: &str) -> usize {
+        self.t
+            .iter()
+            .filter(|(t, s)| *s == surface && now.saturating_duration_since(*t) < window)
+            .count()
+    }
+
+    /// Milliseconds since the most recent admission of any surface, or `None`
+    /// on a peer that has not admitted yet.
+    pub(crate) fn gap_ms(&self, now: Instant) -> Option<u128> {
+        self.t
+            .back()
+            .map(|(t, _)| now.saturating_duration_since(*t).as_millis())
+    }
+
+    /// Snapshot the ring for telemetry (#1927). The per-second counts are the
+    /// instrument that lets a 429 be attributed: a refusal minute whose prior
+    /// second admitted >=1 request is a real over-rate signal, while one whose
+    /// prior second admitted nothing points at the server, not the pacer.
+    pub(crate) fn profile(&self, now: Instant) -> RecentProfile {
+        let minute = Duration::from_secs(60);
+        RecentProfile {
+            last_1s: self.count_within(now, Duration::from_secs(1)),
+            last_5s: self.count_within(now, Duration::from_secs(5)),
+            last_60s: self.count_within(now, minute),
+            typing: self.count_surface(now, minute, SURFACE_TYPING),
+            edits: self.count_surface(now, minute, SURFACE_EDITS),
+            sends: self.count_surface(now, minute, SURFACE_SENDS),
+            rich: self.count_surface(now, minute, SURFACE_RICH),
+            gap_ms: self.gap_ms(now),
+        }
+    }
+}
+
+/// One peer's admission profile (#1927), derived from [`Recent`]. Cumulative
+/// [`Counters`] answer "how much since boot"; this answers "how much just
+/// now", which is the only shape a sub-minute rate rule can be judged by.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub(crate) struct RecentProfile {
+    pub(crate) last_1s: usize,
+    pub(crate) last_5s: usize,
+    pub(crate) last_60s: usize,
+    pub(crate) typing: usize,
+    pub(crate) edits: usize,
+    pub(crate) sends: usize,
+    pub(crate) rich: usize,
+    pub(crate) gap_ms: Option<u128>,
+}
+
+impl RecentProfile {
+    /// One-line rendering shared by the periodic summary and the 429 log.
+    pub(crate) fn render(&self) -> String {
+        format!(
+            "window{{1s={},5s={},60s={}}} by_surface{{typing={},edits={},sends={},rich={}}} gap_ms={}",
+            self.last_1s,
+            self.last_5s,
+            self.last_60s,
+            self.typing,
+            self.edits,
+            self.sends,
+            self.rich,
+            self.gap_ms
+                .map(|g| g.to_string())
+                .unwrap_or_else(|| "none".to_string()),
+        )
+    }
+}
+
+/// Per-second admission profile for one peer — or every governed peer when
+/// `chat` is `None` — rendered for a log line (#1927).
+///
+/// Reads the peer registry and nothing else, so a caller may take it before
+/// acquiring any other lock. A peer that has never admitted renders zeros;
+/// with no peers at all the result is `"none"`.
+pub(crate) fn recent_profile(chat: Option<i64>) -> String {
+    let now = gate_now();
+    let map = peers().lock().unwrap_or_else(|e| e.into_inner());
+    let mut parts: Vec<String> = Vec::new();
+    for (id, peer) in map.iter() {
+        if chat.is_some_and(|want| *id != want) {
+            continue;
+        }
+        parts.push(format!("chat={id} {}", peer.recent.profile(now).render()));
+    }
+    if parts.is_empty() {
+        "none".to_string()
+    } else {
+        parts.join("; ")
+    }
+}
+
+/// How long this chat must still wait before its next request may be admitted
+/// (#1927). [`Duration::ZERO`] means the floor is satisfied, or disabled.
+///
+/// ONE computation for every gate: the floor is cross-surface, so it reads the
+/// ring rather than any surface's bucket, and it is charged AHEAD of the
+/// per-surface budget so a request the floor sheds never spends a token a
+/// later legitimate one needs.
+pub(crate) fn spacing_wait(recent: &Recent, now: Instant, floor: Duration) -> Duration {
+    if floor.is_zero() {
+        return Duration::ZERO;
+    }
+    match recent.gap_ms(now) {
+        // A gap at or beyond the floor means the chat has already waited long
+        // enough. `try_from` guards the u128 -> u64 narrowing rather than
+        // casting, and `saturating_sub` collapses both that case and a
+        // pathologically large gap to zero, i.e. no hold.
+        Some(gap) => {
+            let gap_ms = u64::try_from(gap).unwrap_or(u64::MAX);
+            floor.saturating_sub(Duration::from_millis(gap_ms))
+        }
+        None => Duration::ZERO,
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Per-peer state
 // ---------------------------------------------------------------------------
 
@@ -334,6 +512,11 @@ pub(crate) struct Counters {
     pub(crate) admitted_sends: u64,
     pub(crate) admitted_rich: u64,
     pub(crate) dropped_typing: u64,
+    /// Admissions shed by the cross-surface spacing floor (#1927). Distinct
+    /// from the ladder drops above: those are per-surface budget exhaustion,
+    /// this one is the chat-wide sub-minute rule refusing the next request
+    /// regardless of which surface asked.
+    pub(crate) dropped_spacing: u64,
     pub(crate) dropped_clock: u64,
     pub(crate) dropped_brain_preview: u64,
     pub(crate) dropped_intermediary: u64,
@@ -360,6 +543,11 @@ impl Counters {
         }
     }
 
+    /// Record one admission shed by the cross-surface spacing floor (#1927).
+    pub(crate) fn note_spacing_drop(&mut self) {
+        self.dropped_spacing += 1;
+    }
+
     /// True while nothing at all was counted — quiet forums stay silent in
     /// the periodic summary instead of logging zero-lines forever.
     fn all_zero(&self) -> bool {
@@ -367,6 +555,7 @@ impl Counters {
             && self.admitted_edits == 0
             && self.admitted_sends == 0
             && self.dropped_typing == 0
+            && self.dropped_spacing == 0
             && self.dropped_clock == 0
             && self.dropped_brain_preview == 0
             && self.dropped_intermediary == 0
@@ -402,6 +591,10 @@ struct Peer {
     /// A drainer task is currently running for this peer.
     draining: bool,
     counters: Counters,
+    /// Last [`RECENT_CAP`] admissions, any surface (#1927). The G5 floor and
+    /// the per-second telemetry both read this; it is deliberately NOT part
+    /// of [`Counters`], which stays a cumulative tally.
+    recent: Recent,
 }
 
 fn peers() -> &'static Mutex<HashMap<i64, Peer>> {
@@ -411,16 +604,24 @@ fn peers() -> &'static Mutex<HashMap<i64, Peer>> {
 
 /// Format one peer's summary line. Pure so the field coverage is pinned by a
 /// test: adding a counter without extending this format fails the test.
-pub(crate) fn format_summary(chat_id: i64, c: &Counters, finals_pending: usize) -> Option<String> {
+pub(crate) fn format_summary(
+    chat_id: i64,
+    c: &Counters,
+    finals_pending: usize,
+    recent: Option<&RecentProfile>,
+) -> Option<String> {
     if c.all_zero() && finals_pending == 0 {
         return None;
     }
+    // The per-second block is appended LAST so the cumulative groups above
+    // keep the exact shape their pinning test asserts.
+    let recent_block = recent.map(|p| format!(" {}", p.render())).unwrap_or_default();
     Some(format!(
         "Telegram rate-limiter chat={chat_id}: \
          admitted{{typing={},edits={},sends={},rich={}}} \
-         dropped{{clock={},brain_preview={},intermediary={},status={},typing={}}} \
+         dropped{{clock={},brain_preview={},intermediary={},status={},typing={},spacing={}}} \
          finals{{queued={},superseded={},delivered={},failed={},pending={}}} \
-         throttled_ms{{typing={},send={},rich={}}}",
+         throttled_ms{{typing={},send={},rich={}}}{recent_block}",
         c.admitted_typing,
         c.admitted_edits,
         c.admitted_sends,
@@ -430,6 +631,7 @@ pub(crate) fn format_summary(chat_id: i64, c: &Counters, finals_pending: usize) 
         c.dropped_intermediary,
         c.dropped_status,
         c.dropped_typing,
+        c.dropped_spacing,
         c.queued_finals,
         c.superseded_finals,
         c.delivered_finals,
@@ -452,7 +654,13 @@ async fn summary_loop() {
             let map = peers().lock().unwrap_or_else(|e| e.into_inner());
             map.iter()
                 .filter_map(|(chat_id, peer)| {
-                    format_summary(*chat_id, &peer.counters, peer.finals.len())
+                    let profile = peer.recent.profile(gate_now());
+                    format_summary(
+                        *chat_id,
+                        &peer.counters,
+                        peer.finals.len(),
+                        Some(&profile),
+                    )
                 })
                 .collect()
         };
@@ -524,14 +732,20 @@ pub(crate) async fn admit_chat_action(chat: ChatId, thread_id: Option<i32>) -> b
             if !peer.forum_seen {
                 return true;
             }
+            let now = gate_now();
             let bucket = ensure_bucket(
                 &mut peer.typing,
                 lim.typing_burst,
                 1.0 / lim.typing_interval.as_secs_f64(),
             );
-            match bucket.take(gate_now()) {
+            match bucket.take(now) {
                 Ok(()) => {
                     peer.counters.admitted_typing += 1;
+                    // The floor does NOT gate typing (#1927): it is cosmetic,
+                    // self-healing chrome, and shedding it buys no real budget.
+                    // It DOES feed the ring, so a typing refresh counts as an
+                    // admission against the chat's one-per-second rule.
+                    peer.recent.push(now, SURFACE_TYPING);
                     Decision::Admit
                 }
                 Err(wait) => {
@@ -631,6 +845,14 @@ impl EditClass {
             EditClass::Interactive => 5,
         }
     }
+
+    /// True for the chrome classes the ladder sheds when budget runs out
+    /// (#1927). The two never-dropped classes are `Final` (queues instead)
+    /// and `Interactive` (user-initiated, admitted directly) — so the
+    /// cross-surface floor, which is also a drop path, may only shed the rest.
+    pub(crate) fn is_droppable(self) -> bool {
+        !matches!(self, EditClass::Final | EditClass::Interactive)
+    }
 }
 
 enum Admission {
@@ -712,37 +934,55 @@ pub(crate) async fn edit_admission_media_kb(
         if !peer.forum_seen {
             return true;
         }
-        let bucket = ensure_bucket(&mut peer.edits, lim.edit_burst, lim.edit_rate_per_sec);
-        if bucket.take(now).is_ok() {
-            peer.counters.admitted_edits += 1;
-            Admission::Now
-        } else if class == EditClass::Interactive {
-            // Interactive UI edits never drop and never queue; pass through immediately
-            Admission::Now
-        } else if class == EditClass::Final {
-            let superseded = peer
-                .finals
-                .insert(
-                    msg_id.0,
-                    PendingFinal {
-                        bot: bot.clone(),
-                        html,
-                        rich,
-                        dialect,
-                        media,
-                        reply_markup,
-                        attempts: 0,
-                    },
-                )
-                .is_some();
-            if superseded {
-                peer.counters.superseded_finals += 1;
-            }
-            peer.counters.queued_finals += 1;
-            Admission::Queued
-        } else {
-            peer.counters.note_drop(class);
+        // #1927: the cross-surface floor is charged AHEAD of the edit bucket.
+        // A droppable chrome class it sheds costs no token (it self-heals on
+        // the next full render, so holding it buys nothing); a final still
+        // queues; an interactive edit still passes through.
+        let floor_wait = spacing_wait(&peer.recent, now, lim.spacing_floor);
+        if !floor_wait.is_zero() && class.is_droppable() {
+            peer.counters.note_spacing_drop();
             Admission::Dropped(class)
+        } else {
+            let bucket = ensure_bucket(&mut peer.edits, lim.edit_burst, lim.edit_rate_per_sec);
+            if bucket.take(now).is_ok() {
+                peer.counters.admitted_edits += 1;
+                // A rich-API edit is metered by G4, not here; recording it as
+                // an EDITS admission would double-count it in the ring.
+                if !rich {
+                    peer.recent.push(now, SURFACE_EDITS);
+                }
+                Admission::Now
+            } else if class == EditClass::Interactive {
+                // Interactive UI edits never drop and never queue; pass through immediately
+                if !rich {
+                    peer.recent.push(now, SURFACE_EDITS);
+                }
+                Admission::Now
+            } else if class == EditClass::Final {
+                let superseded = peer
+                    .finals
+                    .insert(
+                        msg_id.0,
+                        PendingFinal {
+                            bot: bot.clone(),
+                            html,
+                            rich,
+                            dialect,
+                            media,
+                            reply_markup,
+                            attempts: 0,
+                        },
+                    )
+                    .is_some();
+                if superseded {
+                    peer.counters.superseded_finals += 1;
+                }
+                peer.counters.queued_finals += 1;
+                Admission::Queued
+            } else {
+                peer.counters.note_drop(class);
+                Admission::Dropped(class)
+            }
         }
     };
     match admission {
@@ -988,9 +1228,10 @@ enum PaceVerdict {
     Wait(Duration),
 }
 
-/// G3 gate ahead of full-message sends. Two AND-ed buckets: ~1/s spacing and
-/// an ~18/min group ceiling (both configurable). Holds the caller just long
-/// enough to buy a token pair, never drops, and fails open past
+/// G3 gate ahead of full-message sends. Three AND-ed constraints: ~1/s
+/// spacing, an ~18/min group ceiling (both configurable), and the
+/// cross-surface spacing floor (#1927). Holds the caller just long enough to
+/// satisfy the longest of the three, never drops, and fails open past
 /// [`SEND_MAX_HOLD`] so a pathological configuration degrades to today's
 /// behavior instead of stalling turns.
 pub(crate) async fn pace_send(chat: ChatId) {
@@ -1019,6 +1260,10 @@ pub(crate) async fn pace_send(chat: ChatId) {
             if !peer.forum_seen {
                 return;
             }
+            let now = gate_now();
+            // #1927: the cross-surface floor joins the two send buckets as a
+            // third, AND-ed constraint — the wait is the longest of the three.
+            let spacing_hold = spacing_wait(&peer.recent, now, lim.spacing_floor);
             let sec = ensure_bucket(
                 &mut peer.sends_sec,
                 lim.send_burst,
@@ -1029,12 +1274,15 @@ pub(crate) async fn pace_send(chat: ChatId) {
                 lim.send_minute_ceiling,
                 f64::from(lim.send_minute_ceiling) / 60.0,
             );
-            let now = gate_now();
-            let need = sec.next_token_in(now).max(min.next_token_in(now));
+            let need = sec
+                .next_token_in(now)
+                .max(min.next_token_in(now))
+                .max(spacing_hold);
             if need.is_zero() {
                 let _ = sec.take(now);
                 let _ = min.take(now);
                 peer.counters.admitted_sends += 1;
+                peer.recent.push(now, SURFACE_SENDS);
                 PaceVerdict::Go
             } else if waited + need > SEND_MAX_HOLD {
                 peer.counters.admitted_sends += 1;
@@ -1124,12 +1372,16 @@ pub(crate) async fn pace_rich(chat: ChatId, thread_id: Option<i32>) {
             if !peer.forum_seen {
                 return;
             }
-            let bucket = ensure_bucket(&mut peer.rich, lim.rich_burst, lim.rich_rate_per_sec);
             let now = gate_now();
-            let need = bucket.next_token_in(now);
+            // #1927: the cross-surface floor joins the rich bucket as a
+            // second, AND-ed constraint.
+            let spacing_hold = spacing_wait(&peer.recent, now, lim.spacing_floor);
+            let bucket = ensure_bucket(&mut peer.rich, lim.rich_burst, lim.rich_rate_per_sec);
+            let need = bucket.next_token_in(now).max(spacing_hold);
             if need.is_zero() {
                 let _ = bucket.take(now);
                 peer.counters.admitted_rich += 1;
+                peer.recent.push(now, SURFACE_RICH);
                 None
             } else {
                 Some(need)
@@ -1301,6 +1553,8 @@ pub(crate) mod test_support {
         pub dropped_brain_preview: u64,
         pub dropped_intermediary: u64,
         pub dropped_status: u64,
+        /// Admissions shed by the cross-surface spacing floor (#1927).
+        pub dropped_spacing: u64,
         pub queued_finals: u64,
         pub superseded_finals: u64,
         pub delivered_finals: u64,
@@ -1325,6 +1579,7 @@ pub(crate) mod test_support {
             dropped_brain_preview: p.counters.dropped_brain_preview,
             dropped_intermediary: p.counters.dropped_intermediary,
             dropped_status: p.counters.dropped_status,
+            dropped_spacing: p.counters.dropped_spacing,
             queued_finals: p.counters.queued_finals,
             superseded_finals: p.counters.superseded_finals,
             delivered_finals: p.counters.delivered_finals,

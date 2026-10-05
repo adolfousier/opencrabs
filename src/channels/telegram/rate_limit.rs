@@ -85,6 +85,13 @@ pub(crate) fn record_global_429(retry_after: Duration) {
     let now = super::governor::gate_now();
     let new_deadline = now + total_wait;
 
+    // #1927: sample the admission profile BEFORE the cooldown lock. The
+    // profile reads the peer registry, so taking it first keeps the two locks
+    // from ever being held at once — and it must be sampled before the
+    // deadline moves, so the line reports what the chat was doing in the
+    // second that got refused, not what it does once the cooldown is armed.
+    let profile = super::governor::recent_profile(None);
+
     let mut lock = GLOBAL_COOLDOWN.write().unwrap_or_else(|e| e.into_inner());
     let active_deadline = match *lock {
         Some(existing) if existing > new_deadline => existing,
@@ -97,7 +104,7 @@ pub(crate) fn record_global_429(retry_after: Duration) {
     if capped {
         tracing::warn!(
             "Telegram: Global 429 cooldown activated: {}s requested exceeds {}s cap \
-             — cooling down for {}s (deadline {:?}); chat likely flood-banned",
+             — cooling down for {}s (deadline {:?}); chat likely flood-banned; recent {profile}",
             retry_after.as_secs(),
             MAX_INLINE_RATE_LIMIT_WAIT.as_secs(),
             total_wait.as_secs(),
@@ -105,7 +112,8 @@ pub(crate) fn record_global_429(retry_after: Duration) {
         );
     } else {
         tracing::warn!(
-            "Telegram: Global 429 cooldown activated: cooling down for {}s (deadline {:?})",
+            "Telegram: Global 429 cooldown activated: cooling down for {}s (deadline {:?}); \
+             recent {profile}",
             total_wait.as_secs(),
             active_deadline
         );

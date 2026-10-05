@@ -665,6 +665,10 @@ enabled = false
 #                refreshes queue latest-wins per message until budget refills.
 #   G3 sends   — full messages paced ~1/s per chat under an 18/min group
 #                ceiling (burst 5); pacing delays, it never drops (#297).
+#   G5 floor   — cross-surface minimum spacing between ANY two admissions to
+#                one chat (#1927), charged ahead of the four governors above:
+#                Telegram's per-chat rule is sub-minute, which a per-minute
+#                bucket cannot express. 0 disables it.
 # Enforcement is FORUMS-ONLY: a chat becomes governed once any call is seen
 # carrying a topic id; DMs are untouched. Telemetry lands in one periodic INFO
 # line per active forum ("Telegram rate-limiter chat=…").
@@ -680,6 +684,7 @@ enabled = false
 # sends_burst = 5                       # G3 burst capacity.
 # rich_per_minute = 18                  # G4 steady-state rich budget.
 # rich_burst = 10                       # G4 burst capacity.
+# spacing_floor_ms = 1000               # G5 cross-surface floor (#1927); 0 disables.
 # summary_log_secs = 300                # Telemetry summary line spacing.
 # [channels.telegram.userbot]
 # enabled = false

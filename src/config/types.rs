@@ -650,6 +650,16 @@ pub struct RateLimiterConfig {
     /// G4 rich: burst capacity of the rich bucket. Default: 10.
     #[serde(default = "default_rich_burst")]
     pub rich_burst: u32,
+    /// Cross-surface minimum spacing between ANY two admissions to one forum
+    /// peer, in milliseconds (#1927). Telegram's per-chat rule is sub-minute
+    /// ("no more than one message per second"), which a per-minute bucket
+    /// cannot express: measured refusals land while the refusing surface is
+    /// still under its own per-minute ceiling, and counting admissions in the
+    /// prior second separates refusal minutes from clean ones (>=1 admission:
+    /// 50.1 % vs 23.8 % refusal, 2.11x). `0` disables the floor and restores
+    /// the pre-#1927 per-surface pacing exactly. Default: 1000 (~1/s).
+    #[serde(default = "default_spacing_floor_ms")]
+    pub spacing_floor_ms: u64,
     /// Spacing of the telemetry summary INFO line (one line per active forum:
     /// admissions, ladder drops per class, finals stats, throttled ms).
     /// Default: 300.
@@ -673,6 +683,7 @@ impl Default for RateLimiterConfig {
             sends_burst: default_sends_burst(),
             rich_per_minute: default_rich_per_minute(),
             rich_burst: default_rich_burst(),
+            spacing_floor_ms: default_spacing_floor_ms(),
             summary_log_secs: default_summary_log_secs(),
         }
     }
@@ -716,6 +727,13 @@ fn default_rich_per_minute() -> u32 {
 
 fn default_rich_burst() -> u32 {
     10
+}
+
+/// Cross-surface spacing floor (#1927). 1000 ms is Telegram's documented
+/// per-chat ceiling ("no more than one message per second") expressed as the
+/// interval the floor enforces; `0` disables it.
+fn default_spacing_floor_ms() -> u64 {
+    1000
 }
 
 fn default_summary_log_secs() -> u64 {

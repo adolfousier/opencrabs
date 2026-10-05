@@ -641,15 +641,20 @@ async fn rich_calls_are_paced_once_the_bucket_empties() {
     const CHAT: ChatId = ChatId(-100_555);
     const TOPIC: i32 = 4242;
 
-    // The burst passes without any hold at all: ordinary traffic is untouched.
+    // The burst passes without any BUCKET hold at all: ordinary traffic is
+    // untouched. #1927 — the cross-surface spacing floor governs rich content
+    // too, so the calls are spaced past it here to isolate the bucket arm this
+    // test pins; the floor's own behaviour is pinned by
+    // `g4_rich_edit_waits_out_the_floor_remainder`.
     for _ in 0..4 {
         governor::pace_rich(CHAT, Some(TOPIC)).await;
+        ts::advance(1_000);
     }
     let snap = ts::snapshot(CHAT).unwrap();
     assert_eq!(snap.admitted_rich, 4);
     assert_eq!(
         snap.throttled_rich_ms, 0,
-        "nothing within the burst may be held"
+        "nothing within the burst may be held by the bucket"
     );
 
     // The next one has to wait for a refill — 30/min is one token every 2 s.
