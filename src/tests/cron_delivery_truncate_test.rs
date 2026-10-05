@@ -16,7 +16,7 @@ fn emoji_straddling_the_limit_truncates_without_panic() {
     let out = truncate_for_delivery(&s);
     let kept = out.strip_suffix(MARKER).expect("truncation marker present");
     assert_eq!(
-        kept.as_bytes().len(),
+        kept.len(),
         3999,
         "cut backs off to the char boundary, never half an emoji"
     );
@@ -28,7 +28,7 @@ fn ascii_over_the_limit_cuts_at_the_limit() {
     let s = "b".repeat(4500);
     let out = truncate_for_delivery(&s);
     let kept = out.strip_suffix(MARKER).expect("truncation marker present");
-    assert_eq!(kept.as_bytes().len(), 4000);
+    assert_eq!(kept.len(), 4000);
 }
 
 #[test]
