@@ -1092,10 +1092,11 @@ mod rich {
     }
 
     #[test]
-    fn a_markdown_reference_inlines_like_any_document_by_default() {
-        // #1968 scope pin: with the opt-out untouched, a `.md` file inlines
-        // exactly as a `.pdf` does. The flag exists for clients that cannot
-        // open an inlined markdown document; the default must not change.
+    fn a_markdown_reference_inlines_when_inlining_is_opted_into() {
+        // #1968 scope pin: with inlining opted into, a `.md` file inlines
+        // exactly as a `.pdf` does. The default keeps markdown detached
+        // (some clients cannot open an inlined markdown document); the flag
+        // exists for setups that prefer inlining.
         let dir = tempfile::tempdir().expect("tempdir");
         write_fixture(dir.path(), "notes.md");
         write_fixture(dir.path(), "notes.markdown");
@@ -1118,7 +1119,7 @@ mod rich {
 
     #[test]
     fn a_markdown_reference_stays_a_marker_when_inlining_is_off() {
-        // #1968: with the opt-out set, a `.md` reference becomes the same
+        // #1968: at the detached default, a `.md` reference becomes the same
         // visible marker the text plane carries and records NO entry, so the
         // media array never gains the document and the file floor ships it
         // detached. A `.pdf` in the SAME body is untouched: the scope is
@@ -1681,10 +1682,11 @@ mod marker_consume {
     }
 
     #[test]
-    fn the_optout_marker_arm_consumes_the_prefix_too() {
-        // The markdown opt-out (#1968) emits the same visible marker on the
-        // rich plane, so the same doubling is possible there and the same
-        // consume guards it. No entry is recorded, as with any opt-out hit.
+    fn the_detached_marker_arm_consumes_the_prefix_too() {
+        // The markdown detached default (#1968) emits the same visible
+        // marker on the rich plane, so the same doubling is possible there
+        // and the same consume guards it. No entry is recorded, as with any
+        // detached-default hit.
         let dir = tempfile::tempdir().expect("tempdir");
         write_fixture(dir.path(), "notes.md");
 

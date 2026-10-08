@@ -313,7 +313,7 @@ pub(crate) async fn deliver_intermediate_message(
         crate::config::Config::current()
             .channels
             .telegram
-            .inline_markdown,
+            .inline_markdown_documents,
     );
     let mut doc_media: Vec<super::rich::mermaid::MediaEntry> = Vec::new();
     let mut all_attached = true;

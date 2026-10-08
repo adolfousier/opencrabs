@@ -165,8 +165,16 @@ fn test_local_file_link_bullet_is_telegram_only_and_matches_the_shipped_behaviou
         "the marker is what the reader sees in place of the link (#1918)"
     );
     assert!(
-        telegram.contains("inlined at that spot"),
+        telegram.contains("inlines it at that spot"),
         "the rich plane puts the document AT the reference (#1918)"
+    );
+    assert!(
+        telegram.contains("inline_markdown_documents"),
+        "markdown inlining is opt-in and the flag is named (#1968)"
+    );
+    assert!(
+        telegram.contains("ship detached unless"),
+        "markdown stays detached by default (#1968)"
     );
     assert!(
         telegram.contains("t.me link to the message that carries the document"),

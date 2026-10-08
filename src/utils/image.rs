@@ -736,8 +736,8 @@ fn record_file_candidate(
 /// this module.
 /// True when the path is a markdown document (#1968): the one kind some
 /// clients cannot open when it is inlined in a rich message's media array,
-/// so it carries the [`inline_markdown`](crate::config::TelegramConfig)
-/// opt-out.
+/// so [`inline_markdown_documents`](crate::config::TelegramConfig) keeps it
+/// detached by default and inlines it only on opt-in.
 fn is_markdown_file(path: &Path) -> bool {
     matches!(
         path.extension()
@@ -959,11 +959,12 @@ struct FileRewriter<'a> {
     base_dir: Option<&'a Path>,
     id_prefix: &'a str,
     already_delivered: &'a [PathBuf],
-    /// Whether MARKDOWN documents may inline (#1968). False keeps a `.md`
-    /// reference out of the media array: it becomes a marker and the file
-    /// ships detached, because some clients cannot open an inlined markdown
-    /// document but open the detached copy in their built-in viewer.
-    inline_markdown: bool,
+    /// Whether MARKDOWN documents may inline (#1968). False (the default)
+    /// keeps a `.md` reference out of the media array: it becomes a marker
+    /// and the file ships detached, because some clients cannot open an
+    /// inlined markdown document but open the detached copy in their
+    /// built-in viewer.
+    inline_markdown_documents: bool,
     rich: String,
     entries: Vec<ResolvedFileRef>,
 }
@@ -990,11 +991,11 @@ impl FileRewriter<'_> {
                     // delivered document is not a lost one.
                     return true;
                 }
-                // The markdown opt-out (#1968): the reference becomes the
-                // same visible marker the text plane carries, and NO entry
-                // is recorded, so the media array never gains the document
-                // and the file floor ships it detached.
-                if !self.inline_markdown && is_markdown_file(&path) {
+                // The markdown detached default (#1968): the reference
+                // becomes the same visible marker the text plane carries,
+                // and NO entry is recorded, so the media array never gains
+                // the document and the file floor ships it detached.
+                if !self.inline_markdown_documents && is_markdown_file(&path) {
                     push_file_marker(&mut self.rich, label, target);
                     return true;
                 }
@@ -1097,14 +1098,14 @@ pub fn rewrite_local_files(
     base_dir: Option<&Path>,
     id_prefix: &str,
     already_delivered: &[PathBuf],
-    inline_markdown: bool,
+    inline_markdown_documents: bool,
 ) -> LocalFileRewrite {
     let regions = code_regions(text);
     let mut rw = FileRewriter {
         base_dir,
         id_prefix,
         already_delivered,
-        inline_markdown,
+        inline_markdown_documents,
         rich: String::with_capacity(text.len()),
         entries: Vec::new(),
     };
