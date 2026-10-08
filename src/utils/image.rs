@@ -734,16 +734,49 @@ fn record_file_candidate(
 ///
 /// Crate-visible for the scanner tests; every production caller lives in
 /// this module.
+/// Break a chat client's URL autolinker on a marker label (#1938).
+///
+/// A dotted token such as `1918-fix-state.md` or `config.io` is rendered by
+/// the Telegram client as a bare domain link, so a marker wearing a filename
+/// would offer the reader a tap on a domain that does not exist. A
+/// zero-width space inserted after a dot that precedes an alphanumeric is
+/// invisible in every plane (the classic HTML renderer, the rich plane's
+/// alt text, and the linked `[label](url)` form `link_file_markers`
+/// splices) while it breaks the client's `name.tld` pattern.
+///
+/// A backslash escape is deliberately not used: the classic plane has no
+/// escape, so the backslash would render visibly. The dot itself stays
+/// visible, so the reader still sees the file's own name.
+fn disarm_autolink(text: &str) -> String {
+    /// U+200B ZERO WIDTH SPACE: no ink in any renderer.
+    const ZWSP: char = '\u{200b}';
+    let chars: Vec<char> = text.chars().collect();
+    let mut out = String::with_capacity(text.len() + 8);
+    for (i, &c) in chars.iter().enumerate() {
+        out.push(c);
+        if c == '.'
+            && let Some(&next) = chars.get(i + 1)
+            && next.is_ascii_alphanumeric()
+        {
+            out.push(ZWSP);
+        }
+    }
+    out
+}
+
 pub(crate) fn file_marker_text(label: &str, target: &str) -> String {
     let trimmed = label.trim();
-    if !trimmed.is_empty() {
+    let text = if !trimmed.is_empty() {
         trimmed.to_string()
     } else {
         std::path::Path::new(target)
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_else(|| "file".to_string())
-    }
+    };
+    // The marker is visible text, so a dotted name must not read as a
+    // domain (#1938). The caption is a separate field and stays verbatim.
+    disarm_autolink(&text)
 }
 
 /// Append the visible marker for a resolved file, `📎 <label>`, and return

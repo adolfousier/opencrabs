@@ -60,7 +60,8 @@ mod scan {
     use super::PNG_BYTES;
     use crate::utils::image::{
         LocalFileScan, LocalImageFailure, LocalImageFailureReason, TELEGRAM_DOCUMENT_MAX_BYTES,
-        append_file_failure_notice, extract_local_files, file_failure_notice, validate_local_file,
+        append_file_failure_notice, extract_local_files, file_failure_notice, file_marker_text,
+        validate_local_file,
     };
     use std::path::{Path, PathBuf};
 
@@ -124,12 +125,52 @@ mod scan {
         let dir = tempfile::tempdir().expect("tempdir");
         let pdf = write_file(dir.path(), "q3.pdf", PDF_BYTES);
         let scan = extract_local_files(&format!("[]({})", pdf.display()), None);
-        assert_eq!(scan.text, "📎 q3.pdf", "the marker is never blank");
+        // The fallback basename is visible marker text, so a dotted name
+        // carries the autolink breaker (#1938): the client must not read
+        // `q3.pdf` as a domain.
+        assert_eq!(scan.text, "📎 q3.\u{200b}pdf", "the marker is never blank");
         let span = scan.attachments[0]
             .marker_span
             .clone()
             .expect("the scan records the marker's span");
-        assert_eq!(&scan.text[span], "📎 q3.pdf");
+        assert_eq!(&scan.text[span], "📎 q3.\u{200b}pdf");
+    }
+
+    #[test]
+    fn a_dotted_label_does_not_autolink_as_a_domain() {
+        // The live specimen (#1938): the marker text `1918-fix-state.md` was
+        // rendered by the client as a link to the Moldova ccTLD. The dot is
+        // followed by a zero-width space: no renderer shows ink for it, and
+        // the client's `name.tld` pattern no longer matches.
+        let out = file_marker_text("1918-fix-state.md", "/tmp/1918-fix-state.md");
+        assert_eq!(
+            out, "1918-fix-state.\u{200b}md",
+            "the dot the client keys on is followed by an invisible breaker"
+        );
+        assert!(
+            !out.contains(".md"),
+            "no bare `.md` survives for the client's TLD detector to match"
+        );
+        assert_eq!(
+            out.replace('\u{200b}', ""),
+            "1918-fix-state.md",
+            "the breaker is pure ink: removing it restores the file's own name"
+        );
+    }
+
+    #[test]
+    fn a_dot_with_no_alphanumeric_after_gets_no_breaker() {
+        // The disarmer targets the autolinker's pattern, not every dot: a
+        // trailing dot has no domain head after it, and the text stays
+        // byte-identical. A dot before a digit is the same pattern shape
+        // (`1.2` looks like a short domain to a matcher) and gets the
+        // breaker too.
+        assert_eq!(file_marker_text("done.", "/tmp/done."), "done.");
+        assert_eq!(
+            file_marker_text("v1.2 final", "/tmp/v1"),
+            "v1.\u{200b}2 final",
+            "the pattern is the dot plus what follows, not the token's shape"
+        );
     }
 
     #[test]
@@ -984,7 +1025,10 @@ mod rich {
         write_fixture(dir.path(), "q3.pdf");
 
         let rw = rewrite_local_files("[](q3.pdf)", Some(dir.path()), DOC_ID_PREFIX, &[]);
-        assert_eq!(rw.rich, "![📎 q3.pdf](tg://document?id=doc0)");
+        assert_eq!(
+            rw.rich, "![📎 q3.\u{200b}pdf](tg://document?id=doc0)",
+            "the alt is disarmed exactly as the text marker is (#1938)"
+        );
         assert_eq!(rw.entries[0].file.caption, None, "no label, no caption");
     }
 
@@ -1006,6 +1050,33 @@ mod rich {
         assert!(scan.text.contains("📎"));
         assert!(rw.rich.contains("[remote](https://x/y)"));
         assert!(rw.rich.contains("`[/code/q.pdf](q.pdf)`"));
+    }
+
+    #[test]
+    fn a_dotted_label_is_disarmed_in_the_alt_but_not_the_caption() {
+        // The rich alt carries the same marker text the floor does, so the
+        // disarmer must reach it too (#1938). The CAPTION is not marker
+        // text: it is the file's own metadata and stays verbatim, so a
+        // reader who saves the file gets the real name back.
+        let dir = tempfile::tempdir().expect("tempdir");
+        write_fixture(dir.path(), "1918-fix-state.md");
+
+        let rw = rewrite_local_files(
+            "See [1918-fix-state.md](1918-fix-state.md) now.",
+            Some(dir.path()),
+            DOC_ID_PREFIX,
+            &[],
+        );
+
+        assert_eq!(
+            rw.rich, "See ![📎 1918-fix-state.\u{200b}md](tg://document?id=doc0) now.",
+            "the alt is disarmed exactly as the text marker is"
+        );
+        assert_eq!(
+            rw.entries[0].file.caption.as_deref(),
+            Some("1918-fix-state.md"),
+            "the caption stays verbatim: only visible marker text is disarmed"
+        );
     }
 
     #[test]
@@ -1194,7 +1265,10 @@ mod intermediate {
             .await;
         let text_mock = server
             .mock("POST", "/botTESTTOKEN/SendMessage")
-            .match_body(mockito::Matcher::Regex("q3.pdf".to_string()))
+            // The marked body carries the autolink breaker (#1938): a
+            // literal dot followed by U+200B, so the naive `q3.pdf`
+            // pattern (any ONE char) no longer matches.
+            .match_body(mockito::Matcher::Regex("q3\\.\\u{200b}pdf".to_string()))
             .with_status(200)
             .with_header("content-type", "application/json")
             .with_body(SEND_MESSAGE_OK)
