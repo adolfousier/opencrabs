@@ -661,14 +661,23 @@ pub struct LocalFile {
     /// The markdown link label, `[label](target)`, shipped as the document
     /// caption. `None` when the label was empty.
     pub caption: Option<String>,
+    /// Byte range in [`LocalFileScan::text`] occupied by this file's visible
+    /// `📎 <label>` marker (#1918). The scanner records the span as it emits
+    /// the marker, so a later pass can rewrite exactly that range: a label
+    /// that also occurs elsewhere in the reply can never be mis-targeted.
+    /// `None` for a value that did not come from a scan, so the sentinel is
+    /// unrepresentable rather than a `(0, 0)` a reader must remember to test
+    /// for.
+    pub marker_span: Option<std::ops::Range<usize>>,
 }
 
 /// Result of scanning a reply for links to local files.
 #[derive(Debug, Clone, Default)]
 pub struct LocalFileScan {
-    /// Reply text with every DELIVERED local-file link removed. A remote
-    /// link, a non-file scheme, a reference inside a code span and a
-    /// REJECTED candidate are all left byte-identical.
+    /// Reply text with every DELIVERED local-file link replaced by a
+    /// visible `📎 <label>` marker (#1918). A remote link, a non-file
+    /// scheme, a reference inside a code span and a REJECTED candidate are
+    /// all left byte-identical.
     pub text: String,
     /// Resolved and validated local files, in order of appearance.
     pub attachments: Vec<LocalFile>,
@@ -677,11 +686,11 @@ pub struct LocalFileScan {
 }
 
 /// File one parsed link into the scan accumulators. Returns `true` when the
-/// reference was consumed and must leave the reply text, which happens ONLY
-/// for a resolved, validated file. A rejected candidate or a non-file target
-/// returns `false`, so the link is copied through byte-identical: a remote
-/// link Telegram resolves itself, and a missing one is a failure report,
-/// never a silent strip.
+/// reference was consumed and replaced by the visible marker, which happens
+/// ONLY for a resolved, validated file. A rejected candidate or a non-file
+/// target returns `false`, so the link is copied through byte-identical: a
+/// remote link Telegram resolves itself, and a missing one is a failure
+/// report, never a silent strip.
 fn record_file_candidate(
     raw: &str,
     label: &str,
@@ -696,7 +705,11 @@ fn record_file_candidate(
             } else {
                 Some(label.to_string())
             };
-            scan.attachments.push(LocalFile { path, caption });
+            scan.attachments.push(LocalFile {
+                path,
+                caption,
+                marker_span: None,
+            });
             true
         }
         Resolution::Rejected { path, reason } => {
@@ -711,19 +724,54 @@ fn record_file_candidate(
     }
 }
 
-/// Scan a reply for markdown links to local files and hand back the text with
-/// every DELIVERED link removed, the validated files, and the rejected
-/// candidates.
+/// The visible text left where a delivered file link was (#1918).
+///
+/// The link label is the natural marker: it is the words the author chose.
+/// An empty label falls back to the file's own name so the marker is never
+/// blank. Deliberately NOT a URL: a `t.me` message link exists only for
+/// groups and channels, so a DM or a basic group has no form to offer,
+/// while a marker needs no link form at all.
+///
+/// Crate-visible for the scanner tests; every production caller lives in
+/// this module.
+pub(crate) fn file_marker_text(label: &str, target: &str) -> String {
+    let trimmed = label.trim();
+    if !trimmed.is_empty() {
+        trimmed.to_string()
+    } else {
+        std::path::Path::new(target)
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "file".to_string())
+    }
+}
+
+/// Append the visible marker for a resolved file, `📎 <label>`, and return
+/// the byte span it occupies in `out` (#1918). The single home of the
+/// marker's shape.
+fn push_file_marker(out: &mut String, label: &str, target: &str) -> std::ops::Range<usize> {
+    let start = out.len();
+    out.push_str("📎 ");
+    out.push_str(&file_marker_text(label, target));
+    start..out.len()
+}
+
+/// Scan a reply for markdown links to local files and hand back the text
+/// with every DELIVERED link replaced by a visible marker, the validated
+/// files, and the rejected candidates.
 ///
 /// `base_dir` is the session working directory: a relative target resolves
 /// against it. With no base directory a relative link stays verbatim while
 /// `~`-prefixed and absolute targets still resolve.
 ///
-/// A resolved file leaves the text so the reader never sees a dead reference
-/// to a file that already arrived as a document bubble. A REJECTED candidate
-/// stays in the text byte-identical AND is reported as a failure, because a
-/// link carries its own label and a silent strip would delete the reader's
-/// only clue about what was referenced.
+/// Marker semantics differ from the image family on purpose. A resolved
+/// file becomes an attachment AND the link that named it is replaced by a
+/// visible `📎 <label>` marker (#1918), not deleted: the marker keeps the
+/// file's name and the position it was referenced at, and it carries no
+/// URL, so it renders in every chat kind. A REJECTED candidate stays in
+/// the text byte-identical AND is reported as a failure, because a link
+/// carries its own label and a silent strip would delete the reader's only
+/// clue about what was referenced.
 pub fn extract_local_files(text: &str, base_dir: Option<&Path>) -> LocalFileScan {
     let regions = code_regions(text);
     let mut scan = LocalFileScan {
@@ -742,6 +790,18 @@ pub fn extract_local_files(text: &str, base_dir: Option<&Path>) -> LocalFileScan
             && let Some((end, label, target, _title)) = parse_markdown_ref(text, i, 1)
             && record_file_candidate(&text[i..end], &label, &target, base_dir, &mut scan)
         {
+            // #1918: the reference becomes a visible marker, not a hole.
+            // The label is the marker text, and an empty label falls back
+            // to the file's own name so the reader always has something to
+            // anchor on. No URL is emitted, so the marker renders in every
+            // chat kind.
+            let span = push_file_marker(&mut scan.text, &label, &target);
+            // The attachment pushed by `record_file_candidate` is the one
+            // this marker belongs to: the scan is single-threaded and in
+            // order.
+            if let Some(record) = scan.attachments.last_mut() {
+                record.marker_span = Some(span);
+            }
             i = end;
             continue;
         }
@@ -750,6 +810,22 @@ pub fn extract_local_files(text: &str, base_dir: Option<&Path>) -> LocalFileScan
         i += ch.len_utf8();
     }
 
+    // `trim()` strips leading whitespace, which shifts every recorded span
+    // left by that many bytes. Rebase the spans BEFORE trimming so a
+    // `marker_span` is always an index into the FINAL `scan.text`. Only the
+    // LEADING run matters: a marker begins with `📎` and ends with a
+    // non-whitespace label, so every span lies wholly inside
+    // `trim_start()..trim_end()`, and any trailing whitespace sits after
+    // the last marker and never moves an index.
+    let lead = scan.text.len() - scan.text.trim_start().len();
+    if lead > 0 {
+        for record in &mut scan.attachments {
+            if let Some(span) = &mut record.marker_span {
+                span.start -= lead;
+                span.end -= lead;
+            }
+        }
+    }
     scan.text = scan.text.trim().to_string();
     scan
 }

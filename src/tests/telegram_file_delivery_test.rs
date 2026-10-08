@@ -10,11 +10,13 @@
 //! Two halves, one file:
 //!
 //! 1. **The scanner** (`mod scan`). Which references become a `LocalFile`
-//!    and which stay as literal text. The removal policy is the one place
-//!    the file family deliberately differs from the image family: a resolved
-//!    file leaves the text, but a REJECTED candidate stays byte-identical
-//!    and is reported, because a link carries its own label and a silent
-//!    strip would delete the reader's only clue about what was referenced.
+//!    and which stay as literal text. The marker policy is the one place
+//!    the file family deliberately differs from the image family: a
+//!    resolved file becomes an attachment and its link is replaced by a
+//!    visible `📎 <label>` marker, while a REJECTED candidate stays
+//!    byte-identical and is reported, because a link carries its own label
+//!    and a silent strip would delete the reader's only clue about what
+//!    was referenced.
 //! 2. **The delivery leg** (`mod floor`). A resolved link ships exactly ONE
 //!    document carrying the link label as its caption, and a file the
 //!    channel could not deliver comes back as a failure entry the caller can
@@ -64,20 +66,25 @@ mod scan {
     }
 
     // -----------------------------------------------------------------------
-    // Resolution and removal
+    // Resolution, the visible marker, and what must be LEFT ALONE
     // -----------------------------------------------------------------------
 
     #[test]
-    fn a_local_file_link_resolves_and_leaves_the_text() {
+    fn a_resolved_link_becomes_a_visible_marker() {
         let dir = tempfile::tempdir().expect("tempdir");
         let pdf = write_file(dir.path(), "q3.pdf", PDF_BYTES);
         let scan = extract_local_files(
             &format!("before [Q3 report]({}) after", pdf.display()),
             None,
         );
-        assert_eq!(scan.text, "before  after");
+        assert_eq!(scan.text, "before 📎 Q3 report after");
         assert_eq!(paths(&scan), vec![pdf]);
         assert_eq!(scan.attachments[0].caption.as_deref(), Some("Q3 report"));
+        let span = scan.attachments[0]
+            .marker_span
+            .clone()
+            .expect("the scan records the marker's span");
+        assert_eq!(&scan.text[span], "📎 Q3 report");
         assert!(scan.failures.is_empty());
     }
 
@@ -94,6 +101,35 @@ mod scan {
     }
 
     #[test]
+    fn an_empty_label_falls_back_to_the_basename() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let pdf = write_file(dir.path(), "q3.pdf", PDF_BYTES);
+        let scan = extract_local_files(&format!("[]({})", pdf.display()), None);
+        assert_eq!(scan.text, "📎 q3.pdf", "the marker is never blank");
+        let span = scan.attachments[0]
+            .marker_span
+            .clone()
+            .expect("the scan records the marker's span");
+        assert_eq!(&scan.text[span], "📎 q3.pdf");
+    }
+
+    #[test]
+    fn the_marker_span_indexes_the_final_text() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let pdf = write_file(dir.path(), "q3.pdf", PDF_BYTES);
+        // Leading AND trailing whitespace force the trim rebase: the span
+        // was recorded while the buffer still carried the leading run, so
+        // an unrebased span would index the WRONG bytes of the final text.
+        let scan = extract_local_files(&format!("  \n [Q3 report]({})  ", pdf.display()), None);
+        assert_eq!(scan.text, "📎 Q3 report");
+        let span = scan.attachments[0]
+            .marker_span
+            .clone()
+            .expect("the scan records the marker's span");
+        assert_eq!(&scan.text[span], "📎 Q3 report");
+    }
+
+    #[test]
     fn two_files_attach_in_order_of_appearance() {
         let dir = tempfile::tempdir().expect("tempdir");
         let a = write_file(dir.path(), "a.pdf", PDF_BYTES);
@@ -103,7 +139,17 @@ mod scan {
             None,
         );
         assert_eq!(paths(&scan), vec![a, b]);
-        assert_eq!(scan.text, "then");
+        assert_eq!(scan.text, "📎 A then 📎 B");
+        let span_a = scan.attachments[0]
+            .marker_span
+            .clone()
+            .expect("the scan records the marker's span");
+        let span_b = scan.attachments[1]
+            .marker_span
+            .clone()
+            .expect("the scan records the marker's span");
+        assert_eq!(&scan.text[span_a], "📎 A");
+        assert_eq!(&scan.text[span_b], "📎 B");
     }
 
     #[test]
@@ -111,7 +157,7 @@ mod scan {
         let dir = tempfile::tempdir().expect("tempdir");
         let pdf = write_file(dir.path(), "Q3 final.pdf", PDF_BYTES);
         let scan = extract_local_files(&format!("x [Q3](<{}>) y", pdf.display()), None);
-        assert_eq!(scan.text, "x  y");
+        assert_eq!(scan.text, "x 📎 Q3 y");
         assert_eq!(paths(&scan), vec![pdf]);
     }
 
@@ -123,7 +169,7 @@ mod scan {
             &format!("x [Q3 report]({} \"quarterly\") y", pdf.display()),
             None,
         );
-        assert_eq!(scan.text, "x  y");
+        assert_eq!(scan.text, "x 📎 Q3 report y");
         assert_eq!(scan.attachments[0].caption.as_deref(), Some("Q3 report"));
     }
 
@@ -133,7 +179,7 @@ mod scan {
         std::fs::create_dir(dir.path().join("reports")).expect("mkdir");
         let pdf = write_file(&dir.path().join("reports"), "q3.pdf", PDF_BYTES);
         let scan = extract_local_files("see [report](reports/q3.pdf) here", Some(dir.path()));
-        assert_eq!(scan.text, "see  here");
+        assert_eq!(scan.text, "see 📎 report here");
         assert_eq!(paths(&scan), vec![pdf]);
         assert_eq!(scan.attachments[0].caption.as_deref(), Some("report"));
     }
@@ -382,6 +428,7 @@ mod floor {
         LocalFile {
             path,
             caption: caption.map(str::to_string),
+            marker_span: None,
         }
     }
 
