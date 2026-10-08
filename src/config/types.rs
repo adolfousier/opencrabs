@@ -508,6 +508,16 @@ pub struct TelegramConfig {
     /// keep mermaid fences as plain code blocks.
     #[serde(default = "default_true")]
     pub mermaid_render: bool,
+    /// Inline local MARKDOWN documents in rich messages (#1968). A `.md` or
+    /// `.markdown` file referenced from a reply is by default rewritten to a
+    /// rich document reference and inlined AT the reference. Some clients
+    /// (Telegram Android) cannot open a document inlined in a rich message,
+    /// while the same file detached opens in the built-in viewer; set false
+    /// to keep markdown out of the media array: the reference becomes a
+    /// plain marker and the file ships as its own document bubble. Other
+    /// document kinds are unaffected and always inline.
+    #[serde(default = "default_true")]
+    pub inline_markdown: bool,
     /// Silently ignore /start commands from non-allowed users in group chats.
     /// When true (default), the bot does NOT reply with user ID in groups.
     /// Users who need their ID can DM the bot instead.
@@ -555,6 +565,7 @@ impl Default for TelegramConfig {
             respond_to: RespondTo::default(),
             session_idle_hours: None,
             rich_messages: true,
+            inline_markdown: true,
             mermaid_render: true,
             silence_group_start: true,
             bot_owner: Vec::new(),

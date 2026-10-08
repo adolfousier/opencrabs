@@ -734,6 +734,20 @@ fn record_file_candidate(
 ///
 /// Crate-visible for the scanner tests; every production caller lives in
 /// this module.
+/// True when the path is a markdown document (#1968): the one kind some
+/// clients cannot open when it is inlined in a rich message's media array,
+/// so it carries the [`inline_markdown`](crate::config::TelegramConfig)
+/// opt-out.
+fn is_markdown_file(path: &Path) -> bool {
+    matches!(
+        path.extension()
+            .and_then(|e| e.to_str())
+            .map(|e| e.to_ascii_lowercase())
+            .as_deref(),
+        Some("md") | Some("markdown")
+    )
+}
+
 /// Break a chat client's URL autolinker on a marker label (#1938).
 ///
 /// A dotted token such as `1918-fix-state.md` or `config.io` is rendered by
@@ -912,6 +926,11 @@ struct FileRewriter<'a> {
     base_dir: Option<&'a Path>,
     id_prefix: &'a str,
     already_delivered: &'a [PathBuf],
+    /// Whether MARKDOWN documents may inline (#1968). False keeps a `.md`
+    /// reference out of the media array: it becomes a marker and the file
+    /// ships detached, because some clients cannot open an inlined markdown
+    /// document but open the detached copy in their built-in viewer.
+    inline_markdown: bool,
     rich: String,
     entries: Vec<ResolvedFileRef>,
 }
@@ -936,6 +955,14 @@ impl FileRewriter<'_> {
                     // The document is already in the chat (an intermediate
                     // sent it). Consume the reference, record nothing: a
                     // delivered document is not a lost one.
+                    return true;
+                }
+                // The markdown opt-out (#1968): the reference becomes the
+                // same visible marker the text plane carries, and NO entry
+                // is recorded, so the media array never gains the document
+                // and the file floor ships it detached.
+                if !self.inline_markdown && is_markdown_file(&path) {
+                    push_file_marker(&mut self.rich, label, target);
                     return true;
                 }
                 let id = format!("{}{}", self.id_prefix, self.entries.len());
@@ -1034,12 +1061,14 @@ pub fn rewrite_local_files(
     base_dir: Option<&Path>,
     id_prefix: &str,
     already_delivered: &[PathBuf],
+    inline_markdown: bool,
 ) -> LocalFileRewrite {
     let regions = code_regions(text);
     let mut rw = FileRewriter {
         base_dir,
         id_prefix,
         already_delivered,
+        inline_markdown,
         rich: String::with_capacity(text.len()),
         entries: Vec::new(),
     };

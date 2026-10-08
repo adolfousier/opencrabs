@@ -912,6 +912,7 @@ mod rich {
             Some(dir.path()),
             DOC_ID_PREFIX,
             &[],
+            true,
         );
         assert_eq!(
             rw.rich, "Read ![📎 report](tg://document?id=doc0) first.",
@@ -938,6 +939,7 @@ mod rich {
             Some(dir.path()),
             DOC_ID_PREFIX,
             &[],
+            true,
         );
         assert_eq!(
             rw.rich,
@@ -954,6 +956,7 @@ mod rich {
             None,
             DOC_ID_PREFIX,
             &[],
+            true,
         );
         assert_eq!(rw.rich, "See [docs](https://example.com/x.pdf) online.");
         assert!(rw.entries.is_empty());
@@ -969,6 +972,7 @@ mod rich {
             Some(dir.path()),
             DOC_ID_PREFIX,
             &[],
+            true,
         );
         assert_eq!(rw.rich, "run `cat [x](q3.pdf)` now");
         assert!(rw.entries.is_empty());
@@ -984,6 +988,7 @@ mod rich {
             Some(dir.path()),
             DOC_ID_PREFIX,
             &[],
+            true,
         );
         assert_eq!(rw.rich, "See [ghost](nope.pdf).");
         assert!(rw.entries.is_empty());
@@ -1003,6 +1008,7 @@ mod rich {
             Some(dir.path()),
             DOC_ID_PREFIX,
             &[pdf],
+            true,
         );
         assert_eq!(rw.rich, "Read  first.", "the consumed link leaves quietly");
         assert!(rw.entries.is_empty());
@@ -1015,7 +1021,7 @@ mod rich {
         let dir = tempfile::tempdir().expect("tempdir");
         write_fixture(dir.path(), "q3.pdf");
 
-        let rw = rewrite_local_files("[r](q3.pdf)", Some(dir.path()), "attachment", &[]);
+        let rw = rewrite_local_files("[r](q3.pdf)", Some(dir.path()), "attachment", &[], true);
         assert_eq!(rw.rich, "![📎 r](tg://document?id=attachment0)");
     }
 
@@ -1024,7 +1030,7 @@ mod rich {
         let dir = tempfile::tempdir().expect("tempdir");
         write_fixture(dir.path(), "q3.pdf");
 
-        let rw = rewrite_local_files("[](q3.pdf)", Some(dir.path()), DOC_ID_PREFIX, &[]);
+        let rw = rewrite_local_files("[](q3.pdf)", Some(dir.path()), DOC_ID_PREFIX, &[], true);
         assert_eq!(
             rw.rich, "![📎 q3.\u{200b}pdf](tg://document?id=doc0)",
             "the alt is disarmed exactly as the text marker is (#1938)"
@@ -1042,7 +1048,7 @@ mod rich {
         let input = "[ok](q3.pdf) and [remote](https://x/y) and `[/code/q.pdf](q.pdf)`";
 
         let scan = extract_local_files(input, Some(dir.path()));
-        let rw = rewrite_local_files(input, Some(dir.path()), DOC_ID_PREFIX, &[]);
+        let rw = rewrite_local_files(input, Some(dir.path()), DOC_ID_PREFIX, &[], true);
         assert_eq!(scan.attachments.len(), rw.entries.len(), "same claims");
         assert_eq!(scan.attachments[0].path, rw.entries[0].file.path);
         // The scanner keeps everything it did not claim byte-identical, and
@@ -1066,6 +1072,7 @@ mod rich {
             Some(dir.path()),
             DOC_ID_PREFIX,
             &[],
+            true,
         );
 
         assert_eq!(
@@ -1076,6 +1083,64 @@ mod rich {
             rw.entries[0].file.caption.as_deref(),
             Some("1918-fix-state.md"),
             "the caption stays verbatim: only visible marker text is disarmed"
+        );
+    }
+
+    #[test]
+    fn a_markdown_reference_inlines_like_any_document_by_default() {
+        // #1968 scope pin: with the opt-out untouched, a `.md` file inlines
+        // exactly as a `.pdf` does. The flag exists for clients that cannot
+        // open an inlined markdown document; the default must not change.
+        let dir = tempfile::tempdir().expect("tempdir");
+        write_fixture(dir.path(), "notes.md");
+        write_fixture(dir.path(), "notes.markdown");
+
+        for name in ["notes.md", "notes.markdown"] {
+            let rw = rewrite_local_files(
+                &format!("See [{name}]({name})."),
+                Some(dir.path()),
+                DOC_ID_PREFIX,
+                &[],
+                true,
+            );
+            assert!(
+                rw.rich.contains("tg://document?id=doc0"),
+                "{name} must inline by default"
+            );
+            assert_eq!(rw.entries.len(), 1, "{name} must produce its entry");
+        }
+    }
+
+    #[test]
+    fn a_markdown_reference_stays_a_marker_when_inlining_is_off() {
+        // #1968: with the opt-out set, a `.md` reference becomes the same
+        // visible marker the text plane carries and records NO entry, so the
+        // media array never gains the document and the file floor ships it
+        // detached. A `.pdf` in the SAME body is untouched: the scope is
+        // markdown only.
+        let dir = tempfile::tempdir().expect("tempdir");
+        write_fixture(dir.path(), "notes.md");
+        write_fixture(dir.path(), "q3.pdf");
+
+        let rw = rewrite_local_files(
+            "Notes [here](notes.md) and [report](q3.pdf) attached.",
+            Some(dir.path()),
+            DOC_ID_PREFIX,
+            &[],
+            false,
+        );
+        assert!(
+            rw.rich.contains("📎 here"),
+            "the markdown reference becomes the marker, not a media reference"
+        );
+        assert!(
+            rw.rich.contains("![📎 report](tg://document?id=doc0)"),
+            "the pdf takes the first media id and inlines as before"
+        );
+        assert_eq!(rw.entries.len(), 1, "only the pdf becomes media");
+        assert_eq!(
+            rw.entries[0].file.path.file_name(),
+            Some(std::ffi::OsStr::new("q3.pdf"))
         );
     }
 
@@ -1093,6 +1158,7 @@ mod rich {
             Some(dir.path()),
             DOC_ID_PREFIX,
             &[],
+            true,
         );
 
         assert!(

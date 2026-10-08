@@ -4,6 +4,10 @@ use crate::config::{Config, TelegramConfig};
 fn test_telegram_config_default_struct_booleans() {
     let cfg = TelegramConfig::default();
     assert!(cfg.rich_messages, "rich_messages must default to true");
+    assert!(
+        cfg.inline_markdown,
+        "inline_markdown must default to true (#1968)"
+    );
     assert!(cfg.mermaid_render, "mermaid_render must default to true");
     assert!(
         cfg.silence_group_start,
@@ -41,6 +45,10 @@ fn test_config_missing_channels_table_toml() {
         "rich_messages must be true when [channels] is omitted"
     );
     assert!(
+        tg.inline_markdown,
+        "inline_markdown must be true when [channels] is omitted"
+    );
+    assert!(
         tg.mermaid_render,
         "mermaid_render must be true when [channels] is omitted"
     );
@@ -61,6 +69,10 @@ fn test_config_missing_channels_telegram_table_toml() {
     assert!(
         tg.rich_messages,
         "rich_messages must be true when [channels.telegram] is omitted"
+    );
+    assert!(
+        tg.inline_markdown,
+        "inline_markdown must be true when [channels.telegram] is omitted"
     );
     assert!(
         tg.mermaid_render,
@@ -86,6 +98,10 @@ fn test_config_empty_channels_telegram_table_toml() {
         "rich_messages must be true when [channels.telegram] is empty"
     );
     assert!(
+        tg.inline_markdown,
+        "inline_markdown must be true when [channels.telegram] is empty"
+    );
+    assert!(
         tg.mermaid_render,
         "mermaid_render must be true when [channels.telegram] is empty"
     );
@@ -100,6 +116,7 @@ fn test_config_explicit_false_overrides_respected() {
     let toml_str = r#"
         [channels.telegram]
         rich_messages = false
+        inline_markdown = false
         mermaid_render = false
         silence_group_start = false
     "#;
@@ -109,6 +126,10 @@ fn test_config_explicit_false_overrides_respected() {
     assert!(
         !tg.rich_messages,
         "explicit rich_messages = false must be respected"
+    );
+    assert!(
+        !tg.inline_markdown,
+        "explicit inline_markdown = false must be respected"
     );
     assert!(
         !tg.mermaid_render,
@@ -129,6 +150,10 @@ fn test_config_partial_override_preserves_other_defaults() {
     let cfg: Config = toml::from_str(toml_str).expect("config must parse with partial override");
     let tg = cfg.channels.telegram;
     assert!(!tg.rich_messages, "rich_messages = false must be applied");
+    assert!(
+        tg.inline_markdown,
+        "inline_markdown must remain true default"
+    );
     assert!(tg.mermaid_render, "mermaid_render must remain true default");
     assert!(
         tg.silence_group_start,

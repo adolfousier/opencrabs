@@ -310,6 +310,10 @@ pub(crate) async fn deliver_intermediate_message(
         Some(base_dir),
         crate::utils::DOC_ID_PREFIX,
         &unreadable,
+        crate::config::Config::current()
+            .channels
+            .telegram
+            .inline_markdown,
     );
     let mut doc_media: Vec<super::rich::mermaid::MediaEntry> = Vec::new();
     let mut all_attached = true;
