@@ -793,10 +793,43 @@ pub(crate) fn file_marker_text(label: &str, target: &str) -> String {
     disarm_autolink(&text)
 }
 
+/// Consume a model-written `📎 ` run immediately before a reference (#2001).
+///
+/// The `📎 <label>` marker is the harness's to write, and the channel
+/// capability line tells the model the reference "is replaced in your reply
+/// by a visible marker naming the file (📎 <label>)". A model matching the
+/// output it was told to expect may therefore prefix its own `📎 ` before
+/// `[label](path)`, and every emit site replaces only the reference span, so
+/// that prefix is copied through and the reader sees the marker twice
+/// (`📎 📎 <label>` on the text plane, `📎 ![📎 <label>](tg://document?id=...)`
+/// on the rich one). Dropping the model's prefix right before the harness
+/// emit makes the emit idempotent: exactly one marker lands either way.
+///
+/// Only trailing spaces, tabs and `📎` tokens are consumed, so ordinary
+/// prose ending in a space is untouched. Every iteration strictly shortens
+/// the buffer, so the loop terminates. Trailing whitespace goes with the
+/// token, so `text 📎 [x](p)` leaves `text ` and the harness marker lands
+/// exactly where the model's was.
+fn consume_marker_prefix(buf: &mut String) {
+    loop {
+        let trimmed = buf.trim_end_matches([' ', '\t']);
+        if !trimmed.ends_with('\u{1F4CE}') {
+            break;
+        }
+        // Hoisted so the immutable borrow ends before `truncate` takes
+        // `&mut`.
+        let cut = trimmed.len() - '\u{1F4CE}'.len_utf8();
+        buf.truncate(cut);
+    }
+}
+
 /// Append the visible marker for a resolved file, `📎 <label>`, and return
 /// the byte span it occupies in `out` (#1918). The single home of the
 /// marker's shape.
 fn push_file_marker(out: &mut String, label: &str, target: &str) -> std::ops::Range<usize> {
+    // A model-written `📎 ` right before the reference must not survive
+    // beside the harness's own marker (#2001).
+    consume_marker_prefix(out);
     let start = out.len();
     out.push_str("📎 ");
     out.push_str(&file_marker_text(label, target));
@@ -1002,6 +1035,9 @@ impl FileRewriter<'_> {
 /// `📎 <label>` the text plane's marker does, so the reader's anchor is
 /// identical in both planes. The single home of the reference's shape.
 fn push_document_ref(out: &mut String, label: &str, target: &str, id: &str) {
+    // Same doubling guard as the visible marker (#2001): the alt carries a
+    // `📎 `, and the model may have prefixed its own before the reference.
+    consume_marker_prefix(out);
     let alt = file_marker_text(label, target);
     out.push_str(&format!("![📎 {alt}](tg://document?id={id})"));
 }

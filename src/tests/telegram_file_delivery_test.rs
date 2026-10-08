@@ -42,6 +42,11 @@
 //!    media array, and when the rich send declines, each file drops to the
 //!    floor as its own document so the marker never points at a file the
 //!    chat never received. A repeated intermediate re-delivers nothing.
+//! 6. **The marker consume** (`mod marker_consume`, #2001). The `📎`
+//!    marker is the harness's to write, but the capability line tells the
+//!    model what the marker looks like, so the model may prefix its own
+//!    `📎 ` before the reference. Every emit site consumes that prefix
+//!    first, so the reader sees exactly ONE marker either way.
 //!
 //! Deliberately NOT covered here: the notice wording battery, the regen
 //! ladder, and the extraction rules of the image family. Each has its own
@@ -1584,5 +1589,126 @@ mod fallback {
             "id": 777_001, "type": "private", "first_name": "a"
         }));
         assert!(file_message_link(&dm.kind, -456_789, None, 91_047).is_none());
+    }
+}
+
+mod marker_consume {
+    use crate::utils::image::{
+        DOC_ID_PREFIX, LocalFileScan, extract_local_files, rewrite_local_files,
+    };
+    use std::path::{Path, PathBuf};
+
+    const PDF_BYTES: &[u8] = b"%PDF-1.7\n1 0 obj\n<<>>\nendobj\n";
+
+    fn write_fixture(dir: &Path, name: &str) -> PathBuf {
+        let path = dir.join(name);
+        std::fs::write(&path, PDF_BYTES).expect("write fixture");
+        path
+    }
+
+    fn paths(scan: &LocalFileScan) -> Vec<PathBuf> {
+        scan.attachments.iter().map(|f| f.path.clone()).collect()
+    }
+
+    #[test]
+    fn a_model_written_marker_prefix_is_not_doubled_on_the_text_plane() {
+        // #2001: the capability line tells the model the reference becomes a
+        // `📎 <label>` marker, so a model may prefix that marker itself. The
+        // harness consumes the model's own `📎 ` before emitting its own, so
+        // the reader sees exactly ONE marker rather than `📎 📎 <label>`.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let pdf = write_fixture(dir.path(), "q3.pdf");
+
+        let scan = extract_local_files(
+            &format!("before 📎 [Q3 report]({}) after", pdf.display()),
+            Some(dir.path()),
+        );
+
+        assert_eq!(
+            scan.text, "before 📎 Q3 report after",
+            "the model's own 📎 is consumed, not doubled"
+        );
+        assert_eq!(scan.text.matches('📎').count(), 1, "exactly one marker");
+        assert_eq!(paths(&scan), vec![pdf]);
+    }
+
+    #[test]
+    fn a_run_of_model_prefixes_collapses_to_one_marker() {
+        // The consume is a loop over trailing `📎` runs, so more than one
+        // model-written prefix still leaves room for exactly one harness
+        // marker, and the loop terminates because every pass shortens the
+        // buffer.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let pdf = write_fixture(dir.path(), "q3.pdf");
+
+        let scan = extract_local_files(
+            &format!("📎 📎 [Q3 report]({})", pdf.display()),
+            Some(dir.path()),
+        );
+
+        assert_eq!(scan.text, "📎 Q3 report", "one marker from a whole run");
+        assert_eq!(scan.text.matches('📎').count(), 1);
+        assert_eq!(paths(&scan), vec![pdf]);
+    }
+
+    #[test]
+    fn a_model_written_marker_prefix_is_not_doubled_in_the_rich_plane() {
+        // #2001, rich plane: a model's own `📎 ` before the reference must
+        // not survive beside the harness alt, or the reader gets
+        // `📎 ![📎 <label>](tg://document?id=...)`.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let pdf = write_fixture(dir.path(), "q3.pdf");
+
+        let rw = rewrite_local_files(
+            &format!("before 📎 [Q3 report]({}) after", pdf.display()),
+            Some(dir.path()),
+            DOC_ID_PREFIX,
+            &[],
+            true,
+        );
+
+        assert_eq!(
+            rw.rich.matches('📎').count(),
+            1,
+            "exactly one marker: {:?}",
+            rw.rich
+        );
+        assert_eq!(
+            rw.rich, "before ![📎 Q3 report](tg://document?id=doc0) after",
+            "the model's own 📎 is consumed, not doubled"
+        );
+        assert_eq!(rw.entries.len(), 1);
+    }
+
+    #[test]
+    fn the_optout_marker_arm_consumes_the_prefix_too() {
+        // The markdown opt-out (#1968) emits the same visible marker on the
+        // rich plane, so the same doubling is possible there and the same
+        // consume guards it. No entry is recorded, as with any opt-out hit.
+        let dir = tempfile::tempdir().expect("tempdir");
+        write_fixture(dir.path(), "notes.md");
+
+        let rw = rewrite_local_files(
+            "before 📎 [notes](notes.md)",
+            Some(dir.path()),
+            DOC_ID_PREFIX,
+            &[],
+            false,
+        );
+
+        assert_eq!(
+            rw.rich.matches('📎').count(),
+            1,
+            "exactly one marker: {:?}",
+            rw.rich
+        );
+        assert_eq!(
+            rw.rich, "before 📎 notes",
+            "the marker replaces the model's prefix"
+        );
+        assert!(
+            rw.entries.is_empty(),
+            "an opt-out hit records no media entry"
+        );
     }
 }
