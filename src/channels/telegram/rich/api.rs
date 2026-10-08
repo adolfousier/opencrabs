@@ -148,7 +148,7 @@ pub(crate) fn build_body_markdown_media_edit(
             };
             serde_json::json!({
                 "id": m.id,
-                "media": { "type": "photo", "media": source },
+                "media": { "type": m.kind.as_str(), "media": source },
             })
         })
         .collect();
@@ -566,6 +566,74 @@ pub(crate) fn multipart_scalar_fields(body: &serde_json::Value) -> Vec<(String, 
 /// (§ Bot API multipart media convention). The JSON body is still passed in
 /// for correlation telemetry ([`rich_send_fields`] reads its `rich_message`
 /// pointer).
+/// The multipart part's filename and MIME type for one media entry (#1918).
+///
+/// A `photo` keeps its static shape: the bytes are mermaid-rendered PNGs and
+/// the part is named `<id>.png`. A `document` names the part after the real
+/// file, because Telegram shows the part filename as the document's title,
+/// and picks a MIME type from the extension so the client's open-with
+/// behavior matches what the file is.
+pub(crate) fn media_part_identity(m: &super::mermaid::MediaEntry) -> (String, &'static str) {
+    match m.kind {
+        super::mermaid::MediaKind::Photo => (format!("{}.png", m.id), "image/png"),
+        super::mermaid::MediaKind::Document => {
+            let name = m.name.clone().unwrap_or_else(|| format!("{}.bin", m.id));
+            let mime = document_mime(&name);
+            (name, mime)
+        }
+    }
+}
+
+/// A coarse MIME type for a document filename (#1918).
+///
+/// Telegram renders the document bubble from the filename and this type; an
+/// unknown extension falls back to `application/octet-stream` rather than
+/// guessing, because a wrong MIME type makes a client open a PDF as text,
+/// which is worse than the generic icon. The list covers the file types a
+/// coding session actually produces; the `sendDocument` call itself never
+/// needed a MIME type, the multipart part does.
+pub(crate) fn document_mime(name: &str) -> &'static str {
+    let ext = name
+        .rsplit('.')
+        .next()
+        .filter(|ext| *ext != name)
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    match ext.as_str() {
+        "pdf" => "application/pdf",
+        "txt" | "log" | "md" => "text/plain",
+        "json" => "application/json",
+        "toml" => "application/toml",
+        "yaml" | "yml" => "application/yaml",
+        "xml" => "application/xml",
+        "html" | "htm" => "text/html",
+        "csv" => "text/csv",
+        "zip" => "application/zip",
+        "gz" | "gzip" => "application/gzip",
+        "tar" => "application/x-tar",
+        "rs" => "text/rust",
+        "py" => "text/x-python",
+        "js" | "mjs" | "cjs" => "text/javascript",
+        "ts" | "tsx" | "jsx" => "text/typescript",
+        "go" => "text/x-go",
+        "c" | "h" => "text/x-c",
+        "cpp" | "hpp" | "cc" => "text/x-c++src",
+        "sh" => "application/x-sh",
+        "sql" => "application/sql",
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "svg" => "image/svg+xml",
+        "webp" => "image/webp",
+        "mp4" => "video/mp4",
+        "mp3" => "audio/mpeg",
+        "wav" => "audio/wav",
+        "ogg" => "audio/ogg",
+        "webm" => "video/webm",
+        _ => "application/octet-stream",
+    }
+}
+
 fn build_multipart_form(
     media: &[super::mermaid::MediaEntry],
     body: &serde_json::Value,
@@ -576,10 +644,11 @@ fn build_multipart_form(
     }
     for m in media {
         if let Some(bytes) = &m.bytes {
+            let (file_name, mime) = media_part_identity(m);
             let part = reqwest::multipart::Part::bytes(bytes.clone())
-                .file_name(format!("{}.png", m.id))
-                .mime_str("image/png")
-                .expect("image/png is a valid mime");
+                .file_name(file_name)
+                .mime_str(mime)
+                .expect("a static mime literal is always valid");
             form = form.part(m.id.clone(), part);
         }
     }
@@ -709,7 +778,7 @@ pub(crate) fn build_body_markdown_media_target(
             };
             serde_json::json!({
                 "id": m.id,
-                "media": { "type": "photo", "media": source },
+                "media": { "type": m.kind.as_str(), "media": source },
             })
         })
         .collect();
@@ -813,27 +882,61 @@ pub(crate) async fn send_rich_with_mermaid_target_id(
     origin: &str,
     origin_detail: &str,
 ) -> anyhow::Result<i32> {
-    if !mermaid::should_render_mermaid(markdown) {
-        return send_rich_markdown_target_id(
-            api_url,
-            token,
-            chat_id,
-            thread_id,
-            reply_to,
-            markdown,
-            origin,
-            origin_detail,
-        )
-        .await;
-    }
+    send_rich_with_media_target_id(
+        api_url,
+        token,
+        chat_id,
+        thread_id,
+        reply_to,
+        markdown,
+        &[],
+        origin,
+        origin_detail,
+    )
+    .await
+}
 
+/// [`send_rich_with_mermaid_target_id`] with a caller-supplied media array
+/// (#1918): the composition core both senders now share.
+///
+/// `local_media` carries entries whose ids the CALLER has already rewritten
+/// into `markdown` as `tg://document?id=<id>` references: the media array is
+/// the only authority that can answer such a reference, so a reference
+/// without its entry would survive the rich pipeline but render nothing.
+/// Entries use the file family's `doc` id prefix and cannot collide with the
+/// fence resolver's `diag` ids inside one message's media array, where
+/// entries are matched to references BY ID.
+///
+/// The two media sources are merged, and the plain-markdown early return
+/// keys on the MERGED array: a message with no fence but with local media
+/// still has something to embed, and returning early would send the
+/// `tg://` references as dead text.
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn send_rich_with_media_target_id(
+    api_url: &str,
+    token: &str,
+    chat_id: i64,
+    thread_id: Option<ThreadId>,
+    reply_to: Option<i32>,
+    markdown: &str,
+    local_media: &[super::mermaid::MediaEntry],
+    origin: &str,
+    origin_detail: &str,
+) -> anyhow::Result<i32> {
     // Resolve every fence once: valid diagrams become markdown media
     // references, broken ones become legible failure blocks. Non-fence text
-    // is left byte-identical.
-    let (resolved, media) = mermaid::resolve_markdown_media(markdown).await;
+    // is left byte-identical. Runs only when a fence is present; the local
+    // rewrite happened upstream of this call, on text the fence resolver
+    // never touched.
+    let (resolved, mut media) = if mermaid::should_render_mermaid(markdown) {
+        mermaid::resolve_markdown_media(markdown).await
+    } else {
+        (markdown.to_string(), Vec::new())
+    };
+    media.extend(local_media.iter().cloned());
 
-    // All fences failed → `resolved` carries only failure blocks, no media to
-    // embed; send it as plain rich markdown (no `media` field).
+    // Nothing to embed at all (no fence, no local media, or every fence
+    // failed) → send it as plain rich markdown with no `media` field.
     if media.is_empty() {
         return send_rich_markdown_target_id(
             api_url,

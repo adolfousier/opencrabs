@@ -90,6 +90,36 @@ pub(crate) struct MediaEntry {
     pub(crate) id: String,
     pub(crate) url: Option<String>,
     pub(crate) bytes: Option<Vec<u8>>,
+    /// Which Telegram media type this entry carries (#1918). One message's
+    /// `media` array is all `photo` OR all `document` per family, and the
+    /// request builder stamps the literal from this field instead of
+    /// hardcoding `"photo"`.
+    pub(crate) kind: MediaKind,
+    /// The file's name for a `document` entry, sent as the multipart part
+    /// filename so Telegram shows it as the document's title. `None` for
+    /// `photo` entries, whose filename is fixed by the upload path.
+    pub(crate) name: Option<String>,
+}
+
+/// The Telegram media type a [`MediaEntry`] carries (#1918). The wire value
+/// is produced by [`MediaKind::as_str`], the single home of the literal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum MediaKind {
+    /// A photo: the mermaid diagrams this module rendered before #1918.
+    #[default]
+    Photo,
+    /// A generic file: the local-file family's documents (#1918).
+    Document,
+}
+
+impl MediaKind {
+    /// The Telegram `type` literal for this media kind.
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            MediaKind::Photo => "photo",
+            MediaKind::Document => "document",
+        }
+    }
 }
 
 /// A located ```mermaid fence in the source markdown. `start` is the byte
@@ -728,6 +758,8 @@ pub(crate) fn replacement_for(
                     id,
                     url: Some(url.clone()),
                     bytes: None,
+                    kind: MediaKind::Photo,
+                    name: None,
                 }),
             )
         }
@@ -747,6 +779,8 @@ pub(crate) fn replacement_for(
                     id,
                     url: None,
                     bytes: Some(bytes.clone()),
+                    kind: MediaKind::Photo,
+                    name: None,
                 }),
             )
         }

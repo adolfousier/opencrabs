@@ -124,6 +124,8 @@ async fn edit_rich_markdown_media_url_entry_uses_custom_api_url() {
             id: "diag0".to_string(),
             url: Some("https://mermaid.ink/img/abc".to_string()),
             bytes: None,
+            kind: crate::channels::telegram::rich::mermaid::MediaKind::Photo,
+            name: None,
         }],
         Some(&kb),
         "test",
@@ -161,6 +163,8 @@ async fn send_rich_markdown_media_target_id_uses_custom_api_url() {
             id: "1".to_string(),
             url: Some("https://example.com/img.png".to_string()),
             bytes: None,
+            kind: crate::channels::telegram::rich::mermaid::MediaKind::Photo,
+            name: None,
         }],
         "test",
         "-",
@@ -349,4 +353,167 @@ fn png_ihdr(w: u32, h: u32) -> Vec<u8> {
     png.extend_from_slice(&[8, 6, 0, 0, 0]);
     png.extend_from_slice(&[0, 0, 0, 0]);
     png
+}
+
+// ── Document entries (#1918) ─────────────────────────────────────────
+//
+// A file reference in a report is not a photo: the media array's type
+// literal must say "document", and inline bytes must upload as a part
+// named after the file with its own MIME, which is what Telegram renders
+// in the document bubble.
+
+#[tokio::test]
+async fn a_document_entry_announces_itself_as_a_document() {
+    let mut server = mockito::Server::new_async().await;
+    let mock = server
+        .mock("POST", "/botTESTTOKEN/sendRichMessage")
+        .match_body(mockito::Matcher::PartialJson(serde_json::json!({
+            "rich_message": {
+                "markdown": "![📎 q3 report](tg://document?id=doc0)",
+                "media": [
+                    {"id": "doc0", "media": {"type": "document", "media": "https://example.com/q3.pdf"}}
+                ]
+            }
+        })))
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(r#"{"ok":true,"result":{"message_id":81}}"#)
+        .create_async()
+        .await;
+
+    let result = api::send_rich_markdown_media_target_id(
+        &server.url(),
+        "TESTTOKEN",
+        11111,
+        None,
+        None,
+        "![📎 q3 report](tg://document?id=doc0)",
+        &[crate::channels::telegram::rich::mermaid::MediaEntry {
+            id: "doc0".to_string(),
+            url: Some("https://example.com/q3.pdf".to_string()),
+            bytes: None,
+            kind: crate::channels::telegram::rich::mermaid::MediaKind::Document,
+            name: Some("q3.pdf".to_string()),
+        }],
+        "test",
+        "-",
+    )
+    .await;
+
+    assert!(
+        result.is_ok(),
+        "document send should succeed: {:?}",
+        result.err()
+    );
+    assert_eq!(result.unwrap(), 81);
+    mock.assert_async().await;
+}
+
+#[tokio::test]
+async fn document_bytes_upload_as_a_named_multipart_part() {
+    let mut server = mockito::Server::new_async().await;
+    let mock = server
+        .mock("POST", "/botTESTTOKEN/sendRichMessage")
+        .match_body(mockito::Matcher::Regex(
+            r#"filename="q3\.pdf"[\s\S]*application/pdf"#.to_string(),
+        ))
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(r#"{"ok":true,"result":{"message_id":82}}"#)
+        .create_async()
+        .await;
+
+    let result = api::send_rich_markdown_media_target_id(
+        &server.url(),
+        "TESTTOKEN",
+        11111,
+        None,
+        None,
+        "![📎 q3 report](tg://document?id=doc0)",
+        &[crate::channels::telegram::rich::mermaid::MediaEntry {
+            id: "doc0".to_string(),
+            url: None,
+            bytes: Some(b"%PDF-1.7\nfake bytes\n".to_vec()),
+            kind: crate::channels::telegram::rich::mermaid::MediaKind::Document,
+            name: Some("q3.pdf".to_string()),
+        }],
+        "test",
+        "-",
+    )
+    .await;
+
+    assert!(
+        result.is_ok(),
+        "multipart document send should succeed: {:?}",
+        result.err()
+    );
+    assert_eq!(result.unwrap(), 82);
+    mock.assert_async().await;
+}
+
+#[test]
+fn document_mime_covers_the_types_a_session_produces() {
+    use crate::channels::telegram::rich::api::document_mime;
+    assert_eq!(document_mime("report.pdf"), "application/pdf");
+    assert_eq!(
+        document_mime("notes.TXT"),
+        "text/plain",
+        "extension match is case-blind"
+    );
+    assert_eq!(document_mime("events.json"), "application/json");
+    assert_eq!(document_mime("main.rs"), "text/rust");
+    assert_eq!(document_mime("lib.py"), "text/x-python");
+    assert_eq!(document_mime("page.html"), "text/html");
+    assert_eq!(
+        document_mime("archive.tar.gz"),
+        "application/gzip",
+        "the last extension wins"
+    );
+    assert_eq!(
+        document_mime("blob"),
+        "application/octet-stream",
+        "no extension: generic"
+    );
+}
+
+#[test]
+fn a_part_identity_follows_the_entry_kind() {
+    use crate::channels::telegram::rich::api::media_part_identity;
+    use crate::channels::telegram::rich::mermaid::{MediaEntry, MediaKind};
+
+    let photo = MediaEntry {
+        id: "d1".to_string(),
+        url: None,
+        bytes: Some(Vec::new()),
+        kind: MediaKind::Photo,
+        name: None,
+    };
+    assert_eq!(
+        media_part_identity(&photo),
+        ("d1.png".to_string(), "image/png")
+    );
+
+    let named = MediaEntry {
+        id: "doc0".to_string(),
+        url: None,
+        bytes: Some(Vec::new()),
+        kind: MediaKind::Document,
+        name: Some("q3.pdf".to_string()),
+    };
+    assert_eq!(
+        media_part_identity(&named),
+        ("q3.pdf".to_string(), "application/pdf")
+    );
+
+    let unnamed = MediaEntry {
+        id: "doc1".to_string(),
+        url: None,
+        bytes: Some(Vec::new()),
+        kind: MediaKind::Document,
+        name: None,
+    };
+    assert_eq!(
+        media_part_identity(&unnamed),
+        ("doc1.bin".to_string(), "application/octet-stream")
+    );
 }

@@ -195,8 +195,17 @@ pub(crate) fn spawn_edit_loop(
                                     // visible answer just because it also appears in
                                     // the collapsed trace.
                                     if super::intermediates::is_deliverable_rich_report(&text) {
+                                        let session_cwd =
+                                            agent.get_working_directory_for_session(sid);
                                         super::intermediates::deliver_intermediate_message(
-                                            &bot, chat, thread_id, &st, &tg, &text,
+                                            &bot,
+                                            chat,
+                                            thread_id,
+                                            &st,
+                                            &tg,
+                                            sid,
+                                            session_cwd.as_path(),
+                                            &text,
                                         )
                                         .await;
                                     } else {

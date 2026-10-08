@@ -190,6 +190,12 @@ pub(crate) struct StreamingState {
     /// cancelled old call leaves its intermediate visible and the new call
     /// re-sends the same text — the exact-match duplicate the user reported.
     pub(crate) intermediate_msg_ids: Vec<MessageId>,
+    /// Local files the intermediate plane already put in the chat, as a
+    /// document bubble or inline in a rich message's media array (#1918).
+    /// The final leg consumes these before shipping its own scan, so a reply
+    /// that repeats a link an intermediate already delivered does not put a
+    /// second copy of the file in the chat.
+    pub(crate) delivered_file_paths: Vec<std::path::PathBuf>,
     /// Message IDs of every voice note delivered to Telegram via `send_voice`
     /// (TTS responses to voice-input turns). This field exists purely as a
     /// load-bearing invariant: voice-reply IDs live here and MUST NEVER be

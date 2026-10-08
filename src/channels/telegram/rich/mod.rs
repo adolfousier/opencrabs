@@ -35,7 +35,8 @@ pub(crate) mod table;
 // (e.g. `rich::detect::has_rich_structure`) so a lib-wide re-export can
 // never go unused in the non-test target.
 pub(crate) use api::{
-    send_rich_with_mermaid, send_rich_with_mermaid_id, send_rich_with_mermaid_target_id,
+    send_rich_with_media_target_id, send_rich_with_mermaid, send_rich_with_mermaid_id,
+    send_rich_with_mermaid_target_id,
 };
 pub(crate) use detect::{
     contains_table, is_atx_heading, prefers_rich_render, should_send_native_rich,

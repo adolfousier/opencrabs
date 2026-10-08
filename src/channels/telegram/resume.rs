@@ -643,6 +643,7 @@ pub(crate) async fn resume_session_inner(
         compacting: false,
         pending_suggestions: None,
         pending_trailer: None,
+        delivered_file_paths: Vec::new(),
         msg_id: None,
         thinking: String::new(),
         tool_msgs: Vec::new(),

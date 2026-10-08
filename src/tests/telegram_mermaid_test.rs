@@ -13,8 +13,8 @@ use crate::channels::telegram::rich::api::{
 };
 use crate::channels::telegram::rich::ast::{Block, Inline, MermaidResult};
 use crate::channels::telegram::rich::mermaid::{
-    MediaEntry, PREVALIDATE_CONNECT_TIMEOUT_SECS, PREVALIDATE_TIMEOUT_SECS, base64url, cache_get,
-    cache_put, classify_render_failure, error_note, failure_html, find_mermaid_fences,
+    MediaEntry, MediaKind, PREVALIDATE_CONNECT_TIMEOUT_SECS, PREVALIDATE_TIMEOUT_SECS, base64url,
+    cache_get, cache_put, classify_render_failure, error_note, failure_html, find_mermaid_fences,
     has_mermaid_fence, image_html, ink_url, is_diagram_capped, is_image_response,
     looks_like_mermaid_source, markdown_failure_block, markdown_failure_block_with_link,
     replacement_for, resolve_blocks, resolve_markdown_media, svg_link_md,
@@ -534,6 +534,8 @@ fn build_body_markdown_media_target_matches_prototype_shape() {
         id: "diag0".into(),
         url: Some("https://mermaid.ink/img/abc".into()),
         bytes: None,
+        kind: MediaKind::Photo,
+        name: None,
     }];
     let body = build_body_markdown_media_target(-100, None, None, "text", &media);
     assert_eq!(body["chat_id"], -100);
@@ -562,6 +564,8 @@ fn build_body_markdown_media_target_bytes_entry_uses_attach_reference() {
         id: "diag1".into(),
         url: None,
         bytes: Some(vec![0x89, b'P']),
+        kind: MediaKind::Photo,
+        name: None,
     }];
     let body = build_body_markdown_media_target(-100, None, None, "text", &media);
     let arr = body["rich_message"]["media"]
@@ -582,6 +586,8 @@ fn build_body_markdown_media_edit_carries_message_id_and_media() {
         id: "diag0".into(),
         url: Some("https://mermaid.ink/img/abc".into()),
         bytes: None,
+        kind: MediaKind::Photo,
+        name: None,
     }];
     let body = build_body_markdown_media_edit(-100, 40827, "text", &media);
     assert_eq!(body["chat_id"], -100);
@@ -603,6 +609,8 @@ fn build_body_markdown_media_edit_bytes_entry_uses_attach_reference() {
         id: "diag1".into(),
         url: None,
         bytes: Some(vec![0x89, b'P']),
+        kind: MediaKind::Photo,
+        name: None,
     }];
     let body = build_body_markdown_media_edit(-100, 5, "text", &media);
     let arr = body["rich_message"]["media"]

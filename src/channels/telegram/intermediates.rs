@@ -68,20 +68,26 @@ pub(crate) async fn try_send_intermediate_rich(
     chat_id: ChatId,
     thread_id: Option<teloxide::types::ThreadId>,
     text: &str,
+    local_media: &[super::rich::mermaid::MediaEntry],
 ) -> Option<MessageId> {
-    if !super::rich::should_send_native_rich(text) {
+    // A media array is its own reason to take the rich plane (#1918): a
+    // plain report that carries documents has something only the array can
+    // render, and the structure detector below knows nothing about files.
+    if !super::rich::should_send_native_rich(text) && local_media.is_empty() {
         return None;
     }
-    // Mermaid-aware sender (#1044/#1202): resolves fences into the rich
-    // markdown media array; byte-identical to send_rich_markdown_id when no
-    // fence is present, so non-diagram reports are unaffected.
-    match super::rich::send_rich_with_mermaid_id(
+    // Media-aware sender (#1044/#1202, #1918): resolves fences into the rich
+    // markdown media array and merges the caller's document entries;
+    // byte-identical to send_rich_markdown_id when neither is present, so
+    // non-diagram, file-free reports are unaffected.
+    match super::rich::send_rich_with_media_target_id(
         bot.api_url().as_str(),
         bot.token(),
         chat_id.0,
         thread_id,
-        text,
         None,
+        text,
+        local_media,
         "turn",
         "-",
     )
@@ -223,39 +229,134 @@ pub(crate) fn is_deliverable_rich_report(text: &str) -> bool {
 /// in `sent_intermediates` so the final-response dedup will not resend it.
 /// Returns true when something was delivered. Used to surface a rich report the
 /// model emitted before a tool call, which folding would otherwise bury (#582).
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn deliver_intermediate_message(
     bot: &Bot,
     chat: ChatId,
     thread_id: Option<teloxide::types::ThreadId>,
     streaming: &Arc<std::sync::Mutex<StreamingState>>,
     tg: &super::state::TelegramState,
+    session_id: uuid::Uuid,
+    base_dir: &std::path::Path,
     text: &str,
 ) -> bool {
     // #690 follow-up (#980): re-expand a collapsed table once, up front, so the
     // dedup record, the rich send and the HTML fallback all see the same
     // expanded shape. The HTML path reflows again internally but is idempotent.
     let expanded = super::rich::reflow_collapsed_tables(text);
-    let text = expanded.as_str();
+    // The dedup record keeps the PRE-scan text: the scan rewrites links into
+    // markers, and recording that form would make a repeated intermediate
+    // (same raw text) miss the exact-match check and ship its files twice.
+    // The BUBBLE carries the marker form; the dedup ledger carries what came
+    // in, byte-identical to what the next attempt will compare against.
+    let dedup_text = expanded.as_str();
     {
         let s = streaming.lock().unwrap_or_else(|e| e.into_inner());
-        if s.sent_intermediates.iter().any(|prev| prev == text) {
+        if s.sent_intermediates.iter().any(|prev| prev == dedup_text) {
             return true;
         }
     }
-    if let Some(id) = try_send_intermediate_rich(bot, chat, thread_id, text).await {
+    // #1918: scan the intermediate for local-file links. The scan comes
+    // AFTER the dedup check: an already-sent intermediate delivered its
+    // files the first time. The scan consumes each link and leaves a visible
+    // marker, which is the honest shape for a plane the rich send declines.
+    let mut file_scan = crate::utils::image::extract_local_files(dedup_text, Some(base_dir));
+    let marked = std::mem::take(&mut file_scan.text);
+
+    // The rich plane can do better than a marker: the same rewrite the final
+    // leg's rich arm uses replaces each resolvable link IN PLACE with a
+    // `tg://document` reference, and the entries it returns ride the rich
+    // bubble's media array, so the document renders AT its reference instead
+    // of as a detached bubble. The rewrite runs on the pre-scan text, since
+    // nothing has been delivered by this plane yet, so nothing is consumed.
+    // A file whose bytes cannot be read here joins the failure list instead
+    // of the array, and the notice below names it.
+    let fw = crate::utils::image::rewrite_local_files(
+        dedup_text,
+        Some(base_dir),
+        crate::utils::DOC_ID_PREFIX,
+        &[],
+    );
+    let mut doc_media: Vec<super::rich::mermaid::MediaEntry> = Vec::new();
+    for entry in &fw.entries {
+        match tokio::fs::read(&entry.file.path).await {
+            Ok(bytes) => doc_media.push(super::rich::mermaid::MediaEntry {
+                id: entry.id.clone(),
+                url: None,
+                bytes: Some(bytes),
+                kind: super::rich::mermaid::MediaKind::Document,
+                name: Some(super::delivery::document_part_name(&entry.file.path)),
+            }),
+            Err(e) => {
+                tracing::error!(
+                    "Telegram: failed to read file {} for the rich array: {}",
+                    entry.file.path.display(),
+                    e
+                );
+                file_scan
+                    .failures
+                    .push(crate::utils::image::LocalImageFailure {
+                        raw: entry.file.path.display().to_string(),
+                        resolved: Some(entry.file.path.clone()),
+                        reason: crate::utils::image::LocalImageFailureReason::Unreadable,
+                    });
+            }
+        }
+    }
+    let plain_text = crate::utils::image::append_file_failure_notice(&marked, &file_scan.failures);
+    let rich_markdown = if doc_media.is_empty() {
+        plain_text.clone()
+    } else {
+        crate::utils::image::append_file_failure_notice(&fw.rich, &file_scan.failures)
+    };
+    if let Some(id) =
+        try_send_intermediate_rich(bot, chat, thread_id, &rich_markdown, &doc_media).await
+    {
+        // The documents ride the bubble's media array: they are in the chat,
+        // so the final leg must not ship them again. The consume list is the
+        // same one the bubble fallback below feeds.
+        if !doc_media.is_empty() {
+            let mut s = streaming.lock().unwrap_or_else(|e| e.into_inner());
+            s.delivered_file_paths
+                .extend(fw.entries.iter().map(|entry| entry.file.path.clone()));
+        }
         // The bubble is non-sticky burial evidence (#1150): the flow block must
         // restick below its own output on the next append.
         tg.note_bot_bubble(chat.0, id.0);
         let mut s = streaming.lock().unwrap_or_else(|e| e.into_inner());
-        s.sent_intermediates.push(text.to_string());
+        s.sent_intermediates.push(dedup_text.to_string());
         s.intermediate_msg_ids.push(id);
         return true;
     }
+    // The rich send declined or failed: each file ships as its own document
+    // bubble, and the marker text carries the reader's anchor. Shipping here
+    // rather than only marking is what makes the marker honest: the final
+    // response is deduped against the intermediates it repeats, so a marker
+    // with no delivery behind it would point at a file that never reaches
+    // the chat.
+    if !file_scan.attachments.is_empty() {
+        let (delivered, send_failures) = super::delivery::send_local_files(
+            session_id,
+            bot,
+            chat,
+            thread_id,
+            &file_scan.attachments,
+        )
+        .await;
+        if !delivered.is_empty() {
+            let mut s = streaming.lock().unwrap_or_else(|e| e.into_inner());
+            s.delivered_file_paths
+                .extend(delivered.iter().map(|f| f.path.clone()));
+        }
+        file_scan.failures.extend(send_failures);
+    }
+    let text = crate::utils::image::append_file_failure_notice(&marked, &file_scan.failures);
+
     // Resolve fences here too (#1142 parity): when the rich path rejected the
     // message, the HTML fallback must still render the diagram instead of
     // shipping raw fence text. Identical to markdown_to_telegram_html when
     // the feature is off or no fence is present.
-    let html = super::rich::markdown_to_html_mermaid(text).await;
+    let html = super::rich::markdown_to_html_mermaid(&text).await;
     if html.is_empty() {
         return false;
     }
@@ -273,7 +374,7 @@ pub(crate) async fn deliver_intermediate_message(
         }
     }
     let mut s = streaming.lock().unwrap_or_else(|e| e.into_inner());
-    s.sent_intermediates.push(text.to_string());
+    s.sent_intermediates.push(dedup_text.to_string());
     s.intermediate_msg_ids.extend(sent_ids);
     true
 }

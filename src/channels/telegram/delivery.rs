@@ -502,7 +502,21 @@ pub(crate) async fn deliver_final_response(
             // nothing. Refusals land in `text_only` as a short notice: raw
             // link + reason, one per line, no markdown, because it rides the
             // same channel as the reply itself.
-            let (_, send_failures) = send_local_files(
+            // #1918: a file an INTERMEDIATE already shipped is in the chat;
+            // the final leg must not put a second copy there. Consume those
+            // entries from the scan before the floor runs: their markers
+            // stay for the reader (linking them to the intermediate's bubble
+            // is #1939's leg), and the failure notice is not theirs to
+            // join, because their delivery already succeeded.
+            {
+                let s = streaming.lock().unwrap_or_else(|e| e.into_inner());
+                if !s.delivered_file_paths.is_empty() {
+                    file_scan
+                        .attachments
+                        .retain(|f| !s.delivered_file_paths.contains(&f.path));
+                }
+            }
+            let (delivered, send_failures) = send_local_files(
                 session_id,
                 bot,
                 chat_id,
@@ -513,6 +527,29 @@ pub(crate) async fn deliver_final_response(
             file_scan.failures.extend(send_failures);
             let text_only =
                 crate::utils::image::append_file_failure_notice(&text_only, &file_scan.failures);
+
+            // #1918: a marker for a file that DID land becomes a link to its
+            // bubble. The inbound message decides whether this chat has a
+            // link form at all; a chat without one (private, basic group)
+            // gets an empty list and keeps the plain markers. `unwrap_or_default`
+            // is the no-inbound leg: nothing here invented a chat, so nothing
+            // here can guess a link into existence.
+            let file_links: Vec<(std::path::PathBuf, String)> = match inbound {
+                Some(inbound) => delivered
+                    .iter()
+                    .filter_map(|delivered_file| {
+                        let link = file_message_link(
+                            &inbound.chat.kind,
+                            chat_id.0,
+                            thread_id,
+                            delivered_file.message_id,
+                        )?;
+                        Some((delivered_file.path.clone(), link))
+                    })
+                    .collect(),
+                None => Vec::new(),
+            };
+            let text_only = link_file_markers(&text_only, &file_scan, &file_links);
 
             // Rich fallback: when all content was sent as HTML intermediates
             // during streaming, the dedup step strips text_only to empty. If
@@ -529,7 +566,7 @@ pub(crate) async fn deliver_final_response(
                     &pre_dedup_text,
                     options_pending(streaming),
                 ) {
-                let rich_md = pre_dedup_text.clone();
+                let rich_md = link_file_markers(&pre_dedup_text, &file_scan, &file_links);
                 match super::rich::send_rich_with_mermaid_id(
                     bot.api_url().as_str(),
                     bot.token(),
@@ -1159,13 +1196,147 @@ pub(crate) async fn deliver_final_response(
     Ok(true)
 }
 
+/// One delivered file together with the id of the message bubble it landed
+/// in (#1918). The path travels with the id because the caller looks the
+/// file up BY PATH: the id alone would not say which file it carried.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct DeliveredFile {
+    /// The file that was sent.
+    pub path: std::path::PathBuf,
+    /// Telegram's id for the message the send produced.
+    pub message_id: i32,
+}
+
+/// The `t.me` message link for a delivered file's bubble, when its chat kind
+/// has one (#1918).
+///
+/// A message link exists only for a public supergroup or a channel.
+/// `t.me/c/...` addresses a chat by its INTERNAL id, the chat id with the
+/// `-100` marker stripped, and gains a middle segment with the topic id
+/// when the message sits in a forum topic, so the reader lands on the bubble
+/// inside the right topic rather than at the top of a thread they then have
+/// to search.
+///
+/// A private chat and a basic group have no message-link form at all, so
+/// they get `None` and the caller leaves the marker as plain text: a link
+/// that goes nowhere is worse than no link, and the marker's job of pointing
+/// at the file is done by the label either way.
+pub(crate) fn file_message_link(
+    kind: &teloxide::types::ChatKind,
+    chat_id: i64,
+    thread_id: Option<teloxide::types::ThreadId>,
+    message_id: i32,
+) -> Option<String> {
+    let has_message_link = match kind {
+        teloxide::types::ChatKind::Public(public) => matches!(
+            public.kind,
+            teloxide::types::PublicChatKind::Supergroup { .. }
+                | teloxide::types::PublicChatKind::Channel { .. }
+        ),
+        teloxide::types::ChatKind::Private { .. } => false,
+    };
+    if !has_message_link {
+        return None;
+    }
+    // `t.me/c/` takes the id WITHOUT the `-100` marker that identifies a
+    // supergroup or channel. A private or basic-group id never reaches here,
+    // so an id without the prefix keeps its digits rather than losing three.
+    let chat = chat_id.to_string();
+    let internal = chat.strip_prefix("-100").unwrap_or(chat.as_str());
+    Some(match thread_id {
+        Some(thread) => format!("https://t.me/c/{internal}/{}/{message_id}", thread.0.0),
+        None => format!("https://t.me/c/{internal}/{message_id}"),
+    })
+}
+
+/// Rewrite each file's `<label>` marker into a markdown link to the bubble
+/// that carries that file (#1918).
+///
+/// `links` names the files that were BOTH delivered and reachable by a link
+/// as `(path, url)`, so a file the channel refused, a file an intermediate
+/// already sent, or one whose chat kind has no message-link form is simply
+/// absent and keeps the plain marker. The marker never points at a bubble
+/// that does not exist, and it never disappears: the label is the reader's
+/// anchor either way.
+///
+/// `text` is the buffer being rewritten, which STARTS as a copy of
+/// `scan.text` and is then run through the artifact strip, the secret
+/// redaction and the dedup ladder, any of which can move a marker. `scan`
+/// therefore travels with the call, and a span is cut only while the bytes
+/// it names still match the ones the scanner wrote there: a rewrite that
+/// moved the text degrades to the plain marker instead of splicing a link
+/// over unrelated words.
+///
+/// Spans are cut from the LAST to the FIRST, so a link's extra bytes can
+/// never invalidate a span that has not been cut yet.
+pub(crate) fn link_file_markers(
+    text: &str,
+    scan: &crate::utils::image::LocalFileScan,
+    links: &[(std::path::PathBuf, String)],
+) -> String {
+    if links.is_empty() {
+        return text.to_string();
+    }
+    let mut spans: Vec<(usize, usize, &str, &str)> = Vec::new();
+    for file in &scan.attachments {
+        let Some(span) = file.marker_span.as_ref() else {
+            // Not from a scan: nothing to cut.
+            continue;
+        };
+        let (start, end) = (span.start, span.end);
+        let Some(marker) = text.get(start..end) else {
+            continue;
+        };
+        if scan.text.get(start..end) != Some(marker) {
+            // The text moved under the span: the marker stays plain.
+            continue;
+        }
+        let Some((_, link)) = links
+            .iter()
+            .find(|(path, _)| path.as_path() == file.path.as_path())
+        else {
+            continue;
+        };
+        spans.push((start, end, marker, link.as_str()));
+    }
+    if spans.is_empty() {
+        return text.to_string();
+    }
+    // The scanner emits markers in order, so this only guards a caller that
+    // reordered them: cutting back-to-front is what keeps the earlier spans
+    // valid, and that needs the order to be known.
+    spans.sort_by_key(|(start, _, _, _)| *start);
+    let mut linked = text.to_string();
+    for (start, end, marker, link) in spans.iter().rev() {
+        linked.replace_range(*start..*end, &format!("[{marker}]({link})"));
+    }
+    linked
+}
+
+/// The filename Telegram should display for a document read from `path`.
+///
+/// `InputFile::memory` carries no name, and teloxide's own fallback returns an
+/// empty string for a `Bytes` payload, so Telegram labels the document `file`
+/// and drops the MIME: the extension never travelled. The multipart part's
+/// filename is where the name travels from (#1918).
+pub(crate) fn document_part_name(path: &std::path::Path) -> String {
+    path.file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_default()
+}
+
 /// Send each resolved local-file link as its own document bubble (#1916).
 ///
-/// Returns the paths that landed and the failures the channel itself
-/// produced, for the same reason the image family's sender does: the two
-/// halves feed different arms (delivered paths record what arrived, failures
-/// feed the reply's failure notice), and inferring one from the other would
-/// couple two independent facts.
+/// Telegram's clients render no document preview, so there is no
+/// photo/document ceiling to route by: every file ships through
+/// `sendDocument`, and the one size gate that matters lives upstream in
+/// [`crate::utils::image::validate_local_file`], where exceeding it can be
+/// reported to the MODEL as a rejection reason before delivery is attempted
+/// instead of surfacing here as a refusal the model never saw coming.
+/// Returns the files that landed, each with the message id the send
+/// produced, and the failures the channel itself refused: the two halves
+/// are set in different arms, and inferring one from the other would couple
+/// two independent facts.
 ///
 /// A file that cannot be READ reports `Unreadable`: the reference named
 /// something this host cannot produce, which the model can repair by
@@ -1179,10 +1350,10 @@ pub(crate) async fn send_local_files(
     thread_id: Option<teloxide::types::ThreadId>,
     files: &[crate::utils::image::LocalFile],
 ) -> (
-    Vec<std::path::PathBuf>,
+    Vec<DeliveredFile>,
     Vec<crate::utils::image::LocalImageFailure>,
 ) {
-    let mut delivered: Vec<std::path::PathBuf> = Vec::new();
+    let mut delivered: Vec<DeliveredFile> = Vec::new();
     let mut failures: Vec<crate::utils::image::LocalImageFailure> = Vec::new();
 
     for file in files {
@@ -1208,7 +1379,10 @@ pub(crate) async fn send_local_files(
         }
         match req.await {
             Ok(msg) => {
-                delivered.push(path.clone());
+                delivered.push(DeliveredFile {
+                    path: path.clone(),
+                    message_id: msg.id.0,
+                });
                 // Match the outbox media receipt: len is sent bytes and hash8
                 // identifies the path, so one audit predicate covers every leg.
                 super::telemetry::log_send_success(

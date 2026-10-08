@@ -830,6 +830,172 @@ pub fn extract_local_files(text: &str, base_dir: Option<&Path>) -> LocalFileScan
     scan
 }
 
+/// The media-id prefix the file family gives a rewritten reference: the
+/// `docN` in `tg://document?id=docN` (#1918). The rich request's `media`
+/// entries are matched to references BY ID inside one message's media array,
+/// so this literal must never be able to produce the same id another
+/// family's prefix produces inside that array.
+pub const DOC_ID_PREFIX: &str = "doc";
+
+/// A resolved local file together with the media-array id its rewritten
+/// reference points at: `tg://document?id=<id>`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedFileRef {
+    /// The id the rewritten reference points at.
+    pub id: String,
+    /// The validated file, path and caption bound in one value as everywhere
+    /// else in this module.
+    pub file: LocalFile,
+}
+
+/// A text prepared for the rich media plane's document half (#1918).
+///
+/// [`extract_local_files`] produces the MARKER form (`📎 <label>`), which is
+/// the honest shape for a plane with no media array to answer a
+/// `tg://document` reference. This walk produces the REFERENCE form instead:
+/// every resolvable link becomes `![📎 <label>](tg://document?id=docN)`, and
+/// the entries it returns ride the rich send's media array so the document
+/// renders AT its reference rather than as a detached bubble. Rejected
+/// candidates stay byte-identical and remain the scan's to report: it walks
+/// the same references, so a copy of that list here would be a second home
+/// for one predicate.
+#[derive(Debug, Clone, Default)]
+pub struct LocalFileRewrite {
+    /// Input with every resolvable local-file link replaced IN PLACE by
+    /// `![📎 <label>](tg://document?id=<prefix><n>)`. Links inside code spans,
+    /// remote targets and existing Telegram media refs are left byte-identical.
+    /// The id prefix is passed by the caller (`doc` at the delivery site) so
+    /// the document namespace cannot collide with another family's inside a
+    /// single message's `media` array, where entries are matched to references
+    /// BY ID.
+    pub rich: String,
+    /// Resolved files in order of appearance, with the id each got.
+    pub entries: Vec<ResolvedFileRef>,
+}
+
+/// Walk state for [`rewrite_local_files`], holding the per-reference policy so
+/// the walk itself stays a single readable loop.
+struct FileRewriter<'a> {
+    base_dir: Option<&'a Path>,
+    id_prefix: &'a str,
+    already_delivered: &'a [PathBuf],
+    rich: String,
+    entries: Vec<ResolvedFileRef>,
+}
+
+impl FileRewriter<'_> {
+    /// File one parsed link. Returns `true` when the reference was consumed
+    /// and must leave the buffer, which happens ONLY for a resolved,
+    /// validated file. A rejected candidate or a non-file target returns
+    /// `false`, so the link is copied through byte-identical: a remote link
+    /// Telegram resolves itself, and a missing one is a failure report, never
+    /// a silent strip. This is [`record_file_candidate`]'s policy, kept
+    /// identical so the scan and the rewrite never disagree about which links
+    /// were files, and the scan is what reports the rejection, so returning
+    /// `false` loses nothing.
+    fn file(&mut self, label: &str, target: &str) -> bool {
+        match resolve_file_target(target, self.base_dir) {
+            Resolution::Local(path) => {
+                // Comparison is on the RESOLVED ABSOLUTE path, which is what
+                // resolve_file_target returns, so two spellings of one file
+                // dedup correctly.
+                if self.already_delivered.contains(&path) {
+                    // The document is already in the chat (an intermediate
+                    // sent it). Consume the reference, record nothing: a
+                    // delivered document is not a lost one.
+                    return true;
+                }
+                let id = format!("{}{}", self.id_prefix, self.entries.len());
+                let caption = if label.trim().is_empty() {
+                    None
+                } else {
+                    Some(label.to_string())
+                };
+                // The alt carries the same `📎 <label>` the text plane's
+                // marker does, so the reader's anchor is identical in both
+                // planes; an empty label falls back to the file's own name.
+                push_document_ref(&mut self.rich, label, target, &id);
+                self.entries.push(ResolvedFileRef {
+                    id,
+                    file: LocalFile {
+                        path,
+                        caption,
+                        // Not from a scan: no position in any scan buffer.
+                        marker_span: None,
+                    },
+                });
+            }
+            // A remote link, an in-page anchor or any other URI scheme has
+            // nothing to embed here: the rich plane's media array is built
+            // from local bytes, and deleting a link nothing downstream will
+            // fetch would lose the reference outright. A rejected candidate
+            // is the SCAN's to report, since it walks the same references, so
+            // the rewriter stays silent and returns `false`.
+            Resolution::Rejected { .. } | Resolution::Skip => return false,
+        }
+        true
+    }
+}
+
+/// Append the rich-plane reference for a resolved file,
+/// `![📎 <label>](tg://document?id=<id>)`, whose alt carries the same
+/// `📎 <label>` the text plane's marker does, so the reader's anchor is
+/// identical in both planes. The single home of the reference's shape.
+fn push_document_ref(out: &mut String, label: &str, target: &str, id: &str) {
+    let alt = file_marker_text(label, target);
+    out.push_str(&format!("![📎 {alt}](tg://document?id={id})"));
+}
+
+/// Scan a reply for markdown links to local files and hand back the rich form
+/// with each resolvable link replaced in place by a `tg://document` media
+/// reference (#1918), together with the validated files and the id each got.
+///
+/// The walk obeys the same rules the scan does: a link inside a code span
+/// stays byte-identical, and a relative target with no base directory stays
+/// verbatim because it may be ordinary prose that merely looks like a link. A
+/// rejected candidate is left byte-identical, which is the file family's declared
+/// policy, since a link carries its own label and a silent strip would delete
+/// the reader's only clue about what was referenced.
+pub fn rewrite_local_files(
+    text: &str,
+    base_dir: Option<&Path>,
+    id_prefix: &str,
+    already_delivered: &[PathBuf],
+) -> LocalFileRewrite {
+    let regions = code_regions(text);
+    let mut rw = FileRewriter {
+        base_dir,
+        id_prefix,
+        already_delivered,
+        rich: String::with_capacity(text.len()),
+        entries: Vec::new(),
+    };
+    let mut i = 0;
+
+    while i < text.len() {
+        if !regions[i]
+            && text[i..].starts_with('[')
+            // `![alt](path)` is an image reference, not a file link: its `[`
+            // is preceded by `!`, and copying the `!` first must not let the
+            // link parser claim the span on the next iteration.
+            && !text[..i].ends_with('!')
+            && let Some((end, label, target, _title)) = parse_markdown_ref(text, i, 1)
+            && rw.file(&label, &target)
+        {
+            i = end;
+            continue;
+        }
+        let ch = text[i..].chars().next().expect("i lies on a char boundary");
+        rw.rich.push(ch);
+        i += ch.len_utf8();
+    }
+
+    LocalFileRewrite {
+        rich: rw.rich.trim().to_string(),
+        entries: rw.entries,
+    }
+}
+
 /// The honest user-visible line for files that could not be delivered.
 /// `None` when there is nothing to report.
 pub fn file_failure_notice(failures: &[LocalImageFailure]) -> Option<String> {

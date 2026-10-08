@@ -23,6 +23,25 @@
 //!    NAME, never as a silent drop. The two failure classes are distinct: a
 //!    path that cannot be READ is a reference problem (`Unreadable`), while
 //!    a file the API refuses is a delivery problem (`DeliveryFailed`).
+//! 3. **The bubble links** (`mod links`, #1918). A delivered file's `📎`
+//!    marker becomes a `t.me` link to the document bubble, so a channel
+//!    reader can tap the marker and land on the file. Links exist only for
+//!    public supergroup and channel chats; a private chat keeps the plain
+//!    marker. A link is spliced only where the recorded span still matches
+//!    the buffer; a moved span degrades to the plain marker rather than
+//!    link unrelated words.
+//! 4. **The rich rewrite** (`mod rich`, #1918). On the rich plane the file
+//!    goes one better than a marker: each resolvable reference is rewritten
+//!    IN PLACE into a `tg://document?id=` reference and the document rides
+//!    the bubble's media array, so the file renders at its position in the
+//!    report. Already-delivered files consume their link and rewrite to
+//!    nothing; remote links, code spans and unresolvable paths stay
+//!    byte-identical.
+//! 5. **The intermediate plane** (`mod intermediate`, #1918). A rich report
+//!    emitted mid-turn runs the same scan: resolvable files inline into its
+//!    media array, and when the rich send declines, each file drops to the
+//!    floor as its own document so the marker never points at a file the
+//!    chat never received. A repeated intermediate re-delivers nothing.
 //!
 //! Deliberately NOT covered here: the notice wording battery, the regen
 //! ladder, and the extraction rules of the image family. Each has its own
@@ -387,9 +406,15 @@ mod scan {
 // ---------------------------------------------------------------------------
 
 mod floor {
-    use crate::channels::telegram::delivery::send_local_files;
+    use crate::channels::telegram::delivery::{DeliveredFile, send_local_files};
     use crate::utils::image::{LocalFile, LocalImageFailureReason};
     use std::path::{Path, PathBuf};
+
+    /// The paths of what landed, in order. Every floor assertion reads this
+    /// projection; the message ids are asserted separately where they matter.
+    fn delivered_paths(delivered: &[DeliveredFile]) -> Vec<PathBuf> {
+        delivered.iter().map(|f| f.path.clone()).collect()
+    }
 
     const CHAT: i64 = 133_526_395;
 
@@ -552,7 +577,14 @@ mod floor {
         .await;
 
         document_mock.assert_async().await;
-        assert_eq!(delivered, vec![report], "the delivered path comes back");
+        assert_eq!(
+            delivered_paths(&delivered),
+            vec![report],
+            "the delivered path comes back"
+        );
+        // The bubble id is the half the #1918 link builder consumes: the
+        // marker is spliced into a t.me link to THIS id.
+        assert_eq!(delivered[0].message_id, 701, "the bubble id comes back");
         assert!(failures.is_empty(), "a delivered file reports no failure");
     }
 
@@ -585,7 +617,7 @@ mod floor {
         .await;
 
         document_mock.assert_async().await;
-        assert_eq!(delivered, vec![report]);
+        assert_eq!(delivered_paths(&delivered), vec![report]);
         assert!(failures.is_empty());
     }
 
@@ -622,10 +654,561 @@ mod floor {
 
         document_mock.assert_async().await;
         assert_eq!(
-            delivered,
+            delivered_paths(&delivered),
             vec![first, second],
             "delivered in the reply's order"
         );
         assert!(failures.is_empty());
+    }
+}
+
+// ---------------------------------------------------------------------------
+// the bubble link: a delivered file's marker points at its t.me bubble
+// ---------------------------------------------------------------------------
+
+mod links {
+    use crate::channels::telegram::delivery::{file_message_link, link_file_markers};
+    use crate::utils::image::extract_local_files;
+    use std::path::Path;
+
+    const PDF_BYTES: &[u8] = b"%PDF-1.7\n1 0 obj\n<<>>\nendobj\n";
+    const SUPERGROUP_ID: i64 = -100_123_456_789_012;
+
+    fn write_fixture(dir: &Path, name: &str) -> std::path::PathBuf {
+        let path = dir.join(name);
+        std::fs::write(&path, PDF_BYTES).expect("write fixture");
+        path
+    }
+
+    /// A `Chat` from its wire form: the kind variants carry their own
+    /// payloads, and building them from JSON keeps the test honest about
+    /// what Telegram actually sends instead of hand-filling internals.
+    fn chat_of_kind(v: serde_json::Value) -> teloxide::types::Chat {
+        serde_json::from_value(v).expect("chat json")
+    }
+
+    #[test]
+    fn a_supergroup_bubble_gets_a_message_link() {
+        let chat = chat_of_kind(serde_json::json!({
+            "id": SUPERGROUP_ID, "type": "supergroup", "title": "Ops",
+        }));
+        let link =
+            file_message_link(&chat.kind, SUPERGROUP_ID, None, 701).expect("supergroup links");
+        // The internal id drops the -100 marker; anything else would 404.
+        assert_eq!(link, "https://t.me/c/123456789012/701");
+    }
+
+    #[test]
+    fn a_topic_message_links_into_its_topic() {
+        let chat = chat_of_kind(serde_json::json!({
+            "id": SUPERGROUP_ID, "type": "supergroup", "title": "Ops", "is_forum": true,
+        }));
+        let thread = teloxide::types::ThreadId(teloxide::types::MessageId(42));
+        let link = file_message_link(&chat.kind, SUPERGROUP_ID, Some(thread), 701)
+            .expect("topic messages link");
+        // The middle segment lands the reader INSIDE the topic, not at the
+        // top of a thread they then have to search.
+        assert_eq!(link, "https://t.me/c/123456789012/42/701");
+    }
+
+    #[test]
+    fn a_channel_bubble_gets_a_message_link() {
+        const CHANNEL_ID: i64 = -100_999_888_777_666;
+        let chat = chat_of_kind(serde_json::json!({
+            "id": CHANNEL_ID, "type": "channel", "title": "Announcements",
+        }));
+        let link =
+            file_message_link(&chat.kind, CHANNEL_ID, None, 5).expect("channel bubbles link");
+        assert_eq!(link, "https://t.me/c/999888777666/5");
+    }
+
+    #[test]
+    fn a_private_chat_has_no_message_link() {
+        let chat = chat_of_kind(serde_json::json!({
+            "id": 133_526_395, "type": "private", "first_name": "A",
+        }));
+        assert!(file_message_link(&chat.kind, 133_526_395, None, 701).is_none());
+    }
+
+    #[test]
+    fn a_basic_group_has_no_message_link() {
+        let chat = chat_of_kind(serde_json::json!({
+            "id": -456_789, "type": "group", "title": "Team",
+        }));
+        assert!(file_message_link(&chat.kind, -456_789, None, 701).is_none());
+    }
+
+    #[test]
+    fn a_delivered_files_link_is_spliced_onto_its_marker() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let pdf = write_fixture(dir.path(), "q3.pdf");
+        let scan = extract_local_files("Here is [Q3 report](q3.pdf).", Some(dir.path()));
+        assert_eq!(scan.text, "Here is 📎 Q3 report.");
+
+        let linked = link_file_markers(
+            &scan.text,
+            &scan,
+            &[(pdf, "https://t.me/c/123456789012/701".to_string())],
+        );
+        assert_eq!(
+            linked, "Here is [📎 Q3 report](https://t.me/c/123456789012/701).",
+            "the marker becomes a link to the bubble, everything else is untouched"
+        );
+    }
+
+    #[test]
+    fn prose_around_a_spliced_marker_is_untouched() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let pdf = write_fixture(dir.path(), "q3.pdf");
+        let scan = extract_local_files("before [x](q3.pdf) after", Some(dir.path()));
+        let linked = link_file_markers(
+            &scan.text,
+            &scan,
+            &[(pdf, "https://t.me/c/1/1".to_string())],
+        );
+        assert!(linked.starts_with("before "));
+        assert!(linked.ends_with(" after"));
+        assert!(linked.contains("[📎 x](https://t.me/c/1/1)"));
+    }
+
+    #[test]
+    fn a_moved_span_degrades_to_the_plain_marker() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let pdf = write_fixture(dir.path(), "q3.pdf");
+        let scan = extract_local_files("Here is [Q3 report](q3.pdf).", Some(dir.path()));
+        // The buffer moved under the span (a prefix landed): cutting the
+        // recorded range would splice a link over unrelated words, so the
+        // rewrite must decline and the marker stays plain.
+        let shifted = format!(">> {}", scan.text);
+        let linked = link_file_markers(
+            &shifted,
+            &scan,
+            &[(pdf, "https://t.me/c/1/701".to_string())],
+        );
+        assert_eq!(linked, shifted, "a moved span is never spliced");
+    }
+
+    #[test]
+    fn an_absent_link_keeps_the_plain_marker() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        write_fixture(dir.path(), "q3.pdf");
+        let scan = extract_local_files("Here is [Q3 report](q3.pdf).", Some(dir.path()));
+        // No links at all: a private chat (no link form) or a refusal. The
+        // marker is the reader's anchor either way; it never disappears.
+        assert_eq!(link_file_markers(&scan.text, &scan, &[]), scan.text);
+        // A DIFFERENT file's link must not claim this marker either.
+        let other = write_fixture(dir.path(), "other.pdf");
+        let linked = link_file_markers(
+            &scan.text,
+            &scan,
+            &[(other, "https://t.me/c/1/2".to_string())],
+        );
+        assert_eq!(linked, scan.text);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// the rich rewrite: a resolvable link becomes an in-place tg://document ref
+// ---------------------------------------------------------------------------
+
+mod rich {
+    use crate::utils::image::{DOC_ID_PREFIX, extract_local_files, rewrite_local_files};
+    use std::path::{Path, PathBuf};
+
+    const PDF_BYTES: &[u8] = b"%PDF-1.7\n1 0 obj\n<<>>\nendobj\n";
+
+    fn write_fixture(dir: &Path, name: &str) -> PathBuf {
+        let path = dir.join(name);
+        std::fs::write(&path, PDF_BYTES).expect("write fixture");
+        path
+    }
+
+    #[test]
+    fn a_resolved_link_is_rewritten_in_place_as_a_document_reference() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let pdf = write_fixture(dir.path(), "q3.pdf");
+
+        let rw = rewrite_local_files(
+            "Read [report](q3.pdf) first.",
+            Some(dir.path()),
+            DOC_ID_PREFIX,
+            &[],
+        );
+        assert_eq!(
+            rw.rich, "Read ![📎 report](tg://document?id=doc0) first.",
+            "the reference takes the link's exact position"
+        );
+        assert_eq!(rw.entries.len(), 1, "one entry per rewritten reference");
+        assert_eq!(rw.entries[0].id, "doc0");
+        assert_eq!(rw.entries[0].file.path, pdf);
+        assert_eq!(
+            rw.entries[0].file.caption.as_deref(),
+            Some("report"),
+            "the label captions the document, as the floor does"
+        );
+    }
+
+    #[test]
+    fn two_files_get_doc0_and_doc1_in_order() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let first = write_fixture(dir.path(), "a.pdf");
+        let second = write_fixture(dir.path(), "b.pdf");
+
+        let rw = rewrite_local_files(
+            "[A](a.pdf) then [B](b.pdf)",
+            Some(dir.path()),
+            DOC_ID_PREFIX,
+            &[],
+        );
+        assert_eq!(
+            rw.rich,
+            "![📎 A](tg://document?id=doc0) then ![📎 B](tg://document?id=doc1)"
+        );
+        assert_eq!(rw.entries[0].file.path, first);
+        assert_eq!(rw.entries[1].file.path, second);
+    }
+
+    #[test]
+    fn a_remote_link_is_left_byte_identical() {
+        let rw = rewrite_local_files(
+            "See [docs](https://example.com/x.pdf) online.",
+            None,
+            DOC_ID_PREFIX,
+            &[],
+        );
+        assert_eq!(rw.rich, "See [docs](https://example.com/x.pdf) online.");
+        assert!(rw.entries.is_empty());
+    }
+
+    #[test]
+    fn a_link_inside_a_code_span_is_left_byte_identical() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        write_fixture(dir.path(), "q3.pdf");
+
+        let rw = rewrite_local_files(
+            "run `cat [x](q3.pdf)` now",
+            Some(dir.path()),
+            DOC_ID_PREFIX,
+            &[],
+        );
+        assert_eq!(rw.rich, "run `cat [x](q3.pdf)` now");
+        assert!(rw.entries.is_empty());
+    }
+
+    #[test]
+    fn a_missing_file_stays_a_verbatim_link() {
+        // A rejected candidate is the SCAN's to report; the rewrite stays
+        // silent and the reader keeps the link that carries its label.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let rw = rewrite_local_files(
+            "See [ghost](nope.pdf).",
+            Some(dir.path()),
+            DOC_ID_PREFIX,
+            &[],
+        );
+        assert_eq!(rw.rich, "See [ghost](nope.pdf).");
+        assert!(rw.entries.is_empty());
+    }
+
+    #[test]
+    fn an_already_delivered_file_is_consumed_not_referenced() {
+        // The file is already in the chat (an intermediate shipped it).
+        // Inlining it AGAIN would put a second copy in the chat, and leaving
+        // the link would point at a file the reader already has: consume the
+        // reference and record nothing.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let pdf = write_fixture(dir.path(), "q3.pdf");
+
+        let rw = rewrite_local_files(
+            "Read [report](q3.pdf) first.",
+            Some(dir.path()),
+            DOC_ID_PREFIX,
+            &[pdf],
+        );
+        assert_eq!(rw.rich, "Read  first.", "the consumed link leaves quietly");
+        assert!(rw.entries.is_empty());
+    }
+
+    #[test]
+    fn a_custom_prefix_namespaces_the_ids() {
+        // Entries are matched to references BY ID inside one message's media
+        // array, so two families cannot share a prefix.
+        let dir = tempfile::tempdir().expect("tempdir");
+        write_fixture(dir.path(), "q3.pdf");
+
+        let rw = rewrite_local_files("[r](q3.pdf)", Some(dir.path()), "attachment", &[]);
+        assert_eq!(rw.rich, "![📎 r](tg://document?id=attachment0)");
+    }
+
+    #[test]
+    fn an_empty_label_falls_back_to_the_basename_in_the_alt() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        write_fixture(dir.path(), "q3.pdf");
+
+        let rw = rewrite_local_files("[](q3.pdf)", Some(dir.path()), DOC_ID_PREFIX, &[]);
+        assert_eq!(rw.rich, "![📎 q3.pdf](tg://document?id=doc0)");
+        assert_eq!(rw.entries[0].file.caption, None, "no label, no caption");
+    }
+
+    #[test]
+    fn the_scan_and_the_rewrite_agree_on_what_is_a_file() {
+        // One input, both walks: the marker form (floor) and the reference
+        // form (rich) must claim the SAME references, or a link could be
+        // reported twice or not at all.
+        let dir = tempfile::tempdir().expect("tempdir");
+        write_fixture(dir.path(), "q3.pdf");
+        let input = "[ok](q3.pdf) and [remote](https://x/y) and `[/code/q.pdf](q.pdf)`";
+
+        let scan = extract_local_files(input, Some(dir.path()));
+        let rw = rewrite_local_files(input, Some(dir.path()), DOC_ID_PREFIX, &[]);
+        assert_eq!(scan.attachments.len(), rw.entries.len(), "same claims");
+        assert_eq!(scan.attachments[0].path, rw.entries[0].file.path);
+        // The scanner keeps everything it did not claim byte-identical, and
+        // so must the rewrite, minus the one claim.
+        assert!(scan.text.contains("📎"));
+        assert!(rw.rich.contains("[remote](https://x/y)"));
+        assert!(rw.rich.contains("`[/code/q.pdf](q.pdf)`"));
+    }
+}
+
+// ---------------------------------------------------------------------------
+// the intermediate plane: a rich report's files ship (inline) or mark (floor)
+// ---------------------------------------------------------------------------
+
+mod intermediate {
+    use crate::channels::telegram::TelegramState;
+    use crate::channels::telegram::flow::StreamingState;
+    use crate::channels::telegram::intermediates::deliver_intermediate_message;
+    use std::path::{Path, PathBuf};
+    use std::sync::Arc;
+
+    const CHAT: i64 = 133_526_395;
+    const PDF_BYTES: &[u8] = b"%PDF-1.7\n1 0 obj\n<<>>\nendobj\n";
+    const RICH_OK: &str = r#"{"ok":true,"result":{"message_id":812}}"#;
+    const SEND_MESSAGE_OK: &str = r#"{"ok":true,"result":{"message_id":701,"date":1757166400,"chat":{"id":133526395,"type":"private"},"text":"ok"}}"#;
+
+    fn write_fixture(dir: &Path, name: &str) -> PathBuf {
+        let path = dir.join(name);
+        std::fs::write(&path, PDF_BYTES).expect("write fixture");
+        path
+    }
+
+    fn test_bot(server: &mockito::ServerGuard) -> teloxide::Bot {
+        teloxide::Bot::with_client(
+            "TESTTOKEN",
+            reqwest_teloxide::Client::builder().build().unwrap(),
+        )
+        .set_api_url(server.url().parse().unwrap())
+    }
+
+    /// Minimal StreamingState for the intermediate plane (field set mirrors
+    /// the house pattern in src/tests/telegram_state_test.rs, plus the
+    /// #1918 delivered ledger this module reads back).
+    fn streaming() -> Arc<std::sync::Mutex<StreamingState>> {
+        Arc::new(std::sync::Mutex::new(StreamingState {
+            is_dm: true,
+            pending_suggestions: None,
+            pending_trailer: None,
+            delivered_file_paths: Vec::new(),
+            msg_id: None,
+            thinking: String::new(),
+            tool_msgs: Vec::new(),
+            display_queue: Vec::new(),
+            open_group_msg_id: None,
+            rich_transport_failures: 0,
+            flow_entries: Vec::new(),
+            flow_status: None,
+            flow_rich: false,
+            response: String::new(),
+            final_bubble: None,
+            dirty: false,
+            recreate: false,
+            header_preview: None,
+            compacting: false,
+            sections: Default::default(),
+            retained_goal: None,
+            applied_plan_kb: Default::default(),
+            tool_round_count: 0,
+            tools_started_at: None,
+            turn_started_at: std::time::Instant::now(),
+            flow_outcome: None,
+            bg_indicator: None,
+            bg_count: None,
+            subagent_counts: Default::default(),
+            sent_intermediates: Vec::new(),
+            intermediate_msg_ids: Vec::new(),
+            voice_msg_ids: Vec::new(),
+            processing: true,
+            is_cli: false,
+        }))
+    }
+
+    #[tokio::test]
+    async fn a_report_with_a_file_inlines_it_in_the_rich_media_array() {
+        // The rich plane owns the file: the document rides the bubble's media
+        // array at its reference, so there is NO detached document bubble,
+        // and the file is recorded as delivered so the final leg cannot
+        // ship a second copy.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let pdf = write_fixture(dir.path(), "q3.pdf");
+        let mut server = mockito::Server::new_async().await;
+        let rich_mock = server
+            .mock("POST", "/botTESTTOKEN/sendRichMessage")
+            .match_body(mockito::Matcher::Regex(
+                "tg://document\\?id=doc0".to_string(),
+            ))
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(RICH_OK)
+            .expect(1)
+            .create_async()
+            .await;
+        let document_mock = server
+            .mock("POST", "/botTESTTOKEN/SendDocument")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(SEND_MESSAGE_OK)
+            // expect(0) is the assertion: an inlined document never also
+            // ships as its own detached bubble.
+            .expect(0)
+            .create_async()
+            .await;
+
+        let bot = test_bot(&server);
+        let st = streaming();
+        let tg = TelegramState::new();
+        let ok = deliver_intermediate_message(
+            &bot,
+            teloxide::types::ChatId(CHAT),
+            None,
+            &st,
+            &tg,
+            uuid::Uuid::new_v4(),
+            dir.path(),
+            "Report ready: [q3.pdf](q3.pdf)\n\nSome prose so the report has a body.",
+        )
+        .await;
+
+        assert!(ok, "the rich bubble is the delivery");
+        rich_mock.assert_async().await;
+        document_mock.assert_async().await;
+        let s = st.lock().unwrap_or_else(|e| e.into_inner());
+        assert_eq!(
+            s.delivered_file_paths,
+            vec![pdf],
+            "an inlined file counts as delivered for the final leg"
+        );
+        assert_eq!(s.sent_intermediates.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_declined_rich_send_ships_the_file_as_its_own_bubble() {
+        // When the rich send fails, the floor is the file's only remaining
+        // leg: it ships as its own document bubble and the marker text
+        // carries the reader's anchor. A marker with no delivery behind it
+        // would point at a file that never reaches the chat.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let pdf = write_fixture(dir.path(), "q3.pdf");
+        let mut server = mockito::Server::new_async().await;
+        // The rich ladder fires twice on a dead endpoint: markdown+media
+        // first, then the HTML dialect fallback. Both decline, and only then
+        // does the file drop to the floor.
+        let rich_mock = server
+            .mock("POST", "/botTESTTOKEN/sendRichMessage")
+            .with_status(500)
+            .with_body("boom")
+            .expect(2)
+            .create_async()
+            .await;
+        let document_mock = server
+            .mock("POST", "/botTESTTOKEN/SendDocument")
+            .match_body(mockito::Matcher::Regex("q3".to_string()))
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(SEND_MESSAGE_OK)
+            .expect(1)
+            .create_async()
+            .await;
+        let text_mock = server
+            .mock("POST", "/botTESTTOKEN/SendMessage")
+            .match_body(mockito::Matcher::Regex("q3.pdf".to_string()))
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(SEND_MESSAGE_OK)
+            .expect(1)
+            .create_async()
+            .await;
+
+        let bot = test_bot(&server);
+        let st = streaming();
+        let tg = TelegramState::new();
+        let ok = deliver_intermediate_message(
+            &bot,
+            teloxide::types::ChatId(CHAT),
+            None,
+            &st,
+            &tg,
+            uuid::Uuid::new_v4(),
+            dir.path(),
+            "Report ready: [q3.pdf](q3.pdf)\n\nProse body for the bubble.",
+        )
+        .await;
+
+        rich_mock.assert_async().await;
+        document_mock.assert_async().await;
+        text_mock.assert_async().await;
+        assert!(ok);
+        let s = st.lock().unwrap_or_else(|e| e.into_inner());
+        assert_eq!(s.delivered_file_paths, vec![pdf]);
+    }
+
+    #[tokio::test]
+    async fn a_repeated_intermediate_does_not_ship_its_file_twice() {
+        // The dedup ledger keeps the PRE-scan text, so an identical
+        // intermediate misses no check and returns before the scan runs:
+        // the file shipped the first time, and the second attempt must add
+        // no request at all.
+        let dir = tempfile::tempdir().expect("tempdir");
+        write_fixture(dir.path(), "q3.pdf");
+        let mut server = mockito::Server::new_async().await;
+        let rich_mock = server
+            .mock("POST", "/botTESTTOKEN/sendRichMessage")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(RICH_OK)
+            .expect(1)
+            .create_async()
+            .await;
+
+        let bot = test_bot(&server);
+        let st = streaming();
+        let tg = TelegramState::new();
+        let text = "Report ready: [q3.pdf](q3.pdf)\n\nProse body for the bubble.";
+        let first = deliver_intermediate_message(
+            &bot,
+            teloxide::types::ChatId(CHAT),
+            None,
+            &st,
+            &tg,
+            uuid::Uuid::new_v4(),
+            dir.path(),
+            text,
+        )
+        .await;
+        let second = deliver_intermediate_message(
+            &bot,
+            teloxide::types::ChatId(CHAT),
+            None,
+            &st,
+            &tg,
+            uuid::Uuid::new_v4(),
+            dir.path(),
+            text,
+        )
+        .await;
+
+        assert!(first);
+        assert!(second, "the repeat reports success without re-delivering");
+        rich_mock.assert_async().await; // exactly ONE rich send happened
     }
 }

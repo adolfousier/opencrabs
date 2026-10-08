@@ -20,6 +20,7 @@ fn base_state(with_card: bool) -> StreamingState {
         is_dm: false,
         pending_suggestions: None,
         pending_trailer: None,
+        delivered_file_paths: Vec::new(),
         msg_id: None,
         thinking: String::new(),
         tool_msgs: Vec::new(),
