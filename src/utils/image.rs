@@ -946,6 +946,46 @@ fn push_document_ref(out: &mut String, label: &str, target: &str, id: &str) {
     out.push_str(&format!("![📎 {alt}](tg://document?id={id})"));
 }
 
+/// Read each resolved file once, before the rewrite (#1921).
+///
+/// A `tg://document?id=` reference resolves ONLY through its media-array
+/// entry, so the rich body must never name a document whose bytes did not
+/// make it into the array: Telegram judges such a reference unresolvable and
+/// can reject the whole message over it. The probe is what keeps that
+/// invariant true by construction. It returns the bytes keyed by resolved
+/// path, plus one failure entry per file it could not read, so the caller
+/// can consume those references instead of emitting them and report the
+/// reason. Reading happens here, once, rather than per consumer.
+pub(crate) fn probe_document_bytes(
+    attachments: &[LocalFile],
+) -> (
+    std::collections::HashMap<PathBuf, Vec<u8>>,
+    Vec<LocalImageFailure>,
+) {
+    let mut readable = std::collections::HashMap::new();
+    let mut failures = Vec::new();
+    for file in attachments {
+        match std::fs::read(&file.path) {
+            Ok(bytes) => {
+                readable.insert(file.path.clone(), bytes);
+            }
+            Err(e) => {
+                tracing::error!(
+                    "Telegram: failed to read file {} for the rich array: {}",
+                    file.path.display(),
+                    e
+                );
+                failures.push(LocalImageFailure {
+                    raw: file.path.display().to_string(),
+                    resolved: Some(file.path.clone()),
+                    reason: LocalImageFailureReason::Unreadable,
+                });
+            }
+        }
+    }
+    (readable, failures)
+}
+
 /// Scan a reply for markdown links to local files and hand back the rich form
 /// with each resolvable link replaced in place by a `tg://document` media
 /// reference (#1918), together with the validated files and the id each got.

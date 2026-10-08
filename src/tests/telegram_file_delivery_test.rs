@@ -969,6 +969,31 @@ mod rich {
         assert!(rw.rich.contains("[remote](https://x/y)"));
         assert!(rw.rich.contains("`[/code/q.pdf](q.pdf)`"));
     }
+
+    #[test]
+    fn a_hand_written_document_reference_passes_through_byte_identical() {
+        // The rewriter owns references it EMITS; a tg:// link the model
+        // wrote itself is a telegram media ref, not a local path, and
+        // rewriting it would double-encode a reference that already points
+        // at the wire.
+        let dir = tempfile::tempdir().expect("tempdir");
+        write_fixture(dir.path(), "q3.pdf");
+
+        let rw = rewrite_local_files(
+            "See ![sheet](tg://document?id=q3) and [report](q3.pdf).",
+            Some(dir.path()),
+            DOC_ID_PREFIX,
+            &[],
+        );
+
+        assert!(
+            rw.rich.contains("![sheet](tg://document?id=q3)"),
+            "a hand-written tg:// reference survives untouched: {:?}",
+            rw.rich
+        );
+        assert_eq!(rw.entries.len(), 1, "only the local link produces an entry");
+        assert_eq!(rw.entries[0].id, "doc0");
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1210,5 +1235,48 @@ mod intermediate {
         assert!(first);
         assert!(second, "the repeat reports success without re-delivering");
         rich_mock.assert_async().await; // exactly ONE rich send happened
+    }
+
+    // The shield invariant (#1921): a tg://document reference reaches the
+    // wire only with its media entry. The probe is where that is enforced.
+    #[cfg(unix)]
+    #[test]
+    fn the_probe_reports_an_unreadable_file_instead_of_its_bytes() {
+        use crate::utils::image::{LocalFile, probe_document_bytes};
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let good = write_fixture(dir.path(), "good.pdf");
+        let sealed = dir.path().join("sealed.pdf");
+        std::fs::write(&sealed, b"%PDF-1.7\n").expect("write sealed");
+        std::fs::set_permissions(&sealed, std::fs::Permissions::from_mode(0o000))
+            .expect("seal the file");
+
+        let files = vec![
+            LocalFile {
+                path: good.clone(),
+                caption: Some("good".to_string()),
+                marker_span: None,
+            },
+            LocalFile {
+                path: sealed.clone(),
+                caption: Some("sealed".to_string()),
+                marker_span: None,
+            },
+        ];
+
+        let (readable, failures) = probe_document_bytes(&files);
+
+        assert_eq!(
+            readable.keys().collect::<Vec<_>>(),
+            vec![&good],
+            "exactly the readable file comes back with bytes"
+        );
+        assert_eq!(failures.len(), 1, "one failure, naming the sealed file");
+        assert_eq!(failures[0].resolved, Some(sealed.clone()));
+        assert_eq!(
+            failures[0].reason,
+            crate::utils::image::LocalImageFailureReason::Unreadable
+        );
     }
 }

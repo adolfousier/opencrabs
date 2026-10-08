@@ -263,48 +263,58 @@ pub(crate) async fn deliver_intermediate_message(
     let mut file_scan = crate::utils::image::extract_local_files(dedup_text, Some(base_dir));
     let marked = std::mem::take(&mut file_scan.text);
 
+    // Read every candidate's bytes BEFORE the rewrite (#1921). A
+    // `tg://document` reference resolves only through its media-array entry,
+    // so a file that cannot be read must not be referenced: its link is
+    // consumed instead (the same treatment an already-delivered file gets),
+    // the failure list names it, and no reference ever reaches the wire
+    // without its entry riding the same request.
+    let (readable, read_failures) =
+        crate::utils::image::probe_document_bytes(&file_scan.attachments);
+    file_scan.failures.extend(read_failures);
+    let unreadable: Vec<std::path::PathBuf> = file_scan
+        .attachments
+        .iter()
+        .map(|f| f.path.clone())
+        .filter(|p| !readable.contains_key(p))
+        .collect();
+
     // The rich plane can do better than a marker: the same rewrite the final
     // leg's rich arm uses replaces each resolvable link IN PLACE with a
     // `tg://document` reference, and the entries it returns ride the rich
     // bubble's media array, so the document renders AT its reference instead
     // of as a detached bubble. The rewrite runs on the pre-scan text, since
-    // nothing has been delivered by this plane yet, so nothing is consumed.
-    // A file whose bytes cannot be read here joins the failure list instead
-    // of the array, and the notice below names it.
+    // nothing has been delivered by this plane yet; the unreadable set is
+    // consumed rather than referenced, so the array and the body can never
+    // disagree.
     let fw = crate::utils::image::rewrite_local_files(
         dedup_text,
         Some(base_dir),
         crate::utils::DOC_ID_PREFIX,
-        &[],
+        &unreadable,
     );
     let mut doc_media: Vec<super::rich::mermaid::MediaEntry> = Vec::new();
+    let mut all_attached = true;
     for entry in &fw.entries {
-        match tokio::fs::read(&entry.file.path).await {
-            Ok(bytes) => doc_media.push(super::rich::mermaid::MediaEntry {
+        match readable.get(&entry.file.path) {
+            Some(bytes) => doc_media.push(super::rich::mermaid::MediaEntry {
                 id: entry.id.clone(),
                 url: None,
-                bytes: Some(bytes),
+                bytes: Some(bytes.clone()),
                 kind: super::rich::mermaid::MediaKind::Document,
                 name: Some(super::delivery::document_part_name(&entry.file.path)),
             }),
-            Err(e) => {
-                tracing::error!(
-                    "Telegram: failed to read file {} for the rich array: {}",
-                    entry.file.path.display(),
-                    e
-                );
-                file_scan
-                    .failures
-                    .push(crate::utils::image::LocalImageFailure {
-                        raw: entry.file.path.display().to_string(),
-                        resolved: Some(entry.file.path.clone()),
-                        reason: crate::utils::image::LocalImageFailureReason::Unreadable,
-                    });
+            None => {
+                // Unreachable while the consume list above matches the probe
+                // exactly, but the failure mode is a reference without an
+                // entry, so the response is to abandon the rich form
+                // entirely rather than ship one.
+                all_attached = false;
             }
         }
     }
     let plain_text = crate::utils::image::append_file_failure_notice(&marked, &file_scan.failures);
-    let rich_markdown = if doc_media.is_empty() {
+    let rich_markdown = if doc_media.is_empty() || !all_attached {
         plain_text.clone()
     } else {
         crate::utils::image::append_file_failure_notice(&fw.rich, &file_scan.failures)
