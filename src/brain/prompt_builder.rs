@@ -766,6 +766,7 @@ const TELEGRAM_CHANNEL_CAPABILITIES_BODY: &str = "\
 - Markdown tables: GFM tables rendered natively as rich Telegram tables (header on own line, blank line before, delimiter row).
 - HTML glyphs / formatting: rich HTML entities, blockquotes (<blockquote>), code, and emoji styling.
 - Image includes: Markdown syntax (![alt](path/or/url)) for local/remote image rendering.
+- Local file links: a markdown link ([label](path)) whose target is an existing local file is delivered as a document. The reference is replaced in your reply by a visible marker naming the file (📎 <label>, or the file's own basename when the label is empty); in rich-formatting mode the document is inlined at that spot instead. A delivered file's marker becomes a t.me link to the message that carries the document where the chat kind has one (supergroup, topic, channel); a private chat keeps the plain marker. A target that does not resolve stays as plain text in the reply, so a link to a file that is not there still reads as a link.
 - Renderer condition: the lines above describe the native rich plane, gated on [channels.telegram] rich_messages (default true). With it off, replies fall to the HTML plane: bold, code and links still style and tables reflow as aligned monospace grids, but there are no native Telegram tables, no blockquote blocks and no inline diagram rendering; check the flag before promising native formatting.";
 
 /// The #1773 file-delivery directive, shared by both capability blocks: a

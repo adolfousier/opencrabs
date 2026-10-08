@@ -134,6 +134,55 @@ fn test_file_delivery_directive_in_both_blocks() {
 }
 
 #[test]
+fn test_local_file_link_bullet_is_telegram_only_and_matches_the_shipped_behaviour() {
+    // #1916/#1918/#1940: the preamble teaches the model what a markdown link
+    // to a local file becomes. The bullet belongs to the TELEGRAM block, a
+    // document bubble is a Telegram renderer fact, and the generic block
+    // exists precisely so a channel with no capability block is not taught
+    // renderer behaviour it may not have.
+    //
+    // The wording holds in BOTH modes on purpose (#1940): the note is
+    // injected for every Telegram-bound session and `rich_messages` is not
+    // consulted, so the marker (which both modes carry) is the main clause
+    // and the inline-at-reference behaviour is named as the rich mode's.
+    let telegram = telegram_channel_capabilities();
+    let generic = channel_file_delivery_capabilities();
+    assert_eq!(
+        telegram.matches("- Local file links:").count(),
+        1,
+        "the file-link bullet must appear exactly once in the Telegram block"
+    );
+    assert!(
+        !generic.contains("- Local file links:"),
+        "a document bubble is a Telegram renderer fact"
+    );
+    assert!(
+        telegram.contains("is delivered as a document"),
+        "the bullet states the OUTCOME, not just the syntax"
+    );
+    assert!(
+        telegram.contains("visible marker naming the file"),
+        "the marker is what the reader sees in place of the link (#1918)"
+    );
+    assert!(
+        telegram.contains("inlined at that spot"),
+        "the rich plane puts the document AT the reference (#1918)"
+    );
+    assert!(
+        telegram.contains("t.me link to the message that carries the document"),
+        "a delivered file's marker links to its bubble (#1918)"
+    );
+    assert!(
+        telegram.contains("a private chat keeps the plain marker"),
+        "chats without a link form must not be promised one (#1918)"
+    );
+    assert!(
+        !telegram.contains("the link label as its caption"),
+        "the caption promise died with #1918: the label names the marker now"
+    );
+}
+
+#[test]
 fn test_compaction_preserves_capabilities_in_system_brain() {
     // Upstream welds nothing onto the summary (#1649/#1676): system_brain
     // survives compaction untouched, which is WHY the injection needs no
