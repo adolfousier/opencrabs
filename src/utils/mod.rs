@@ -40,8 +40,10 @@ pub use approval::{
 pub use directives::extract_leaked_suggestions;
 pub use file_extract::{FileContent, classify_file, inject_file_content, process_file_with_vision};
 pub use image::{
-    extract_img_markers, extract_react_marker, extract_react_marker_lenient, extract_vid_markers,
-    strip_invalid_react_markers,
+    LocalFile, LocalFileScan, LocalImageFailure, LocalImageFailureReason,
+    TELEGRAM_DOCUMENT_MAX_BYTES, append_file_failure_notice, code_regions, extract_img_markers,
+    extract_local_files, extract_react_marker, extract_react_marker_lenient, extract_vid_markers,
+    file_failure_notice, strip_invalid_react_markers, validate_local_file,
 };
 pub use prompt_analyzer::PromptAnalyzer;
 pub use retry::{RetryConfig, RetryableError, retry, retry_with_check};

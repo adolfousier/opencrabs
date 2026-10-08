@@ -1,3 +1,5 @@
+use std::path::{Path, PathBuf};
+
 /// Extract `<<IMG:path>>` markers from text.
 ///
 /// Returns `(cleaned_text, vec_of_paths)` — the text has all markers removed
@@ -356,4 +358,433 @@ fn extract_markers_with_prefix(text: &str, prefix: &str) -> (String, Vec<String>
     }
 
     (out.trim().to_string(), paths)
+}
+
+// ── Local-file link delivery (#1916) ───────────────────────────────────────
+//
+// A reply can name a file on this host with an ordinary markdown link,
+// `[label](/srv/reports/q3.pdf)`. Until now that link reached the chat as
+// dead text: the label rendered, the target went nowhere, and the file never
+// left the machine. This section scans a reply for such links, validates the
+// targets, and hands the resolved files to the channel delivery layer, which
+// ships each one as a document bubble.
+//
+// One policy rules the whole family: a candidate is removed from the reply
+// text ONLY when it resolved, validated, and will actually be delivered. A
+// REJECTED candidate (missing file, empty file, unreadable) stays in the text
+// byte-identical AND is reported as a failure, because a link carries its own
+// label and a silent strip would delete the reader's only clue about what was
+// referenced. A non-file target (remote URL, `mailto:`, in-page anchor,
+// Telegram media ref) is left as written: Telegram resolves those itself.
+
+/// Why a candidate reference was rejected. One taxonomy shared by every media
+/// family, so a notice can name the reason without the channel layer knowing
+/// how validation works.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LocalImageFailureReason {
+    /// The path does not exist.
+    NotFound,
+    /// The path exists but is not a regular file (a directory, a socket).
+    NotAFile,
+    /// The file exists but holds 0 bytes.
+    Empty,
+    /// The file exists but could not be opened or read.
+    Unreadable,
+    /// More bytes than the family's size ceiling.
+    TooLarge,
+    /// The attachment was extracted and validated, but the channel refused to
+    /// send it (API error, media-type rejection, platform size ceiling).
+    /// Distinct from every other reason: the reference is not the problem.
+    DeliveryFailed,
+}
+
+impl LocalImageFailureReason {
+    /// Short human- and model-facing phrase used in notices.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::NotFound => "file not found",
+            Self::NotAFile => "not a regular file",
+            Self::Empty => "file is empty (0 bytes)",
+            Self::Unreadable => "file could not be read",
+            Self::TooLarge => "larger than the size limit",
+            Self::DeliveryFailed => "the channel could not deliver it",
+        }
+    }
+}
+
+/// One reference that was removed from the reply but could not be delivered,
+/// with the reason the model needs in order to fix it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LocalImageFailure {
+    /// The reference exactly as it appeared in the reply text.
+    pub raw: String,
+    /// The path the reference resolved to, when resolution succeeded.
+    pub resolved: Option<PathBuf>,
+    /// Why the candidate was rejected.
+    pub reason: LocalImageFailureReason,
+}
+
+impl LocalImageFailure {
+    /// `raw (reason)`: the phrase quoted back to the model in a nudge.
+    pub fn describe(&self) -> String {
+        format!("{} ({})", self.raw, self.reason.as_str())
+    }
+}
+
+/// Per-byte predicate: `regions[i]` is true when byte `i` of `text` sits
+/// inside a code span or fenced block. A backtick toggles the state, so a
+/// fenced block (three backticks) and an inline span (one) both open and
+/// close with the same rule. One home for "is this inside code", shared by
+/// every scanner that walks markdown-shaped reply text.
+pub fn code_regions(text: &str) -> Vec<bool> {
+    let mut regions = vec![false; text.len()];
+    let mut in_code = false;
+    for (i, byte) in text.bytes().enumerate() {
+        regions[i] = in_code;
+        if byte == b'`' {
+            in_code = !in_code;
+        }
+    }
+    regions
+}
+
+/// True when the reference is a Telegram media reference rather than a path.
+/// These are resolved by Telegram against the `media` array of the rich
+/// request that carries them, so a caller must never join one to the session
+/// working directory and report a nonsense path back to the model.
+pub(crate) fn is_telegram_media_ref(raw: &str) -> bool {
+    let lower = raw.to_ascii_lowercase();
+    lower.starts_with("tg://") || lower.starts_with("attach://")
+}
+
+/// True when the reference is a fetchable network URL rather than a local
+/// path. `mailto:` and `ftp://` are deliberately absent: neither names a file
+/// this host can ship, so a reference carrying one is left in the text as
+/// written rather than reported as a missing file.
+pub(crate) fn is_remote_url(raw: &str) -> bool {
+    const SCHEMES: [&str; 3] = ["http://", "https://", "data:"];
+    let lower = raw.to_ascii_lowercase();
+    SCHEMES.iter().any(|scheme| lower.starts_with(scheme))
+}
+
+/// Parse a markdown reference starting at `start` (a char boundary where the
+/// text begins with `[`). `bracket_len` is the length of the opening bracket:
+/// 2 for an image (`![alt](target)`), 1 for a link (`[label](target)`); the
+/// two forms differ in nothing else. Accepts the angle-bracket form
+/// `(<target>)` that markdown requires when the path holds spaces, and an
+/// optional `"title"` / `'title'` after the target. Returns
+/// `(end_byte_exclusive, label, raw_target, title)`.
+fn parse_markdown_ref(
+    text: &str,
+    start: usize,
+    bracket_len: usize,
+) -> Option<(usize, String, String, Option<String>)> {
+    let open = match bracket_len {
+        2 => "![",
+        1 => "[",
+        _ => return None,
+    };
+    debug_assert!(text[start..].starts_with(open));
+    // `\![alt](path)` and `\[label](path)` are escaped literal text, not
+    // references.
+    if start > 0 && text[..start].ends_with('\\') {
+        return None;
+    }
+    let label_end = text[start + bracket_len..].find(']')?;
+    let paren = start + bracket_len + label_end + 1;
+    if !text[paren..].starts_with('(') {
+        return None;
+    }
+    let label = text[start + bracket_len..start + bracket_len + label_end].to_string();
+    let cursor = skip_whitespace(text, paren + 1);
+    let (target, mut after_target) = if text[cursor..].starts_with('<') {
+        let close = text[cursor + 1..].find('>')?;
+        let target = text[cursor + 1..cursor + 1 + close].to_string();
+        (target, cursor + 1 + close + 1)
+    } else {
+        let mut end = cursor;
+        while let Some(ch) = text[end..].chars().next() {
+            if ch.is_whitespace() || ch == ')' {
+                break;
+            }
+            end += ch.len_utf8();
+        }
+        (text[cursor..end].to_string(), end)
+    };
+    after_target = skip_whitespace(text, after_target);
+    // The title is the only caption carrier markdown offers, so it is
+    // captured here instead of being stepped over.
+    let mut title: Option<String> = None;
+    if let Some(quote) = text[after_target..].chars().next()
+        && (quote == '"' || quote == '\'')
+    {
+        let close = text[after_target + 1..].find(quote)?;
+        let parsed = text[after_target + 1..after_target + 1 + close].trim();
+        if !parsed.is_empty() {
+            title = Some(parsed.to_string());
+        }
+        after_target = skip_whitespace(text, after_target + 1 + close + 1);
+    }
+    if !text[after_target..].starts_with(')') || target.trim().is_empty() {
+        return None;
+    }
+    Some((after_target + 1, label, target, title))
+}
+
+/// Byte offset of the first non-whitespace char at or after `from`.
+fn skip_whitespace(text: &str, from: usize) -> usize {
+    let mut cursor = from;
+    while let Some(ch) = text[cursor..].chars().next() {
+        if !ch.is_whitespace() {
+            break;
+        }
+        cursor += ch.len_utf8();
+    }
+    cursor
+}
+
+/// True when `raw` begins a URI scheme (`mailto:`, `ftp:`, `tel:`, ...).
+/// `http(s)://`, `data:` and `tg://`/`attach://` are covered by the caller's
+/// earlier checks; this catches every OTHER scheme so a `mailto:` link is
+/// left as written rather than joined to the session working directory and
+/// reported as a missing file.
+fn has_url_scheme(raw: &str) -> bool {
+    let mut chars = raw.chars();
+    match chars.next() {
+        Some(first) if first.is_ascii_alphabetic() => {}
+        _ => return false,
+    }
+    for ch in chars {
+        if ch == ':' {
+            return true;
+        }
+        if !(ch.is_ascii_alphanumeric() || ch == '+' || ch == '-' || ch == '.') {
+            return false;
+        }
+    }
+    false
+}
+
+/// Telegram's `sendDocument` ceiling. The one size gate that matters for the
+/// family: a larger file is reported as a rejection reason BEFORE delivery is
+/// attempted, instead of surfacing as an API refusal the model never saw
+/// coming.
+pub const TELEGRAM_DOCUMENT_MAX_BYTES: u64 = 50 * 1024 * 1024;
+
+/// Validate a resolved local-file candidate: it must exist, be a regular
+/// file, hold at least one byte, be openable, and fit the document size
+/// ceiling. There is deliberately NO format gate: any bytes can ship as a
+/// document, and rejecting an unrecognised format would delete a referenced
+/// file from the reply and deliver nothing.
+pub fn validate_local_file(path: &Path) -> Result<(), LocalImageFailureReason> {
+    let meta = match std::fs::metadata(path) {
+        Ok(meta) => meta,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            return Err(LocalImageFailureReason::NotFound);
+        }
+        Err(_) => return Err(LocalImageFailureReason::Unreadable),
+    };
+    if !meta.is_file() {
+        return Err(LocalImageFailureReason::NotAFile);
+    }
+    if meta.len() == 0 {
+        return Err(LocalImageFailureReason::Empty);
+    }
+    if meta.len() > TELEGRAM_DOCUMENT_MAX_BYTES {
+        return Err(LocalImageFailureReason::TooLarge);
+    }
+    std::fs::File::open(path).map_err(|_| LocalImageFailureReason::Unreadable)?;
+    Ok(())
+}
+
+/// What a markdown link target resolves to for the file family:
+/// classification and validation in ONE step.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Resolution {
+    /// A local file that exists, is a regular non-empty file, is openable and
+    /// fits the document size ceiling.
+    Local(PathBuf),
+    /// A local path that failed validation, with the resolved path and why.
+    Rejected {
+        path: PathBuf,
+        reason: LocalImageFailureReason,
+    },
+    /// Not a filesystem candidate at all: a remote URL, a Telegram media ref,
+    /// a `mailto:`/`tel:`-style scheme, an in-page `#anchor`, or a relative
+    /// path with no base directory to resolve it against. Left as written.
+    Skip,
+}
+
+/// Resolve AND validate one link target for the file family.
+///
+/// ONE policy for both the scan ([`record_file_candidate`]) and any later
+/// consumer, so the two can never disagree about which links were files.
+/// `~/...` goes through the shared tilde expander, an absolute path is taken
+/// as-is, and a relative path is joined to `base_dir` (the session working
+/// directory).
+fn resolve_file_target(target: &str, base_dir: Option<&Path>) -> Resolution {
+    let trimmed = target.trim();
+    // An in-page anchor (`#section`) is not a file.
+    if trimmed.is_empty() || trimmed.starts_with('#') {
+        return Resolution::Skip;
+    }
+    // A link Telegram resolves itself (a real URL, a media ref), or one with
+    // any other URI scheme (`mailto:`, `ftp:`, `tel:`), must not be joined to
+    // the cwd and reported as a missing file.
+    if is_remote_url(trimmed) || is_telegram_media_ref(trimmed) || has_url_scheme(trimmed) {
+        return Resolution::Skip;
+    }
+    let expanded = crate::brain::tools::error::expand_tilde(trimmed);
+    let path = if expanded.is_absolute() {
+        expanded
+    } else {
+        match base_dir {
+            Some(dir) => dir.join(expanded),
+            // A relative target with no base directory may be ordinary prose
+            // that merely looks like a link: leave it as written.
+            None => return Resolution::Skip,
+        }
+    };
+    match validate_local_file(&path) {
+        Ok(()) => Resolution::Local(path),
+        Err(reason) => Resolution::Rejected { path, reason },
+    }
+}
+
+/// A resolved local file. The caption belongs to the link written around the
+/// path, so the two travel as ONE value: parallel vectors would desync the
+/// first time a candidate is dropped from one and not the other.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LocalFile {
+    /// Absolute path to the file on disk.
+    pub path: PathBuf,
+    /// The markdown link label, `[label](target)`, shipped as the document
+    /// caption. `None` when the label was empty.
+    pub caption: Option<String>,
+}
+
+/// Result of scanning a reply for links to local files.
+#[derive(Debug, Clone, Default)]
+pub struct LocalFileScan {
+    /// Reply text with every DELIVERED local-file link removed. A remote
+    /// link, a non-file scheme, a reference inside a code span and a
+    /// REJECTED candidate are all left byte-identical.
+    pub text: String,
+    /// Resolved and validated local files, in order of appearance.
+    pub attachments: Vec<LocalFile>,
+    /// Rejected local candidates, in order of appearance.
+    pub failures: Vec<LocalImageFailure>,
+}
+
+/// File one parsed link into the scan accumulators. Returns `true` when the
+/// reference was consumed and must leave the reply text, which happens ONLY
+/// for a resolved, validated file. A rejected candidate or a non-file target
+/// returns `false`, so the link is copied through byte-identical: a remote
+/// link Telegram resolves itself, and a missing one is a failure report,
+/// never a silent strip.
+fn record_file_candidate(
+    raw: &str,
+    label: &str,
+    target: &str,
+    base_dir: Option<&Path>,
+    scan: &mut LocalFileScan,
+) -> bool {
+    match resolve_file_target(target, base_dir) {
+        Resolution::Local(path) => {
+            let caption = if label.trim().is_empty() {
+                None
+            } else {
+                Some(label.to_string())
+            };
+            scan.attachments.push(LocalFile { path, caption });
+            true
+        }
+        Resolution::Rejected { path, reason } => {
+            scan.failures.push(LocalImageFailure {
+                raw: raw.to_string(),
+                resolved: Some(path),
+                reason,
+            });
+            false
+        }
+        Resolution::Skip => false,
+    }
+}
+
+/// Scan a reply for markdown links to local files and hand back the text with
+/// every DELIVERED link removed, the validated files, and the rejected
+/// candidates.
+///
+/// `base_dir` is the session working directory: a relative target resolves
+/// against it. With no base directory a relative link stays verbatim while
+/// `~`-prefixed and absolute targets still resolve.
+///
+/// A resolved file leaves the text so the reader never sees a dead reference
+/// to a file that already arrived as a document bubble. A REJECTED candidate
+/// stays in the text byte-identical AND is reported as a failure, because a
+/// link carries its own label and a silent strip would delete the reader's
+/// only clue about what was referenced.
+pub fn extract_local_files(text: &str, base_dir: Option<&Path>) -> LocalFileScan {
+    let regions = code_regions(text);
+    let mut scan = LocalFileScan {
+        text: String::with_capacity(text.len()),
+        ..LocalFileScan::default()
+    };
+    let mut i = 0;
+
+    while i < text.len() {
+        if !regions[i]
+            && text[i..].starts_with('[')
+            // `![alt](path)` is an image reference, not a file link: its `[`
+            // is preceded by `!`, and copying the `!` first must not let the
+            // link parser claim the span on the next iteration.
+            && !text[..i].ends_with('!')
+            && let Some((end, label, target, _title)) = parse_markdown_ref(text, i, 1)
+            && record_file_candidate(&text[i..end], &label, &target, base_dir, &mut scan)
+        {
+            i = end;
+            continue;
+        }
+        let ch = text[i..].chars().next().expect("i lies on a char boundary");
+        scan.text.push(ch);
+        i += ch.len_utf8();
+    }
+
+    scan.text = scan.text.trim().to_string();
+    scan
+}
+
+/// The honest user-visible line for files that could not be delivered.
+/// `None` when there is nothing to report.
+pub fn file_failure_notice(failures: &[LocalImageFailure]) -> Option<String> {
+    if failures.is_empty() {
+        return None;
+    }
+    let mut notice = String::from(
+        "⚠️ File not attached: the reply referenced a file that could not be delivered:",
+    );
+    for failure in failures {
+        notice.push_str("\n- ");
+        notice.push_str(&failure.describe());
+    }
+    Some(notice)
+}
+
+/// Append [`file_failure_notice`] to a reply body, separated by a blank line.
+/// The empty-body case is why this lives here rather than at each call site:
+/// a reply whose ONLY content was a broken file reference leaves an empty
+/// body, and a naive `format!` would deliver the notice with a stray blank
+/// line or be skipped by a downstream emptiness check entirely. An empty body
+/// becomes the notice.
+pub fn append_file_failure_notice(body: &str, failures: &[LocalImageFailure]) -> String {
+    match file_failure_notice(failures) {
+        None => body.to_string(),
+        Some(notice) => {
+            if body.trim().is_empty() {
+                notice
+            } else {
+                format!("{}\n\n{notice}", body.trim_end())
+            }
+        }
+    }
 }

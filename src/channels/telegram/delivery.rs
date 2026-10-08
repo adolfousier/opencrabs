@@ -12,12 +12,15 @@ use super::flow::{
 use super::handler::{fire_reaction, map_to_allowed_reaction};
 use super::intermediates::send_html_or_plain;
 use super::markdown::{markdown_to_telegram_html, split_message};
-use super::send::{best_effort_delete, message_in_thread, photo_in_thread, voice_in_thread};
+use super::send::{
+    best_effort_delete, document_in_thread, message_in_thread, photo_in_thread, voice_in_thread,
+};
 use crate::brain::agent::AgentService;
 use crate::db::ChannelMessageRepository;
 use crate::db::models::ChannelMessage as DbChannelMessage;
 use crate::utils::sanitize::redact_secrets;
 use std::sync::Arc;
+use teloxide::payloads::SendDocumentSetters;
 use teloxide::prelude::*;
 use teloxide::types::{InputFile, MessageId, ParseMode};
 use uuid::Uuid;
@@ -127,6 +130,15 @@ pub(crate) async fn deliver_final_response(
             // Strip LLM-hallucinated artifacts (<!-- tools-v2 -->, XML tool blocks)
             let text_only = crate::utils::sanitize::strip_llm_artifacts(&text_only);
             let text_only = redact_secrets(&text_only);
+            // #1916: after secret redaction, scan the reply for markdown
+            // links to local files. The session working directory is the
+            // base a relative target resolves against; scan-cleared text is
+            // adopted via partial move so the failure list stays available
+            // for the notice below.
+            let session_cwd = agent.get_working_directory_for_session(session_id);
+            let mut file_scan =
+                crate::utils::image::extract_local_files(&text_only, Some(session_cwd.as_path()));
+            let text_only = std::mem::take(&mut file_scan.text);
 
             // Drop an echoed plan title (#837). The reminder shows the model
             // the title every turn and it opens by repeating it, directly
@@ -483,6 +495,24 @@ pub(crate) async fn deliver_final_response(
                     }
                 }
             }
+
+            // #1916: ship every scanned local-file link as a document bubble.
+            // Read or send failures come back on the SAME link rather than as
+            // a log-only error, so the model learns the reference produced
+            // nothing. Refusals land in `text_only` as a short notice: raw
+            // link + reason, one per line, no markdown, because it rides the
+            // same channel as the reply itself.
+            let (_, send_failures) = send_local_files(
+                session_id,
+                bot,
+                chat_id,
+                thread_id,
+                &std::mem::take(&mut file_scan.attachments),
+            )
+            .await;
+            file_scan.failures.extend(send_failures);
+            let text_only =
+                crate::utils::image::append_file_failure_notice(&text_only, &file_scan.failures);
 
             // Rich fallback: when all content was sent as HTML intermediates
             // during streaming, the dedup step strips text_only to empty. If
@@ -1127,6 +1157,89 @@ pub(crate) async fn deliver_final_response(
         }
     }
     Ok(true)
+}
+
+/// Send each resolved local-file link as its own document bubble (#1916).
+///
+/// Returns the paths that landed and the failures the channel itself
+/// produced, for the same reason the image family's sender does: the two
+/// halves feed different arms (delivered paths record what arrived, failures
+/// feed the reply's failure notice), and inferring one from the other would
+/// couple two independent facts.
+///
+/// A file that cannot be READ reports `Unreadable`: the reference named
+/// something this host cannot produce, which the model can repair by
+/// rewriting the link. A file the Telegram API REFUSES reports
+/// `DeliveryFailed`: the reference was fine, the channel said no, and no
+/// rewrite fixes that. The distinction is what routes the correction.
+pub(crate) async fn send_local_files(
+    session_id: uuid::Uuid,
+    bot: &Bot,
+    chat_id: ChatId,
+    thread_id: Option<teloxide::types::ThreadId>,
+    files: &[crate::utils::image::LocalFile],
+) -> (
+    Vec<std::path::PathBuf>,
+    Vec<crate::utils::image::LocalImageFailure>,
+) {
+    let mut delivered: Vec<std::path::PathBuf> = Vec::new();
+    let mut failures: Vec<crate::utils::image::LocalImageFailure> = Vec::new();
+
+    for file in files {
+        let path = &file.path;
+        let bytes = match tokio::fs::read(path).await {
+            Ok(bytes) => bytes,
+            Err(e) => {
+                tracing::error!("Telegram: failed to read file {}: {}", path.display(), e);
+                failures.push(crate::utils::image::LocalImageFailure {
+                    raw: path.display().to_string(),
+                    resolved: Some(path.clone()),
+                    reason: crate::utils::image::LocalImageFailureReason::Unreadable,
+                });
+                continue;
+            }
+        };
+        let len = bytes.len();
+        let mut req = document_in_thread(bot, chat_id, thread_id, InputFile::memory(bytes));
+        // Upstream `document_in_thread` carries no caption parameter, so the
+        // link label chains onto the request as the document caption.
+        if let Some(caption) = file.caption.as_deref() {
+            req = req.caption(caption.to_string());
+        }
+        match req.await {
+            Ok(msg) => {
+                delivered.push(path.clone());
+                // Match the outbox media receipt: len is sent bytes and hash8
+                // identifies the path, so one audit predicate covers every leg.
+                super::telemetry::log_send_success(
+                    "turn",
+                    "-",
+                    &session_id.to_string(),
+                    "delivery_media",
+                    "file_document",
+                    chat_id.0,
+                    thread_id.map(|t| t.0.0),
+                    msg.id.0,
+                    len,
+                    &super::telemetry::content_hash8(&path.display().to_string()),
+                );
+            }
+            Err(e) => {
+                tracing::error!(
+                    "Telegram: failed to send file {} as document: {}",
+                    path.display(),
+                    e
+                );
+                failures.push(crate::utils::image::LocalImageFailure {
+                    raw: path.display().to_string(),
+                    resolved: Some(path.clone()),
+                    reason: crate::utils::image::LocalImageFailureReason::DeliveryFailed,
+                });
+            }
+        }
+    }
+
+    (delivered, failures)
 }
 
 /// Drain the display items left queued after the edit loop stopped,
