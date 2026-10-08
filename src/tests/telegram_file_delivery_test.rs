@@ -589,6 +589,44 @@ mod floor {
     }
 
     #[tokio::test]
+    async fn a_delivered_document_arrives_named_after_its_file() {
+        // #1937: `InputFile::memory` carries no filename and teloxide's
+        // guess for raw bytes is empty, so Telegram labelled every delivered
+        // document "file" with no MIME. The multipart part's filename is
+        // where the name travels from, and the extension is what teloxide
+        // derives the MIME type from, so the body must carry both.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let report = write_fixture(dir.path(), "q3-report.pdf", PDF_BYTES);
+        let mut server = mockito::Server::new_async().await;
+        let document_mock = server
+            .mock("POST", "/botTESTTOKEN/SendDocument")
+            .match_body(mockito::Matcher::Regex(
+                // The name travels in the part's filename attribute; teloxide
+                // sets no per-part content type, so the MIME is not asserted.
+                r#"filename="q3-report\.pdf""#.to_string(),
+            ))
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(SEND_MESSAGE_OK)
+            .expect(1)
+            .create_async()
+            .await;
+
+        let bot = test_bot(&server);
+        let (_, failures) = send_local_files(
+            uuid::Uuid::new_v4(),
+            &bot,
+            teloxide::types::ChatId(CHAT),
+            None,
+            &[file_at(report, Some("Q3 report"))],
+        )
+        .await;
+
+        document_mock.assert_async().await;
+        assert!(failures.is_empty(), "a named document still delivers");
+    }
+
+    #[tokio::test]
     async fn a_link_without_a_label_ships_the_document_with_no_caption() {
         // `[](path)`: an empty label is not a caption. Sending `Some("")`
         // would make Telegram render an empty caption bubble; the scanner

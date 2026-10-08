@@ -1371,7 +1371,17 @@ pub(crate) async fn send_local_files(
             }
         };
         let len = bytes.len();
-        let mut req = document_in_thread(bot, chat_id, thread_id, InputFile::memory(bytes));
+        // The document's own name rides the multipart part's filename
+        // (#1937): InputFile::memory carries none, teloxide guesses empty,
+        // and Telegram labels an unnamed document "file" with no MIME. The
+        // extension is also what teloxide derives the MIME type from, so
+        // naming the part is what makes a .pdf arrive as application/pdf.
+        let mut req = document_in_thread(
+            bot,
+            chat_id,
+            thread_id,
+            InputFile::memory(bytes).file_name(document_part_name(path)),
+        );
         // Upstream `document_in_thread` carries no caption parameter, so the
         // link label chains onto the request as the document caption.
         if let Some(caption) = file.caption.as_deref() {
