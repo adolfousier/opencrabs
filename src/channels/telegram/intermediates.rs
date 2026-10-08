@@ -101,6 +101,24 @@ pub(crate) async fn try_send_intermediate_rich(
     }
 }
 
+/// Does a media-bearing intermediate already carry `rich_text`, so the rich
+/// fallback's re-send would be pure duplication (#1939)?
+///
+/// The fallback arm's premise is that it REPLACES the intermediates it
+/// deletes. A bubble whose media array carried documents is not in
+/// `intermediate_msg_ids`, so nothing it holds can be deleted: the arm would
+/// delete only the smaller text bubbles and still re-send the body, leaving
+/// the reader with it twice. The normalization matches the dedup ladder in
+/// `deliver_final_response`, so both agree on what "same body" means.
+pub(crate) fn fallback_would_duplicate(
+    media: &[(teloxide::types::MessageId, String)],
+    rich_text: &str,
+) -> bool {
+    let norm = |s: &str| -> String { s.split_whitespace().collect::<Vec<_>>().join(" ") };
+    let norm_final = norm(rich_text);
+    media.iter().any(|(_, text)| norm(text) == norm_final)
+}
+
 /// True when an intermediate message contains a substantial markdown status report
 /// (e.g. status/progress/pipeline heading or substantial section) worth delivering
 /// as its own message rather than burying in collapsible flow (#215).
@@ -325,17 +343,28 @@ pub(crate) async fn deliver_intermediate_message(
         // The documents ride the bubble's media array: they are in the chat,
         // so the final leg must not ship them again. The consume list is the
         // same one the bubble fallback below feeds.
-        if !doc_media.is_empty() {
-            let mut s = streaming.lock().unwrap_or_else(|e| e.into_inner());
-            s.delivered_file_paths
-                .extend(fw.entries.iter().map(|entry| entry.file.path.clone()));
-        }
         // The bubble is non-sticky burial evidence (#1150): the flow block must
         // restick below its own output on the next append.
         tg.note_bot_bubble(chat.0, id.0);
-        let mut s = streaming.lock().unwrap_or_else(|e| e.into_inner());
-        s.sent_intermediates.push(dedup_text.to_string());
-        s.intermediate_msg_ids.push(id);
+        {
+            let mut s = streaming.lock().unwrap_or_else(|e| e.into_inner());
+            if doc_media.is_empty() {
+                s.intermediate_msg_ids.push(id);
+            } else {
+                // The documents ride THIS bubble's media array: it is the
+                // only copy of them in the chat, so its id must never reach
+                // a delete list (#1939). The pair is also the address the
+                // final leg links the marker to.
+                s.media_intermediates.push((id, dedup_text.to_string()));
+                s.delivered_files.extend(fw.entries.iter().map(|entry| {
+                    super::delivery::DeliveredFile {
+                        path: entry.file.path.clone(),
+                        message_id: id.0,
+                    }
+                }));
+            }
+            s.sent_intermediates.push(dedup_text.to_string());
+        }
         return true;
     }
     // The rich send declined or failed: each file ships as its own document
@@ -355,8 +384,12 @@ pub(crate) async fn deliver_intermediate_message(
         .await;
         if !delivered.is_empty() {
             let mut s = streaming.lock().unwrap_or_else(|e| e.into_inner());
-            s.delivered_file_paths
-                .extend(delivered.iter().map(|f| f.path.clone()));
+            // Each document shipped as its OWN bubble, so the pair points at
+            // the document itself: the address the final leg links the
+            // marker to (#1939). These ids stay out of
+            // `intermediate_msg_ids`, so the rich fallback deletes only the
+            // text around them.
+            s.delivered_files.extend(delivered.iter().cloned());
         }
         file_scan.failures.extend(send_failures);
     }

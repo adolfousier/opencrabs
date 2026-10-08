@@ -1143,7 +1143,8 @@ mod intermediate {
             is_dm: true,
             pending_suggestions: None,
             pending_trailer: None,
-            delivered_file_paths: Vec::new(),
+            delivered_files: Vec::new(),
+            media_intermediates: Vec::new(),
             msg_id: None,
             thinking: String::new(),
             tool_msgs: Vec::new(),
@@ -1228,11 +1229,30 @@ mod intermediate {
         document_mock.assert_async().await;
         let s = st.lock().unwrap_or_else(|e| e.into_inner());
         assert_eq!(
-            s.delivered_file_paths,
+            s.delivered_files
+                .iter()
+                .map(|d| d.path.clone())
+                .collect::<Vec<_>>(),
             vec![pdf],
             "an inlined file counts as delivered for the final leg"
         );
+        assert_eq!(
+            s.delivered_files[0].message_id, 812,
+            "the recorded address is the rich bubble that carries the file"
+        );
         assert_eq!(s.sent_intermediates.len(), 1);
+        // #1939: the media-bearing bubble is the only copy of the file, so
+        // its id belongs to the undeletable ledger, never to the delete
+        // list the rich fallback consumes.
+        assert_eq!(
+            s.media_intermediates.len(),
+            1,
+            "the bubble is recorded as media-bearing"
+        );
+        assert!(
+            s.intermediate_msg_ids.is_empty(),
+            "a media-bearing bubble is never deletable"
+        );
     }
 
     #[tokio::test]
@@ -1296,7 +1316,18 @@ mod intermediate {
         text_mock.assert_async().await;
         assert!(ok);
         let s = st.lock().unwrap_or_else(|e| e.into_inner());
-        assert_eq!(s.delivered_file_paths, vec![pdf]);
+        // #1939: on this leg each document IS its own bubble, so the pair
+        // points at the document itself, and that id never joins
+        // `intermediate_msg_ids` (only the text chunks do): the rich
+        // fallback deletes the text around the file, never the file.
+        assert_eq!(
+            s.delivered_files,
+            vec![crate::channels::telegram::delivery::DeliveredFile {
+                path: pdf,
+                message_id: 701,
+            }],
+            "the pair points at the document's own bubble"
+        );
     }
 
     #[tokio::test]
@@ -1390,5 +1421,102 @@ mod intermediate {
             failures[0].reason,
             crate::utils::image::LocalImageFailureReason::Unreadable
         );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// the rich fallback vs a media-bearing intermediate (#1939)
+// ---------------------------------------------------------------------------
+
+mod fallback {
+    use crate::channels::telegram::delivery::{
+        DeliveredFile, file_message_link, link_file_markers,
+    };
+    use crate::channels::telegram::intermediates::fallback_would_duplicate;
+    use crate::utils::image::extract_local_files;
+    use std::path::Path;
+
+    const SUPERGROUP_ID: i64 = -100_123_456_789_012;
+
+    fn write_fixture(dir: &Path, name: &str) -> std::path::PathBuf {
+        let p = dir.join(name);
+        std::fs::write(&p, b"%PDF-1.7 fixture").expect("write fixture");
+        p
+    }
+
+    fn chat_of_kind(v: serde_json::Value) -> teloxide::types::Chat {
+        serde_json::from_value(v).expect("chat json")
+    }
+
+    #[test]
+    fn a_media_intermediate_that_carries_the_body_suppresses_the_resend() {
+        // The fallback arm's premise is that it REPLACES what it deletes. A
+        // media-bearing bubble is not in the delete list (its media array is
+        // the only copy of the documents), so re-sending the body it already
+        // carries would leave the reader with it twice (#1939). The
+        // normalization is the dedup ladder's own, so both agree.
+        let body = "Here is the report, inline.";
+        let media = vec![(teloxide::types::MessageId(90_465), body.to_string())];
+        assert!(
+            fallback_would_duplicate(&media, body),
+            "the bubble already delivered this body and cannot be replaced"
+        );
+        // The same body with different whitespace still counts: that is what
+        // "the body" means everywhere else in this file's dedup pins.
+        assert!(fallback_would_duplicate(
+            &media,
+            "Here  is the\nreport, inline."
+        ));
+        // A media bubble whose text differs suppresses nothing: an
+        // unrelated answer must still reach the reader.
+        assert!(!fallback_would_duplicate(
+            &media,
+            "An entirely different answer."
+        ));
+        // No media-bearing intermediates: the arm's original premise holds
+        // and the check must never block it.
+        assert!(!fallback_would_duplicate(&[], body));
+    }
+
+    #[test]
+    fn the_fallback_links_a_marker_to_the_intermediates_bubble() {
+        // When the rich plane owned the documents, the final leg's `delivered`
+        // list is empty, so its own links list is too. The ledger's pair is
+        // the document's real address; merged into the SAME list, the one
+        // splice links both origins by one rule. This drives the merge the
+        // way delivery.rs composes it: recover the pair, build the chat
+        // kind's link over the intermediate's id, splice.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let pdf = write_fixture(dir.path(), "q3.pdf");
+        let body = "Report: [Q3 report](q3.pdf).";
+        let scan = extract_local_files(body, Some(dir.path()));
+        assert_eq!(scan.text, "Report: 📎 Q3 report.");
+
+        let ledger = vec![DeliveredFile {
+            path: pdf.clone(),
+            message_id: 91_047,
+        }];
+        let chat = chat_of_kind(serde_json::json!({
+            "id": SUPERGROUP_ID, "type": "supergroup", "title": "g"
+        }));
+        let mut links: Vec<(std::path::PathBuf, String)> = Vec::new();
+        for file in &ledger {
+            if let Some(link) = file_message_link(&chat.kind, SUPERGROUP_ID, None, file.message_id)
+            {
+                links.push((file.path.clone(), link));
+            }
+        }
+        assert_eq!(
+            link_file_markers(&scan.text, &scan, &links),
+            "Report: [📎 Q3 report](https://t.me/c/123456789012/91047).",
+            "the marker points at the bubble that actually holds the document"
+        );
+
+        // A chat without a link form yields no link from the same pair, so
+        // the marker stays plain rather than pointing nowhere.
+        let dm = chat_of_kind(serde_json::json!({
+            "id": 777_001, "type": "private", "first_name": "a"
+        }));
+        assert!(file_message_link(&dm.kind, -456_789, None, 91_047).is_none());
     }
 }

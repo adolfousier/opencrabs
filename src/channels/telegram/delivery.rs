@@ -510,10 +510,10 @@ pub(crate) async fn deliver_final_response(
             // join, because their delivery already succeeded.
             {
                 let s = streaming.lock().unwrap_or_else(|e| e.into_inner());
-                if !s.delivered_file_paths.is_empty() {
+                if !s.delivered_files.is_empty() {
                     file_scan
                         .attachments
-                        .retain(|f| !s.delivered_file_paths.contains(&f.path));
+                        .retain(|f| !s.delivered_files.iter().any(|d| d.path == f.path));
                 }
             }
             let (delivered, send_failures) = send_local_files(
@@ -534,7 +534,7 @@ pub(crate) async fn deliver_final_response(
             // gets an empty list and keeps the plain markers. `unwrap_or_default`
             // is the no-inbound leg: nothing here invented a chat, so nothing
             // here can guess a link into existence.
-            let file_links: Vec<(std::path::PathBuf, String)> = match inbound {
+            let mut file_links: Vec<(std::path::PathBuf, String)> = match inbound {
                 Some(inbound) => delivered
                     .iter()
                     .filter_map(|delivered_file| {
@@ -549,6 +549,28 @@ pub(crate) async fn deliver_final_response(
                     .collect(),
                 None => Vec::new(),
             };
+            // #1939: a document an INTERMEDIATE delivered is in the chat but
+            // absent from `delivered` above: the final leg sent nothing for
+            // it, so there is no id here to build a link from. Its bubble id
+            // is recorded next to the path, so the one splice below links
+            // both origins by one rule. A path the final leg DID ship keeps
+            // its own (fresher) id rather than being overwritten.
+            if let Some(inbound) = inbound {
+                let from_intermediates = {
+                    let s = streaming.lock().unwrap_or_else(|e| e.into_inner());
+                    s.delivered_files.clone()
+                };
+                for file in from_intermediates {
+                    if file_links.iter().any(|(p, _)| p == &file.path) {
+                        continue;
+                    }
+                    if let Some(link) =
+                        file_message_link(&inbound.chat.kind, chat_id.0, thread_id, file.message_id)
+                    {
+                        file_links.push((file.path, link));
+                    }
+                }
+            }
             let text_only = link_file_markers(&text_only, &file_scan, &file_links);
 
             // Rich fallback: when all content was sent as HTML intermediates
@@ -560,8 +582,23 @@ pub(crate) async fn deliver_final_response(
             // reclaim below can restore the host, so it must consult
             // options_pending itself — same gate as the final-answer site
             // (#45) — or a fully-deduped buttons turn stays plain.
+            // #1939: does a media-bearing intermediate already carry this
+            // exact body? Its bubble is not in `intermediate_msg_ids`, so
+            // the cleanup below cannot replace it: the arm would only
+            // re-send the body the reader already has, and the copy's
+            // markers would point at a bubble that holds nothing. Skipping
+            // the arm loses nothing: `text_only` is empty here, and the
+            // body itself already lives in that bubble.
+            let fallback_dup = {
+                let s = streaming.lock().unwrap_or_else(|e| e.into_inner());
+                super::intermediates::fallback_would_duplicate(
+                    &s.media_intermediates,
+                    &pre_dedup_text,
+                )
+            };
             let text_only = if text_only.is_empty()
                 && !sent.is_empty()
+                && !fallback_dup
                 && super::rich::should_send_native_rich_for(
                     &pre_dedup_text,
                     options_pending(streaming),

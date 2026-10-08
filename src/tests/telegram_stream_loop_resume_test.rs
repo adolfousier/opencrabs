@@ -172,7 +172,8 @@ async fn resume_shape_loop_edits_tools_in_place_and_never_reacts() {
         is_dm: true,
         pending_suggestions: None,
         pending_trailer: None,
-        delivered_file_paths: Vec::new(),
+        delivered_files: Vec::new(),
+        media_intermediates: Vec::new(),
         msg_id: None,
         thinking: String::new(),
         tool_msgs: vec![ToolMsg {
