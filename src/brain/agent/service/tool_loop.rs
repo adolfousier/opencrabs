@@ -681,6 +681,9 @@ impl AgentService {
                     approval_callback.clone(),
                     has_progress_override,
                     progress_callback.clone(),
+                    // Only the first entry persists the turn start. A rotation
+                    // reuses the same message, so the user row already exists.
+                    rotations == 0,
                 )
                 .await;
 
@@ -837,6 +840,11 @@ impl AgentService {
         approval_callback: Option<ApprovalCallback>,
         has_progress_override: bool,
         progress_callback: Option<ProgressCallback>,
+        // True on the first entry of a turn. The rotation loop in `run_tool_loop`
+        // re-enters this function with the SAME `user_message` when a provider is
+        // killed by the loop detector, and turn-start persistence lives here, so
+        // every rotation wrote the user's message a second time (#2009).
+        first_attempt: bool,
     ) -> Result<AgentResponse> {
         // Restore the directory `/cd` persisted for this session BEFORE anything
         // else in this function (#1810). Everything below (context build, brain
@@ -1276,8 +1284,11 @@ impl AgentService {
         // of the LLM-context-augmented `user_message`. This keeps Telegram /
         // Discord / Slack / WhatsApp / Trello sessions readable in OpenCrabs
         // — no sender brackets, no reply context, no recent-history dump.
+        // `first_attempt` keeps a rotation from re-writing the user row: the
+        // retry re-enters with the same message and the history would otherwise
+        // show it once per provider tried (#2009).
         let is_system_continuation = user_message.starts_with("[System:");
-        if !is_system_continuation {
+        if !is_system_continuation && first_attempt {
             let raw_for_db = display_text_override.as_deref().unwrap_or(&user_message);
             let safe_message = crate::utils::sanitize::redact_secrets(raw_for_db);
             let _user_db_msg = message_service
