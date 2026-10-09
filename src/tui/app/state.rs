@@ -764,10 +764,12 @@ pub struct App {
     /// Working directory
     pub working_directory: std::path::PathBuf,
 
-    /// Context hints queued by UI actions (e.g. /cd, @ file picker).
-    /// Drained and prepended to the next user message so the LLM knows
-    /// what just happened without the user having to explain.
-    pub pending_context: Vec<String>,
+    /// Context hints queued by UI actions (e.g. /cd, @ file picker), keyed by
+    /// the session they belong to. Drained and prepended to that session's
+    /// next user message so the LLM knows what just happened without the user
+    /// having to explain. App-level storage let one session's `/cd` hint ride
+    /// into whichever session sent next (#2006).
+    pub(crate) pending_context: std::collections::HashMap<Uuid, Vec<String>>,
 
     /// Editor handoff request (#1744): `(command, origin_session_id)` set by
     /// the bang allowlist branch, consumed by the runner loop (it owns the
@@ -1120,7 +1122,7 @@ impl App {
             input_history_index: None,
             input_history_stash: String::new(),
             working_directory: crate::utils::cwd::launch_cwd(),
-            pending_context: Vec::new(),
+            pending_context: std::collections::HashMap::new(),
             #[cfg(unix)]
             pending_editor_handoff: None,
             brain_path,
@@ -1885,6 +1887,12 @@ impl App {
             .session_model_snapshot()
             .into_iter()
             .collect();
+        // Carry each session's OWN working directory across the rebuild (#2008).
+        // The `.with_working_directory(working_dir)` above copies the global
+        // only, so without this every pane that had chosen its own repo answers
+        // the next prompt from the new global default and reports it in Runtime
+        // Info. Same contract as the provider and model pins below.
+        let preserved_session_wds = self.agent_service.session_working_dir_snapshot();
 
         let new_agent_service = Arc::new(new_agent_service);
         for (sid, prov) in preserved_session_providers {
@@ -1893,6 +1901,9 @@ impl App {
                 .cloned()
                 .unwrap_or_else(|| prov.default_model().to_string());
             new_agent_service.swap_provider_for_session(sid, prov, model);
+        }
+        for (sid, dir) in preserved_session_wds {
+            new_agent_service.set_session_only_working_directory(sid, dir);
         }
 
         // Update app state

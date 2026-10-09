@@ -92,3 +92,99 @@ async fn untouched_session_falls_back_to_global() {
         PathBuf::from("/tmp/global-seed")
     );
 }
+
+/// #2007: restoring one session's own directory (a pane switch, a channel
+/// resume, the boot fan-out) pins THAT session and must not move the global
+/// every other session seeds from. Only an explicit operator `/cd` may move it.
+#[tokio::test]
+async fn restoring_a_sessions_own_directory_does_not_move_the_global() {
+    let svc = make_service().await;
+    let global_before = svc.get_working_directory();
+    let resumed = Uuid::new_v4();
+    let other = Uuid::new_v4();
+
+    svc.set_session_only_working_directory(resumed, PathBuf::from("/tmp/resumed-repo"));
+
+    assert_eq!(
+        svc.get_working_directory_for_session(resumed),
+        PathBuf::from("/tmp/resumed-repo")
+    );
+    assert_eq!(
+        svc.get_working_directory(),
+        global_before,
+        "a resume dragged every session with no handle yet into the resumed repo (#2007)"
+    );
+    assert_eq!(
+        svc.get_working_directory_for_session(other),
+        global_before,
+        "a session nobody switched to must keep the global seed"
+    );
+
+    // Boot restores several sessions in a row: the last one must not win for everyone else.
+    svc.set_session_only_working_directory(other, PathBuf::from("/tmp/second-repo"));
+    assert_eq!(
+        svc.get_working_directory_for_session(resumed),
+        PathBuf::from("/tmp/resumed-repo")
+    );
+    assert_eq!(svc.get_working_directory(), global_before);
+
+    // The documented exception: an operator `/cd` moves the seed for brand-new
+    // sessions, and sessions that already hold a handle keep it.
+    svc.set_working_directory_for_session(resumed, PathBuf::from("/tmp/operator-cd"));
+    assert_eq!(
+        svc.get_working_directory(),
+        PathBuf::from("/tmp/operator-cd")
+    );
+    assert_eq!(
+        svc.get_working_directory_for_session(other),
+        PathBuf::from("/tmp/second-repo"),
+        "a session with its own handle keeps it across an operator /cd"
+    );
+}
+
+/// The call-site guard. The bug was not the setter, it was who called it: a pane
+/// switch, a resume and the boot fan-out all passed through the setter that
+/// moves the global. If any of them goes back, the behaviour test above can only
+/// catch the one it simulates. This names every caller outside `src/tests/`.
+#[test]
+fn only_the_cd_path_calls_the_global_moving_setter() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let mut callers = Vec::new();
+    let mut stack = vec![root];
+    while let Some(dir) = stack.pop() {
+        let read = match std::fs::read_dir(&dir) {
+            Ok(r) => r,
+            Err(_) => continue,
+        };
+        for entry in read.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                if path.file_name().is_some_and(|n| n == "tests") {
+                    continue;
+                }
+                stack.push(path);
+                continue;
+            }
+            if path.extension().and_then(|e| e.to_str()) != Some("rs") {
+                continue;
+            }
+            let text = match std::fs::read_to_string(&path) {
+                Ok(t) => t,
+                Err(_) => continue,
+            };
+            // A call site always reads `.<setter>(`; the definition in
+            // builder.rs and its doc mentions do not.
+            if text.contains(".set_working_directory_for_session(") {
+                callers.push(path.file_name().unwrap().to_string_lossy().into_owned());
+            }
+        }
+    }
+    callers.sort();
+    callers.dedup();
+    assert_eq!(
+        callers,
+        vec!["messaging.rs".to_string()],
+        "`set_working_directory_for_session` moves the process-global cwd, so the only \
+         caller allowed is the /cd handler in tui/app/messaging.rs (#2007)"
+    );
+}

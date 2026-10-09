@@ -1181,10 +1181,13 @@ impl AgentService {
             .unwrap_or_else(|| self.get_working_directory())
     }
 
-    /// Set a session's working directory (#703). Called from a session switch,
-    /// `/cd`, or resume. Also updates the global so brand-new sessions seed from
-    /// the most recent foreground directory, but background sessions are never
-    /// affected because they hold their own handle.
+    /// Set a session's working directory AND move the global (#703). The global
+    /// write is what lets a brand-new foreground session seed from the directory
+    /// the operator just chose, so this is only correct for an explicit
+    /// operator `/cd` in the foreground. A session switch, a resume or a boot
+    /// restore must use `set_session_only_working_directory`, or they move every
+    /// session that has no handle yet (#2007). Background sessions hold their
+    /// own handle and are never affected by either setter.
     pub fn set_working_directory_for_session(&self, session_id: Uuid, path: std::path::PathBuf) {
         *self
             .working_dir_handle_for_session(session_id)
@@ -1823,6 +1826,32 @@ impl AgentService {
             .read()
             .expect("session_models lock poisoned");
         map.iter().map(|(k, v)| (*k, v.clone())).collect()
+    }
+
+    /// Snapshot of every session that holds its OWN working directory (#2008).
+    /// `rebuild_agent_service` replays these onto the new service exactly the
+    /// way it replays provider and model pins. Copying only the global
+    /// directory reverts every other pane to it on the next prompt.
+    ///
+    /// Sessions whose handle was seeded lazily from the global are included;
+    /// replaying them is a no-op because the new service already seeds from the
+    /// same value. A session with no handle at all is absent and keeps resolving
+    /// to the new global, which is the documented fallback (#703).
+    pub fn session_working_dir_snapshot(&self) -> Vec<(Uuid, std::path::PathBuf)> {
+        let map = self
+            .session_working_dirs
+            .read()
+            .expect("session_working_dirs lock poisoned");
+        map.iter()
+            .map(|(k, v)| {
+                (
+                    *k,
+                    v.read()
+                        .expect("session working_directory lock poisoned")
+                        .clone(),
+                )
+            })
+            .collect()
     }
 
     /// Provider name for a specific session, including sticky-fallback

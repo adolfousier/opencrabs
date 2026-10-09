@@ -117,6 +117,23 @@ impl App {
         }
     }
 
+    /// Queue a context hint for one session (#2006). Keyed by session id the
+    /// same way `queued_messages` is, so a hint produced in one pane can never
+    /// ride into another session's prompt.
+    pub(crate) fn push_pending_context_for(&mut self, session_id: Uuid, hint: String) {
+        self.pending_context
+            .entry(session_id)
+            .or_default()
+            .push(hint);
+    }
+
+    /// Take every context hint queued for one session and leave the other
+    /// sessions' queues untouched. Draining is one-shot: a hint reaches exactly
+    /// one turn, and the map keeps no empty entries behind.
+    pub(crate) fn take_pending_context_for(&mut self, session_id: Uuid) -> Vec<String> {
+        self.pending_context.remove(&session_id).unwrap_or_default()
+    }
+
     /// Apply a `/cd <path>` typed into the TUI (#1574). Validation mirrors
     /// the agent-tool dispatcher (`slash_command::handle_cd`): tilde
     /// expansion, then an is_dir check whose failure is reported, never
@@ -166,11 +183,18 @@ impl App {
             canonical.display()
         ));
 
-        // Queue context hint so the next message to the LLM knows about the cd
-        self.pending_context.push(format!(
-            "[User changed working directory to: {}]",
-            canonical.display()
-        ));
+        // Queue the context hint for the session this change actually targeted,
+        // so its next message to the LLM knows about the cd (#2006).
+        if let Some(session) = &self.current_session {
+            let sid = session.id;
+            self.push_pending_context_for(
+                sid,
+                format!(
+                    "[User changed working directory to: {}]",
+                    canonical.display()
+                ),
+            );
+        }
     }
 
     /// Create a new session
@@ -323,20 +347,21 @@ impl App {
         // footer said one repo while the prompt and tools ran in another.
         // Seed the newly focused session's OWN cwd handle (#703) so the prompt
         // and tools resolve THIS session's directory, not whatever the global
-        // last held. `set_working_directory_for_session` also refreshes the
-        // global seed for brand-new sessions.
+        // last held. Switching panes is not a directory change: the global
+        // stays where the operator put it, so no other session inherits this
+        // one's repo (#2007).
         if let Some(ref dir_str) = session.working_directory {
             let path = std::path::PathBuf::from(dir_str);
             if path.is_dir() {
                 self.working_directory = path.clone();
                 self.agent_service
-                    .set_working_directory_for_session(session.id, path);
+                    .set_session_only_working_directory(session.id, path);
             }
         } else {
             // No persisted wd: pin this session to the TUI-tracked directory so
             // the previous session's wd can never leak into this one (#460).
             self.agent_service
-                .set_working_directory_for_session(session.id, self.working_directory.clone());
+                .set_session_only_working_directory(session.id, self.working_directory.clone());
         }
 
         self.current_session = Some(session.clone());
@@ -2942,6 +2967,19 @@ impl App {
             self.cursor_position = self.input_buffer.len();
             return Ok(());
         }
+        // Drain this session's pending context hints (/cd and friends) and
+        // prepend them. Per-session (#2006): a hint queued in another pane
+        // must not ride along on this turn. Hoisted above the `session` borrow
+        // below, which stays live until the turn is dispatched, so the drain
+        // cannot take `&mut self` inside it.
+        let mut transformed_content = content.clone();
+        if let Some(sid) = self.current_session.as_ref().map(|s| s.id) {
+            let hints = self.take_pending_context_for(sid);
+            if !hints.is_empty() {
+                transformed_content = format!("{}\n\n{}", hints.join("\n"), transformed_content);
+            }
+        }
+
         if let Some(session) = &self.current_session {
             self.processing_sessions.insert(session.id);
             self.is_processing = true;
@@ -2950,13 +2988,6 @@ impl App {
             self.error_message = None;
             self.error_message_shown_at = None;
             self.intermediate_text_received = false;
-
-            // Drain pending context hints (model changes, /cd, etc.) and prepend to message
-            let mut transformed_content = content.clone();
-            if !self.pending_context.is_empty() {
-                let context = std::mem::take(&mut self.pending_context).join("\n");
-                transformed_content = format!("{}\n\n{}", context, transformed_content);
-            }
 
             // Soft-nudge: append LLM-only tool hints when the USER's own text
             // matches keyword families. Natural-language chat only: command,

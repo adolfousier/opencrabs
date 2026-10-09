@@ -1442,20 +1442,20 @@ async fn cmd_chat_inner(
                         boot_report::record_resumed(session_id);
                         // Restore the session's saved working directory before
                         // resuming so the agent runs tools in the right CWD.
-                        // Note: agent_service shares one global WD lock across
-                        // sessions, so concurrent multi-session resumes with
-                        // different WDs can race — resolving that needs
-                        // per-session WD threading through the request pipeline
-                        // and is out of scope here.
+                        // Each resumed session gets its own handle (#703) and the
+                        // global is left alone (#2007), so concurrent resumes in
+                        // different repos cannot clobber one another.
                         if let Ok(Some(s)) = session_repo.find_by_id(session_id).await
                             && let Some(ref dir_str) = s.working_directory
                         {
                             let p = std::path::PathBuf::from(dir_str);
                             if p.is_dir() {
                                 // Per-session (#703): seed the resumed session's
-                                // own handle so a concurrent resume with a
-                                // different wd can't clobber it via the global.
-                                agent.set_working_directory_for_session(session_id, p);
+                                // own handle ONLY. Boot restores each session's
+                                // own directory; writing the global here made the
+                                // last resume win for every session that had no
+                                // handle yet (#2007).
+                                agent.set_session_only_working_directory(session_id, p);
                             }
                         }
                         let agent = agent.clone();
