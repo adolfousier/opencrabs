@@ -504,9 +504,10 @@ pub(crate) async fn handle_message(
                     bot_id.is_some_and(|bid| msg.mentions.iter().any(|u| u.id.get() == bid));
                 // The owner's own /respond_to is solicited, so it passes the gate
                 // unmentioned (#2016). Everything else stays dropped.
-                let owner_respond_to = is_owner
-                    && crate::channels::respond_to_scope::is_respond_to_command(&msg.content);
-                if !mentioned && !owner_respond_to {
+                let owner_scope_command = is_owner
+                    && (crate::channels::respond_to_scope::is_respond_to_command(&msg.content)
+                        || super::cowork::is_cowork_command(&msg.content));
+                if !mentioned && !owner_scope_command {
                     tracing::debug!("Discord: respond_to=mention, bot not mentioned — ignoring");
                     store_channel_msg(msg.content.clone()).await;
                     return;
@@ -775,15 +776,32 @@ pub(crate) async fn handle_message(
     )
     .await;
 
-    // `/respond_to` writes Telegram's section when it reaches the shared parser
-    // with no chat id, so Discord answers it from its own channel setting (#2013).
-    if let Some(reply) = crate::channels::respond_to_scope::respond_to_discord_channel(
+    // `/respond_to` and `/cowork` are answered here, not by the shared parser:
+    // `/respond_to` would write Telegram's section with no chat id (#2013), and
+    // `/cowork` is Telegram's group flow (#2015).
+    let cowork_name = if !is_dm && super::cowork::is_cowork_command(&content) {
+        super::cowork::channel_name(&ctx.http, msg.channel_id).await
+    } else {
+        None
+    };
+    let scope_reply = super::cowork::cowork_discord_channel(
         &content,
         is_owner,
+        !is_dm,
         &channel_str,
-        &respond_to_here,
-        super::commands::write_channel_respond_to,
-    ) {
+        cowork_name.as_deref(),
+        super::cowork::write_channel_open,
+    )
+    .or_else(|| {
+        crate::channels::respond_to_scope::respond_to_discord_channel(
+            &content,
+            is_owner,
+            &channel_str,
+            &respond_to_here,
+            super::commands::write_channel_respond_to,
+        )
+    });
+    if let Some(reply) = scope_reply {
         if let Err(e) = msg.channel_id.say(&ctx.http, reply).await {
             tracing::warn!(error = %e, "failed to send Discord message");
         }

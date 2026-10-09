@@ -364,13 +364,29 @@ impl EventHandler for Handler {
 
             // `/respond_to` from the menu is answered here, not routed to the
             // model as a prompt. It never writes Telegram's section (#2013).
-            if let Some(reply) = crate::channels::respond_to_scope::respond_to_discord_channel(
+            let cowork_name = if !is_dm && super::cowork::is_cowork_command(&invocation) {
+                super::cowork::channel_name(&ctx.http, command.channel_id).await
+            } else {
+                None
+            };
+            let scope_reply = super::cowork::cowork_discord_channel(
                 &invocation,
                 owner,
+                !is_dm,
                 &channel_str,
-                &dc.respond_to_for(&channel_str, parent.as_deref()),
-                super::commands::write_channel_respond_to,
-            ) {
+                cowork_name.as_deref(),
+                super::cowork::write_channel_open,
+            )
+            .or_else(|| {
+                crate::channels::respond_to_scope::respond_to_discord_channel(
+                    &invocation,
+                    owner,
+                    &channel_str,
+                    &dc.respond_to_for(&channel_str, parent.as_deref()),
+                    super::commands::write_channel_respond_to,
+                )
+            });
+            if let Some(reply) = scope_reply {
                 if let Err(e) = command
                     .create_response(
                         &ctx.http,

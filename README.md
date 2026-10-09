@@ -418,9 +418,11 @@ Referenced markdown files (`.md`, `.markdown`) are a special case: they ship as 
 
 **Flow logs** (processing-log messages showing tool calls and intermediate text) also use the rich API when enabled, supporting 32K characters instead of HTML's 4K limit. Long tool chains fit in a single message without splitting. If the rich send fails, flow logs fall back to HTML rendering. The block auto-freezes at 30K characters to stay within limits.
 
-#### /cowork — Telegram-only workspace creation
+#### /cowork — workspace creation (Telegram) and channel opening (Discord)
 
-The `/cowork` command creates a team workspace directly from Telegram. It is **Telegram-only** because it relies on Telegram-specific primitives: group creation via `?startgroup` deep links, invite links, QR codes from `t.me` URLs, and `new_chat_members` service messages for auto-registration. None of these exist in Discord, Slack, or WhatsApp.
+On **Discord**, `/cowork` (owner only, typed in a channel or thread, or picked from the `/` menu) opens that channel or thread to its members. It writes `[channels.discord.channels.<id>]` with `open = true` and the channel's `name`. Members are not registered anywhere: `open` admits them, threads and forum posts included, and DMs and other channels stay locked. Run it in a server channel; in a DM it refuses.
+
+The Telegram flow below creates a team workspace directly from Telegram. It is **Telegram-only** because it relies on Telegram-specific primitives: group creation via `?startgroup` deep links, invite links, QR codes from `t.me` URLs, and `new_chat_members` service messages for auto-registration. None of these exist in Discord, Slack, or WhatsApp.
 
 **Prerequisite:** Telegram must be configured (bot token set via `/channels telegram` or manual `config.toml` setup).
 

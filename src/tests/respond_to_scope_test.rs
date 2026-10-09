@@ -81,7 +81,7 @@ fn discord_menu_offers_respond_to_once() {
     };
     let kept = with_menu_builtins(vec![user_defined]);
     assert_eq!(
-        kept.len(),
+        kept.iter().filter(|c| c.name == "/respond_to").count(),
         1,
         "a user command of the same name is not duplicated"
     );

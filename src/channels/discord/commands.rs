@@ -286,8 +286,10 @@ pub(crate) fn sync_key(plan_sig: u64, guilds: &[GuildId]) -> u64 {
 /// Each is answered by the interaction path, never routed to the model, so an
 /// entry here has to be handled there too.
 pub(crate) fn with_menu_builtins(mut catalog: Vec<UserCommand>) -> Vec<UserCommand> {
-    const MENU_BUILTINS: &[(&str, &str)] =
-        &[("/respond_to", "Show this bot's respond mode (owner only)")];
+    const MENU_BUILTINS: &[(&str, &str)] = &[
+        ("/respond_to", "Show this bot's respond mode (owner only)"),
+        ("/cowork", "Open this channel to its members (owner only)"),
+    ];
     for (name, description) in MENU_BUILTINS {
         if !catalog.iter().any(|c| c.name == *name) {
             catalog.push(UserCommand {
