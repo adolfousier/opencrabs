@@ -763,6 +763,20 @@ pub(crate) async fn handle_message(
     )
     .await;
 
+    // `/respond_to` writes Telegram's section when it reaches the shared parser
+    // with no chat id, so Discord answers it from its own channel setting (#2013).
+    if let Some(reply) = crate::channels::respond_to_scope::respond_to_outside_telegram(
+        &content,
+        is_owner,
+        "Discord",
+        Some(&dc_cfg.respond_to),
+    ) {
+        if let Err(e) = msg.channel_id.say(&ctx.http, reply).await {
+            tracing::warn!(error = %e, "failed to send Discord message");
+        }
+        return;
+    }
+
     // ── Channel commands (/help, /usage, /models) ──────────────────────────
     {
         use crate::channels::commands::{self, ChannelCommand};

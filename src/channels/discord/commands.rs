@@ -282,12 +282,32 @@ pub(crate) fn sync_key(plan_sig: u64, guilds: &[GuildId]) -> u64 {
 /// round-trip per guild for nothing. The 5-per-second per-route bucket
 /// (`application-commands.mdx:206`) is what a chatty watcher would hit, not the
 /// 200-per-day create budget, which bulk overwrite does not touch.
+/// Built-ins offered in the Discord `/` menu beside `commands.toml` (#2013).
+/// Each is answered by the interaction path, never routed to the model, so an
+/// entry here has to be handled there too.
+pub(crate) fn with_menu_builtins(mut catalog: Vec<UserCommand>) -> Vec<UserCommand> {
+    const MENU_BUILTINS: &[(&str, &str)] =
+        &[("/respond_to", "Show this bot's respond mode (owner only)")];
+    for (name, description) in MENU_BUILTINS {
+        if !catalog.iter().any(|c| c.name == *name) {
+            catalog.push(UserCommand {
+                name: (*name).to_string(),
+                description: (*description).to_string(),
+                action: "system".to_string(),
+                prompt: String::new(),
+            });
+        }
+    }
+    catalog
+}
+
 pub(crate) async fn sync_commands(
     http: &Arc<Http>,
     guilds: &[GuildId],
     last_key: Option<u64>,
 ) -> Option<u64> {
-    let catalog = CommandLoader::from_brain_path(&BrainLoader::resolve_path()).load();
+    let catalog =
+        with_menu_builtins(CommandLoader::from_brain_path(&BrainLoader::resolve_path()).load());
 
     if catalog.is_empty() {
         tracing::info!(

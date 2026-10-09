@@ -1222,6 +1222,21 @@ pub(crate) async fn handle_message(
     )
     .await;
 
+    // `/respond_to` writes Telegram's section when it reaches the shared parser
+    // with no chat id. WhatsApp has no respond mode, so it only says so (#2013).
+    if let Some(reply) = crate::channels::respond_to_scope::respond_to_outside_telegram(
+        &content, is_owner, "WhatsApp", None,
+    ) {
+        let reply_msg = waproto::whatsapp::Message {
+            conversation: Some(reply),
+            ..Default::default()
+        };
+        if let Err(e) = client.send_message(reply_target.clone(), reply_msg).await {
+            tracing::warn!(error = %e, "failed to send WhatsApp message");
+        }
+        return;
+    }
+
     // ── Channel commands (/help, /usage, /models, /stop) ────────────────────
     {
         use crate::channels::commands::{self, ChannelCommand};

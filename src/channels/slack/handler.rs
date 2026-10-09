@@ -1354,6 +1354,26 @@ async fn handle_message(
     )
     .await;
 
+    // `/respond_to` writes Telegram's section when it reaches the shared parser
+    // with no chat id, so Slack answers it from its own channel setting (#2013).
+    if let Some(reply) = crate::channels::respond_to_scope::respond_to_outside_telegram(
+        &content,
+        is_owner,
+        "Slack",
+        Some(&sl_cfg.respond_to),
+    ) {
+        let token = SlackApiToken::new(SlackApiTokenValue::from(state.current_bot_token()));
+        let session = client.open_session(&token);
+        let request = SlackApiChatPostMessageRequest::new(
+            SlackChannelId::new(channel_id),
+            SlackMessageContent::new().with_text(reply),
+        );
+        if let Err(e) = session.chat_post_message(&request).await {
+            tracing::warn!(error = %e, "failed to post Slack message");
+        }
+        return;
+    }
+
     // ── Channel commands (/help, /usage, /models) ──────────────────────────
     {
         use crate::channels::commands::{self, ChannelCommand};

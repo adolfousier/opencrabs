@@ -11,6 +11,7 @@ pub(crate) mod group_history;
 pub mod manager;
 pub(crate) mod model_menu;
 pub mod question_common;
+pub(crate) mod respond_to_scope;
 pub mod session_init;
 pub mod session_resolve;
 pub mod single_flight;

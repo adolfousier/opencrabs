@@ -353,6 +353,30 @@ impl EventHandler for Handler {
                 return;
             }
 
+            // `/respond_to` from the menu is answered here, not routed to the
+            // model as a prompt. It never writes Telegram's section (#2013).
+            if let Some(reply) = crate::channels::respond_to_scope::respond_to_outside_telegram(
+                &invocation,
+                owner,
+                "Discord",
+                Some(&dc.respond_to),
+            ) {
+                if let Err(e) = command
+                    .create_response(
+                        &ctx.http,
+                        serenity::builder::CreateInteractionResponse::Message(
+                            serenity::builder::CreateInteractionResponseMessage::new()
+                                .content(reply)
+                                .ephemeral(true),
+                        ),
+                    )
+                    .await
+                {
+                    tracing::warn!("Discord: /{} reply refused: {e}", command.data.name);
+                }
+                return;
+            }
+
             let idle = dc.session_idle_hours;
             // History keeps the invocation the way a typed message would:
             // `Sender: /cmd args` in a guild, bare in the owner's DM, the same
