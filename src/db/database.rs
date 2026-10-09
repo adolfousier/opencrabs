@@ -142,6 +142,13 @@ pub(crate) const MIGRATION_SQL: &[&str] = &[
     // that moves every job's `next_run_at`, so a spent one-shot reads
     // `enabled = 0` instead of parking armed until the same date next year.
     include_str!("../migrations/20260927000001_add_cron_run_once.sql"),
+    // #2010: the Telegram bubble id a turn was streaming into, so a boot
+    // resume can edit that bubble instead of opening a second one beside the
+    // partial answer the killed process left on screen. ALTER TABLE ADD
+    // COLUMN with the column NULL by design on every existing row, so no
+    // heal pass is needed (same shape as the project_repo_remote note above).
+    // Appended last per the list invariant.
+    include_str!("../migrations/20261009000001_pending_requests_channel_message_id.sql"),
 ];
 
 pub(crate) fn build_migrations() -> Migrations<'static> {

@@ -1,0 +1,21 @@
+-- 20261009000001_pending_requests_channel_message_id.sql
+--
+-- #2010: the Telegram boot resume opened a SECOND bubble for a turn the
+-- topic already showed half-answered. Receipt (session d9718421, chat
+-- -1003953283261, topic 15): the live process edited bubble 159 up to 1313
+-- chars, was SIGKILLed at 01:01:14.899 mid turn, and the boot resume at
+-- 01:01:23.228 called sendRichMessage and opened bubble 160, then delivered
+-- 639 chars there. The partial answer stayed on screen and a second bubble
+-- appeared under it.
+--
+-- The interrupted process's bubble id died with it, and the pending row is
+-- the only state that survives the SIGKILL and is already read by the
+-- resume, so the id rides on that row: when a turn's streaming bubble is
+-- created its Telegram message id is recorded here, and a resume that finds
+-- one edits that bubble instead of opening a new one.
+--
+-- NULL by design on every existing row and on every row of a turn that
+-- never reached a streaming bubble, so there is nothing to backfill and no
+-- heal pass is needed (same shape as
+-- 20260912000001_add_project_repo_remote.sql).
+ALTER TABLE pending_requests ADD COLUMN channel_message_id TEXT;

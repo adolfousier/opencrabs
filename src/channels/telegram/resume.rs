@@ -12,12 +12,13 @@ use crate::a2a::handler::notify::CLI_SENDER_PREFIX;
 use crate::brain::agent::service::background_tasks;
 use crate::brain::agent::{AgentService, ProgressCallback, ProgressEvent};
 use crate::config::Config;
-use crate::db::ChannelMessageRepository;
+use crate::db::repository::pending_request::PendingRequest;
+use crate::db::{ChannelMessageRepository, PendingRequestRepository};
 use crate::utils::echo_budget::{ECHO_BODY_CAP_CHARS, ECHO_BODY_CAP_CHARS_RICH};
 use futures::future::BoxFuture;
 use std::sync::Arc;
 use teloxide::prelude::*;
-use teloxide::types::ChatAction;
+use teloxide::types::{ChatAction, MessageId};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
@@ -602,6 +603,60 @@ pub(crate) fn flush_queued_after_turn(
     })
 }
 
+/// Which bubble a resumed turn takes over from the process it replaces
+/// (#2010).
+///
+/// A turn streams into two different surfaces, and they live in two
+/// different `StreamingState` fields: the processing-log block
+/// (`open_group_msg_id`, opened in flow.rs) and the response placeholder
+/// (`msg_id`, opened in stream_loop.rs). The row only stores one id, so the
+/// field it belongs to is stored with it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CarriedBubble {
+    /// The processing-log block: seed `open_group_msg_id`. The bool is
+    /// `flow_rich` as the interrupted process had it: a block opened through
+    /// the rich API must be edited through the rich API, and an HTML one
+    /// through HTML, or the first refresh re-renders the wrong markup.
+    Flow(MessageId, bool),
+    /// The response placeholder: seed `msg_id`.
+    Answer(MessageId),
+}
+
+/// Decide which bubble, if any, a resumed turn should adopt (#2010).
+///
+/// A SIGKILLed Telegram turn leaves its partially written bubble on screen,
+/// and the resume used to open a second one for the same answer. The pending
+/// row is the only state that survives the kill and the resume already reads
+/// it, so the live bubble's id rides on it as `"<surface>:<message id>"`.
+///
+/// Everything that is not exactly this turn's own streaming bubble declines,
+/// and the resume then does what it did before #2010 (open a fresh bubble):
+/// another channel, a `system` push row (its text is re-delivered, never
+/// re-streamed), a row from a different chat (Telegram ids are only unique
+/// per chat, so the wrong chat would edit a stranger's message), an unknown
+/// surface tag, or an id that does not parse.
+pub(crate) fn streaming_bubble_to_adopt(
+    row: &PendingRequest,
+    chat_id: i64,
+) -> Option<CarriedBubble> {
+    if row.channel != "telegram" || row.origin != "user" {
+        return None;
+    }
+    if row.channel_chat_id.as_deref() != Some(chat_id.to_string().as_str()) {
+        return None;
+    }
+    let (surface, raw_id) = row.channel_message_id.as_deref()?.split_once(':')?;
+    let id = raw_id.parse::<i32>().ok().map(MessageId)?;
+    match surface {
+        "flow" => Some(CarriedBubble::Flow(id, true)),
+        // A block the interrupted process opened through the classic HTML
+        // path because the rich API was off or had already failed.
+        "flow_plain" => Some(CarriedBubble::Flow(id, false)),
+        "answer" => Some(CarriedBubble::Answer(id)),
+        _ => None,
+    }
+}
+
 /// Unguarded core of `resume_session`. The turn-slot contract lives in the
 /// caller: either hold an `ActiveTurnGuard` across the await, or go through
 /// the public wrapper.
@@ -637,6 +692,31 @@ pub(crate) async fn resume_session_inner(
     );
 
     // ── Streaming setup ────────────────────────────────────────────────────
+    // #2010: take over the bubble the interrupted process was streaming into.
+    // The pending row is the only state that survives the SIGKILL and the
+    // resume already reads it, so the live surface's id rides on it. Seeding
+    // it here makes the first refresh EDIT that bubble instead of sending a
+    // new one beside the partial answer the dead process left on screen,
+    // which is what showed a resumed turn as two bubbles in one topic. A row
+    // with nothing adoptable keeps the old behaviour: the resume opens its own
+    // bubble.
+    let carried_bubble = PendingRequestRepository::new(agent.context().pool())
+        .find_latest_for_session(session_id)
+        .await
+        .ok()
+        .flatten()
+        .and_then(|row| streaming_bubble_to_adopt(&row, chat_id.0));
+    // The bubble being adopted is the response placeholder, which predates
+    // this process. The cancel teardown below must not delete it.
+    let adopted_answer = matches!(carried_bubble, Some(CarriedBubble::Answer(_)));
+    let seed_msg_id = match carried_bubble {
+        Some(CarriedBubble::Answer(id)) => Some(id),
+        _ => None,
+    };
+    let seed_flow = match carried_bubble {
+        Some(CarriedBubble::Flow(id, rich)) => Some((id, rich)),
+        _ => None,
+    };
     let streaming = Arc::new(std::sync::Mutex::new(StreamingState {
         // Telegram: positive chat id = private/DM, negative = group (#677).
         is_dm: chat_id.0 > 0,
@@ -645,15 +725,15 @@ pub(crate) async fn resume_session_inner(
         pending_trailer: None,
         delivered_files: Vec::new(),
         media_intermediates: Vec::new(),
-        msg_id: None,
+        msg_id: seed_msg_id,
         thinking: String::new(),
         tool_msgs: Vec::new(),
         display_queue: Vec::new(),
-        open_group_msg_id: None,
+        open_group_msg_id: seed_flow.map(|(id, _)| id),
         rich_transport_failures: 0,
         flow_entries: Vec::new(),
         flow_status: None,
-        flow_rich: false,
+        flow_rich: matches!(seed_flow, Some((_, true))),
         response: String::new(),
         final_bubble: None,
         dirty: false,
@@ -953,7 +1033,20 @@ pub(crate) async fn resume_session_inner(
         // intermediate + tool-call history visible. See the matching
         // block in handle_message() for rationale.
         if let Some(mid) = streaming_msg_id {
-            best_effort_delete(&bot, chat_id, mid, "streaming teardown").await;
+            if adopted_answer {
+                // #2010: this bubble is the partial answer the killed process
+                // left on screen, not something this resume created. Deleting
+                // user-visible history that predates the process is the worse
+                // failure: a stale bubble is recoverable by hand, a deleted one
+                // is gone (the same keep-never-discard call #1462 made for
+                // rows). Leave it, and let the next message answer it.
+                tracing::info!(
+                    "Telegram: resume {} cancelled; keeping adopted bubble {mid} from the interrupted turn",
+                    session_id
+                );
+            } else {
+                best_effort_delete(&bot, chat_id, mid, "streaming teardown").await;
+            }
         }
         return Ok(());
     }

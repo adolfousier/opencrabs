@@ -24,6 +24,13 @@ pub struct PendingRequest {
     /// topic that asked instead of the chat's default (#1457). NULL for
     /// legacy rows and non-topic channels.
     pub channel_thread_id: Option<String>,
+    /// The Telegram bubble this turn is streaming into (#2010). Recorded
+    /// when the streaming placeholder is created, and read back by the boot
+    /// resume so the resumed turn EDITS that bubble instead of opening a
+    /// second one beside the partial answer the killed process left on
+    /// screen. NULL for rows of other channels and for turns that never got
+    /// as far as a streaming bubble.
+    pub channel_message_id: Option<String>,
     /// Who started the turn this row tracks: `"user"` or `"system"` (a push
     /// — session_notify / background-task completion). Boot recovery treats
     /// them differently (#12): user rows replay with the continuation prompt;
@@ -123,7 +130,7 @@ impl PendingRequestRepository {
             .context("Failed to get connection")?
             .interact(move |conn| {
                 conn.prepare(
-                    "SELECT id, session_id, user_message, channel, channel_chat_id, channel_thread_id, origin \
+                    "SELECT id, session_id, user_message, channel, channel_chat_id, channel_thread_id, origin, channel_message_id \
                      FROM pending_requests WHERE session_id = ?1 \
                      ORDER BY created_at DESC LIMIT 1",
                 )?
@@ -136,6 +143,7 @@ impl PendingRequestRepository {
                         channel_chat_id: row.get("channel_chat_id")?,
                         channel_thread_id: row.get("channel_thread_id")?,
                         origin: row.get("origin")?,
+                        channel_message_id: row.get("channel_message_id")?,
                     })
                 })
                 .map(Some)
@@ -231,7 +239,7 @@ impl PendingRequestRepository {
                     [],
                 );
                 let mut stmt = conn.prepare(
-                    "SELECT id, session_id, user_message, channel, channel_chat_id, channel_thread_id, origin \
+                    "SELECT id, session_id, user_message, channel, channel_chat_id, channel_thread_id, origin, channel_message_id \
                      FROM pending_requests \
                      ORDER BY created_at ASC",
                 )?;
@@ -244,6 +252,7 @@ impl PendingRequestRepository {
                         channel_chat_id: row.get("channel_chat_id")?,
                         channel_thread_id: row.get("channel_thread_id")?,
                         origin: row.get("origin")?,
+                        channel_message_id: row.get("channel_message_id")?,
                     })
                 })?;
                 rows.collect::<std::result::Result<Vec<_>, _>>()
@@ -270,7 +279,7 @@ impl PendingRequestRepository {
                     params![ch],
                 );
                 let mut stmt = conn.prepare(
-                    "SELECT id, session_id, user_message, channel, channel_chat_id, channel_thread_id, origin \
+                    "SELECT id, session_id, user_message, channel, channel_chat_id, channel_thread_id, origin, channel_message_id \
                      FROM pending_requests WHERE channel = ?1 \
                      ORDER BY created_at ASC",
                 )?;
@@ -283,6 +292,7 @@ impl PendingRequestRepository {
                         channel_chat_id: row.get("channel_chat_id")?,
                         channel_thread_id: row.get("channel_thread_id")?,
                         origin: row.get("origin")?,
+                        channel_message_id: row.get("channel_message_id")?,
                     })
                 })?;
                 rows.collect::<std::result::Result<Vec<_>, _>>()
@@ -323,6 +333,42 @@ impl PendingRequestRepository {
             .await
             .map_err(interact_err)?
             .context("Failed to clear pending requests")?;
+        Ok(())
+    }
+
+    /// Record the bubble id the turn is streaming into (#2010).
+    ///
+    /// Keyed by session id like [`touch_session`], because the write site is
+    /// the streaming loop, which holds the session id and not the row id.
+    /// `updated_at` is deliberately NOT touched: it drives the 24h
+    /// crash-debris prune in [`get_interrupted`], and must keep meaning "last
+    /// interaction with the user's request".
+    ///
+    /// Idempotent by design: the placeholder is created once per turn, and a
+    /// resume adopts the stored id rather than recording a second one.
+    ///
+    /// [`touch_session`]: Self::touch_session
+    /// [`get_interrupted`]: Self::get_interrupted
+    pub async fn set_channel_message_id_for_session(
+        &self,
+        session_id: Uuid,
+        message_id: &str,
+    ) -> Result<()> {
+        let sid = session_id.to_string();
+        let mid = message_id.to_string();
+        self.pool
+            .get()
+            .await
+            .context("Failed to get connection")?
+            .interact(move |conn| {
+                conn.execute(
+                    "UPDATE pending_requests SET channel_message_id = ?2 WHERE session_id = ?1",
+                    params![sid, mid],
+                )
+            })
+            .await
+            .map_err(interact_err)?
+            .context("Failed to record the streaming bubble id")?;
         Ok(())
     }
 }

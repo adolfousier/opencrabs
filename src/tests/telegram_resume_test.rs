@@ -635,11 +635,13 @@ fn pending_request_struct_fields() {
         channel: "telegram".to_string(),
         channel_chat_id: Some("-12345".to_string()),
         channel_thread_id: Some("77".to_string()),
+        channel_message_id: Some("flow:159".to_string()),
         origin: "user".to_string(),
     };
     assert_eq!(pr.channel, "telegram");
     assert_eq!(pr.channel_chat_id, Some("-12345".to_string()));
     assert_eq!(pr.channel_thread_id, Some("77".to_string()));
+    assert_eq!(pr.channel_message_id, Some("flow:159".to_string()));
 }
 
 #[test]
@@ -652,10 +654,193 @@ fn pending_request_tui_channel_no_chat_id() {
         channel: "tui".to_string(),
         channel_chat_id: None,
         channel_thread_id: None,
+        channel_message_id: None,
         origin: "user".to_string(),
     };
     assert_eq!(pr.channel, "tui");
     assert!(pr.channel_chat_id.is_none());
+    assert!(pr.channel_message_id.is_none());
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Carried bubble adoption — #2010
+//
+// A SIGKILLed Telegram turn leaves its partially written bubble on screen and
+// the boot resume used to open a SECOND bubble for the same answer. The
+// pending row now carries the live surface as "<surface>:<message id>" and the
+// resume must adopt exactly that bubble, or decline and do what it did before.
+// No fake Telegram transport exists in this crate, so the send-vs-edit wiring
+// itself is pinned structurally against the source; the pure decision function
+// is tested directly.
+// ─────────────────────────────────────────────────────────────────────────────
+
+use crate::channels::telegram::resume::{CarriedBubble, streaming_bubble_to_adopt};
+use crate::db::repository::pending_request::PendingRequest;
+use teloxide::types::MessageId;
+
+/// The chat the original incident happened in (oc-users topic 15).
+const CARRIED_CHAT: i64 = -1004428873948;
+
+fn carried_row(surface: Option<&str>) -> PendingRequest {
+    PendingRequest {
+        id: "row-1".to_string(),
+        session_id: "sess-1".to_string(),
+        user_message: "hello".to_string(),
+        channel: "telegram".to_string(),
+        channel_chat_id: Some(CARRIED_CHAT.to_string()),
+        channel_thread_id: Some("15".to_string()),
+        channel_message_id: surface.map(str::to_string),
+        origin: "user".to_string(),
+    }
+}
+
+#[test]
+fn carried_flow_bubble_is_adopted_as_rich() {
+    let got = streaming_bubble_to_adopt(&carried_row(Some("flow:159")), CARRIED_CHAT);
+    assert_eq!(got, Some(CarriedBubble::Flow(MessageId(159), true)));
+}
+
+#[test]
+fn carried_plain_flow_bubble_keeps_the_html_path() {
+    let got = streaming_bubble_to_adopt(&carried_row(Some("flow_plain:159")), CARRIED_CHAT);
+    assert_eq!(got, Some(CarriedBubble::Flow(MessageId(159), false)));
+}
+
+#[test]
+fn carried_answer_bubble_is_adopted_as_the_placeholder() {
+    let got = streaming_bubble_to_adopt(&carried_row(Some("answer:160")), CARRIED_CHAT);
+    assert_eq!(got, Some(CarriedBubble::Answer(MessageId(160))));
+}
+
+#[test]
+fn row_without_a_carried_bubble_adopts_nothing() {
+    assert_eq!(
+        streaming_bubble_to_adopt(&carried_row(None), CARRIED_CHAT),
+        None
+    );
+}
+
+#[test]
+fn malformed_carriage_adopts_nothing() {
+    // Anything that is not exactly "<known surface>:<i64>" falls back to the
+    // pre-#2010 behaviour: the resume opens its own bubble.
+    for bad in [
+        "159",
+        "flow:",
+        "mystery:159",
+        "flow:not-a-number",
+        "flow:99999999999999999999",
+    ] {
+        let got = streaming_bubble_to_adopt(&carried_row(Some(bad)), CARRIED_CHAT);
+        assert_eq!(got, None, "{bad} must not be adopted");
+    }
+}
+
+#[test]
+fn adoption_declines_rows_that_are_not_this_turns_telegram_bubble() {
+    // Telegram message ids are unique per CHAT: editing with a foreign chat
+    // id would edit a stranger's message.
+    let mut other_chat = carried_row(Some("flow:159"));
+    other_chat.channel_chat_id = Some("-1009999999999".to_string());
+    assert_eq!(streaming_bubble_to_adopt(&other_chat, CARRIED_CHAT), None);
+
+    let no_chat = {
+        let mut r = carried_row(Some("flow:159"));
+        r.channel_chat_id = None;
+        r
+    };
+    assert_eq!(streaming_bubble_to_adopt(&no_chat, CARRIED_CHAT), None);
+
+    // Other channels have no Telegram bubbles to adopt.
+    let discord = {
+        let mut r = carried_row(Some("flow:159"));
+        r.channel = "discord".to_string();
+        r
+    };
+    assert_eq!(streaming_bubble_to_adopt(&discord, CARRIED_CHAT), None);
+
+    // A `system` push row re-delivers its text (#12), it never re-streams a
+    // bubble.
+    let pushed = {
+        let mut r = carried_row(Some("flow:159"));
+        r.origin = "system".to_string();
+        r
+    };
+    assert_eq!(streaming_bubble_to_adopt(&pushed, CARRIED_CHAT), None);
+}
+
+fn resume_source() -> String {
+    std::fs::read_to_string(format!(
+        "{}/src/channels/telegram/resume.rs",
+        env!("CARGO_MANIFEST_DIR")
+    ))
+    .expect("read channels/telegram/resume.rs")
+}
+
+#[test]
+fn resume_seeds_the_streaming_state_from_the_carried_bubble() {
+    // #2010 contract, structural half: the resume looks the row up, runs it
+    // through the adoption decision and SEEDS the StreamingState with the
+    // result, so the first refresh edits the carried bubble instead of
+    // sending a new one.
+    let src = resume_source();
+    assert!(
+        src.contains("streaming_bubble_to_adopt(&row, chat_id.0)"),
+        "resume must decide adoption from the pending row"
+    );
+    let ctor_at = src
+        .find("StreamingState {")
+        .expect("StreamingState construction in resume");
+    let ctor = &src[ctor_at..ctor_at + 2000];
+    assert!(
+        ctor.contains("msg_id: seed_msg_id"),
+        "placeholder must be seeded"
+    );
+    assert!(
+        ctor.contains("open_group_msg_id: seed_flow.map(|(id, _)| id)"),
+        "flow block must be seeded"
+    );
+    assert!(
+        ctor.contains("flow_rich: matches!(seed_flow, Some((_, true)))"),
+        "the carried surface's API must be seeded"
+    );
+    assert!(
+        !ctor.contains("msg_id: None"),
+        "the placeholder field must not be hardcoded to None again"
+    );
+}
+
+#[test]
+fn teardown_keeps_an_adopted_bubble_and_still_deletes_its_own() {
+    // #1462 ethos: a bubble that predates this process is user-visible
+    // history. A stale bubble is recoverable by hand, a deleted one is gone.
+    let src = resume_source();
+    assert!(
+        src.contains("if adopted_answer {")
+            && src.contains("keeping adopted bubble")
+            && src.contains("best_effort_delete(&bot, chat_id, mid, \"streaming teardown\")"),
+        "teardown must branch on adopted_answer, not delete unconditionally"
+    );
+}
+
+#[test]
+fn stream_loop_records_the_live_bubble_surface_on_the_row() {
+    // The write hook: without it the row never carries an id and the resume
+    // has nothing to adopt. The flow block wins when both surfaces exist.
+    let src = std::fs::read_to_string(format!(
+        "{}/src/channels/telegram/stream_loop.rs",
+        env!("CARGO_MANIFEST_DIR")
+    ))
+    .expect("read channels/telegram/stream_loop.rs");
+    assert!(
+        src.contains("set_channel_message_id_for_session(sid, &carried)"),
+        "the edit loop must persist the live bubble"
+    );
+    assert!(
+        src.contains("if s.flow_rich { \"flow\" } else { \"flow_plain\" }")
+            && src.contains("snap.msg_id.map(|m| (\"answer\", m.0))"),
+        "the surface tag must follow flow_rich and fall back to the placeholder"
+    );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
