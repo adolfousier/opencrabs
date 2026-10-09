@@ -398,6 +398,19 @@ pub(crate) fn identity_admitted(
     !unconfigured && (is_owner || in_allowlist || role_granted || open_here)
 }
 
+/// Persist a channel's respond mode under `[channels.discord.channels.<id>]`
+/// (#2014). The config watcher picks the change up the way it picks up any
+/// config write.
+pub(crate) fn write_channel_respond_to(channel_id: &str, mode: &str) -> Result<(), String> {
+    crate::config::Config::write_key(
+        &format!("channels.discord.channels.{channel_id}"),
+        "respond_to",
+        mode,
+    )
+    .map(|_| ())
+    .map_err(|e| e.to_string())
+}
+
 /// The parent channel of a thread or forum post, or `None` for a top-level
 /// channel, a DM, or a lookup that failed (#2014). A failed lookup is logged;
 /// callers fall back to the thread's own id alone.

@@ -87,3 +87,91 @@ fn discord_menu_offers_respond_to_once() {
     );
     assert_eq!(kept[0].description, "mine");
 }
+
+// ── Discord channel scope (#2014) ───────────────────────────────────────
+
+use crate::channels::respond_to_scope::respond_to_discord_channel;
+use std::cell::RefCell;
+
+fn no_write(_: &str, _: &str) -> Result<(), String> {
+    panic!("a bare or refused command must not write")
+}
+
+#[test]
+fn discord_bare_command_shows_this_channels_effective_mode() {
+    let reply = respond_to_discord_channel("/respond_to", true, "4242", &RespondTo::All, no_write)
+        .expect("recognised");
+    assert!(reply.contains("**all**"), "{reply}");
+    assert!(
+        reply.contains("[channels.discord.channels.4242] respond_to"),
+        "{reply}"
+    );
+}
+
+#[test]
+fn discord_mode_writes_that_channels_own_entry() {
+    let written = RefCell::new(Vec::new());
+    let reply = respond_to_discord_channel(
+        "/respond_to mention",
+        true,
+        "4242",
+        &RespondTo::All,
+        |cid, mode| {
+            written
+                .borrow_mut()
+                .push((cid.to_string(), mode.to_string()));
+            Ok(())
+        },
+    )
+    .expect("recognised");
+    assert!(reply.contains("switched to **mention**"), "{reply}");
+    assert_eq!(
+        written.into_inner(),
+        vec![("4242".to_string(), "mention".to_string())]
+    );
+}
+
+#[test]
+fn discord_accepts_dm_only_and_the_documented_spellings() {
+    for (arg, label) in [
+        ("all", "all"),
+        ("mentions", "mention"),
+        ("auto", "auto"),
+        ("dm_only", "dm_only"),
+    ] {
+        let text = format!("/respond_to {arg}");
+        let captured = RefCell::new(String::new());
+        respond_to_discord_channel(&text, true, "1", &RespondTo::Mention, |_, mode| {
+            *captured.borrow_mut() = mode.to_string();
+            Ok(())
+        });
+        assert_eq!(captured.into_inner(), label, "{arg}");
+    }
+}
+
+#[test]
+fn discord_unknown_mode_is_refused_without_a_write() {
+    let reply =
+        respond_to_discord_channel("/respond_to loud", true, "1", &RespondTo::Mention, no_write)
+            .expect("recognised");
+    assert!(reply.contains("Unknown mode"), "{reply}");
+}
+
+#[test]
+fn discord_write_failure_is_reported() {
+    let reply =
+        respond_to_discord_channel("/respond_to all", true, "1", &RespondTo::Mention, |_, _| {
+            Err("disk full".to_string())
+        })
+        .expect("recognised");
+    assert!(reply.contains("Could not save"), "{reply}");
+    assert!(reply.contains("disk full"), "{reply}");
+}
+
+#[test]
+fn discord_non_owner_is_refused_and_nothing_is_written() {
+    let reply =
+        respond_to_discord_channel("/respond_to all", false, "1", &RespondTo::Mention, no_write)
+            .expect("recognised");
+    assert!(reply.contains("restricted to the bot owner"), "{reply}");
+}

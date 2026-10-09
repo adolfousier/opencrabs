@@ -364,11 +364,12 @@ impl EventHandler for Handler {
 
             // `/respond_to` from the menu is answered here, not routed to the
             // model as a prompt. It never writes Telegram's section (#2013).
-            if let Some(reply) = crate::channels::respond_to_scope::respond_to_outside_telegram(
+            if let Some(reply) = crate::channels::respond_to_scope::respond_to_discord_channel(
                 &invocation,
                 owner,
-                "Discord",
-                Some(&dc.respond_to),
+                &channel_str,
+                &dc.respond_to_for(&channel_str, parent.as_deref()),
+                super::commands::write_channel_respond_to,
             ) {
                 if let Err(e) = command
                     .create_response(
