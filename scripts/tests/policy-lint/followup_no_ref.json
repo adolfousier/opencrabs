@@ -1,0 +1,8 @@
+{
+  "name": "followup_no_child_issue_ref",
+  "body": "This is the first slice. The rest in a next PR once the governor API settles.\n",
+  "subjects": ["feat(discord): first slice of the plan board"],
+  "messages": "feat(discord): first slice of the plan board\n",
+  "files_count": 9,
+  "expected_exit": 1
+}

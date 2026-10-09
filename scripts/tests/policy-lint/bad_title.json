@@ -1,0 +1,8 @@
+{
+  "name": "bad_subject",
+  "body": "Fixes the thing.\n",
+  "subjects": ["updated stuff", "fix(discord): the real one"],
+  "messages": "updated stuff\n\nfix(discord): the real one\n",
+  "files_count": 2,
+  "expected_exit": 1
+}

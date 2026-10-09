@@ -389,6 +389,16 @@ That's completely fine. You can still contribute meaningfully:
 
 A well-written bug report or feature request is worth more than a stub PR. Seriously.
 
+## Workflow policy: `governance.toml`
+
+The machine-checkable workflow rules (child issues not sibling PRs, no
+co-author trailers, conventional commit titles, and a diff-size warning)
+live in [`governance.toml`](governance.toml) and are enforced by the
+`Policy lint` CI job (`scripts/policy-lint.py`). That file is the source
+of truth; this page is its human mirror. Everything the fence cannot see
+(tone, scope creep, "is this really one problem?") stays with human review
+by design.
+
 ## License
 
 By contributing to OpenCrabs, you agree that your contributions will be licensed under the MIT License. See [LICENSE.md](LICENSE.md) for details.

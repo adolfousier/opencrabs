@@ -1,0 +1,8 @@
+{
+  "name": "oversized_diff_warns_not_fails",
+  "body": "One problem, many files, all of it one mechanical rename. Issue-Ref: #1934",
+  "subjects": ["refactor(channels): rename the turn tracker everywhere"],
+  "messages": "refactor(channels): rename the turn tracker everywhere\n\nIssue-Ref: #1934\n",
+  "files_count": 45,
+  "expected_exit": 0
+}

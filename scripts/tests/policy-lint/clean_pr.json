@@ -1,0 +1,11 @@
+{
+  "name": "clean_pr",
+  "body": "## Summary\n\nResolves everything for #1912 in this PR. The review-daemon nudge is follow-up work and lands as child issue #1935, never a sibling PR.\n\nIssue-Ref: #1912",
+  "subjects": [
+    "feat(discord): persistent plan card on the shared governor budget (#1912)",
+    "Merge origin/main into feat/discord-plan-card"
+  ],
+  "messages": "feat(discord): persistent plan card on the shared governor budget (#1912)\n\nBody of the commit.\n\nIssue-Ref: #1912\n",
+  "files_count": 21,
+  "expected_exit": 0
+}

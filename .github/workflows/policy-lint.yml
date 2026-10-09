@@ -1,0 +1,56 @@
+name: Policy lint
+
+# Enforces governance.toml (issue #1934) on pull requests only. Runs on
+# GitHub-hosted ubuntu: the linter is python3 + git, milliseconds of work,
+# so it never competes with the cargo build on the self-hosted Mac runner.
+# This check is advisory for the ruleset (not in the required-gate list);
+# it exists to catch the loop-step drift humans kept making by hand.
+on:
+  pull_request:
+
+concurrency:
+  group: policy-lint-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: read
+
+env:
+  PYTHONUNBUFFERED: 1
+
+jobs:
+  policy-lint:
+    name: Policy lint
+    timeout-minutes: 5
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Linter proves its own teeth
+        run: python3 scripts/policy-lint.py --self-test
+
+      # PR body and history go to files, never into the shell line, so no
+      # payload can inject into the job (house rule from ci.yml).
+      - name: Collect PR inputs
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.number }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          mkdir -p /tmp/policy-lint
+          gh pr view "$PR_NUMBER" --json body --jq '.body' > /tmp/policy-lint/body.md
+          git log --format='%s' "$BASE_SHA..$HEAD_SHA" > /tmp/policy-lint/subjects.txt
+          git log --format='%B%x1e' "$BASE_SHA..$HEAD_SHA" > /tmp/policy-lint/messages.txt
+          git diff --name-only "$BASE_SHA..$HEAD_SHA" | wc -l | tr -d ' ' > /tmp/policy-lint/files_count.txt
+
+      - name: Run policy checks on the PR
+        run: >
+          python3 scripts/policy-lint.py
+          --body-file /tmp/policy-lint/body.md
+          --subjects-file /tmp/policy-lint/subjects.txt
+          --messages-file /tmp/policy-lint/messages.txt
+          --files-count "$(cat /tmp/policy-lint/files_count.txt)"

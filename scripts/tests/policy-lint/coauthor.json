@@ -1,0 +1,8 @@
+{
+  "name": "coauthor_trailer",
+  "body": "Everything this problem needs lands in this one PR. Issue-Ref: #1934",
+  "subjects": ["fix(discord): stop the card leak"],
+  "messages": "fix(discord): stop the card leak\n\nCo-authored-by: A Helpful Bot <bot@example.com>\n",
+  "files_count": 3,
+  "expected_exit": 1
+}

@@ -1,2 +1,5 @@
 # Default: all PRs require review from the owner
 * @adolfousier
+
+# The rules guard their own book (issue #1934)
+governance.toml @adolfousier
