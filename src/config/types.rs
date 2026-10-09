@@ -897,6 +897,67 @@ pub struct DiscordConfig {
     /// Default: false.
     #[serde(default)]
     pub bang_new_thread: bool,
+    /// `[channels.discord.governor]` - the outbound write policy (#1910). Serenity's
+    /// per-bucket limiter stays underneath: it is transport hygiene and owns
+    /// the actual request queue. This is the PRODUCT layer on top: it knows
+    /// the flow ticker and the tool-group edits are the same message being
+    /// rewritten every few seconds, so it can drop a re-render instead of
+    /// queueing five stale snapshots of it, and it records what the API's
+    /// 429s told us. Default-on and deliberately loose.
+    #[serde(default)]
+    pub governor: DiscordGovernorConfig,
+}
+
+/// Discord outbound write policy (#1910).
+///
+/// Discord publishes no fixed per-route budget and its docs forbid
+/// hardcoding one, so nothing here pretends to be the real limit. The
+/// buckets are CEILINGS that only bite when the bot outruns its own cadence,
+/// and `pause_secs` is only the fallback window for a 429 that did not carry
+/// a `retry_after`: when the response names a window, that window is what we
+/// honor.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct DiscordGovernorConfig {
+    /// Master switch. False makes every gate a pass-through: the layer stops
+    /// deciding, and serenity's limiter plus the 429 log stay as the only
+    /// protection, which is the pre-#1910 behavior.
+    pub enabled: bool,
+    /// Rolling per-channel write ceiling. Any surface counts against it
+    /// (send, edit, chrome): it is the one number that says "this channel is
+    /// being rewritten too often". `0` = no ceiling.
+    pub writes_per_minute: u32,
+    /// Burst capacity for that ceiling. A turn opening with a tool group plus
+    /// an answer plus a settle edit needs to land at once, so this is the
+    /// headroom before the sustained rate starts pacing. Ignored when the
+    /// ceiling is off.
+    pub burst: u32,
+    /// Minimum spacing between two LIVE re-renders of the same message: the
+    /// flow ticker's clock edits and the waiting-line refresh. Content edits
+    /// and sends never wait on it. `0` = no spacing.
+    pub chrome_min_spacing_ms: u64,
+    /// Fallback pause window for a 429 that named no `retry_after`. When the
+    /// response DOES name one, that window is what we honor, clamped to four
+    /// times this number: a response asking for an hour parks the channel for
+    /// that ceiling and then resets, because a governor that stalls a channel
+    /// forever is a worse outage than the one it prevents.
+    pub pause_secs: u64,
+}
+
+impl Default for DiscordGovernorConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            // Generous on purpose: a real Discord write budget is per route
+            // and per bucket, and this layer must not be the thing that
+            // stalls a turn. It exists to catch a runaway ticker, not to
+            // second-guess the API.
+            writes_per_minute: 40,
+            burst: 12,
+            chrome_min_spacing_ms: 1000,
+            pause_secs: 5,
+        }
+    }
 }
 
 impl Default for DiscordConfig {
@@ -914,6 +975,7 @@ impl Default for DiscordConfig {
             trace_narration: default_true(),
             auto_thread_min_chars: 0,
             bang_new_thread: false,
+            governor: DiscordGovernorConfig::default(),
         }
     }
 }

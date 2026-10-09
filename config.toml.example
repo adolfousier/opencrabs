@@ -636,6 +636,20 @@ allowed_channels = ["channel_id"]       # Where the bot operates (empty = all ch
 # it the gateway connects and chat works, but every command registration returns
 # 403 and "/" stays empty. See src/docs/reference/DISCORD_COMMANDS.md.
 
+# Outbound write governor (#1910): one token bucket per channel, applied before
+# the write goes out, plus a park learned from a 429. Discord publishes no fixed
+# per-route budget, so these are ceilings that only bite when the bot outruns its
+# own cadence, not a mirror of the API's limits.
+# [channels.discord.governor]
+# enabled = true                        # Master switch. false = pre-#1910 pass-through.
+# writes_per_minute = 40                # Rolling per-channel write ceiling. 0 = no ceiling.
+# burst = 12                            # Headroom before the sustained rate starts pacing.
+# chrome_min_spacing_ms = 1000          # Spacing between LIVE re-renders (ticker clock,
+                                        # waiting line). Content writes and sends never wait
+                                        # on it. 0 = no spacing.
+# pause_secs = 5                        # Fallback park when a 429 names no retry_after, and
+                                        # the ceiling on a park that does (4x this value).
+
 [channels.telegram]
 enabled = false
 # allowed_users = [123456789]             # Who the bot replies to (numeric user ID, empty = everyone)

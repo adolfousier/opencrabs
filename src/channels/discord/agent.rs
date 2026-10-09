@@ -815,10 +815,19 @@ impl EventHandler for Handler {
                         let agent_clone = self.agent.clone();
                         let http = ctx.http.clone();
                         let channel_id = comp.channel_id;
+                        let dstate = self.discord_state.clone();
                         tokio::spawn(async move {
                             match agent_clone.send_message(sid, prompt, None).await {
                                 Ok(r) => {
-                                    if let Err(e) = channel_id.say(&http, &r.content).await {
+                                    if let Err(e) = super::governor::say(
+                                        &dstate.governor,
+                                        channel_id,
+                                        &http,
+                                        super::governor::Surface::Send,
+                                        &r.content,
+                                    )
+                                    .await
+                                    {
                                         tracing::warn!(error = %e, "failed to send Discord agent message");
                                     }
                                 }

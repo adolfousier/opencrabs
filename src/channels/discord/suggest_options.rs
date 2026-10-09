@@ -71,14 +71,16 @@ pub(crate) async fn render_suggestions(
 
     state.register_select(followup_id, options).await;
 
-    if let Err(e) = ChannelId::new(channel_id)
-        .send_message(
-            http,
-            CreateMessage::new()
-                .content("\u{1f4a1} Suggested next:")
-                .components(rows),
-        )
-        .await
+    if let Err(e) = super::governor::send_content(
+        &state.governor,
+        ChannelId::new(channel_id),
+        http,
+        super::governor::Surface::Send,
+        CreateMessage::new()
+            .content("\u{1f4a1} Suggested next:")
+            .components(rows),
+    )
+    .await
     {
         tracing::warn!("Discord suggest_options: send failed: {e}");
     }

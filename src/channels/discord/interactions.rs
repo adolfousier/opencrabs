@@ -234,7 +234,15 @@ pub(crate) async fn route_followup_turn(
                                         &group,
                                         mid.get(),
                                     ));
-                                if let Err(e) = channel.edit_message(&http, mid, edit).await {
+                                if let Some(Err(e)) = super::governor::edit_chrome(
+                                    &dstate.governor,
+                                    channel,
+                                    &http,
+                                    mid,
+                                    edit,
+                                )
+                                .await
+                                {
                                     tracing::warn!(
                                         "Discord: follow-up tap tool group edit failed (append): {e}"
                                     );
@@ -249,20 +257,29 @@ pub(crate) async fn route_followup_turn(
                                     settled: None,
                                 };
                                 let content = super::tool_group::render_content(&group);
-                                match channel.say(&http, &content).await {
+                                match super::governor::say(
+                                    &dstate.governor,
+                                    channel,
+                                    &http,
+                                    super::governor::Surface::Send,
+                                    &content,
+                                )
+                                .await
+                                {
                                     Ok(sent_msg) => {
                                         let comps = super::tool_group::render_components(
                                             &group,
                                             sent_msg.id.get(),
                                         );
                                         if !comps.is_empty()
-                                            && let Err(e) = channel
-                                                .edit_message(
-                                                    &http,
-                                                    sent_msg.id,
-                                                    EditMessage::new().components(comps),
-                                                )
-                                                .await
+                                            && let Some(Err(e)) = super::governor::edit_chrome(
+                                                &dstate.governor,
+                                                channel,
+                                                &http,
+                                                sent_msg.id,
+                                                EditMessage::new().components(comps),
+                                            )
+                                            .await
                                         {
                                             tracing::warn!(
                                                 "Discord: follow-up tap tool group component fixup failed: {e}"
@@ -315,7 +332,15 @@ pub(crate) async fn route_followup_turn(
                                     &group,
                                     mid.get(),
                                 ));
-                            if let Err(e) = channel.edit_message(&http, mid, edit).await {
+                            if let Some(Err(e)) = super::governor::edit_chrome(
+                                &dstate.governor,
+                                channel,
+                                &http,
+                                mid,
+                                edit,
+                            )
+                            .await
+                            {
                                 tracing::warn!(
                                     "Discord: follow-up tap tool group edit failed (status): {e}"
                                 );
@@ -324,10 +349,19 @@ pub(crate) async fn route_followup_turn(
                     });
                 }
                 ProgressEvent::SelfHealingAlert { message } => {
+                    let dstate = group_state_cb.clone();
                     tokio::spawn(async move {
                         let text =
                             format!("🔧 {}", crate::utils::sanitize::normalize_dashes(&message));
-                        if let Err(e) = channel.say(&http, &text).await {
+                        if let Err(e) = super::governor::say(
+                            &dstate.governor,
+                            channel,
+                            &http,
+                            super::governor::Surface::Send,
+                            &text,
+                        )
+                        .await
+                        {
                             tracing::warn!(error = %e, "Discord: follow-up tap self-heal post failed");
                         }
                     });
@@ -363,7 +397,15 @@ pub(crate) async fn route_followup_turn(
                                     &group,
                                     mid.get(),
                                 ));
-                            if let Err(e) = channel.edit_message(&http, mid, edit).await {
+                            if let Some(Err(e)) = super::governor::edit_chrome(
+                                &dstate.governor,
+                                channel,
+                                &http,
+                                mid,
+                                edit,
+                            )
+                            .await
+                            {
                                 tracing::debug!(
                                     "Discord: follow-up tap trace note edit failed: {e}"
                                 );
@@ -377,6 +419,7 @@ pub(crate) async fn route_followup_turn(
                     let sent = sent.clone();
                     let handles = handles_cb.clone();
                     let http = http.clone();
+                    let dstate = group_state_cb.clone();
                     let handle = tokio::spawn(async move {
                         {
                             let mut prev = sent.lock().await;
@@ -386,7 +429,15 @@ pub(crate) async fn route_followup_turn(
                             prev.push(clean.clone());
                         }
                         for chunk in super::handler::split_message(&clean, 2000) {
-                            if let Err(e) = channel.say(&http, &chunk).await {
+                            if let Err(e) = super::governor::say(
+                                &dstate.governor,
+                                channel,
+                                &http,
+                                super::governor::Surface::Send,
+                                &chunk,
+                            )
+                            .await
+                            {
                                 tracing::debug!(
                                     "Discord: follow-up tap intermediate send failed: {e}"
                                 )
@@ -403,9 +454,18 @@ pub(crate) async fn route_followup_turn(
                     reason,
                 } => {
                     let http = http.clone();
+                    let dstate = group_state_cb.clone();
                     tokio::spawn(async move {
                         let text = format!("⏳ Retry {}/{} — {}", attempt, max, reason);
-                        if let Err(e) = channel.say(&http, &text).await {
+                        if let Err(e) = super::governor::say(
+                            &dstate.governor,
+                            channel,
+                            &http,
+                            super::governor::Surface::Send,
+                            &text,
+                        )
+                        .await
+                        {
                             tracing::warn!(error = %e, "Discord: follow-up tap retry post failed");
                         }
                     });
@@ -414,9 +474,18 @@ pub(crate) async fn route_followup_turn(
                     to_name, to_model, ..
                 } => {
                     let http = http.clone();
+                    let dstate = group_state_cb.clone();
                     tokio::spawn(async move {
                         let text = format!("🔄 Now using {}/{}", to_name, to_model);
-                        if let Err(e) = channel.say(&http, &text).await {
+                        if let Err(e) = super::governor::say(
+                            &dstate.governor,
+                            channel,
+                            &http,
+                            super::governor::Surface::Send,
+                            &text,
+                        )
+                        .await
+                        {
                             tracing::warn!(error = %e, "Discord: follow-up tap provider switch post failed");
                         }
                     });
@@ -452,9 +521,14 @@ pub(crate) async fn route_followup_turn(
         started_at: std::time::Instant::now(),
         settled: None,
     };
-    match channel
-        .say(&http, &super::tool_group::render_content(&turn_shell))
-        .await
+    match super::governor::say(
+        &discord_state.governor,
+        channel,
+        &http,
+        super::governor::Surface::Send,
+        &super::tool_group::render_content(&turn_shell),
+    )
+    .await
     {
         Ok(sent_msg) => {
             discord_state
@@ -557,7 +631,10 @@ pub(crate) async fn route_followup_turn(
                 let edit = serenity::builder::EditMessage::new()
                     .content(super::tool_group::render_content(&group))
                     .components(super::tool_group::render_components(&group, mid.get()));
-                if let Err(e) = channel.edit_message(&http, mid, edit).await {
+                if let Some(Err(e)) =
+                    super::governor::edit_chrome(&discord_state.governor, channel, &http, mid, edit)
+                        .await
+                {
                     tracing::debug!("Discord: follow-up tap trace mirror-note drop failed: {e}");
                 }
             }
@@ -590,14 +667,31 @@ pub(crate) async fn route_followup_turn(
                 let edit = serenity::builder::EditMessage::new()
                     .content(super::tool_group::render_content(&group))
                     .components(super::tool_group::render_components(&group, mid.get()));
-                if let Err(e) = channel.edit_message(&http, mid, edit).await {
+                if let Err(e) = super::governor::edit_content(
+                    &discord_state.governor,
+                    channel,
+                    &http,
+                    mid,
+                    super::governor::Surface::Final,
+                    edit,
+                )
+                .await
+                {
                     tracing::debug!("Discord: follow-up tap settled stamp failed: {e}");
                 }
             }
 
             if !skip_final_post {
                 for chunk in super::handler::split_message(&text_only, 2000) {
-                    if let Err(e) = channel.say(&http, &chunk).await {
+                    if let Err(e) = super::governor::say(
+                        &discord_state.governor,
+                        channel,
+                        &http,
+                        super::governor::Surface::Send,
+                        &chunk,
+                    )
+                    .await
+                    {
                         tracing::error!("Discord: follow-up tap reply delivery failed: {e}");
                     }
                 }
@@ -615,7 +709,16 @@ pub(crate) async fn route_followup_turn(
                 let edit = serenity::builder::EditMessage::new()
                     .content(super::tool_group::render_content(&group))
                     .components(super::tool_group::render_components(&group, mid.get()));
-                if let Err(e) = channel.edit_message(&http, mid, edit).await {
+                if let Err(e) = super::governor::edit_content(
+                    &discord_state.governor,
+                    channel,
+                    &http,
+                    mid,
+                    super::governor::Surface::Final,
+                    edit,
+                )
+                .await
+                {
                     tracing::debug!("Discord: follow-up cancelled settle stamp failed: {e}");
                 }
             }
@@ -623,7 +726,15 @@ pub(crate) async fn route_followup_turn(
         Err(e) => {
             tracing::error!("Discord: follow-up tap agent error: {e}");
             let error_msg = format!("❌ Error\n\n{}", crate::brain::agent::format_user_error(&e));
-            if let Err(e) = channel.say(&http, error_msg).await {
+            if let Err(e) = super::governor::say(
+                &discord_state.governor,
+                channel,
+                &http,
+                super::governor::Surface::Send,
+                error_msg,
+            )
+            .await
+            {
                 tracing::warn!("Discord: follow-up tap error post failed: {e}");
             }
             // #1987: the tap turn settles on failure too, and #1911 gives
@@ -637,7 +748,16 @@ pub(crate) async fn route_followup_turn(
                 let edit = serenity::builder::EditMessage::new()
                     .content(super::tool_group::render_content(&group))
                     .components(super::tool_group::render_components(&group, mid.get()));
-                if let Err(e) = channel.edit_message(&http, mid, edit).await {
+                if let Err(e) = super::governor::edit_content(
+                    &discord_state.governor,
+                    channel,
+                    &http,
+                    mid,
+                    super::governor::Surface::Final,
+                    edit,
+                )
+                .await
+                {
                     tracing::debug!("Discord: follow-up error settle stamp failed: {e}");
                 }
             }

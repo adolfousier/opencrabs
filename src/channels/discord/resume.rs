@@ -71,9 +71,14 @@ pub(crate) fn build_enqueue_callback(
                         .content(super::tool_group::render_content(&group))
                         .components(super::tool_group::render_components(&group, gmid));
                     let flip_mid = serenity::model::id::MessageId::new(gmid);
-                    if let Err(e) = serenity::model::id::ChannelId::new(channel_id)
-                        .edit_message(&http, flip_mid, edit)
-                        .await
+                    if let Some(Err(e)) = super::governor::edit_chrome(
+                        &state.governor,
+                        serenity::model::id::ChannelId::new(channel_id),
+                        &http,
+                        flip_mid,
+                        edit,
+                    )
+                    .await
                     {
                         tracing::debug!("[bg-resume] discord: waiting-line flip edit failed: {e}");
                     }

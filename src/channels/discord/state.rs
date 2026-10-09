@@ -11,7 +11,7 @@ use tokio::sync::{Mutex, oneshot};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
-use super::{interactions, tool_group};
+use super::{governor::Governor, interactions, tool_group};
 
 /// Shared Discord state for proactive messaging.
 ///
@@ -76,6 +76,11 @@ pub struct DiscordState {
     pub(super) pending_followups: std::sync::Mutex<
         HashMap<Uuid, std::collections::VecDeque<crate::brain::agent::QueuedUserMessage>>,
     >,
+    /// Outbound write governor (#1910): the one place that decides whether a
+    /// channel can afford another message or edit right now. Held on the
+    /// shared state because every writer reaches it, and because a 429 seen by
+    /// the flow ticker has to park the settle edit too, not just the ticker.
+    pub(super) governor: Governor,
 }
 
 impl Default for DiscordState {
@@ -103,6 +108,7 @@ impl DiscordState {
             waiting_groups: Mutex::new(HashMap::new()),
             active_turns: std::sync::Mutex::new(std::collections::HashSet::new()),
             pending_followups: std::sync::Mutex::new(HashMap::new()),
+            governor: Governor::default(),
         }
     }
 }

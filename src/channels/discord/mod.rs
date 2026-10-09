@@ -18,6 +18,7 @@ mod approval;
 mod cancel;
 pub(crate) mod commands;
 mod connection;
+pub(crate) mod governor;
 pub(crate) mod handler;
 pub(crate) mod interactions;
 mod pending_interactions;

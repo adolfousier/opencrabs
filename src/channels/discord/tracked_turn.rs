@@ -163,7 +163,15 @@ pub(crate) fn run_tracked_resume_turn(
                                             &group,
                                             mid.get(),
                                         ));
-                                    if let Err(e) = channel.edit_message(&http, mid, edit).await {
+                                    if let Some(Err(e)) = super::governor::edit_chrome(
+                                        &dstate.governor,
+                                        channel,
+                                        &http,
+                                        mid,
+                                        edit,
+                                    )
+                                    .await
+                                    {
                                         tracing::warn!(
                                             "Discord: tracked turn tool group edit failed (append): {e}"
                                         );
@@ -178,20 +186,29 @@ pub(crate) fn run_tracked_resume_turn(
                                         settled: None,
                                     };
                                     let content = super::tool_group::render_content(&group);
-                                    match channel.say(&http, &content).await {
+                                    match super::governor::say(
+                                        &dstate.governor,
+                                        channel,
+                                        &http,
+                                        super::governor::Surface::Send,
+                                        &content,
+                                    )
+                                    .await
+                                    {
                                         Ok(sent_msg) => {
                                             let comps = super::tool_group::render_components(
                                                 &group,
                                                 sent_msg.id.get(),
                                             );
                                             if !comps.is_empty()
-                                                && let Err(e) = channel
-                                                    .edit_message(
-                                                        &http,
-                                                        sent_msg.id,
-                                                        EditMessage::new().components(comps),
-                                                    )
-                                                    .await
+                                                && let Some(Err(e)) = super::governor::edit_chrome(
+                                                    &dstate.governor,
+                                                    channel,
+                                                    &http,
+                                                    sent_msg.id,
+                                                    EditMessage::new().components(comps),
+                                                )
+                                                .await
                                             {
                                                 tracing::warn!(
                                                     "Discord: tracked turn tool group component fixup failed: {e}"
@@ -246,7 +263,15 @@ pub(crate) fn run_tracked_resume_turn(
                                         &group,
                                         mid.get(),
                                     ));
-                                if let Err(e) = channel.edit_message(&http, mid, edit).await {
+                                if let Some(Err(e)) = super::governor::edit_chrome(
+                                    &dstate.governor,
+                                    channel,
+                                    &http,
+                                    mid,
+                                    edit,
+                                )
+                                .await
+                                {
                                     tracing::warn!(
                                         "Discord: tracked turn tool group edit failed (status): {e}"
                                     );
@@ -255,12 +280,21 @@ pub(crate) fn run_tracked_resume_turn(
                         });
                     }
                     ProgressEvent::SelfHealingAlert { message } => {
+                        let dstate = group_state_cb.clone();
                         tokio::spawn(async move {
                             let text = format!(
                                 "🔧 {}",
                                 crate::utils::sanitize::normalize_dashes(&message)
                             );
-                            if let Err(e) = channel.say(&http, &text).await {
+                            if let Err(e) = super::governor::say(
+                                &dstate.governor,
+                                channel,
+                                &http,
+                                super::governor::Surface::Send,
+                                &text,
+                            )
+                            .await
+                            {
                                 tracing::warn!(error = %e, "Discord: tracked turn self-heal post failed");
                             }
                         });
@@ -296,7 +330,15 @@ pub(crate) fn run_tracked_resume_turn(
                                         &group,
                                         mid.get(),
                                     ));
-                                if let Err(e) = channel.edit_message(&http, mid, edit).await {
+                                if let Some(Err(e)) = super::governor::edit_chrome(
+                                    &dstate.governor,
+                                    channel,
+                                    &http,
+                                    mid,
+                                    edit,
+                                )
+                                .await
+                                {
                                     tracing::debug!(
                                         "Discord: tracked turn trace note edit failed: {e}"
                                     );
@@ -310,6 +352,7 @@ pub(crate) fn run_tracked_resume_turn(
                         let sent = sent.clone();
                         let handles = handles_cb.clone();
                         let http = http.clone();
+                        let dstate = group_state_cb.clone();
                         let handle = tokio::spawn(async move {
                             {
                                 let mut prev = sent.lock().await;
@@ -319,7 +362,15 @@ pub(crate) fn run_tracked_resume_turn(
                                 prev.push(clean.clone());
                             }
                             for chunk in super::handler::split_message(&clean, 2000) {
-                                if let Err(e) = channel.say(&http, &chunk).await {
+                                if let Err(e) = super::governor::say(
+                                    &dstate.governor,
+                                    channel,
+                                    &http,
+                                    super::governor::Surface::Send,
+                                    &chunk,
+                                )
+                                .await
+                                {
                                     tracing::debug!(
                                         "Discord: tracked turn intermediate send failed: {e}"
                                     )
@@ -336,9 +387,18 @@ pub(crate) fn run_tracked_resume_turn(
                         reason,
                     } => {
                         let http = http.clone();
+                        let dstate = group_state_cb.clone();
                         tokio::spawn(async move {
                             let text = format!("⏳ Retry {}/{} - {}", attempt, max, reason);
-                            if let Err(e) = channel.say(&http, &text).await {
+                            if let Err(e) = super::governor::say(
+                                &dstate.governor,
+                                channel,
+                                &http,
+                                super::governor::Surface::Send,
+                                &text,
+                            )
+                            .await
+                            {
                                 tracing::warn!(error = %e, "Discord: tracked turn retry post failed");
                             }
                         });
@@ -347,9 +407,18 @@ pub(crate) fn run_tracked_resume_turn(
                         to_name, to_model, ..
                     } => {
                         let http = http.clone();
+                        let dstate = group_state_cb.clone();
                         tokio::spawn(async move {
                             let text = format!("🔄 Now using {}/{}", to_name, to_model);
-                            if let Err(e) = channel.say(&http, &text).await {
+                            if let Err(e) = super::governor::say(
+                                &dstate.governor,
+                                channel,
+                                &http,
+                                super::governor::Surface::Send,
+                                &text,
+                            )
+                            .await
+                            {
                                 tracing::warn!(error = %e, "Discord: tracked turn provider switch post failed");
                             }
                         });
@@ -384,9 +453,14 @@ pub(crate) fn run_tracked_resume_turn(
             started_at: std::time::Instant::now(),
             settled: None,
         };
-        match channel
-            .say(&http, &super::tool_group::render_content(&turn_shell))
-            .await
+        match super::governor::say(
+            &dstate.governor,
+            channel,
+            &http,
+            super::governor::Surface::Send,
+            &super::tool_group::render_content(&turn_shell),
+        )
+        .await
         {
             Ok(sent_msg) => {
                 dstate
@@ -512,7 +586,10 @@ pub(crate) fn run_tracked_resume_turn(
                     let edit = serenity::builder::EditMessage::new()
                         .content(super::tool_group::render_content(&group))
                         .components(super::tool_group::render_components(&group, mid.get()));
-                    if let Err(e) = channel.edit_message(&http, mid, edit).await {
+                    if let Some(Err(e)) =
+                        super::governor::edit_chrome(&dstate.governor, channel, &http, mid, edit)
+                            .await
+                    {
                         tracing::debug!("Discord: tracked turn trace mirror-note drop failed: {e}");
                     }
                 }
@@ -548,7 +625,16 @@ pub(crate) fn run_tracked_resume_turn(
                     let edit = serenity::builder::EditMessage::new()
                         .content(super::tool_group::render_content(&group))
                         .components(super::tool_group::render_components(&group, mid.get()));
-                    if let Err(e) = channel.edit_message(&http, mid, edit).await {
+                    if let Err(e) = super::governor::edit_content(
+                        &dstate.governor,
+                        channel,
+                        &http,
+                        mid,
+                        super::governor::Surface::Final,
+                        edit,
+                    )
+                    .await
+                    {
                         tracing::debug!("Discord: tracked turn settled stamp failed: {e}");
                     }
                 }
@@ -557,7 +643,15 @@ pub(crate) fn run_tracked_resume_turn(
                     // The #1899 cap disease applies here too: chunk through the
                     // fence-aware splitter, never one plain `say`.
                     for chunk in super::resume::resume_delivery_chunks(&text_only) {
-                        if let Err(e) = channel.say(&http, &chunk).await {
+                        if let Err(e) = super::governor::say(
+                            &dstate.governor,
+                            channel,
+                            &http,
+                            super::governor::Surface::Send,
+                            &chunk,
+                        )
+                        .await
+                        {
                             tracing::error!("Discord: tracked turn reply delivery failed: {e}");
                         }
                     }
@@ -574,7 +668,16 @@ pub(crate) fn run_tracked_resume_turn(
                     let edit = serenity::builder::EditMessage::new()
                         .content(super::tool_group::render_content(&group))
                         .components(super::tool_group::render_components(&group, mid.get()));
-                    if let Err(e) = channel.edit_message(&http, mid, edit).await {
+                    if let Err(e) = super::governor::edit_content(
+                        &dstate.governor,
+                        channel,
+                        &http,
+                        mid,
+                        super::governor::Surface::Final,
+                        edit,
+                    )
+                    .await
+                    {
                         tracing::debug!("Discord: tracked turn cancelled settle stamp failed: {e}");
                     }
                 }
@@ -584,7 +687,15 @@ pub(crate) fn run_tracked_resume_turn(
                 tracing::error!("Discord: tracked turn agent error: {e}");
                 let error_msg =
                     format!("❌ Error\n\n{}", crate::brain::agent::format_user_error(&e));
-                if let Err(e) = channel.say(&http, error_msg).await {
+                if let Err(e) = super::governor::say(
+                    &dstate.governor,
+                    channel,
+                    &http,
+                    super::governor::Surface::Send,
+                    error_msg,
+                )
+                .await
+                {
                     tracing::warn!("Discord: tracked turn error post failed: {e}");
                 }
                 if let Some(mid) = *turn_group_mid.lock().await
@@ -595,7 +706,16 @@ pub(crate) fn run_tracked_resume_turn(
                     let edit = serenity::builder::EditMessage::new()
                         .content(super::tool_group::render_content(&group))
                         .components(super::tool_group::render_components(&group, mid.get()));
-                    if let Err(e) = channel.edit_message(&http, mid, edit).await {
+                    if let Err(e) = super::governor::edit_content(
+                        &dstate.governor,
+                        channel,
+                        &http,
+                        mid,
+                        super::governor::Surface::Final,
+                        edit,
+                    )
+                    .await
+                    {
                         tracing::debug!("Discord: tracked turn error settle stamp failed: {e}");
                     }
                 }
