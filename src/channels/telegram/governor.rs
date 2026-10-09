@@ -231,10 +231,10 @@ impl Limits {
 
 // Everything in this section is consumed by `pace_engine` (the next step).
 // It lands as a frozen descriptor first so it can be reviewed against
-// `docs/governor-policy-matrix.md` without a single call site moving; the
+// `src/docs/governor-policy-matrix.md` without a single call site moving; the
 // `allow(dead_code)` markers come off when the engine reads every field.
 //
-// Source of truth: `docs/governor-policy-matrix.md`.
+// Source of truth: `src/docs/governor-policy-matrix.md`.
 // A cell that changes here is a behavioural change and must be named as one.
 
 /// Whether a surface consults the shared cross-surface spacing floor (#676).
