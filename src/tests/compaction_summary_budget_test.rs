@@ -220,7 +220,7 @@ fn a_trimmed_document_keeps_its_obligation_status_and_manifest_fence() {
          or the guard is never exercised and this test proves nothing"
     );
 
-    let trimmed = AgentService::enforce_summary_budget(oversized.clone(), TIGHT_BUDGET);
+    let trimmed = AgentService::enforce_summary_budget(oversized.clone(), TIGHT_BUDGET, &[]);
     let after = crate::brain::tokenizer::count_tokens(&trimmed);
 
     assert!(
@@ -257,6 +257,7 @@ fn a_document_within_budget_is_returned_unchanged() {
     let out = AgentService::enforce_summary_budget(
         doc.to_string(),
         COMPACTION_SUMMARY_MAX_TOKENS as usize,
+        &[],
     );
     assert_eq!(
         out, doc,
@@ -278,7 +279,7 @@ fn the_guard_keeps_the_obligation_rather_than_trim_it() {
          active_skills:\n  - opencrabs-dev\n```\n",
         "CONTINUE THIS TASK: keep going. ".repeat(400)
     );
-    let out = AgentService::enforce_summary_budget(doc, 100);
+    let out = AgentService::enforce_summary_budget(doc, 100, &[]);
 
     assert!(
         out.to_lowercase().contains("obligation status"),
@@ -436,7 +437,7 @@ fn five_forced_compactions_stay_bounded() {
              ({raw_tokens} vs {budget}), or the guard is never exercised"
         );
 
-        let out = AgentService::enforce_summary_budget(raw, budget);
+        let out = AgentService::enforce_summary_budget(raw, budget, &[]);
         let out_tokens = crate::brain::tokenizer::count_tokens(&out);
 
         assert!(
@@ -549,6 +550,7 @@ fn an_under_budget_document_without_a_fence_warns() {
         AgentService::enforce_summary_budget(
             doc.to_string(),
             COMPACTION_SUMMARY_MAX_TOKENS as usize,
+            &[],
         )
     });
 
@@ -577,6 +579,7 @@ fn a_complete_under_budget_document_does_not_warn() {
         AgentService::enforce_summary_budget(
             doc.to_string(),
             COMPACTION_SUMMARY_MAX_TOKENS as usize,
+            &[],
         )
     });
 
@@ -750,7 +753,11 @@ fn a_cut_document_surfaces_the_truncation_warn_and_keeps_its_fence() {
             Some(crate::brain::provider::StopReason::MaxTokens),
             &usage,
         );
-        AgentService::enforce_summary_budget(cut.clone(), COMPACTION_SUMMARY_MAX_TOKENS as usize)
+        AgentService::enforce_summary_budget(
+            cut.clone(),
+            COMPACTION_SUMMARY_MAX_TOKENS as usize,
+            &[],
+        )
     });
 
     let warns = capture.warns();

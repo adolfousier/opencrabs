@@ -502,6 +502,26 @@ pub fn is_user_correction(msg: &str) -> bool {
 }
 
 impl AgentService {
+    /// #1960: the session's live skill inventory, read from the SAME two
+    /// registries the continuation stamp uses (#125/#131): slash-invoked skills
+    /// (#219) unioned with the skills the session consumed by reading.
+    ///
+    /// Both compaction surfaces stamp this list: the continuation prompt and the
+    /// summariser's §10 manifest instructions. Neither can then hold a different
+    /// idea of what is active, and a manifest that prunes one of them is a
+    /// detectable contradiction instead of a silent one.
+    pub(crate) fn skill_inventory_for_session(&self, session_id: Uuid) -> Vec<String> {
+        let active: std::collections::BTreeSet<String> = self
+            .active_skills_for_session(session_id)
+            .into_iter()
+            .collect();
+        let seen: std::collections::BTreeSet<String> =
+            crate::brain::tools::seen_skills::seen_for_session(session_id)
+                .into_iter()
+                .collect();
+        active.union(&seen).cloned().collect()
+    }
+
     /// Build the post-compaction continuation prompt for `kind` — the single
     /// construction path shared by all five compaction sites (Regular,
     /// MidLoop, Emergency, PostTool, Manual): continuation body + plan
@@ -511,34 +531,15 @@ impl AgentService {
         session_id: Uuid,
         kind: super::compaction_prompts::CompactionKind,
     ) -> String {
-        // Union (issue #131): slash-invoked skills (#219 registry) plus
-        // skills the session CONSUMED by reading (seen_skills registry) —
-        // the inventory must reflect every way the agent loaded a skill.
-        // Deduped by BTreeSet; slash-invocation wins nothing extra because
-        // both registries store the same slug strings.
-        let active: std::collections::BTreeSet<String> = self
-            .active_skills_for_session(session_id)
-            .into_iter()
-            .collect();
-        // Epoch bump (#150) BEFORE the seen-inventory read below is NOT
-        // required and after it is not harmful: `note_compaction` bumps a
-        // per-session epoch counter and clears nothing, so
-        // `seen_for_session` is unaffected either way (decision 5 — a
-        // clearing implementation would empty the stamp's inventory).
+        // Epoch bump (#150) BEFORE the seen-inventory read inside
+        // `skill_inventory_for_session` is NOT required and after it is not
+        // harmful: `note_compaction` bumps a per-session epoch counter and
+        // clears nothing, so `seen_for_session` is unaffected either way
+        // (decision 5: a clearing implementation would empty the stamp's
+        // inventory).
         crate::brain::tools::seen_skills::note_compaction(session_id);
-        let seen: std::collections::BTreeSet<String> =
-            crate::brain::tools::seen_skills::seen_for_session(session_id)
-                .into_iter()
-                .collect();
-        let skills: Vec<String> = active.union(&seen).cloned().collect();
-        tracing::debug!(
-            "continuation_prompt({kind:?}): skill inventory stamp = {skills:?} \
-             (active {}/{} + seen {}/{})",
-            skills.len(),
-            active.len(),
-            seen.len(),
-            skills.len()
-        );
+        let skills = self.skill_inventory_for_session(session_id);
+        tracing::debug!("continuation_prompt({kind:?}): skill inventory stamp = {skills:?}");
         super::compaction_prompts::append_skill_stamp(
             super::compaction_prompts::build_continuation(
                 kind,

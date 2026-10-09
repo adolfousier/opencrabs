@@ -27,6 +27,24 @@ pub fn parse_context_manifest(summary: &str) -> Option<ContextManifest> {
     parse_manifest_text(&block)
 }
 
+/// #1960: does discarding `discarded` unload something the session still holds
+/// as `active`?
+///
+/// True for the same name, and for a parent/child pair in either direction: an
+/// auxiliary document `<skill>/<file.md>` is unreachable once the bare `<skill>`
+/// is pruned, and pruning the child out from under an active parent is the same
+/// self-contradiction one level down. Two unrelated slugs that merely share a
+/// text prefix (`dev` vs `dev-tools`) do NOT collide, hence the `/` boundary.
+fn skill_names_collide(active: &str, discarded: &str) -> bool {
+    // `parent` covers `child` when `child` is one of its auxiliary documents.
+    let parent_covers = |parent: &str, child: &str| {
+        child
+            .strip_prefix(parent)
+            .is_some_and(|rest| rest.starts_with('/'))
+    };
+    active == discarded || parent_covers(active, discarded) || parent_covers(discarded, active)
+}
+
 fn extract_manifest_block(summary: &str) -> Option<String> {
     let mut in_block = false;
     let mut fence_char = '`';
@@ -655,6 +673,7 @@ impl AgentService {
             super::request_budget::compaction_summary_request_allowance(),
             self.get_working_directory_for_session(session_id),
             self.auto_approve_tools,
+            self.skill_inventory_for_session(session_id),
             cancel,
             self.compaction_attempt_deadline(session_id),
             notifier,
@@ -949,6 +968,37 @@ impl AgentService {
         )
     }
 
+    /// #1960: the live skill set stamped into the summariser's §10 manifest
+    /// instructions.
+    ///
+    /// The compactor authors `active_skills` / `discard_skills` from conversation
+    /// memory alone: nothing in its input says which skills the session holds
+    /// RIGHT NOW, so it can prune a load-bearing one and revoke the #219
+    /// re-injection with a well-formed fence and no warning. The harness owns that
+    /// registry (the same inventory `append_skill_stamp` reads), so the names go
+    /// in as measured fact instead of guesswork. An empty inventory stamps nothing:
+    /// zero marginal tokens for sessions that never touched a skill.
+    pub(crate) fn compaction_active_skill_stamp(active_skills: &[String]) -> String {
+        if active_skills.is_empty() {
+            return String::new();
+        }
+        let mut names: Vec<&str> = active_skills.iter().map(|s| s.as_str()).collect();
+        names.sort();
+        names.dedup();
+        let list = names
+            .iter()
+            .map(|n| format!("- `{n}`"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        format!(
+            "### LIVE SKILL SET (harness-measured at compaction time, not your guess):\n\
+             {list}\n\
+             Every name above MUST be listed under `active_skills` and MUST NOT appear under \
+             `discard_skills`. If you believe one is spent, keep it anyway: pruning it unloads a \
+             body the next turn cannot recover, and its tools get refused by the skill gate.\n\n"
+        )
+    }
+
     /// #1649: the scope header prepended to the summariser prompt. Empty for
     /// `FullWindow` — the first-compaction prompt stays byte-identical to the
     /// classic one (the parity probe pins this). Delta and consolidation get
@@ -1001,6 +1051,7 @@ impl AgentService {
         max_output_tokens: u32,
         working_directory: PathBuf,
         auto_approve_tools: bool,
+        active_skills: Vec<String>,
         cancel: CancellationToken,
         attempt_deadline: std::time::Duration,
         notifier: Option<super::compaction_notice::CompactionNotifier>,
@@ -1111,8 +1162,14 @@ impl AgentService {
              `<skill-slug>/<file.md>` (e.g. `opencrabs-dev/editor.md`, `opencrabs-dev/fleet-directives.md`) \
              if only specific auxiliary procedures are needed.\n\
              - `discard_skills`: Skills or specific auxiliary documents whose tasks are complete and should be pruned to save budget.\n\
+             - NEVER discard an ACTIVE skill (#1960). Anything under `active_skills`, or named in the \
+             LIVE SKILL SET below, is load-bearing right now: discarding it unloads the skill body at \
+             wake-up and silently revokes the re-injection the harness already guarantees. Discard a \
+             skill only once the task it serves is finished. And never discard the bare `<skill>` while \
+             keeping `<skill>/<file.md>`: the auxiliary document cannot load without its parent.\n\
              - `required_tools`: Extended lazy tools (e.g. telegram_send, browser_navigate, cron_manage, pg_query) \
              that the agent will need immediately on turn 1.\n\
+             {active_skill_stamp}\
              Format as YAML:\n\
              ```context-manifest\n\
              active_skills:\n\
@@ -1201,6 +1258,7 @@ impl AgentService {
             budget_directive = Self::compaction_budget_directive(
                 super::request_budget::COMPACTION_SUMMARY_MAX_TOKENS,
             ),
+            active_skill_stamp = Self::compaction_active_skill_stamp(&active_skills),
         );
 
         // #1649: the scope prelude rides in front of the unchanged body;
@@ -1282,6 +1340,7 @@ impl AgentService {
         let summary = Self::enforce_summary_budget(
             summary,
             super::request_budget::compaction_summary_output_tokens() as usize,
+            &active_skills,
         );
 
         // #482: the summary is obeyed as the continuation document, so an
@@ -1316,7 +1375,11 @@ impl AgentService {
     /// exceeds the budget the guard WARNs and ships it: that is a prompt
     /// defect, not a trimming one, and silently cutting the obligation out
     /// would be worse than an over-budget document.
-    pub(crate) fn enforce_summary_budget(summary: String, budget_tokens: usize) -> String {
+    pub(crate) fn enforce_summary_budget(
+        summary: String,
+        budget_tokens: usize,
+        active_skills: &[String],
+    ) -> String {
         let before = crate::brain::tokenizer::count_tokens(&summary);
         if before <= budget_tokens {
             // #1933: an under-budget document can still be INCOMPLETE. When the
@@ -1325,7 +1388,7 @@ impl AgentService {
             // fence entirely. This early return is exactly why the one failure
             // that removes the fence was the one the guard never inspected, so
             // the invariants are checked on BOTH paths.
-            Self::warn_on_summary_invariants(&summary);
+            Self::warn_on_summary_invariants(&summary, active_skills);
             return summary;
         }
 
@@ -1400,7 +1463,7 @@ impl AgentService {
 
         // The two invariants this guard exists to protect. WARN rather than
         // ship a document that violates them.
-        Self::warn_on_summary_invariants(&result);
+        Self::warn_on_summary_invariants(&result, active_skills);
         if after > budget_tokens {
             tracing::warn!(
                 "enforce_summary_budget: must-keep sections alone are {} tokens against a {} \
@@ -1420,15 +1483,25 @@ impl AgentService {
     }
 
     /// WARN when a continuation document is missing a block a woken agent cannot
-    /// recover from anywhere else (#1930, #1933).
+    /// recover from anywhere else (#1930, #1933), or when its manifest prunes a
+    /// skill the harness still holds active (#1960).
     ///
     /// Runs on the UNDER-budget path too, not only after a trim: a document cut
     /// at source is short AND incomplete at once, and the trim-only check could
     /// never see that combination. `parse_context_manifest` is
     /// position-independent, so this is a real presence test rather than a shape
     /// guess.
-    fn warn_on_summary_invariants(document: &str) {
-        if parse_context_manifest(document).is_none() {
+    ///
+    /// The retention leg is the content half of the same problem: a manifest with
+    /// a well-formed fence that lists an active skill under `discard_skills`
+    /// passes every presence check and still revokes the #219 re-injection, which
+    /// is exactly how the 2026-10-06 specimen lost `opencrabs-dev` while keeping
+    /// `opencrabs-dev/harvest.md`. WARN only, never rewrite: the guard cannot know
+    /// whether the summariser's judgement or the registry is the stale side, and a
+    /// silent edit would hide the disagreement instead of surfacing it.
+    fn warn_on_summary_invariants(document: &str, active_skills: &[String]) {
+        let manifest = parse_context_manifest(document);
+        if manifest.is_none() {
             tracing::warn!(
                 "enforce_summary_budget: continuation document carries no context-manifest fence (#1933)"
             );
@@ -1438,6 +1511,43 @@ impl AgentService {
                 "enforce_summary_budget: continuation document carries no §0 obligation-status line (#1933)"
             );
         }
+        let conflicts = Self::manifest_discard_conflicts(document, active_skills);
+        if !conflicts.is_empty() {
+            tracing::warn!(
+                "enforce_summary_budget: the manifest discards {} which the harness still holds \
+                 active (#1960): that skill body is gone at wake-up and the next turn's tools \
+                 matching it get refused by the skill gate",
+                conflicts.join(", ")
+            );
+        }
+    }
+
+    /// #1960: entries of `discard_skills` that collide with a skill the harness
+    /// still holds active.
+    ///
+    /// A collision is an exact name match or a parent/child pair in either
+    /// direction, because pruning one silently unloads the other: the live
+    /// specimen discarded `opencrabs-dev` while keeping
+    /// `opencrabs-dev/harvest.md`, and an auxiliary document cannot be reached
+    /// once its parent body is gone. Returns an empty Vec for a document with no
+    /// fence (the presence check owns that) or for a session with no active
+    /// skills, so this is silent exactly when there is nothing to protect.
+    pub(crate) fn manifest_discard_conflicts(
+        document: &str,
+        active_skills: &[String],
+    ) -> Vec<String> {
+        if active_skills.is_empty() {
+            return Vec::new();
+        }
+        let Some(manifest) = parse_context_manifest(document) else {
+            return Vec::new();
+        };
+        manifest
+            .discard_skills
+            .iter()
+            .filter(|d| active_skills.iter().any(|a| skill_names_collide(a, d)))
+            .cloned()
+            .collect()
     }
 
     /// WARN when the summariser's own stop reason says the document is

@@ -724,6 +724,10 @@ impl AgentService {
         let auto_approve = self.auto_approve_tools;
         let subagents = self.subagent_manager.clone();
         let attempt_deadline = self.compaction_attempt_deadline(session_id);
+        // #1960: read the live skill inventory BEFORE the spawn, so the
+        // summariser is told which skills the session actually holds instead of
+        // guessing from the transcript.
+        let active_skills = self.skill_inventory_for_session(session_id);
         // Its own token: this task answers to session teardown, never to a
         // context that grew impatient.
         let cancel = tokio_util::sync::CancellationToken::new();
@@ -742,6 +746,7 @@ impl AgentService {
                 max_output,
                 working_dir,
                 auto_approve,
+                active_skills,
                 cancel,
                 attempt_deadline,
                 None,
