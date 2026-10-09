@@ -897,6 +897,11 @@ pub struct DiscordConfig {
     /// Default: false.
     #[serde(default)]
     pub bang_new_thread: bool,
+    /// Per-channel overrides, keyed by channel id, under
+    /// `[channels.discord.channels.<id>]` (#2014). A thread or forum post
+    /// inherits any field it does not set from its parent channel.
+    #[serde(default)]
+    pub channels: std::collections::HashMap<String, DiscordChannelConfig>,
     /// `[channels.discord.governor]` - the outbound write policy (#1910). Serenity's
     /// per-bucket limiter stays underneath: it is transport hygiene and owns
     /// the actual request queue. This is the PRODUCT layer on top: it knows
@@ -976,14 +981,62 @@ impl Default for DiscordConfig {
             auto_thread_min_chars: 0,
             bang_new_thread: false,
             governor: DiscordGovernorConfig::default(),
+            channels: std::collections::HashMap::new(),
         }
     }
+}
+
+/// One Discord channel's overrides (#2014). Lives under
+/// `[channels.discord.channels.<channel_id>]`.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct DiscordChannelConfig {
+    /// Channel name, recorded so the config is readable without the id.
+    /// Display metadata only; access never reads it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// Respond mode for this channel. `None` inherits the global value.
+    #[serde(default)]
+    pub respond_to: Option<RespondTo>,
+    /// Let any member of this channel pass the ACL here without being
+    /// listed in `allowed_users`. DMs and other channels stay locked.
+    #[serde(default)]
+    pub open: bool,
 }
 
 impl DiscordConfig {
     /// Check if a user ID is a bot owner. See [`crate::config::owner::is_owner`].
     pub fn is_owner(&self, user_id: &str) -> bool {
         crate::config::owner::is_owner(&self.allowed_users, &self.bot_owner, user_id)
+    }
+
+    /// Respond mode for a message in `channel_id`. A thread's own setting
+    /// wins, then its parent channel's, then the global `respond_to` (#2014).
+    pub fn respond_to_for(&self, channel_id: &str, parent_id: Option<&str>) -> RespondTo {
+        self.channel_field(channel_id, parent_id, |c| c.respond_to)
+            .unwrap_or(self.respond_to)
+    }
+
+    /// Whether `channel_id` (or its parent) is `open` (#2014). Opening a
+    /// channel opens its threads; nothing else is affected.
+    pub fn channel_open(&self, channel_id: &str, parent_id: Option<&str>) -> bool {
+        self.channel_field(channel_id, parent_id, |c| c.open.then_some(true))
+            .unwrap_or(false)
+    }
+
+    /// First set value of `pick` along thread → parent, field by field.
+    fn channel_field<T>(
+        &self,
+        channel_id: &str,
+        parent_id: Option<&str>,
+        pick: impl Fn(&DiscordChannelConfig) -> Option<T>,
+    ) -> Option<T> {
+        let own = self.channels.get(channel_id).and_then(&pick);
+        own.or_else(|| {
+            parent_id
+                .filter(|p| *p != channel_id)
+                .and_then(|p| self.channels.get(p))
+                .and_then(&pick)
+        })
     }
 }
 
