@@ -820,29 +820,12 @@ pub(crate) fn compacted_flow_line(
     )
 }
 
-/// Terminal state of a turn, shown in the settled flow-block header (#480).
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum FlowOutcome {
-    Finished,
-    Failed,
-    TimedOut,
-}
-
-impl FlowOutcome {
-    /// Icon and verb for the settled header, e.g. `("✅", "Finished")`.
-    pub(crate) fn icon_verb(self) -> (&'static str, &'static str) {
-        match self {
-            FlowOutcome::Finished => ("✅", "Finished"),
-            FlowOutcome::Failed => ("❌", "Failed"),
-            FlowOutcome::TimedOut => ("⏱", "Timed out"),
-        }
-    }
-}
-
-/// Alive sub-agent counts and the waiting-verb decision live in the shared
-/// [`crate::channels::background_work`] module (#1985); re-exported here so
-/// the flow renderer keeps its path.
-pub(crate) use crate::channels::background_work::{SubagentCounts, waiting_verb};
+/// The terminal state of a turn and its settled-header icon+verb live in the
+/// shared [`crate::channels::background_work`] module (#480, lifted there for
+/// the Discord port in #1911 so both surfaces read one vocabulary). They are
+/// re-exported here so the flow renderer keeps its path, next to the
+/// waiting-verb decision the same module owns (#1985).
+pub(crate) use crate::channels::background_work::{FlowOutcome, SubagentCounts, waiting_verb};
 
 /// Settled header icon+verb, overridden to a waiting state when the turn
 /// finished with background work still alive (#1144, #1183). A settled card

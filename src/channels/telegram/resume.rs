@@ -1081,14 +1081,7 @@ pub(crate) async fn resume_session_inner(
     // stamped after so it renders on the block's final shape.
     let flow_outcome = match &result {
         Ok(_) => FlowOutcome::Finished,
-        Err(e) => {
-            let es = e.to_string().to_lowercase();
-            if es.contains("timed out") || es.contains("timeout") || es.contains("deadline") {
-                FlowOutcome::TimedOut
-            } else {
-                FlowOutcome::Failed
-            }
-        }
+        Err(e) => crate::channels::background_work::outcome_for_error(e),
     };
     if !super::handler::deliver_final_response(
         &bot,

@@ -16,6 +16,7 @@ use std::time::{Duration, Instant};
 use uuid::Uuid;
 
 use super::DiscordState;
+use crate::channels::background_work::FlowOutcome;
 
 /// One tool row in a group.
 #[derive(Debug, Clone)]
@@ -61,11 +62,15 @@ pub(crate) struct SettledStatus {
     /// narrows this as work drains and clears it (flip to finished) once
     /// both registries are empty.
     pub waiting: Option<String>,
-    /// Forced failure chrome from the Cancelled/Err delivery arms (#1987):
-    /// the line reads `❌ {word}` so the group stops claiming success and
-    /// the flow ticker's clock ends with the turn instead of running to its
-    /// 30-minute orphan cap.
-    pub terminal: Option<&'static str>,
+    /// Terminal state of a turn that ended anywhere but normally (#1911):
+    /// `None` means the turn delivered its answer, so the line keeps the
+    /// plain counts chrome. `Some` stamps the settled outcome's own icon and
+    /// verb (`⏱ Timed out`, `❌ Failed`, `❌ Cancelled`) from the shared
+    /// [`FlowOutcome`], the same vocabulary Telegram's settled header reads.
+    /// Set by the Cancelled/Err delivery arms (#1987) so the group stops
+    /// claiming success and the flow ticker's clock ends with the turn
+    /// instead of running to its 30-minute orphan cap.
+    pub outcome: Option<FlowOutcome>,
 }
 
 /// Keep at most this many narration lines in the bubble (newest win).
@@ -197,12 +202,17 @@ fn summary_line(group: &GroupState) -> String {
             // the live "N running" tail (an entry left statusless at
             // settle is done, not running). #1987 puts two overrides ahead
             // of that default: a waiting verb (⏳, the turn ended with
-            // background work alive) and a forced failure word (❌, the
-            // Cancelled/Err arms settle the group so its clock stops).
+            // background work alive) and a terminal outcome (#1911, the
+            // Cancelled/Err arms settle the group so its clock stops). The
+            // outcome prints its own icon and verb, so a timed-out turn now
+            // reads `⏱ Timed out` where a crashed one reads `❌ Failed`,
+            // matching the Telegram settled header instead of collapsing
+            // both into one cross.
             let mut line = if let Some(verb) = &s.waiting {
                 format!("⏳ {verb} · {counts}")
-            } else if let Some(word) = s.terminal {
-                format!("❌ {word} · {counts}")
+            } else if let Some(outcome) = s.outcome {
+                let (icon, verb) = outcome.icon_verb();
+                format!("{icon} {verb} · {counts}")
             } else if failed > 0 {
                 format!("❌ {counts} · {failed} failed")
             } else {
@@ -290,7 +300,7 @@ fn hard_clip(body: String) -> String {
 /// Message body for the group in its current display state.
 pub(crate) fn render_content(group: &GroupState) -> String {
     // The bare entry line is a LIVE-only shortcut. Once settled, the
-    // final-state chrome (⏳ waiting verb, ❌ terminal word, ✅/❌ counts,
+    // final-state chrome (⏳ waiting verb, outcome icon+verb, ✅/❌ counts,
     // ctx, frozen clock) must render even for single-tool turns. #1987:
     // a lone aborted call otherwise kept showing a plain entry row and
     // hid the Cancelled/Error/Waiting state from the user entirely.
@@ -403,17 +413,18 @@ impl DiscordState {
     /// record the ctx budget line for the settled chrome. A `None` ctx keeps
     /// whatever a previous settle stamped, so a re-settle never clears the
     /// budget. `waiting` (Some verb, #1987) settles the line to the ⏳ form
-    /// because the turn ended with background work alive; `terminal` (a
-    /// forced failure word like "Cancelled") settles the line to ❌ from the
-    /// Cancelled/Err delivery arms so the ticker's clock ends with the turn.
-    /// Returns the updated state, or None when the message has no stored
-    /// group (aged out of retention).
+    /// because the turn ended with background work alive; `outcome` (Some,
+    /// #1911) settles it to that state's own icon and verb, so the Cancelled
+    /// and Err delivery arms stop the ticker's clock with the turn and the
+    /// group never claims success. `None` is the normal delivery: the line
+    /// keeps the plain ✅/❌ counts chrome. Returns the updated state, or
+    /// None when the message has no stored group (aged out of retention).
     pub(crate) async fn settle_tool_group(
         &self,
         message_id: u64,
         ctx: Option<String>,
         waiting: Option<String>,
-        terminal: Option<&'static str>,
+        outcome: Option<FlowOutcome>,
     ) -> Option<GroupState> {
         let mut guard = self.tool_groups.lock().await;
         let (_, map) = &mut *guard;
@@ -423,7 +434,7 @@ impl DiscordState {
             elapsed: group.started_at.elapsed(),
             ctx: ctx.or(prev_ctx),
             waiting,
-            terminal,
+            outcome,
         });
         Some(group.clone())
     }
@@ -514,7 +525,7 @@ mod cap_tests {
                 elapsed: Duration::from_secs(3),
                 ctx: None,
                 waiting: None,
-                terminal: None,
+                outcome: None,
             }),
         }
     }

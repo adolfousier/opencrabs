@@ -2801,14 +2801,7 @@ pub(crate) async fn handle_message(
     // block's final shape (post take_folded_final).
     let flow_outcome = match &result {
         Ok(_) => FlowOutcome::Finished,
-        Err(e) => {
-            let es = e.to_string().to_lowercase();
-            if es.contains("timed out") || es.contains("timeout") || es.contains("deadline") {
-                FlowOutcome::TimedOut
-            } else {
-                FlowOutcome::Failed
-            }
-        }
+        Err(e) => crate::channels::background_work::outcome_for_error(e),
     };
 
     if !deliver_final_response(

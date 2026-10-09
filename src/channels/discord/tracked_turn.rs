@@ -27,6 +27,7 @@ use uuid::Uuid;
 use super::DiscordState;
 use super::tool_group::{GroupEntry, GroupState};
 use crate::brain::agent::AgentService;
+use crate::channels::background_work::{FlowOutcome, outcome_for_error};
 
 /// The agent call a tracked turn rides (#1990).
 pub(crate) enum ResumeDispatch {
@@ -567,7 +568,7 @@ pub(crate) fn run_tracked_resume_turn(
                 tracing::info!("Discord: tracked turn cancelled for session {session_id}");
                 if let Some(mid) = *turn_group_mid.lock().await
                     && let Some(group) = dstate
-                        .settle_tool_group(mid.get(), None, None, Some("Cancelled"))
+                        .settle_tool_group(mid.get(), None, None, Some(FlowOutcome::Cancelled))
                         .await
                 {
                     let edit = serenity::builder::EditMessage::new()
@@ -588,7 +589,7 @@ pub(crate) fn run_tracked_resume_turn(
                 }
                 if let Some(mid) = *turn_group_mid.lock().await
                     && let Some(group) = dstate
-                        .settle_tool_group(mid.get(), None, None, Some("Error"))
+                        .settle_tool_group(mid.get(), None, None, Some(outcome_for_error(&e)))
                         .await
                 {
                     let edit = serenity::builder::EditMessage::new()

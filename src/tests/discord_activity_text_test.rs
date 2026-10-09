@@ -30,7 +30,7 @@ fn settled(group: &mut GroupState, ctx: Option<String>) {
         elapsed: Duration::from_secs(42),
         ctx,
         waiting: None,
-        terminal: None,
+        outcome: None,
     });
 }
 

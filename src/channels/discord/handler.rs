@@ -5,7 +5,9 @@
 
 use super::DiscordState;
 use crate::brain::agent::AgentService;
-use crate::channels::background_work::{bg_indicator_for, subagent_counts_for, waiting_verb};
+use crate::channels::background_work::{
+    FlowOutcome, bg_indicator_for, outcome_for_error, subagent_counts_for, waiting_verb,
+};
 use crate::channels::group_history;
 use crate::config::{Config, RespondTo};
 use crate::db::ChannelMessageRepository;
@@ -1783,11 +1785,11 @@ pub(crate) async fn handle_message(
         Err(ref e) if matches!(e, crate::brain::agent::AgentError::Cancelled) => {
             tracing::info!("Discord: agent call cancelled for session {}", session_id);
             // #1987: an unsettled group keeps editing its 🕒 line until the
-            // 30-minute orphan cap; stamp the terminal ❌ word so the clock
+            // 30-minute orphan cap; stamp the cancelled outcome so the clock
             // ends with the cancelled turn.
             if let Some(mid) = *turn_group_mid.lock().await
                 && let Some(group) = discord_state
-                    .settle_tool_group(mid.get(), None, None, Some("Cancelled"))
+                    .settle_tool_group(mid.get(), None, None, Some(FlowOutcome::Cancelled))
                     .await
             {
                 let edit = serenity::builder::EditMessage::new()
@@ -1810,9 +1812,11 @@ pub(crate) async fn handle_message(
             }
             // #1987: a failed turn must settle its group too, or the flow
             // ticker keeps editing 🕒 on a bubble whose turn is gone.
+            // #1911: the settle carries the classified outcome, so a timeout
+            // reads `⏱ Timed out` and anything else `❌ Failed`.
             if let Some(mid) = *turn_group_mid.lock().await
                 && let Some(group) = discord_state
-                    .settle_tool_group(mid.get(), None, None, Some("Error"))
+                    .settle_tool_group(mid.get(), None, None, Some(outcome_for_error(&e)))
                     .await
             {
                 let edit = serenity::builder::EditMessage::new()

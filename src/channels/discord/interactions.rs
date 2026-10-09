@@ -9,7 +9,9 @@
 //! the TTL answer "expired" instead of firing stale actions.
 
 use crate::brain::agent::AgentService;
-use crate::channels::background_work::{bg_indicator_for, subagent_counts_for, waiting_verb};
+use crate::channels::background_work::{
+    FlowOutcome, bg_indicator_for, outcome_for_error, subagent_counts_for, waiting_verb,
+};
 use crate::services::SessionService;
 use serenity::prelude::Context;
 use std::sync::Arc;
@@ -607,7 +609,7 @@ pub(crate) async fn route_followup_turn(
             // the cancelled turn instead of running to the orphan cap.
             if let Some(mid) = *turn_group_mid.lock().await
                 && let Some(group) = discord_state
-                    .settle_tool_group(mid.get(), None, None, Some("Cancelled"))
+                    .settle_tool_group(mid.get(), None, None, Some(FlowOutcome::Cancelled))
                     .await
             {
                 let edit = serenity::builder::EditMessage::new()
@@ -624,10 +626,12 @@ pub(crate) async fn route_followup_turn(
             if let Err(e) = channel.say(&http, error_msg).await {
                 tracing::warn!("Discord: follow-up tap error post failed: {e}");
             }
-            // #1987: the tap turn settles to ❌ on failure too.
+            // #1987: the tap turn settles on failure too, and #1911 gives
+            // that settle the real state: `⏱ Timed out` for a timeout,
+            // `❌ Failed` for anything else.
             if let Some(mid) = *turn_group_mid.lock().await
                 && let Some(group) = discord_state
-                    .settle_tool_group(mid.get(), None, None, Some("Error"))
+                    .settle_tool_group(mid.get(), None, None, Some(outcome_for_error(&e)))
                     .await
             {
                 let edit = serenity::builder::EditMessage::new()

@@ -2,6 +2,7 @@
 //! toggle/preservation semantics, and retention pruning — mirroring the
 //! Slack port's contracts.
 
+use crate::channels::background_work::FlowOutcome;
 use crate::channels::discord::DiscordState;
 use crate::channels::discord::tool_group::{
     GroupEntry, GroupState, SettledStatus, render_components, render_content,
@@ -81,7 +82,7 @@ fn live_summary_carries_the_rolling_clock_settled_freezes_it() {
         elapsed: Duration::from_secs(90),
         ctx: Some("ctx: 84K/200K 42%".into()),
         waiting: None,
-        terminal: None,
+        outcome: None,
     });
     let settled = render_content(&done_group);
     assert!(settled.contains("⏱️ 1:30"));
@@ -143,7 +144,7 @@ async fn resettle_with_no_ctx_keeps_the_stamped_budget() {
     );
 }
 
-// #1987: the waiting state, the terminal stamp, the flip, and the registry.
+// #1987: the waiting state, the settled outcome stamp, the flip, and the registry.
 
 #[test]
 fn waiting_verb_replaces_the_check_and_keeps_the_frozen_clock() {
@@ -152,7 +153,7 @@ fn waiting_verb_replaces_the_check_and_keeps_the_frozen_clock() {
         elapsed: Duration::from_secs(60),
         ctx: Some("ctx: 84K/200K 42%".into()),
         waiting: Some("waiting for 2 background tasks".into()),
-        terminal: None,
+        outcome: None,
     });
     let line = render_content(&g);
     assert!(line.contains("⏳ waiting for 2 background tasks"));
@@ -162,13 +163,13 @@ fn waiting_verb_replaces_the_check_and_keeps_the_frozen_clock() {
 }
 
 #[test]
-fn terminal_word_settles_the_group_with_a_cross() {
+fn cancelled_outcome_settles_the_group_with_a_cross() {
     let mut g = group(2, true, false);
     g.settled = Some(SettledStatus {
         elapsed: Duration::from_secs(12),
         ctx: None,
         waiting: None,
-        terminal: Some("Cancelled"),
+        outcome: Some(FlowOutcome::Cancelled),
     });
     let line = render_content(&g);
     assert!(line.contains("❌ Cancelled"));
@@ -177,7 +178,7 @@ fn terminal_word_settles_the_group_with_a_cross() {
 }
 
 #[tokio::test]
-async fn settle_stamps_waiting_and_the_terminal_word() {
+async fn settle_stamps_waiting_then_the_failed_outcome() {
     let state = DiscordState::new();
     state.upsert_tool_group(120, group(2, true, false)).await;
     let stamped = state
@@ -191,17 +192,17 @@ async fn settle_stamps_waiting_and_the_terminal_word() {
         .expect("group exists");
     let s = stamped.settled.as_ref().expect("stamped at settle");
     assert_eq!(s.waiting.as_deref(), Some("waiting for 1 background task"));
-    assert!(s.terminal.is_none());
+    assert!(s.outcome.is_none());
     state.upsert_tool_group(121, group(1, true, false)).await;
     let dead = state
-        .settle_tool_group(121, None, None, Some("Error"))
+        .settle_tool_group(121, None, None, Some(FlowOutcome::Failed))
         .await
         .expect("group exists");
     assert_eq!(
-        dead.settled.as_ref().expect("stamped").terminal,
-        Some("Error")
+        dead.settled.as_ref().expect("stamped").outcome,
+        Some(FlowOutcome::Failed)
     );
-    assert!(render_content(&dead).contains("❌ Error"));
+    assert!(render_content(&dead).contains("❌ Failed"));
 }
 
 #[tokio::test]
