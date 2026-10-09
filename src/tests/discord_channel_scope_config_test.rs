@@ -107,3 +107,22 @@ fn channels_section_parses_from_toml() {
     assert!(entry.open);
     assert_eq!(cfg.respond_to_for("100", None), RespondTo::All);
 }
+
+#[test]
+fn open_admits_a_member_of_its_channel() {
+    use crate::channels::discord::commands::identity_admitted;
+    assert!(identity_admitted(false, false, false, false, true));
+}
+
+#[test]
+fn open_never_overrides_an_unconfigured_bot() {
+    use crate::channels::discord::commands::identity_admitted;
+    assert!(!identity_admitted(true, false, false, false, true));
+    assert!(!identity_admitted(true, true, true, true, true));
+}
+
+#[test]
+fn without_open_the_member_is_still_refused() {
+    use crate::channels::discord::commands::identity_admitted;
+    assert!(!identity_admitted(false, false, false, false, false));
+}

@@ -46,7 +46,7 @@ use std::sync::Arc;
 use serenity::builder::{CreateCommand, CreateCommandOption};
 use serenity::http::Http;
 use serenity::model::application::{CommandOptionType, CommandType};
-use serenity::model::id::GuildId;
+use serenity::model::id::{ChannelId, GuildId};
 
 use crate::brain::{BrainLoader, CommandLoader, UserCommand};
 
@@ -384,7 +384,8 @@ pub(crate) async fn sync_commands(
 /// no roles and no owner is UNCONFIGURED, and unconfigured denies everybody:
 /// the old "empty means everyone" reading made a half-configured Discord bot
 /// public. Otherwise the owner, an allowlisted id, or a holder of an allowed
-/// role is admitted.
+/// role is admitted, and so is any member of a channel that is `open` there
+/// (#2014). `open_here` never overrides `unconfigured`.
 ///
 /// Extracted pure so the branch can be pinned without a gateway.
 pub(crate) fn identity_admitted(
@@ -392,8 +393,25 @@ pub(crate) fn identity_admitted(
     is_owner: bool,
     in_allowlist: bool,
     role_granted: bool,
+    open_here: bool,
 ) -> bool {
-    !unconfigured && (is_owner || in_allowlist || role_granted)
+    !unconfigured && (is_owner || in_allowlist || role_granted || open_here)
+}
+
+/// The parent channel of a thread or forum post, or `None` for a top-level
+/// channel, a DM, or a lookup that failed (#2014). A failed lookup is logged;
+/// callers fall back to the thread's own id alone.
+pub(crate) async fn parent_channel_id(http: &Http, channel: ChannelId) -> Option<String> {
+    match channel.to_channel(http).await {
+        Ok(serenity::model::channel::Channel::Guild(gc)) => {
+            gc.parent_id.map(|p| p.get().to_string())
+        }
+        Ok(_) => None,
+        Err(e) => {
+            tracing::warn!("Discord: could not resolve parent of channel {channel}: {e}");
+            None
+        }
+    }
 }
 
 /// Whether any of a member's role ids is on the allowlist. Ids cross a JSON

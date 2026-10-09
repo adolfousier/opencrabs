@@ -310,24 +310,24 @@ fn roles(list: &[&str]) -> Vec<String> {
 #[test]
 fn an_unconfigured_channel_admits_nobody_not_everybody() {
     assert!(
-        !identity_admitted(true, true, true, true),
+        !identity_admitted(true, true, true, true, true),
         "even a set that looks admitted must deny while unconfigured"
     );
 }
 
 #[test]
 fn a_configured_channel_admits_owner_allowlist_or_role() {
-    assert!(identity_admitted(false, true, false, false), "owner");
+    assert!(identity_admitted(false, true, false, false, false), "owner");
     assert!(
-        identity_admitted(false, false, true, false),
+        identity_admitted(false, false, true, false, false),
         "allowlisted id"
     );
     assert!(
-        identity_admitted(false, false, false, true),
+        identity_admitted(false, false, false, true, false),
         "holder of an allowed role"
     );
     assert!(
-        !identity_admitted(false, false, false, false),
+        !identity_admitted(false, false, false, false, false),
         "a stranger in a configured guild is denied"
     );
 }

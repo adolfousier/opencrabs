@@ -374,7 +374,6 @@ pub(crate) async fn handle_message(
         .iter()
         .filter_map(|s| s.parse().ok())
         .collect();
-    let respond_to = &dc_cfg.respond_to;
     let allowed_channels: HashSet<String> = dc_cfg.allowed_channels.iter().cloned().collect();
     let idle_timeout_hours = dc_cfg.session_idle_hours;
     let voice_config = cfg.voice_config();
@@ -425,6 +424,21 @@ pub(crate) async fn handle_message(
         }
     };
 
+    // Channel settings (#2014). A thread or forum post resolves through its
+    // parent channel (#384); the lookup runs only when the operator set up
+    // something a parent can carry, so a default install costs nothing.
+    let is_dm = msg.guild_id.is_none();
+    let channel_str = msg.channel_id.get().to_string();
+    let needs_parent = !is_dm && (!allowed_channels.is_empty() || !dc_cfg.channels.is_empty());
+    let parent_id: Option<String> = if needs_parent {
+        super::commands::parent_channel_id(&ctx.http, msg.channel_id).await
+    } else {
+        None
+    };
+    let open_here = !is_dm && dc_cfg.channel_open(&channel_str, parent_id.as_deref());
+    let respond_to_here = dc_cfg.respond_to_for(&channel_str, parent_id.as_deref());
+    let respond_to = &respond_to_here;
+
     // Deny-by-default allowlist (OC-02). An empty allowlist used to accept
     // everyone, unlike Telegram, which denies an unconfigured channel. Now a
     // channel with no allowed_users, no allowed_roles, and no bot_owner denies;
@@ -450,7 +464,7 @@ pub(crate) async fn handle_message(
         });
     let unconfigured =
         allowed.is_empty() && dc_cfg.allowed_roles.is_empty() && dc_cfg.bot_owner.is_empty();
-    if unconfigured || !(is_owner || in_allowlist || role_granted) {
+    if unconfigured || !(is_owner || in_allowlist || role_granted || open_here) {
         tracing::debug!(
             "Discord: ignoring message from non-allowed user {} (deny-by-default, OC-02)",
             user_id
@@ -459,21 +473,15 @@ pub(crate) async fn handle_message(
     }
 
     // respond_to / allowed_channels filtering — DMs always pass
-    let is_dm = msg.guild_id.is_none();
     if !is_dm {
-        let channel_str = msg.channel_id.get().to_string();
-
         // Check allowed_channels (empty = all channels allowed). Threads and
         // forum posts (#384) carry their own channel id, so a miss falls back
         // to the PARENT channel: allow-listing a forum allows every post in
         // it, each post keeping its own per-thread session.
         if !allowed_channels.is_empty() && !allowed_channels.contains(&channel_str) {
-            let parent_allowed = match msg.channel_id.to_channel(&ctx.http).await {
-                Ok(serenity::model::channel::Channel::Guild(gc)) => gc
-                    .parent_id
-                    .is_some_and(|p| allowed_channels.contains(&p.get().to_string())),
-                _ => false,
-            };
+            let parent_allowed = parent_id
+                .as_deref()
+                .is_some_and(|p| allowed_channels.contains(p));
             if !parent_allowed {
                 tracing::debug!(
                     "Discord: ignoring message in non-allowed channel {} (parent not allowed either)",

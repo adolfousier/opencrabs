@@ -299,6 +299,18 @@ impl EventHandler for Handler {
                 .iter()
                 .filter_map(|s| s.parse::<i64>().ok())
                 .any(|u| u == user as i64);
+            // A thread or forum post resolves its settings through its parent
+            // (#384, #2014). The lookup runs only when the operator configured
+            // something a parent can carry, so a default install costs nothing.
+            let channel_str = channel_id.to_string();
+            let needs_parent =
+                !is_dm && (!dc.allowed_channels.is_empty() || !dc.channels.is_empty());
+            let parent = if needs_parent {
+                super::commands::parent_channel_id(&ctx.http, command.channel_id).await
+            } else {
+                None
+            };
+            let open_here = !is_dm && dc.channel_open(&channel_str, parent.as_deref());
             let admitted = super::commands::identity_admitted(
                 dc.allowed_users.is_empty()
                     && dc.allowed_roles.is_empty()
@@ -306,30 +318,27 @@ impl EventHandler for Handler {
                 owner,
                 in_allowlist,
                 !is_dm && super::commands::holds_allowed_role(&dc.allowed_roles, &role_ids),
+                open_here,
             );
 
             // Channel scope, with the parent fallback: a thread or forum post
             // carries its own id, so allow-listing a forum admits its posts.
-            let channel_str = channel_id.to_string();
             let mut channel_ok = dc.allowed_channels.is_empty()
                 || dc.allowed_channels.iter().any(|c| c == &channel_str);
             if !channel_ok && !is_dm {
-                channel_ok = match command.channel_id.to_channel(&ctx.http).await {
-                    Ok(serenity::model::channel::Channel::Guild(gc)) => {
-                        gc.parent_id.is_some_and(|p| {
-                            dc.allowed_channels
-                                .iter()
-                                .any(|c| c == &p.get().to_string())
-                        })
-                    }
-                    _ => false,
-                };
+                channel_ok = parent
+                    .as_deref()
+                    .is_some_and(|p| dc.allowed_channels.iter().any(|c| c == p));
             }
             // `respond_to` filters unsolicited messages; an invoked command is
             // solicited by definition, so only `dm_only` applies, and it means
-            // the operator told this bot not to speak in guild channels.
-            let inside_dm_policy =
-                is_dm || !matches!(dc.respond_to, crate::config::RespondTo::DmOnly);
+            // the operator told this bot not to speak in guild channels. The
+            // mode is the channel's own, with the parent and global fallbacks.
+            let inside_dm_policy = is_dm
+                || !matches!(
+                    dc.respond_to_for(&channel_str, parent.as_deref()),
+                    crate::config::RespondTo::DmOnly
+                );
 
             if !admitted || !channel_ok || !inside_dm_policy {
                 tracing::warn!(
