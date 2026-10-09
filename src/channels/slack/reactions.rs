@@ -9,6 +9,7 @@
 //! Sentiment and prompt framing reuse the channel-agnostic helpers in
 //! `crate::channels::telegram::reaction_prompt`.
 
+use super::governor::GatedWrites;
 use slack_morphism::prelude::*;
 use std::sync::Arc;
 
@@ -216,7 +217,7 @@ pub(crate) async fn handle_reaction_added(
             channel,
             SlackMessageContent::new().with_text(body),
         );
-        if let Err(e) = session.chat_post_message(&req).await {
+        if let Err(e) = session.post(&req).await {
             tracing::warn!("Slack reaction: failed to deliver reply: {e}");
         }
     }

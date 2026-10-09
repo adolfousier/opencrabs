@@ -737,6 +737,22 @@ allowed_channels = ["C12345678"]        # Where the bot operates (Slack channel 
 # respond_to = "all"                    # "all" | "dm_only" | "mention"
 # session_idle_hours = 24.0             # Archive inactive non-owner sessions after N hours (default: never)
 
+# Outbound write policy for Slack (#2012), the twin of [channels.discord.governor]
+# (#1910). slack-morphism's own throttler stays underneath: it queues the request
+# and retries it, it does not know that this request is the fourth re-render of a
+# step group nobody has read yet. Content (answers, notices, settle stamps) is
+# delay-never-drop; chrome (the flow ticker's clock, the step-group status edit)
+# is dropped the moment it is refused, because the next paint restates it.
+# [channels.slack.governor]
+# enabled = true                        # Master switch. false = pre-#2012 pass-through.
+# writes_per_minute = 50                # Rolling per-conversation write ceiling. 0 = no ceiling.
+# burst = 10                            # Headroom before the sustained rate starts pacing.
+# chrome_min_spacing_ms = 1000          # Spacing between LIVE re-renders (ticker clock,
+                                        # step-group status). Content writes and sends never wait
+                                        # on it. 0 = no spacing.
+# pause_secs = 5                        # Fallback park when a 429 names no Retry-After, and
+                                        # the ceiling on a park that does (4x this value).
+
 # ========================================
 # Trello — board card management
 # ========================================

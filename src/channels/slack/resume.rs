@@ -5,6 +5,7 @@
 //! channel via `chat.postMessage` (same path as crash recovery in `cli/ui.rs`).
 
 use super::SlackState;
+use super::governor::GatedWrites;
 use crate::brain::agent::service::MessageEnqueueCallback;
 use crate::channels::bg_resume::{self, AgentHolder};
 use slack_morphism::prelude::{
@@ -66,7 +67,7 @@ pub(crate) fn build_enqueue_callback(
             if let Some(thread) = state.session_thread(session_id).await {
                 req = req.with_thread_ts(SlackTs::new(thread));
             }
-            if let Err(e) = session.chat_post_message(&req).await {
+            if let Err(e) = session.post(&req).await {
                 tracing::warn!("[bg-resume] slack: chat_post_message failed: {e}");
             }
             // The completion just delivered is the event the channel's waiting

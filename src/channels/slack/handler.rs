@@ -7,6 +7,7 @@
 //! Socket Mode callbacks require plain function pointers (not closures).
 
 use super::SlackState;
+use super::governor::GatedWrites;
 use crate::brain::agent::AgentService;
 use crate::channels::background_work::{bg_indicator_for, subagent_counts_for, waiting_verb};
 use crate::channels::group_history;
@@ -56,7 +57,7 @@ pub async fn on_interaction(
                             content,
                             slack_ts,
                         );
-                        if let Err(e) = session.chat_update(&upd).await {
+                        if let Err(e) = session.update(&upd).await {
                             tracing::warn!("Slack: tool group toggle update failed: {e}");
                         }
                     } else {
@@ -92,7 +93,7 @@ pub async fn on_interaction(
                                 SlackMessageContent::new()
                                     .with_text(format!("\u{25b6}\u{fe0f} {text}")),
                             );
-                            if let Err(e) = session.chat_post_message(&echo).await {
+                            if let Err(e) = session.post(&echo).await {
                                 tracing::warn!(error = %e, "failed to post Slack message");
                             }
                             run_followup_turn(
@@ -189,9 +190,7 @@ pub async fn on_interaction(
                                                 channel_id_clone,
                                                 SlackMessageContent::new().with_text(r.content),
                                             );
-                                            if let Err(e) =
-                                                session.chat_post_message(&request).await
-                                            {
+                                            if let Err(e) = session.post(&request).await {
                                                 tracing::warn!(error = %e, "failed to post Slack message");
                                             }
                                         }
@@ -235,7 +234,7 @@ pub async fn on_interaction(
                             channel.id.clone(),
                             SlackMessageContent::new().with_blocks(blocks),
                         );
-                        if let Err(e) = session.chat_post_message(&request).await {
+                        if let Err(e) = session.post(&request).await {
                             tracing::warn!(error = %e, "failed to post Slack message");
                         }
                     }
@@ -310,7 +309,7 @@ pub async fn on_interaction(
                             channel.id.clone(),
                             SlackMessageContent::new().with_text(reply),
                         );
-                        if let Err(e) = session.chat_post_message(&request).await {
+                        if let Err(e) = session.post(&request).await {
                             tracing::warn!(error = %e, "failed to post Slack message");
                         }
                     }
@@ -357,7 +356,7 @@ pub async fn on_interaction(
                                 SlackMessageContent::new()
                                     .with_text(format!("✅ Switched to session `{}`", display)),
                             );
-                            if let Err(e) = session.chat_post_message(&request).await {
+                            if let Err(e) = session.post(&request).await {
                                 tracing::warn!(error = %e, "failed to post Slack message");
                             }
                         }
@@ -673,7 +672,7 @@ fn spawn_flow_ticker(
             ));
             let session = client.open_session(&token);
             let upd = SlackApiChatUpdateRequest::new(group.channel.clone(), content, ts.clone());
-            if let Err(e) = session.chat_update(&upd).await {
+            if let Some(Err(e)) = session.update_chrome(&upd).await {
                 tracing::warn!("Slack: flow ticker chat_update failed (ts={ts}): {e}");
             }
             // Race guard: settle may have stamped and posted while this
@@ -683,7 +682,7 @@ fn spawn_flow_ticker(
                 Some(re) if re.settled_terminal() => {
                     let content = super::tool_group::render(&re, &ts);
                     let upd = SlackApiChatUpdateRequest::new(re.channel, content, ts);
-                    if let Err(e) = session.chat_update(&upd).await {
+                    if let Err(e) = session.update(&upd).await {
                         tracing::warn!("Slack: flow ticker settle fixup failed: {e}");
                     }
                     break;
@@ -712,7 +711,7 @@ async fn sync_step_group<'a>(
                 .await;
             let content = super::tool_group::render(&group, ts);
             let upd = SlackApiChatUpdateRequest::new(channel, content, ts.clone());
-            if let Err(e) = session.chat_update(&upd).await {
+            if let Some(Err(e)) = session.update_chrome(&upd).await {
                 tracing::warn!("Slack: chat_update failed (step group append): {e}");
             }
         }
@@ -725,11 +724,11 @@ async fn sync_step_group<'a>(
             if let Some(ref ts) = thread_ts {
                 req = req.with_thread_ts(ts.clone());
             }
-            match session.chat_post_message(&req).await {
+            match session.post(&req).await {
                 Ok(resp) => {
                     let fixed = super::tool_group::render(&group, &resp.ts);
                     let upd = SlackApiChatUpdateRequest::new(channel, fixed, resp.ts.clone());
-                    if let Err(e) = session.chat_update(&upd).await {
+                    if let Err(e) = session.update(&upd).await {
                         tracing::warn!("Slack: chat_update failed (step group ts fixup): {e}");
                     }
                     slack_state
@@ -766,7 +765,7 @@ async fn post_final_text<'a>(
     if let Some(ts) = thread_ts {
         req = req.with_thread_ts(ts.clone());
     }
-    if let Err(e) = session.chat_post_message(&req).await {
+    if let Err(e) = session.post(&req).await {
         // The answer is lost if this fails, so it is an error, not a debug.
         tracing::error!("Slack: failed to post salvaged final response: {e}");
     }
@@ -808,7 +807,7 @@ async fn settle_step_group<'a>(
     };
     let content = super::tool_group::render(&group, &ts);
     let upd = SlackApiChatUpdateRequest::new(channel, content, ts.clone());
-    if let Err(e) = session.chat_update(&upd).await {
+    if let Err(e) = session.update(&upd).await {
         tracing::warn!("Slack: chat_update failed (step group settle, ts={ts}): {e}");
     }
     if group.settled.as_ref().is_some_and(|s| s.waiting) {
@@ -861,7 +860,7 @@ pub(crate) async fn flip_waiting_group(
         content,
         SlackTs::new(ts.clone()),
     );
-    if let Err(e) = session.chat_update(&upd).await {
+    if let Err(e) = session.update(&upd).await {
         tracing::warn!("Slack: chat_update failed (waiting-group flip, ts={ts}): {e}");
     }
     if group.settled.as_ref().is_some_and(|s| s.waiting) {
@@ -1186,7 +1185,7 @@ async fn handle_message(
                          /new if you deliberately want a fresh session."
                     )),
                 );
-                if let Err(e) = session.chat_post_message(&request).await {
+                if let Err(e) = session.post(&request).await {
                     tracing::warn!(error = %e, "failed to post Slack message");
                 }
                 return;
@@ -1368,7 +1367,7 @@ async fn handle_message(
             SlackChannelId::new(channel_id),
             SlackMessageContent::new().with_text(reply),
         );
-        if let Err(e) = session.chat_post_message(&request).await {
+        if let Err(e) = session.post(&request).await {
             tracing::warn!(error = %e, "failed to post Slack message");
         }
         return;
@@ -1395,7 +1394,7 @@ async fn handle_message(
                 SlackChannelId::new(channel_id),
                 SlackMessageContent::new().with_text(reply),
             );
-            if let Err(e) = session.chat_post_message(&request).await {
+            if let Err(e) = session.post(&request).await {
                 tracing::warn!(error = %e, "failed to post Slack message");
             }
             return;
@@ -1442,7 +1441,7 @@ async fn handle_message(
                     SlackChannelId::new(channel_id),
                     SlackMessageContent::new().with_blocks(blocks),
                 );
-                if let Err(e) = session.chat_post_message(&request).await {
+                if let Err(e) = session.post(&request).await {
                     tracing::warn!(error = %e, "failed to post Slack message");
                 }
                 return;
@@ -1543,7 +1542,7 @@ async fn handle_message(
                             SlackChannelId::new(channel_id),
                             SlackMessageContent::new().with_text(msg_text),
                         );
-                        if let Err(e) = session.chat_post_message(&request).await {
+                        if let Err(e) = session.post(&request).await {
                             tracing::warn!(error = %e, "failed to post Slack message");
                         }
                         tracing::info!(
@@ -1563,7 +1562,7 @@ async fn handle_message(
                             SlackMessageContent::new()
                                 .with_text("Failed to create session.".to_string()),
                         );
-                        if let Err(e) = session.chat_post_message(&request).await {
+                        if let Err(e) = session.post(&request).await {
                             tracing::warn!(error = %e, "failed to post Slack message");
                         }
                     }
@@ -1600,7 +1599,7 @@ async fn handle_message(
                     SlackChannelId::new(channel_id),
                     SlackMessageContent::new().with_blocks(blocks),
                 );
-                if let Err(e) = session.chat_post_message(&request).await {
+                if let Err(e) = session.post(&request).await {
                     tracing::warn!(error = %e, "failed to post Slack message");
                 }
                 return;
@@ -1618,7 +1617,7 @@ async fn handle_message(
                     SlackChannelId::new(channel_id),
                     SlackMessageContent::new().with_text(reply.to_string()),
                 );
-                if let Err(e) = session.chat_post_message(&request).await {
+                if let Err(e) = session.post(&request).await {
                     tracing::warn!(error = %e, "failed to post Slack message");
                 }
                 return;
@@ -1630,7 +1629,7 @@ async fn handle_message(
                     SlackChannelId::new(channel_id.clone()),
                     SlackMessageContent::new().with_text("⏳ Compacting context...".to_string()),
                 );
-                if let Err(e) = session.chat_post_message(&request).await {
+                if let Err(e) = session.post(&request).await {
                     tracing::warn!(error = %e, "failed to post Slack message");
                 }
                 content =
@@ -1652,7 +1651,7 @@ async fn handle_message(
                     SlackChannelId::new(channel_id.clone()),
                     SlackMessageContent::new().with_text(reply),
                 );
-                if let Err(e) = session.chat_post_message(&request).await {
+                if let Err(e) = session.post(&request).await {
                     tracing::warn!(error = %e, "failed to post Slack clear receipt");
                 }
                 return;
@@ -1670,7 +1669,7 @@ async fn handle_message(
                     SlackChannelId::new(channel_id),
                     SlackMessageContent::new().with_text(resp.text.clone()),
                 );
-                if let Err(e) = session.chat_post_message(&request).await {
+                if let Err(e) = session.post(&request).await {
                     tracing::warn!(error = %e, "failed to post Slack message");
                 }
                 return;
@@ -1716,7 +1715,7 @@ async fn handle_message(
             SlackChannelId::new(channel_id),
             SlackMessageContent::new().with_text("Operation cancelled.".to_string()),
         );
-        if let Err(e) = session.chat_post_message(&request).await {
+        if let Err(e) = session.post(&request).await {
             tracing::warn!(error = %e, "failed to post Slack message");
         }
         return;
@@ -1966,7 +1965,7 @@ async fn handle_message(
                                 .await;
                             let content = super::tool_group::render(&group, ts);
                             let upd = SlackApiChatUpdateRequest::new(channel, content, ts.clone());
-                            if let Err(e) = session.chat_update(&upd).await {
+                            if let Some(Err(e)) = session.update_chrome(&upd).await {
                                 tracing::warn!(
                                     "Slack: chat_update failed (tool group status, ts={}): {}",
                                     ts,
@@ -1989,7 +1988,7 @@ async fn handle_message(
                         if let Some(ref ts) = thread_ts_heal {
                             req = req.with_thread_ts(ts.clone());
                         }
-                        if let Err(e) = session.chat_post_message(&req).await {
+                        if let Err(e) = session.post(&req).await {
                             tracing::warn!(error = %e, "failed to post Slack message");
                         }
                     });
@@ -2066,7 +2065,7 @@ async fn handle_message(
                         if let Some(ref ts) = thread_ts_retry {
                             req = req.with_thread_ts(ts.clone());
                         }
-                        if let Err(e) = session.chat_post_message(&req).await {
+                        if let Err(e) = session.post(&req).await {
                             tracing::warn!(error = %e, "failed to post Slack message");
                         }
                     });
@@ -2085,7 +2084,7 @@ async fn handle_message(
                         if let Some(ref ts) = thread_ts_switch {
                             req = req.with_thread_ts(ts.clone());
                         }
-                        if let Err(e) = session.chat_post_message(&req).await {
+                        if let Err(e) = session.post(&req).await {
                             tracing::warn!(error = %e, "failed to post Slack message");
                         }
                     });
@@ -2357,7 +2356,7 @@ async fn handle_message(
                 if let Some(ref ts) = thread_ts {
                     request = request.with_thread_ts(ts.clone());
                 }
-                if let Err(e) = session.chat_post_message(&request).await {
+                if let Err(e) = session.post(&request).await {
                     tracing::warn!("Slack: blocks post failed ({e}) — retrying as plain text");
                     let mut plain = SlackApiChatPostMessageRequest::new(
                         SlackChannelId::new(channel_id.clone()),
@@ -2366,7 +2365,7 @@ async fn handle_message(
                     if let Some(ref ts) = thread_ts {
                         plain = plain.with_thread_ts(ts.clone());
                     }
-                    if let Err(e) = session.chat_post_message(&plain).await {
+                    if let Err(e) = session.post(&plain).await {
                         tracing::error!("Slack: failed to send reply: {}", e);
                     }
                 }
@@ -2499,7 +2498,7 @@ async fn handle_message(
             if let Some(ref ts) = thread_ts {
                 request = request.with_thread_ts(ts.clone());
             }
-            if let Err(e) = session.chat_post_message(&request).await {
+            if let Err(e) = session.post(&request).await {
                 tracing::warn!(error = %e, "failed to post Slack message");
             }
             settle_step_group(
@@ -2659,7 +2658,7 @@ async fn run_followup_turn(
                                 .await;
                             let content = super::tool_group::render(&group, ts);
                             let upd = SlackApiChatUpdateRequest::new(channel, content, ts.clone());
-                            if let Err(e) = session.chat_update(&upd).await {
+                            if let Some(Err(e)) = session.update_chrome(&upd).await {
                                 tracing::warn!(
                                     "Slack tap: chat_update failed (tool group status, ts={ts}): {e}"
                                 );
@@ -2707,7 +2706,7 @@ async fn run_followup_turn(
                             channel,
                             SlackMessageContent::new().with_text(text),
                         );
-                        if let Err(e) = session.chat_post_message(&req).await {
+                        if let Err(e) = session.post(&req).await {
                             tracing::warn!(error = %e, "Slack tap: self-healing alert post failed");
                         }
                     });
@@ -2724,7 +2723,7 @@ async fn run_followup_turn(
                             channel,
                             SlackMessageContent::new().with_text(text),
                         );
-                        if let Err(e) = session.chat_post_message(&req).await {
+                        if let Err(e) = session.post(&req).await {
                             tracing::warn!(error = %e, "Slack tap: retry notice post failed");
                         }
                     });
@@ -2739,7 +2738,7 @@ async fn run_followup_turn(
                             channel,
                             SlackMessageContent::new().with_text(text),
                         );
-                        if let Err(e) = session.chat_post_message(&req).await {
+                        if let Err(e) = session.post(&req).await {
                             tracing::warn!(error = %e, "Slack tap: provider switch post failed");
                         }
                     });
@@ -2902,13 +2901,13 @@ async fn run_followup_turn(
                         .with_blocks(blocks)
                 };
                 let request = SlackApiChatPostMessageRequest::new(channel.clone(), content);
-                if let Err(e) = session.chat_post_message(&request).await {
+                if let Err(e) = session.post(&request).await {
                     tracing::warn!("Slack tap: blocks post failed ({e}) — retrying as plain text");
                     let plain = SlackApiChatPostMessageRequest::new(
                         channel.clone(),
                         SlackMessageContent::new().with_text(fallback_text),
                     );
-                    if let Err(e) = session.chat_post_message(&plain).await {
+                    if let Err(e) = session.post(&plain).await {
                         tracing::error!("Slack tap: failed to send reply: {e}");
                     }
                 }
@@ -2949,7 +2948,7 @@ async fn run_followup_turn(
                 channel.clone(),
                 SlackMessageContent::new().with_text(error_msg),
             );
-            if let Err(pe) = session.chat_post_message(&request).await {
+            if let Err(pe) = session.post(&request).await {
                 tracing::warn!(error = %pe, "Slack tap: failed to post error");
             }
             let es = e.to_string().to_lowercase();
@@ -3082,7 +3081,7 @@ pub(crate) fn make_approval_callback(
                 channel_id
             );
 
-            let sent = match session.chat_post_message(&request).await {
+            let sent = match session.post(&request).await {
                 Ok(r) => r,
                 Err(e) => {
                     tracing::error!("Slack approval: failed to send message: {}", e);
@@ -3119,7 +3118,7 @@ pub(crate) fn make_approval_callback(
                         SlackMessageContent::new().with_text(label.to_string()),
                         msg_ts.clone(),
                     );
-                    if let Err(e) = session.chat_update(&update).await {
+                    if let Err(e) = session.update(&update).await {
                         tracing::warn!(
                             "Slack: chat_update failed (approval result, ts={}): {}",
                             msg_ts,
@@ -3146,7 +3145,7 @@ pub(crate) fn make_approval_callback(
                             .with_text("⏱️ Approval timed out — denied".to_string()),
                         msg_ts.clone(),
                     );
-                    if let Err(e) = session.chat_update(&update).await {
+                    if let Err(e) = session.update(&update).await {
                         tracing::warn!(
                             "Slack: chat_update failed (approval timeout, ts={}): {}",
                             msg_ts,

@@ -8,6 +8,7 @@
 
 use std::sync::Arc;
 
+use super::governor::GatedWrites;
 use slack_morphism::prelude::*;
 use uuid::Uuid;
 
@@ -76,7 +77,7 @@ pub(crate) async fn render_suggestions(
     let request = SlackApiChatPostMessageRequest::new(SlackChannelId::new(channel_id), content);
     let token = SlackApiToken::new(SlackApiTokenValue::from(bot_token));
     let session = client.open_session(&token);
-    if let Err(e) = session.chat_post_message(&request).await {
+    if let Err(e) = session.post(&request).await {
         tracing::warn!("Slack suggest_options: send failed: {e}");
         state.clear_pending_followups(session_id).await;
     }

@@ -21,6 +21,7 @@ mod connection;
 pub(crate) mod final_body;
 mod followups;
 pub(crate) mod formatting_prompt;
+pub(crate) mod governor;
 pub(crate) mod handler;
 pub(crate) mod reactions;
 pub(crate) mod resume;

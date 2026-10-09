@@ -1067,6 +1067,63 @@ pub struct SlackConfig {
     /// `allowed_users`. Accepts int or string arrays.
     #[serde(default, deserialize_with = "deser_users_compat")]
     pub bot_owner: Vec<String>,
+    /// `[channels.slack.governor]` - the outbound write policy (#2012), the
+    /// Slack twin of `[channels.discord.governor]` (#1910). slack-morphism's
+    /// own throttler stays underneath: it queues the request and retries it,
+    /// it does not know that this request is the fourth re-render of a step
+    /// group nobody has read yet.
+    #[serde(default)]
+    pub governor: SlackGovernorConfig,
+}
+
+/// Slack outbound write policy (#2012).
+///
+/// Slack DOES publish per-method tier budgets, and slack-morphism's connector
+/// enforces them before the request leaves the process. These numbers are not
+/// a mirror of those: they are ceilings that only bite when the bot outruns
+/// its own cadence, plus the window we honor when Slack's 429 names a
+/// `Retry-After`. When the response names a window, that window governs.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SlackGovernorConfig {
+    /// Master switch. False makes every gate a pass-through: the layer stops
+    /// deciding, and slack-morphism's throttler plus the 429 log are the only
+    /// protection, which is the pre-#2012 behavior.
+    pub enabled: bool,
+    /// Rolling per-conversation write ceiling (all surfaces together). It is
+    /// the one number that says "this conversation is being rewritten too
+    /// often". `0` = no ceiling.
+    pub writes_per_minute: u32,
+    /// Burst capacity for that ceiling: a turn opening with a step group plus
+    /// an answer plus a settle edit has to land at once. Ignored when the
+    /// ceiling is off.
+    pub burst: u32,
+    /// Minimum spacing between two LIVE re-renders of the same message: the
+    /// flow ticker's clock and the tool-group status edits. Content edits and
+    /// sends never wait on it. `0` = no spacing.
+    pub chrome_min_spacing_ms: u64,
+    /// Fallback park window for a 429 that named no `Retry-After`, and the
+    /// safety ceiling on a park that did (4x this number): a response asking
+    /// for an hour parks the conversation for the ceiling and then resets,
+    /// because a governor that stalls a conversation forever is a worse
+    /// outage than the one it prevents.
+    pub pause_secs: u64,
+}
+
+impl Default for SlackGovernorConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            // Generous on purpose: the real budget is Slack's own per-method
+            // tier limit, enforced by the connector. This layer exists to
+            // catch a runaway ticker and to remember a `Retry-After`, not to
+            // second-guess the API.
+            writes_per_minute: 50,
+            burst: 10,
+            chrome_min_spacing_ms: 1000,
+            pause_secs: 5,
+        }
+    }
 }
 
 impl SlackConfig {
