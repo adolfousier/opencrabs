@@ -312,9 +312,14 @@ fn a_named_retry_after_is_read_from_the_error_and_zero_is_not_a_window() {
 // ---------------------------------------------------------------------------
 
 /// Install a config mirror with the governor knobs this suite expects, run
-/// `body`, then put the previous mirror back. The guard serializes against
-/// every other test here; the restore keeps the full-suite gate honest, since
-/// `Config::current()` is one process-wide mirror.
+/// `body`, then put the previous mirror back. The registry guard serializes
+/// against every other test here; the restore keeps the full-suite gate honest,
+/// since `Config::current()` is one process-wide mirror. #2018: the swap lands
+/// in state the Telegram gates read while holding `telegram_cooldown_lock`, and
+/// Discord's registry blocks nobody outside this suite, so call sites must take
+/// that guard BEFORE invoking this macro, not after. No Discord body waits on
+/// the cooldown while holding the registry, so cooldown-then-registry cannot
+/// close a cycle.
 macro_rules! governor_config {
     ($($field:ident : $value:expr),* $(,)?) => {{
         let _guard = ts::registry_guard().await;
@@ -330,11 +335,15 @@ macro_rules! governor_config {
 
 #[tokio::test]
 async fn chrome_admits_the_first_paint_and_refuses_the_one_inside_the_window() {
-    let (prev, _guard) = governor_config!(chrome_min_spacing_ms: 1_000u64);
     // `ts::advance` moves the process-wide virtual clock the global 429
     // cooldown rides on, so this test must not run beside the other guarded
-    // ones. Registry first (inside the macro), cooldown here: #1854.
+    // ones. The cooldown comes BEFORE the macro now (#2018): the macro holds
+    // only Discord's own registry, and its config swap lands in the
+    // process-wide mirror the Telegram gates read while holding this lock.
+    // No Discord-registry holder ever waits on the cooldown lock, so this
+    // order cannot cycle.
     let _cooldown = crate::tests::telegram_cooldown_lock::guard().await;
+    let (prev, _guard) = governor_config!(chrome_min_spacing_ms: 1_000u64);
     let g = Governor::default();
     let ch = 7u64;
     assert!(g.chrome_admits(ch), "the first paint of a turn must go out");
@@ -352,9 +361,11 @@ async fn chrome_admits_the_first_paint_and_refuses_the_one_inside_the_window() {
 
 #[tokio::test]
 async fn a_429_parks_its_channel_and_no_other() {
-    let (prev, _guard) = governor_config!(pause_secs: 5u64);
-    // Same discipline as above: this body advances the shared clock. #1854.
+    // Same discipline as above: the cooldown comes BEFORE the macro so the
+    // swap lands inside the lock the Telegram gates read the mirror under.
+    // #1854, #2018.
     let _cooldown = crate::tests::telegram_cooldown_lock::guard().await;
+    let (prev, _guard) = governor_config!(pause_secs: 5u64);
     let g = Governor::default();
     let parked = 11u64;
     let neighbour = 12u64;
@@ -377,6 +388,9 @@ async fn a_429_parks_its_channel_and_no_other() {
 async fn a_gate_on_a_disabled_governor_returns_immediately() {
     // The escape hatch has to be inert at the ASYNC layer too, not just in the
     // pure math: a config that says "off" must never park a caller in `gate`.
+    // This body used to swap the mirror holding NO cross-family lock at all:
+    // the #2018 clobber. The cooldown guard now covers the swap.
+    let _cooldown = crate::tests::telegram_cooldown_lock::guard().await;
     let (prev, _guard) = governor_config!(enabled: false);
     let g = Governor::default();
     let t = Instant::now();

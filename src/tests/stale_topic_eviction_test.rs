@@ -126,8 +126,11 @@ async fn outbox_retries_unthreaded_after_thread_not_found() {
     // HTML ladder (teloxide client) and the sendRichMessage mocks below see
     // zero requests — a nondeterministic RED that has nothing to do with
     // the eviction contract under test. Guard serializes the swap against
-    // the governor tests that mutate the same mirror.
+    // the governor tests that mutate the same mirror. Cooldown added for
+    // #2018: it is the only lock the Discord and Slack suites hold too,
+    // and they swap the same process-wide mirror.
     let _guard = crate::channels::telegram::governor::test_support::registry_guard().await;
+    let _cooldown = crate::tests::telegram_cooldown_lock::guard().await;
     let mut pinned: crate::config::Config =
         toml::from_str(include_str!("../../config.toml.example"))
             .expect("embedded config.toml.example must parse");
@@ -212,6 +215,9 @@ async fn outbox_eviction_persists_without_repoisoning_latest_thread() {
     use crate::channels::telegram::send::{latest_thread_id_for_chat, send_markdown_outbox};
 
     let _guard = crate::channels::telegram::governor::test_support::registry_guard().await;
+    // Cooldown is the cross-family token for the shared mirror (#2018): the
+    // Discord suites swap it under their own registry alone.
+    let _cooldown = crate::tests::telegram_cooldown_lock::guard().await;
     let mut pinned: crate::config::Config =
         toml::from_str(include_str!("../../config.toml.example"))
             .expect("embedded config.toml.example must parse");

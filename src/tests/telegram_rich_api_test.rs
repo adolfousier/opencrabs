@@ -267,8 +267,12 @@ async fn the_html_fallback_wraps_each_block_in_its_own_p_tag() {
     // Serialize against the other suites that swap the process-wide config
     // mirror (governor_gates, governor_spacing_floor, stale_topic_eviction):
     // all four take this same guard. Restore the pre-test mirror on the way
-    // out so the swap cannot leak sideways.
+    // out so the swap cannot leak sideways. The cooldown lock is the
+    // cross-family token: the Discord and Slack suites swap this same
+    // mirror under their own registries, so this guard alone cannot
+    // serialize against them (#2018).
     let _guard = crate::channels::telegram::governor::test_support::registry_guard().await;
+    let _cooldown = crate::tests::telegram_cooldown_lock::guard().await;
     let previous = crate::config::Config::current();
 
     // `should_render_mermaid` reads `rich_messages && mermaid_render` from the

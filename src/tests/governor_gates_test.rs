@@ -266,6 +266,11 @@ fn ensure_tracing_capture() {
 /// `label` names the round in every race-relevant failure message.
 async fn drainer_wire_round(label: &str) {
     let _guard = ts::registry_guard().await;
+    // The registry is Telegram-local, so it cannot block a Discord or Slack
+    // config swap; the cooldown lock is the only cross-family token for the
+    // shared mirror this round swaps and reads (#2018). Registry-then-
+    // cooldown, the same order every body in this suite uses.
+    let _cooldown = crate::tests::telegram_cooldown_lock::guard().await;
     ts::reset(5_000);
     rl_config!(
         enabled: true,

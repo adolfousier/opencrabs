@@ -29,6 +29,11 @@ use crate::tui::plan::{PlanDocument, PlanStatus, PlanTask};
 /// inside the shared clock guard, and hand back the previous mirror so the
 /// test can put it back. Parsing `config.toml.example` is deliberate: it keeps
 /// the shipped example loadable, which is the same seam the #1910 suite uses.
+/// #2018: callers must hold `telegram_cooldown_lock::guard()` BEFORE invoking
+/// this macro. The swap lands in the process-wide mirror the Telegram gates
+/// read, and this registry is Discord-local, so it does not serialize against
+/// them; cooldown-then-registry cannot cycle because no registry holder ever
+/// waits on the cooldown.
 macro_rules! governor_config {
     ($($field:ident : $value:expr),* $(,)?) => {{
         let _guard = test_support::registry_guard().await;
@@ -312,6 +317,10 @@ async fn a_burnt_bucket_refuses_the_repaint_instead_of_queueing_behind_it() {
     // if it queued, the card would sit in front of the bubble's next tick and
     // both surfaces would drift. The bucket, not the spacing floor, is what
     // refuses here, so the floor is switched off.
+    // Cooldown before the swap (#2018): the macro resets the shared clock
+    // and installs the process-wide config mirror, and this suite's own
+    // registry serializes against neither the Telegram gates nor Slack.
+    let _cooldown = crate::tests::telegram_cooldown_lock::guard().await;
     let (prev, _guard) = governor_config!(
         writes_per_minute: 3u32,
         burst: 3u32,
