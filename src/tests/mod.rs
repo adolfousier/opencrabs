@@ -1116,6 +1116,7 @@ pub mod voice_local_tts_test;
 pub mod voice_local_whisper_test;
 pub mod voice_service_test;
 pub mod voice_text_cleanup_test;
+pub mod whatsapp_ban_visibility_test;
 pub mod whatsapp_blocklist_test;
 pub mod whatsapp_broadcast_test;
 pub mod whatsapp_composing_parity_test;

@@ -16,11 +16,54 @@ use tokio::sync::Mutex;
 use uuid::Uuid;
 
 use super::store::Store;
-use wacore::types::events::Event;
+use wacore::types::events::{ConnectFailureReason, Event, TempBanReason};
 use whatsapp_rust::TokioRuntime;
 use whatsapp_rust::bot::Bot;
 use whatsapp_rust_tokio_transport::TokioWebSocketTransportFactory;
 use whatsapp_rust_ureq_http_client::UreqHttpClient;
+
+/// #1999: a ban, an account lock or a connect failure used to land in the
+/// debug-only catch-all, so the server's one-time reason never reached a
+/// human. Each formatter turns one payload into the line the log and the
+/// onboarding UI get. They are pure so the mapping is pinned without a live
+/// socket; the event arms wire them in.
+pub(crate) fn logout_notice(reason: &ConnectFailureReason, server_header: Option<&str>) -> String {
+    let mut msg = format!("WhatsApp logged out (reason: {reason:?})");
+    if let Some(header) = server_header {
+        msg.push_str(&format!(": {header}"));
+    }
+    msg
+}
+
+pub(crate) fn temp_ban_notice(
+    code: &TempBanReason,
+    expire: chrono::Duration,
+    message: Option<&str>,
+    url: Option<&str>,
+) -> String {
+    let mut msg = format!(
+        "WhatsApp temporarily banned ({code:?}); usable again in {} min",
+        expire.num_minutes().max(1)
+    );
+    if let Some(m) = message {
+        msg.push_str(&format!(": {m}"));
+    }
+    if let Some(u) = url {
+        msg.push_str(&format!(" Appeal: {u}"));
+    }
+    msg
+}
+
+pub(crate) fn connect_failure_notice(
+    reason: &ConnectFailureReason,
+    message: Option<&str>,
+) -> String {
+    let mut msg = format!("WhatsApp connect failure ({reason:?})");
+    if let Some(m) = message {
+        msg.push_str(&format!(": {m}"));
+    }
+    msg
+}
 
 /// WhatsApp agent that forwards messages to the AgentService
 pub struct WhatsAppAgent {
@@ -429,8 +472,41 @@ impl WhatsAppAgent {
                                     ));
                                 }
                             }
-                            Event::LoggedOut(_) => {
-                                tracing::warn!("WhatsApp: logged out");
+                            Event::LoggedOut(lo) => {
+                                tracing::error!(
+                                    reason = ?lo.reason,
+                                    on_connect = lo.on_connect,
+                                    "WhatsApp: logged out"
+                                );
+                                wa_state.broadcast_error(&logout_notice(
+                                    &lo.reason,
+                                    lo.logout_message
+                                        .as_ref()
+                                        .and_then(|m| m.header.as_deref()),
+                                ));
+                            }
+                            Event::TemporaryBan(ban) => {
+                                tracing::error!(
+                                    code = ?ban.code,
+                                    expire_secs = ban.expire.num_seconds(),
+                                    "WhatsApp: temporary ban"
+                                );
+                                wa_state.broadcast_error(&temp_ban_notice(
+                                    &ban.code,
+                                    ban.expire,
+                                    ban.message.as_deref(),
+                                    ban.url.as_deref(),
+                                ));
+                            }
+                            Event::ConnectFailure(cf) => {
+                                tracing::error!(
+                                    reason = ?cf.reason,
+                                    "WhatsApp: connect failure"
+                                );
+                                wa_state.broadcast_error(&connect_failure_notice(
+                                    &cf.reason,
+                                    cf.message.as_deref(),
+                                ));
                             }
                             Event::Disconnected(_) => {
                                 tracing::warn!("WhatsApp: disconnected");

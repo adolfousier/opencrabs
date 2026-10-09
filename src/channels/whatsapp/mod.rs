@@ -11,7 +11,7 @@
 //! results and `store` persists the session. This file is declarations
 //! only — no function definitions live here (CONTRIBUTING.md).
 
-mod agent;
+pub(crate) mod agent;
 mod approval;
 pub(crate) mod blocklist;
 pub(crate) mod broadcast;
