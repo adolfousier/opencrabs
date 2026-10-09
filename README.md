@@ -536,6 +536,17 @@ open = true                              # any member of THIS group is allowed (
 
 `respond_to` accepts `all`, `mention`, `dm_only`, or `auto` (reply to all while there is at most one active sender, then switch to mention-only once a second unique sender appears).
 
+**Discord channels work the same way.** Each channel (or forum/thread parent) can have its own entry:
+
+```toml
+[channels.discord.channels.1473207147025137778]
+name = "general"                 # display only
+respond_to = "all"               # this channel's mode; unset inherits the global respond_to
+open = true                      # any member of THIS channel is allowed, threads and forum posts included
+```
+
+A thread or forum post takes any setting it does not set from its parent channel, and its own setting wins over the parent's. `open` never admits anyone while the bot has no `allowed_users`, `allowed_roles` or `bot_owner`, and DMs and other channels stay locked. `auto` on Discord currently behaves as `mention`. The owner can run `/respond_to` inside a channel or thread to set that entry; the command reports the mode that applies there.
+
 **`/cowork` opens a group.** Running `/cowork` (owner-only) is the explicit, owner-initiated action that sets that group's `open = true` (persisted, until you change it): either by adding the bot to a group via the cowork deep link, or by sending `/cowork` inside a group the bot is already in. Once open, every member (existing and new) is allowed and tracked in the group's `allowed_users` — no per-user `/start` needed — while DM access stays closed. Auto-registration only happens in open groups; a group you never `/cowork` (or set `open = true` on) stays secure by default and admits no one automatically.
 
 #### Voice and file pickup in groups
