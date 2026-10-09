@@ -637,6 +637,9 @@ pub(crate) fn run_tracked_resume_turn(
                     {
                         tracing::debug!("Discord: tracked turn settled stamp failed: {e}");
                     }
+                    // #1912: the card's last word, FINAL like this stamp.
+                    super::plan_card::refresh_plan_card(&dstate, &http, channel, session_id, true)
+                        .await;
                 }
 
                 if !skip_final_post {

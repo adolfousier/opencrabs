@@ -223,6 +223,11 @@ pub(super) fn spawn_flow_ticker(
                 super::governor::note_if_429(&dstate.governor, channel.get(), Some(&e));
                 tracing::warn!("Discord: flow ticker edit failed (mid={}): {e}", mid.get());
             }
+            // #1912: the plan card rides this same tick and this same
+            // per-channel budget instead of getting a timer of its own. An
+            // unchanged checklist paints nothing at all, so sharing the cadence
+            // costs a disk read, not an edit.
+            super::plan_card::refresh_for_channel(&dstate, &http, channel).await;
             // Race guard: settle may have stamped and posted while this
             // tick's edit was in flight. The settled line must be last,
             // so if the group settled behind us, re-render its content once.
@@ -1848,6 +1853,17 @@ pub(crate) async fn handle_message(
                 {
                     tracing::debug!("Discord: settled status stamp failed: {e}");
                 }
+                // #1912: the plan card's last word for this session. Same rule
+                // as the stamp above it: FINAL, because nothing after this will
+                // ever restate the checklist.
+                super::plan_card::refresh_plan_card(
+                    &discord_state,
+                    &ctx.http,
+                    target,
+                    session_id,
+                    true,
+                )
+                .await;
             }
 
             // Media gallery (#385): batch all generated files into ONE

@@ -106,3 +106,32 @@ a hand-maintained 1:1 mirror with no compiler link.
 - G3: two AND-ed buckets; **fails open** past `SEND_MAX_HOLD` and still counts `admitted_sends`.
 - G4: one bucket; **never** fails open; counts `admitted_rich`.
 - Every gate's `forum_seen` set-condition is per-surface and must not be unified into one shape.
+
+---
+
+## 6. Discord: the ported surface map (#1910, #1912)
+
+The Discord channel got its own governor at `src/channels/discord/governor.rs`. It is a port of
+the POLICY, not of this file's line-by-line Telegram machinery: one bucket set per channel, three
+surface classes, and a 429 park. Lines below cite the Discord source as it stands after both PRs.
+
+| Surface | Write | On floor-dry | On 429 | Max hold | Fail-open |
+|---|---|---|---|---|---|
+| `Send` | first plan card, answers, follow-ups (`governor::say` / `send_content`) | **HOLD** | park the channel | 25 min (the Discord queue ceiling) | yes, past the ceiling, charged 0 |
+| `Final` | settled stamps, the card's completing paint | **HOLD** | park the channel | 25 min | yes, past the ceiling, charged 0 |
+| `Chrome` | flow ticker repaints, live card repaints, in-turn repaints | **DROP** | park the channel | none, by design | n/a — the drop is terminal |
+
+`chrome_min_spacing_ms` (default 1000) applies to `Chrome` only, and a chrome write refused by the
+spacing floor is dropped without waiting. `Send` and `Final` are content: they never drop.
+`[channels.discord.governor]` (`src/config/types.rs`) mirrors `Limits::from_config`
+(`governor.rs`) key for key, same hand-maintained mirror as section 4 above.
+
+The plan card (`src/channels/discord/plan_card.rs`, #1912) is the second live surface on the same
+channel as the flow bubble, and it is bounded by two things the matrix should keep honest:
+
+- **Signature dedupe.** The card's signature is its rendered text; an unchanged checklist paints
+  nothing at all, so the ticker's 4 s cadence costs a disk read and zero writes. Persisted with the
+  row via `PlanCardRepository` (#809), so a restart dedupes instead of reposting.
+- **Surface class.** First paint is `Send`, a live repaint is `Chrome` (droppable: the next tick
+  restates it), the completing paint is `Final` (holds: nothing after it will ever say this again).
+  The card therefore adds no new edit budget pressure and no new timer.

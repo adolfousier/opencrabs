@@ -679,6 +679,15 @@ pub(crate) async fn route_followup_turn(
                 {
                     tracing::debug!("Discord: follow-up tap settled stamp failed: {e}");
                 }
+                // #1912: the card gets the same FINAL treatment as this stamp.
+                super::plan_card::refresh_plan_card(
+                    &discord_state,
+                    &http,
+                    channel,
+                    session_id,
+                    true,
+                )
+                .await;
             }
 
             if !skip_final_post {

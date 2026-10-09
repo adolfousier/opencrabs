@@ -76,6 +76,16 @@ pub struct DiscordState {
     pub(super) pending_followups: std::sync::Mutex<
         HashMap<Uuid, std::collections::VecDeque<crate::brain::agent::QueuedUserMessage>>,
     >,
+    /// The session's live plan card: session -> (message id, signature),
+    /// mirrored from the `plan_cards` table so the dedupe check is a memory hit
+    /// (#1912). Telegram's twin; rehydrated on `ready` because losing it would
+    /// make the first refresh after a restart post a second card and strand the
+    /// first.
+    pub(super) plan_cards: Mutex<HashMap<Uuid, (u64, u64, String)>>,
+    /// Per-session card mutexes (#822). Held across the render, the dedupe
+    /// check and the edit, so two refreshes for one session cannot both see
+    /// "no card" and post two.
+    pub(super) plan_card_locks: Mutex<HashMap<Uuid, Arc<tokio::sync::Mutex<()>>>>,
     /// Outbound write governor (#1910): the one place that decides whether a
     /// channel can afford another message or edit right now. Held on the
     /// shared state because every writer reaches it, and because a 429 seen by
@@ -108,6 +118,8 @@ impl DiscordState {
             waiting_groups: Mutex::new(HashMap::new()),
             active_turns: std::sync::Mutex::new(std::collections::HashSet::new()),
             pending_followups: std::sync::Mutex::new(HashMap::new()),
+            plan_cards: Mutex::new(HashMap::new()),
+            plan_card_locks: Mutex::new(HashMap::new()),
             governor: Governor::default(),
         }
     }
