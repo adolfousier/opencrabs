@@ -331,6 +331,10 @@ macro_rules! governor_config {
 #[tokio::test]
 async fn chrome_admits_the_first_paint_and_refuses_the_one_inside_the_window() {
     let (prev, _guard) = governor_config!(chrome_min_spacing_ms: 1_000u64);
+    // `ts::advance` moves the process-wide virtual clock the global 429
+    // cooldown rides on, so this test must not run beside the other guarded
+    // ones. Registry first (inside the macro), cooldown here: #1854.
+    let _cooldown = crate::tests::telegram_cooldown_lock::guard().await;
     let g = Governor::default();
     let ch = 7u64;
     assert!(g.chrome_admits(ch), "the first paint of a turn must go out");
@@ -349,6 +353,8 @@ async fn chrome_admits_the_first_paint_and_refuses_the_one_inside_the_window() {
 #[tokio::test]
 async fn a_429_parks_its_channel_and_no_other() {
     let (prev, _guard) = governor_config!(pause_secs: 5u64);
+    // Same discipline as above: this body advances the shared clock. #1854.
+    let _cooldown = crate::tests::telegram_cooldown_lock::guard().await;
     let g = Governor::default();
     let parked = 11u64;
     let neighbour = 12u64;
