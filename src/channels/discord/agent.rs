@@ -505,9 +505,11 @@ impl EventHandler for Handler {
                 let idle = self.config_rx.borrow().channels.discord.session_idle_hours;
                 let title = spec.title.clone();
                 let ctx2 = ctx.clone();
+                let dstate = self.discord_state.clone();
                 tokio::spawn(async move {
                     super::interactions::route_interaction_turn(
                         &ctx2,
+                        &dstate.governor,
                         agent,
                         session_svc,
                         is_dm,
@@ -663,9 +665,11 @@ impl EventHandler for Handler {
                 let session_svc = self.session_svc.clone();
                 let idle = self.config_rx.borrow().channels.discord.session_idle_hours;
                 let ctx2 = ctx.clone();
+                let dstate = self.discord_state.clone();
                 tokio::spawn(async move {
                     super::interactions::route_interaction_turn(
                         &ctx2,
+                        &dstate.governor,
                         agent,
                         session_svc,
                         is_dm,

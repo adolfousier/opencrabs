@@ -127,6 +127,13 @@ fn bare_route_still_serves_the_synthetic_steering_callers() {
         interactions.contains(".send_message_with_display("),
         "route_interaction_turn keeps its documented single-call contract"
     );
+    // #2011: the bare route answers on a channel whose governor exists, so its
+    // signature carries the handle. The old shape had no way to reach it, which
+    // is why #1910 left this one write ungated.
+    assert!(
+        interactions.contains("governor: &super::governor::Governor,"),
+        "route_interaction_turn must take the governor that gates its reply"
+    );
     let agent = include_str!("../channels/discord/agent.rs");
     let synthetic_calls = agent.matches("route_interaction_turn(").count();
     assert_eq!(
@@ -140,5 +147,44 @@ fn bare_route_still_serves_the_synthetic_steering_callers() {
         "the follow-up tap and the slash-command arm (#1850) are the two \
          user-intent callers of the tool-loop display path; anything routed \
          off these is single-completion code running a request to do work"
+    );
+}
+
+/// #2011: this reply loop was the last raw write in the module, so a
+/// `retry_after` here was logged as a generic delivery failure and the channel
+/// stayed unparked while the next tick kept fighting the window. Delivery must
+/// ride `governor::say` on the content surface, and both synthetic callers must
+/// hand over the governor they hold.
+#[test]
+fn bare_route_delivers_its_reply_through_the_governor() {
+    let interactions = include_str!("../channels/discord/interactions.rs");
+    let start = interactions
+        .find("pub(crate) async fn route_interaction_turn(")
+        .expect("bare route present");
+    let body = &interactions[start..];
+    let end = body
+        .find("/// Run a tapped follow-up suggestion")
+        .expect("the tap helper terminates the bare route");
+    let body = &body[..end];
+    assert!(
+        !body.contains("channel.say(&ctx.http"),
+        "a raw say bypasses the budget and learns nothing from a 429 (#2011)"
+    );
+    assert!(
+        body.contains("super::governor::say("),
+        "the bare route's reply must be gated (#2011)"
+    );
+    assert!(
+        body.contains("super::governor::Surface::Send,"),
+        "an answer is content: chrome's drop-on-refusal rule must not apply"
+    );
+
+    let agent = include_str!("../channels/discord/agent.rs");
+    let dispatch = "route_interaction_turn(\n                        &ctx2,\n                        &dstate.governor,";
+    assert_eq!(
+        agent.matches(dispatch).count(),
+        2,
+        "both synthetic callers pass the governor into the bare route; one short \
+         means a dispatch went back to the ungated shape"
     );
 }

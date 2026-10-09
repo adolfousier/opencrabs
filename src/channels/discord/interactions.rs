@@ -70,9 +70,14 @@ pub(crate) async fn resolve_interaction_session(
 /// Run an interaction-originated agent turn and deliver the reply to the
 /// channel. `context_text` goes to the model for this turn only; history
 /// persists `display_tag` (the system-note contract shared with reactions).
+///
+/// The reply is a content write, so it pays the governor's budget before it
+/// reaches Discord (#2011, the last raw send in this module): a `retry_after`
+/// learned here parks the channel instead of being logged and ignored.
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn route_interaction_turn(
     ctx: &Context,
+    governor: &super::governor::Governor,
     agent: Arc<AgentService>,
     session_svc: SessionService,
     is_dm: bool,
@@ -106,7 +111,15 @@ pub(crate) async fn route_interaction_turn(
     }
     let channel = serenity::model::id::ChannelId::new(channel_id);
     for chunk in super::handler::split_message(trimmed, 2000) {
-        if let Err(e) = channel.say(&ctx.http, chunk).await {
+        if let Err(e) = super::governor::say(
+            governor,
+            channel,
+            &ctx.http,
+            super::governor::Surface::Send,
+            chunk,
+        )
+        .await
+        {
             tracing::warn!("Discord interaction: failed to deliver reply: {e}");
         }
     }
