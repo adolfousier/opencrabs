@@ -502,7 +502,11 @@ pub(crate) async fn handle_message(
                 let bot_id = discord_state.bot_user_id().await;
                 let mentioned =
                     bot_id.is_some_and(|bid| msg.mentions.iter().any(|u| u.id.get() == bid));
-                if !mentioned {
+                // The owner's own /respond_to is solicited, so it passes the gate
+                // unmentioned (#2016). Everything else stays dropped.
+                let owner_respond_to = is_owner
+                    && crate::channels::respond_to_scope::is_respond_to_command(&msg.content);
+                if !mentioned && !owner_respond_to {
                     tracing::debug!("Discord: respond_to=mention, bot not mentioned — ignoring");
                     store_channel_msg(msg.content.clone()).await;
                     return;

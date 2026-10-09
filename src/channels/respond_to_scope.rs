@@ -7,6 +7,15 @@
 
 use crate::config::RespondTo;
 
+/// Whether `text` is a `/respond_to` command, with or without arguments.
+/// Used by the mention gate: the owner's own command is solicited, so it does
+/// not need an @mention to reach the parser (#2016).
+pub(crate) fn is_respond_to_command(text: &str) -> bool {
+    text.trim()
+        .strip_prefix("/respond_to")
+        .is_some_and(|rest| rest.is_empty() || rest.starts_with(char::is_whitespace))
+}
+
 /// Parse a mode argument. Accepts the spellings `/respond_to` documents.
 pub(crate) fn parse_mode(arg: &str) -> Option<RespondTo> {
     match arg.to_lowercase().as_str() {

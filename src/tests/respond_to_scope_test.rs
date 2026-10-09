@@ -175,3 +175,14 @@ fn discord_non_owner_is_refused_and_nothing_is_written() {
             .expect("recognised");
     assert!(reply.contains("restricted to the bot owner"), "{reply}");
 }
+
+#[test]
+fn respond_to_command_is_recognised_for_the_mention_gate() {
+    use crate::channels::respond_to_scope::is_respond_to_command;
+    assert!(is_respond_to_command("/respond_to"));
+    assert!(is_respond_to_command("/respond_to all"));
+    assert!(is_respond_to_command("  /respond_to mention  "));
+    assert!(!is_respond_to_command("/respond_tomato"));
+    assert!(!is_respond_to_command("please /respond_to all"));
+    assert!(!is_respond_to_command("/models"));
+}
