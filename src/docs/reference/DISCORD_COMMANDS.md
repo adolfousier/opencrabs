@@ -4,10 +4,11 @@ Issue: [#1850](https://github.com/opencrabs/opencrabs/issues/1850): OpenCrabs ha
 
 OpenCrabs projects `commands.toml` onto Discord's native slash-command list for
 every guild the bot is in, so a command defined in that file appears in the
-client's `/` menu with its description and an argument hint. The scope is
-`commands.toml` only: Telegram's menu also lists built-in commands and skills,
-Discord's does not (#1850 named the file, not the whole catalog), and a skill
-typed as plain text still works through the message path.
+client's `/` menu with its description and an argument hint. The menu is the
+`commands.toml` catalog plus two built-ins the owner needs from Discord:
+`/respond_to` (#2013) and `/cowork` (#2015). Telegram's menu also lists the other
+built-ins and skills, and Discord's does not, so a skill typed as plain text still
+works through the message path.
 
 ## Two different axes: intents and scopes
 
@@ -51,9 +52,11 @@ an existing connection when you re-authorize it.
 
 `src/channels/discord/commands.rs` reads the catalog through the same
 `CommandLoader` every channel uses, so entries added at runtime by the agent
-appear on Discord too: the config watcher re-plans on every publish. The scope is
-`commands.toml`; Telegram's menu additionally lists built-ins and skills, and this
-projection does not. Names and descriptions that Discord would reject are
+appear on Discord too: the config watcher re-plans on every publish. Beside the
+catalog, two built-ins are added (`MENU_BUILTINS`, `src/channels/discord/commands.rs`):
+`/respond_to` and `/cowork`, both owner-only. A user command of the same name wins.
+Telegram's menu also lists the other built-ins and skills, and this projection does
+not. Names and descriptions that Discord would reject are
 sanitized rather than dropped:
 
 | Rule | Discord limit | What OpenCrabs does |
@@ -106,9 +109,34 @@ command is a new way into the agent and gets the same deny-by-default gate
 The refusal is an ephemeral message, so only the person who tapped it sees it,
 plus a `warn` line naming which check failed. Channel scope travels with the
 identity check: `allowed_channels` applies, including the parent fallback that
-lets an allow-listed forum admit its posts, and `respond_to` applies only in its
-`dm_only` form, because that setting is about unsolicited messages and nobody
-taps a command unsolicited.
+lets an allow-listed forum admit its posts. A command is solicited, so only a
+channel's `dm_only` mode blocks it; that mode is read per channel, with the thread →
+parent → global fallback (#2014). In a `mention` channel an unmentioned command is
+dropped, except the owner's `/respond_to` and `/cowork`, which pass the gate (#2016).
+
+## Per-channel settings and the owner commands
+
+Each Discord channel, or a forum/thread parent, can have its own entry:
+
+```toml
+[channels.discord.channels.1473207147025137778]
+name = "general"             # display only; access never reads it
+respond_to = "all"           # this channel's mode; unset inherits the global respond_to
+open = true                  # any member of this channel is admitted (ACL)
+```
+
+- **`open`** admits every member of the channel, and its threads and forum posts,
+  past `allowed_users`. It never admits anyone while the bot has no
+  `allowed_users`, `allowed_roles` or `bot_owner`. DMs and other channels stay locked.
+- **`/respond_to`** (owner) typed in a channel or thread shows the mode that applies
+  there. With an argument (`all`, `dm_only`, `mention`, `auto`) it writes that
+  channel's own `respond_to`. Threads write their own entry, which wins over the parent's.
+- **`/cowork`** (owner) in a server channel or thread writes `open = true` and the
+  channel's `name`. It refuses in a DM. Members are not registered; `open` admits them.
+- Both commands are refused for non-owners before anything is written, and a failed
+  write is reported in the channel. Slack and WhatsApp answer `/respond_to` from their
+  channel-level setting and do not write it.
+- `auto` on Discord behaves as `mention`.
 
 The verdict itself lives in `identity_admitted()` and `holds_allowed_role()` as
 pure functions, which is what lets the deny-by-default case have a test: there
