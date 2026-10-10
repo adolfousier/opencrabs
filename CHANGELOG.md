@@ -7,6 +7,314 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.5] - 2026-10-10
+
+283 commits since v0.5.4, 6 contributors. 471 files changed, +51,885 / -4,903 lines.
+
+A channel-native window. Discord became a first-class surface: native polls via send_poll (#1848), TTS replies delivered as voice messages (#1849), commands.toml projected onto native slash commands (#1850), a flow group that opens at turn start with a live clock covering thinking and activity text leading the flow line (#1841, #1843, #1844, #1845), a persistent plan card riding one shared outbound write governor with 429 park (#1910, #1912), per-channel respond_to and open modes with a /respond_to command (#2014), and /cowork opening a channel or thread to its members (#2015). Slack matched the pass: throttled flow ticker (#1807), flow group opening at turn start with live activity text (#1808, #1809), and an outbound write governor with 429 observability (#2012). Telegram got observability and rate discipline: instrumented getUpdates polls and handler handoffs for stall triage, a cross-surface sub-second spacing floor with per-second admission telemetry (#1927), a per-chat 429 pause behind one Cooldown accessor, markdown links to local files delivered as documents (#1916), a flag to keep markdown documents out of the rich media array (#1968), and mermaid fences rendering inside trailer bubbles via the hooked rich send (#583). ACP implemented the five v1 session lifecycle methods and publishes the plan as a v1 plan update (#1815), and decodes image prompt blocks into IMG attachments. The TUI unified every dialog on a shared command footer with direct a/r approval verbs (#1775), made URLs and file paths clickable (#1772), redesigned onboarding around a left-side step timeline with direct setup commands (#1979, #1980, #1981, #1982), hinted when the clipboard holds a screenshot, and stamped the banner with the running binary's build time (#1965). The claude-cli provider grew background-task lifecycle surfacing into the agent mirror, process-group isolation with group kill, and post-turn completion delivery (#1774, #1776). Cron retires one-shot jobs on delivery instead of re-firing a year later (#544), stamps every delivered run with its run id (#1703), and Discord cron reports arrive as one forum post (#1851). Windows carried a LockFileEx saga of its own (9 scoped commits) and stopped telling users to run as Administrator or use WSL2. Restart and resume paint revived turns as processing and park is a third resume outcome in the boot ledger (#1951, #1952). governance.toml plus a policy-lint CI job landed (#1934). The DB snapshots the image before migrations touch it (#1779), supervised brew evolve bounds its children and reads the installed version back (#1779), session_notify got a kill switch defaulting off (#1802), and suggest_options recovers channel-safe option chips from final text (#1774).
+
+### ✨ Features
+
+- `185d67fe` **discord**: /cowork opens a channel or thread to its members (#2015)
+- `9c4b6cd8` **slack**: outbound write governor with 429 observability (#2012)
+- `f8997baa` **discord**: /respond_to in a channel or thread sets that channel's mode (#2014)
+- `cd690000` **discord**: enforce per-channel respond_to and open in the message filter, ACL and command gate (#2014)
+- `bc8e67b9` **config**: per-channel Discord respond_to and open under channels.discord.channels (#2014)
+- `fb21a285` **governance**: governance.toml + policy-lint CI job (#1934)
+- `2dd900b0` **discord**: persistent plan card on the shared governor budget (#1912)
+- `11a8341d` **discord**: outbound write governor with 429 park (#1910)
+- `0a407f3e` **telegram**: a flag to keep markdown documents out of the rich media array (#1968)
+- `580e02de` **telegram**: deliver markdown links to local files as documents (#1916)
+- `cd740363` **channels**: route /voice, /image, /channels from chat and name the direct setup commands in hints (#1981)
+- `49d7c53a` **tui**: direct setup commands replace /onboard:<step> in dispatch and autocomplete (#1981)
+- `ecce856b` **onboarding**: brand line into the timeline, one-line header title, spaced header rows (#1980)
+- `3d7a39ec` **onboarding**: move the progress dots into a left-side step timeline (#1979)
+- `1ecdd7e7` **acp**: decode image prompt blocks into IMG file attachments
+- `766291b6` **1927**: per-chat 429 pause behind one Cooldown accessor
+- `357e51ac` **tui**: stamp the banner with the running binary's build time (#1965)
+- `cd943040` **telegram**: cross-surface sub-second spacing floor + per-second admission telemetry (#1927)
+- `214b31ab` **telegram**: log every outbound request on the Telegram surface
+- `73e4907b` **tools**: add maintainer rebuild skill template (#1958)
+- `cd8bfa3c` **resume**: paint revived turns as processing in the restarted TUI (#1951)
+- `7d8e29ba` **restart**: park is a third resume outcome in the boot ledger (#1952)
+- `019a0aeb` **cron**: stamp every delivered run with its run id (#1703)
+- `6f898e26` **tui**: Ctrl+C expands the active dialog's command panel (#1775)
+- `56a449d7` **tui**: direct a/r verbs on the inline tool approval (#1775)
+- `9b1c6bc4` **tui**: migrate every remaining dialog to the shared footer (#1775)
+- `87cf8ec1` **tui**: detail popup, profiles and skills share the command footer (#1775)
+- `7a4db912` **tui**: scoped dialog keymap catalog + shared footer/chrome helpers (#1775)
+- `f095e1c2` **clear**: quote the last six exchanges in the /clear marker (#1905)
+- `5cfa2f70` **whatsapp**: post image statuses from status_update
+- `f26ab03e` **acp**: implement the five v1 session lifecycle methods (#1815)
+- `506f8cdf` **acp**: name the tool and publish the plan as a v1 plan update (#1815)
+- `7a8e7901` **acp**: implement the five v1 session lifecycle methods (#1815)
+- `257fe32e` **discord**: default trace_narration to true (#1871)
+- `d6da814a` **channels/discord**: project commands.toml onto native slash commands (#1850)
+- `f4fd1f83` **cron**: deliver Discord reports as one forum post (#1851)
+- `dac49692` **channels/discord**: send TTS replies as native voice messages (#1849)
+- `10dd28b9` **channels/discord**: native polls via send_poll (#1848)
+- `4fc124fc` **discord**: flow group opens at turn start, clock covers thinking (#1845)
+- `453863f6` **discord**: live activity text leads the flow line (#1844)
+- `ca794fb2` **discord**: flow line live ticker with settle-race guard (#1843)
+- `7b3d9db5` **discord**: flow-group clock and settled ctx line (#1841)
+- `401b337f` **tui**: vanishing hint when the clipboard holds a screenshot
+- `42ce7dfe` **slack**: live activity text in the flow line (#1809)
+- `1570fe77` **slack**: open flow group at turn start, delete static thinking placeholder (#1808)
+- `a444a480` **slack**: throttled flow ticker keeps the clock live (#1807)
+- `832fa336` **cron**: a one-shot cron job retires itself instead of re-firing a year later (#544)
+- `40a28f7b` **config**: session_notify kill switch under [agent], default off (#1802)
+- `9931f2bf` **telegram**: instrument getUpdates polls and handler handoffs for stall triage
+- `55713984` **channels**: inject per-session channel capabilities into the system preamble
+- `b6987fe1` **brain**: deliver claude-cli task completions after turn end (#1776 seam 3)
+- `688f3659` **agent**: mirror claude background tasks into BackgroundTaskManager
+- `e0ae338f` **feat**: recover channel-safe suggest_options from final text (#1774)
+- `7b82d18e` **cli**: isolate claude_cli spawns in a process group and kill the group
+- `a867a20a` **cli**: surface claude_cli background-task lifecycle events from the System arm
+- `25f97826` **db**: snapshot the image before migrations touch it (#1779)
+- `31f3f07e` **telegram**: #31 trailer bubble renders mermaid fences via the hooked rich send (#583)
+- `95fcbae5` **tui**: open URLs and file paths on click (#1772)
+
+### 🔧 Fixes
+
+- `692616fc` **whatsapp**: a ban or lock alerts the owner over Telegram; five named events stop falling through (#1999)
+- `1ff7ca0b` **discord**: the owner's unmentioned /respond_to passes the mention gate (#2016)
+- `0485d75f` **discord**: route interaction replies through the governor (#2011)
+- `acb2f919` **whatsapp**: ban, lock and connect-failure events surface to the owner (#1999)
+- `d55a2406` **commands**: /respond_to outside Telegram never writes the Telegram section (#2013)
+- `6d6fcc81` **discord**: the settled flow line names how the turn ended (#1911)
+- `1504fa95` **agent**: the compactor is told which skills are live (#1960)
+- `40f11223` **telegram**: a boot resume adopts the bubble of the turn it interrupted (#2010)
+- `2f70fb7c` **agent**: a provider rotation no longer writes the user message twice (#2009)
+- `1a7492bc` **tui**: a session keeps its own working directory (#2006 #2007 #2008)
+- `9829980f` **telegram**: markdown documents ship detached unless inlining is opted into (#1968)
+- `8257134c` **telegram**: a model-written marker prefix no longer doubles the file marker (#2001)
+- `f99e61a7` **telegram**: the rich fallback respects media-bearing intermediates (#1939)
+- `532a17f2` **telegram**: disarm the autolinker on a delivered file's marker (#1938)
+- `5fed12b8` **telegram**: a delivered document arrives named after its file (#1937)
+- `b356b762` **telegram**: a document reference never reaches the wire without its entry (#1921)
+- `08cb9407` **telegram**: splice bubble links onto file markers and inline documents in rich (#1918)
+- `f0b88eac` **telegram**: leave a visible marker where a delivered file link was (#1918)
+- `5a71bd3c` **search**: append a deterministic Sources footer to search-backed answers (#1883)
+- `331ae325` **compaction**: remove the resolve leg, its consumer is fork-only wiring
+- `d8d7445a` **compaction**: strip the fork-only inventory slot and BUDGET bullets
+- `e312cf16` **compaction**: drop the conflict marker left by the trim-guard pick
+- `91ad9e5b` **compaction**: resolve a missing manifest fence to the pruning-safe default (#1933)
+- `f510e79f` **compaction**: head-protect the continuation prompt's must-keep blocks (#1933)
+- `7c6ce50a` **compaction**: anchor the loader's segment skip on the delta banner, not a substring (#1928)
+- `f8ddffed` **compaction**: persist the marker the apply welded in, not a rebuilt banner (#1928)
+- `bf103717` **channel_search**: the scope header count reads "N messages" (#718)
+- `524cff64` **channel_search**: inherit the session's forum topic by default
+- `8763420a` **compaction**: allow reasoning headroom and surface truncation (#1933)
+- `eb639bc0` **compaction**: collapse the guard's nested conditionals to satisfy clippy (#1930)
+- `d198f448` **compaction**: a structural trim guard enforces the continuation-document budget (#1930)
+- `6df61f71` **compaction**: the continuation-document prompt states its budget and retention order (#1930)
+- `79570abd` **compaction**: one budget constant for the continuation document (#1930)
+- `ea349580` **db**: take the integrity scan off every database open (#459, #677)
+- `07536197` **compaction**: flag artifacts a summary reports but no tool call produced (#482)
+- `3f008608` **discord**: run recovered turns visibly, hold the session slot, queue follow-ups (#1990)
+- `059e4a4a` **channels**: bound the typing tick and clear stuck background rows (#1984)
+- `176f1fc0` **whatsapp**: give the composing indicator parity for background work and resume turns (#1989)
+- `c4531aa6` **slack**: flip the waiting step group on completion, count sub-agents, keep thread
+- `577cba05` **discord**: show the waiting state at settle and stop the clock on error (#1987)
+- `49f46fa0` **deps**: bump rusqlite to 0.40 (SQLite 3.53.2) to remove a unix-VFS deadlock (#1982)
+- `2562a62f` **tui**: scrub SGR mouse fragments at the key dispatch choke point
+- `de12bc4a` **cron**: bake oc://session targets as session:<uuid> so wakes land in the addressed session (#1961)
+- `3f1c8420` **cli**: classify A2A transport failures in the journal detail so the mechanism is discriminated (#1959)
+- `34d314de` **memory**: enforce the shared-session gate on brain, memory, load_brain_file and recall surfaces (#1957)
+- `468711df` **tests**: watchdog the test leg with thread dumps instead of a silent timeout burn (#1936)
+- `4e7ee7c5` **cron**: stamp tick liveness and expose it on the daemon health endpoint (#1925)
+- `239f7fe6` **tui**: shape and reorder RTL text on the render path (#1897)
+- `74eab4f0` **onboarding**: pad and tint the header and footer bands (#1975)
+- `5fd046cb` **onboarding**: label Esc as Exit on step 1 of a re-run (#1976)
+- `4f1bdd06` **onboarding**: derive the mode select step counts from the progress totals (#1977)
+- `865e11d6` **telegram**: satisfy clippy::question_mark on the owner-fallback guard
+- `dc76ef32` **cron**: one un-persistable schedule advance must not abort the tick
+- `e8751b70` **plan**: scope the trailing auto-complete to delivery-shaped tasks
+- `0a084b8e` **plan**: expire the Active plan reminder after staleness
+- `12c73700` **discord**: ack command invocations with the deferred source type
+- `bf9d1140` **config**: seed the Ralph verification gate on every profile
+- `4836e3f1` **brain**: disclose the rich_messages gate in the Telegram capabilities block
+- `ed59b083` **telegram**: refuse owner-fallback sends for non-Telegram sessions
+- `378c3af8` **tools**: thread typed args into user commands and skills (#1868)
+- `842647f0` **db**: cron list_all skips unreadable rows instead of failing (#1924)
+- `43695066` **onboarding**: render the wizard full-screen and responsive (#1973)
+- `176ad463` **onboarding**: quit a first run on Esc or Ctrl+C, require a model on the provider step (#1973)
+- `52efab90` **cron**: print the anyhow chain at the supervised-tick sites (#1972)
+- `342a3e28` **trello**: route outbound card text through the strip_llm_artifacts boundary (#1970)
+- `bab5acfb` **utils**: keep typographic dashes as hyphens on markdown table rows (#1969)
+- `175cc0e4` **cron**: print the anyhow chain at the three supervised-tick log sites
+- `6b7ed48b` **1927**: widen the surface-policy field types to the policy table's own visibility
+- `0f3b81c6` **1927**: name the chat at the rich 429 sites instead of a scoped binding
+- `eb8a2d6e` **tui**: restore the terminal in full on crash recovery, signals, startup (#1964)
+- `b6ee1b9c` **cron**: supervise every tick and job so one panic cannot kill the scheduler (#1963)
+- `20b25950` **telegram**: render the rich HTML fallback with the paragraph-wrapping renderer
+- `9f53c547` **skills**: move rebuild template out of the builtin-skill directory
+- `cc03e6ed` **telegram**: surface admitted_sends on the governor test Snap (#1927)
+- `2ac9c06f` **core**: sweep the residual rebuild references the removal missed (#674)
+- `08e06499` **resume**: chunk discord answers at the message cap instead of losing them (#1953)
+- `bd5a475a` **resume**: wait for the transport, announce recovery, count outcomes after the send (#1950, #1952)
+- `010313fe` **discord**: deliver CLI-provider answers in trace mode instead of dropping them (#1942)
+- `aea27434` **discord**: resolve every tool-group toggle interaction with ephemeral fallbacks (#1949)
+- `2785eebb` **discord**: clamp tool-group bubble to the message cap and answer every toggle (#1949)
+- `7603e5d9` **tui**: give the plan seed strip breathing room (#1945)
+- `27318cef` **tui**: always keep the newest message in the display-budget trim (#1944)
+- `ef9577d1` **tui**: scrub SGR mouse-report garbage out of the input buffer (#1943)
+- `9a3d472b` **cron**: escalate repeated tick failures to the delivery target (#1893)
+- `1df0e910` **db**: skip unreadable cron_jobs rows instead of failing the whole read (#1893)
+- `e33bc2d2` **cron**: log the full anyhow chain in scheduler errors (#1894)
+- `cbd4beaa` **cron**: truncate delivery output at a UTF-8 char boundary (#1919)
+- `e81d4e47` **cron**: compaction boundary at run start, not end (#1703)
+- `322cc935` **tui**: clear the clippy errors leaving main red
+- `b390daea` **cron**: a run that executed no tools earns no success (#1703)
+- `14858d49` **telegram**: a notify past the classic cap loses its tail (#490)
+- `3addf2e7` **provider**: tolerate usage-only stream chunk without id
+- `6ae8685b` **discord**: chunk bg-resume delivery so long verdicts reach the channel
+- `162b7511` **discord**: dispatch mention-only messages and fold the referenced reply (#1890)
+- `b559929c` **discord**: surface forwarded message snapshots in turns and history
+- `ca2d0b1e` **vision**: send opencode identity headers and gate unauthable candidates (#1792)
+- `9b56f710` **vision**: send opencode identity headers and gate unauthable candidates (#1792)
+- `7bb63b78` **acp**: emit official configOptions and stop echoing sessionId on load
+- `40ff35ce` **acp**: move custom session methods under the _opencrabs extension prefix
+- `37be9083` **acp**: keep stopReason inside the v1 enum, map StopSequence to end_turn
+- `651b3c2f` **telegram**: plan cards now reach channel_messages, so the agent can read its own cards (#1684)
+- `e19b4332` **agent**: fold a queued follow-up into one final reply (#1784)
+- `d19ec718` **acp**: emit the schema's usage_update frame instead of an invented one
+- `3734b14e` **tui**: persist the panic hook's post-mortem to the log dir (#1791)
+- `cced211b` **evolve**: swap the Windows binary atomically and report what actually happened (#1820)
+- `62b089e7` **tui**: give Windows a real clipboard path (#1822)
+- `e99d915c` **ci**: Windows build gated at job level so a filtered run reports skipped (#1831)
+- `6fc21fe7` **discord**: route follow-up taps through the tool-loop display path
+- `319417ed` **slack**: route follow-up taps through the tool-loop display path
+- `e2fdd447` **notify**: retire the durable twin at the delivery that replaces it (#439, #366)
+- `0731e34e` **windows**: quoted triggers must reach cmd.exe verbatim
+- `2a570a70` **windows**: cron trigger spawns the platform shell, not /bin/sh
+- `a9f64be2` **discord**: drop ctx footer from answer messages, settled line is the only ctx surface (#1842)
+- `d7f9cba1` **config**: session_notify tool registration gated on [agent] session_notify_enabled (#1840)
+- `af5861ab` **telegram**: drain the whole reaction queue into one joined injection
+- `f5256a0e` **provider**: bound each HTTP send, not the provider.stream() subtree
+- `30eeb987` **db**: skip the pre-migration copy when nothing will write
+- `24df9a9b` **acp**: emit authMethods in the initialize response (ACP v1 schema)
+- `e6ebcb6a` **vision**: surface every failed analyze_image candidate in the error (#1792)
+- `cc0cb03f` **profile**: pick the live lock owner by the kernel's own reading
+- `9bcd8c10` **profile**: the owner map is readable from the sibling test module
+- `91685cc6` **profile**: resolve a reused PID to the newest creation time
+- `4929830f` **profile**: a stamped live owner must parse as an owner
+- `9f524fd0` **winlock**: prove ownership by exact creation time, not a coarse mtime
+- `143edef6` **winlock**: allow for a coarse mtime before calling an owner a recycled PID
+- `6bd3b188` **windows**: the lock tip must compile on the target it ships for
+- `a461138e` **lint**: gate the owners mut to the target that actually mutates it
+- `a4bcde3b` **windows**: the kill must prove birth, and the lock must spare the stamp
+- `ee2152b7` **windows**: fail-closed target verification in preempt terminate
+- `3ee24c98` **windows**: real LockFileEx for instance, scheduler, registry, path locks
+- `eadf0876` **memory**: default vector_enabled to false, local embeddings become opt-in (#1798)
+- `f0cf5cbc` **tui**: Cmd+V pastes and SUPER chords no longer type a literal character (#1812)
+- `5b64b8e6` **tui**: Ctrl+V falls back to the clipboard image when the clipboard holds no text (#1811)
+- `5d2fa506` **slack**: ctx footer off every answer message, settled line only (#1806)
+- `f4876ced` **slack**: consume folded narration on empty-final salvage, drop dead intermediate branch (#1805)
+- `fffb7584` **sessions**: hoist persisted /cd restore above lazy cwd seed (#1810)
+- `b844b213` **telegram**: get_me retry predicate for teloxide ApiError shape
+- `bcbd3286` **telegram**: add retry to get_me() startup call (#1785)
+- `b55394ce` **cron**: substitute the fired trigger result into the agent-path prompt (#526)
+- `f83f98c9` **slack**: always-on tool counter, ctx budget and settle pass on the step group (#1797)
+- `a51ac8fb` **fix**: de-dash hardcoded user-facing strings on the alert and plan paths (#1745)
+- `eec82266` **fix**: normalize dashes on the SelfHealingAlert display path (#1745)
+- `1c485887` **telegram**: suggestion button folds to a bare digit when its label carries an HTML entity (#396)
+- `b7918f9a` **goal**: an armed goal no longer claims a driver it does not have (#480)
+- `ba1c9ddb` **notify**: refuse an unbound session target instead of parking it (#574)
+- `93d8b07d` **tests**: declare tokio tests as async fn
+- `74c0ab19` **telegram**: suppress reaction acks while global cooldown is active
+- `53a4bff1` **evolve**: bound brew children, read the installed version back, and arm the systemd restart (#1779)
+- `0adc3bea` **db**: surface corruption and the restore asset outside the TUI (#1779)
+- `8084f8f0` **db**: check integrity before migrations and refuse with a restore path (#1779)
+- `0d79cc83` **provider**: preserve model IDs in streaming responses
+- `1f668030` **provider**: preserve requested model IDs
+- `f81ea664` **notify**: reject an absent session_notify target instead of promising a delivery
+- `6a6f603c` **compaction**: derive section 0 obligation status instead of carrying it verbatim (#499)
+- `0887a624` **timezone**: parse markdown-table rows and Russian city-name forms (#348)
+- `bdb11171` **#555**: bash guard tests interactivity, not flag strings
+- `336db908` **context**: serialise the session_context read-modify-write (#600)
+- `c8a848aa` **tools**: keep same-path writers out of one parallel batch (#593)
+- `901f7067` **telegram**: terminate a blockquote run before a block-level HTML opener (#552)
+- `7cb5c1ad` **systemd**: add OOMPolicy=continue to the generated unit files
+- `b7a3ceee` **telegram**: deliver a push to its session binding, not the topic that spoke last (#478)
+
+### 📖 Documentation
+
+- `72840322` **discord**: DISCORD_COMMANDS.md covers /respond_to, /cowork and per-channel settings (#2020)
+- `38a73d72` **readme**: per-channel Discord respond_to and open (#2014)
+- `855d8f26` **channels**: one copy of the governor policy matrix, under src/docs
+- `c77f1418` **telegram**: teach the capabilities preamble the file-delivery shape (#1940)
+- `b4599a91` **docs**: moved governor to real docs dir
+- `804a7c56` **docs**: name the direct setup commands across README, docs and the TOOLS template (#1981)
+- `2aeee521` **docs**: add MonoCode GUI section and opencrabs acp CLI row (#1967)
+- `c4b4aefc` **discord**: stop the ack comment quoting its own banned pattern
+- `ee5fccaf` **readme**: troubleshooting entry for inherited macOS malloc stderr
+- `d3f02fac` **1927**: land the upstream governor policy matrix as the frozen contract
+- `fb2b1910` **readme**: fix MonoCode misnaming in the ACP surfaces (#1966)
+- `767069de` **contributing**: correct MSRV to 1.94 and the CI gate descriptions (#1955)
+- `a996833b` **contributing**: correct the post-org repo slug in the duplicate sweep
+- `85535807` **core**: drop the last /rebuild references from the shipped examples (#674)
+- `5dd026d6` **config**: the typing-knob comment justified its default with a per-topic bound the code does not implement
+- `dc020d21` **docs**: document issue routing, core markers, and the PR lifecycle
+- `01fcb6eb` **contributing**: drop chore from commit types, document core scope and breaking marker (#1948)
+- `e9fe96cd` **docs**: removed inspired by OpenClaw as it was at the very beginning, today we get inspired by all other harnesses
+- `fe78f7e4` **tui**: reword the detail-popup comment to drop the phantom CLI name (#1775)
+- `eb4a67c6` **discord**: document trace_narration in example config and README (#1872)
+- `00319b54` **windows**: stop telling users to run as Administrator or to use WSL2
+- `f37d2c2f` **config**: document [agent] session_notify_enabled kill switch (#1802)
+- `1560318a` **readme**: replace the dead-end salvage recipe with the full page-1 procedure (#1779)
+- `591ee54e` **readme**: document the pre-migration snapshot, the integrity refusal and the supervised brew evolve (#1779)
+- `91e310cd` **tui**: /help dialog Ctrl+C scroll-to-bottom (#1771)
+- `dea8ed37` **readme**: Ctrl+C scroll-to-bottom in shortcut table (#1770)
+
+### 🧹 Miscellaneous
+
+- `2957a2cb` **discord**: hold the cooldown lock across governor config swaps (#2018)
+- `9bd88788` **discord**: the two clock-advancing governor tests hold the cooldown guard (#1910)
+- `f09ff663` **channel_search**: drop the glue_target mod, it fixtures on the fork-only ship plane
+- `e099e1c2` **style**: apply rustfmt across the landed lane commits
+- `68bc4162` **compaction**: pin both #1933 legs, the head-protect cut and the harness default (#1933)
+- `4bb426f6` **compaction**: pin the delta persist seam so the DB row must carry the sentinel banner (#1928)
+- `1cc809a8` **compaction**: a five-round soak pins the continuation document to its budget (#1930)
+- `5a297acc` **channels**: move background-work waiting helpers out of Telegram (#1985)
+- `15bfa6c1` **onboarding**: gate build_onboarding_systemd_unit with cfg instead of allow(dead_code) (#1978)
+- `4c828a82` **1927**: fix two dead summary asserts and de-flake the 429 cap check
+- `0c5f7304` **1927**: extract pace_engine; four gates become thin wrappers
+- `776f7fd5` **1927**: land the surface policy table as a frozen descriptor
+- `06f41a61` **telegram**: cargo fmt the spacing-floor and telemetry surfaces
+- `0fd5f294` **core**: remove /rebuild and the rebuild tool from the public tree (#674)
+- `fb28a79b` **cli**: pin restart-resume delivery outcomes, notice, presence and chunking (#1950, #1951, #1952, #1953)
+- `55375426` **discord**: skip the summary line when counting rows shown by the clamp (#1949)
+- `74678cf2` **cron**: drop needless as_bytes in the delivery truncation test (#1942)
+- `c4e8cb4e` **chore**: point repository references at the opencrabs org
+- `69679f94` **cron**: the bare-error scan counts format strings, not comments (#1893)
+- `b94e0863` **ci**: assign maintainer-opened issues to the maintainer
+- `9c07495d` **tui**: point the analytics hotkey assertion at the shared footer
+- `98226ada` **style**: rustfmt re-wrap of echo truncation and its tests
+- `9cae24da` **tui**: drop the dead_code staircase from the #1775 helpers
+- `3e7005ac` **whatsapp**: pin that alpha PNGs produce a JPEG status thumbnail
+- `f65ec431` **telegram**: enforce the cooldown guard rule with a source scan (#1854)
+- `aa271a0e` **windows**: execute the binary the job builds (#1823)
+- `334a4d3e` **windows**: make the footgun linter a required gate (#1823)
+- `ee48fbb6` **style**: rustfmt the fmt-drift files on main
+- `b1716622` **test**: serialize global 429 cooldown access across parallel test modules
+- `e9afd8ac` **style**: rustfmt the four merged PR trees
+- `1aece86a` **telegram**: hold registry_guard in the cooldown-arming retry tests (#1832)
+- `1e480a8c` **rsi**: give the self-improve apply tests per-test temp homes (#1800)
+- `98164b6f` **backfill**: build the opt-in config with struct-update syntax (#1798 follow-up)
+- `06d72586` **profile**: shape the reused-PID stamps to the rule each platform uses
+- `83cd1438` **backfill**: assert the 300s default interval on an opted-in config (#1798)
+- `a8a9693d` **test**: add em-dash guard for self-heal alert constants and renderer coverage
+- `110df5c4` **provider**: relocate stable_model_id tests to src/tests per contributing.md
+- `dea20183` **lint**: annotate the macOS-only launchd label parser for non-macOS builds
+
+### 📊 Stats
+
+- 283 commits since v0.5.4
+- 471 files changed, +51,885 / -4,903 lines
+- 10,366 tests (10,328 passed, 0 failed, 38 ignored)
+
+
 ## [0.5.4] - 2026-09-26
 
 104 commits since v0.5.3, 7 contributors. 225 files changed, +18,619 / -1,429 lines.
@@ -5772,7 +6080,7 @@ provider and context budget.
 - **Anti-code-block nudge for local models** — brain instructions explicitly
   tell the model to use `tool_calls`, not markdown code blocks.
 
-[Unreleased]: https://github.com/adolfousier/opencrabs/compare/v0.3.32...HEAD
+[Unreleased]: https://github.com/opencrabs/opencrabs/compare/v0.5.5...HEAD
 [0.3.32]: https://github.com/adolfousier/opencrabs/compare/v0.3.31...v0.3.32
 [0.3.31]: https://github.com/adolfousier/opencrabs/compare/v0.3.30...v0.3.31
 [0.3.30]: https://github.com/adolfousier/opencrabs/compare/v0.3.29...v0.3.30
@@ -8989,3 +9297,4 @@ fixes.
 [0.5.0]: https://github.com/adolfousier/opencrabs/compare/v0.3.83...v0.5.0
 [0.5.3]: https://github.com/adolfousier/opencrabs/compare/v0.5.2...v0.5.3
 [0.5.4]: https://github.com/adolfousier/opencrabs/compare/v0.5.3...v0.5.4
+[0.5.5]: https://github.com/opencrabs/opencrabs/compare/v0.5.4...v0.5.5
