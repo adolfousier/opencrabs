@@ -373,6 +373,13 @@ impl ChannelManager {
                     .create_agent_service_full(None, Some(enqueue_cb))
                     .await;
                 crate::channels::bg_resume::fill(&agent_holder, &wa_agent_service);
+                // A WhatsApp ban or lock cannot be reported over WhatsApp, so
+                // the owner alert goes out over Telegram (#1999).
+                #[cfg(feature = "telegram")]
+                let owner_alert =
+                    crate::channels::owner_alert::telegram_owner_alert(self.telegram_state.clone());
+                #[cfg(not(feature = "telegram"))]
+                let owner_alert = crate::channels::owner_alert::no_alert();
                 let agent = crate::channels::whatsapp::WhatsAppAgent::new(
                     wa_agent_service,
                     self.channel_factory.service_context(),
@@ -380,6 +387,7 @@ impl ChannelManager {
                     self.whatsapp_state.clone(),
                     self.channel_factory.config_rx(),
                     crate::db::ChannelMessageRepository::new(self.db_pool.clone()),
+                    owner_alert,
                 );
                 tracing::info!(
                     "ChannelManager: spawning WhatsApp agent ({} allowed phones)",
