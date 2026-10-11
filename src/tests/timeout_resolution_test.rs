@@ -80,9 +80,10 @@ fn both_tiers_zero_reports_both() {
     );
 }
 
-/// Stream idle has no compiled floor on purpose: the default is chosen at stream
-/// time from whether the target is local/CLI or remote (`helpers.rs` — 3600s
-/// there, 20s for remote, 45s for the z.ai host). An unset flag must defer to
+/// Stream idle has no compiled floor on the native families on purpose: the
+/// default is chosen at stream time from whether the target is local/CLI or
+/// remote (`helpers.rs`, 3600s there, 20s for remote). OpenAI-compatible
+/// providers carry their own compiled 120s (#2021). An unset flag must defer to
 /// that runtime decision instead of overriding it with a constant guessed here.
 #[test]
 fn stream_idle_without_a_compiled_floor_defers_to_the_runtime_default() {
@@ -185,7 +186,7 @@ fn factory_resolves_every_timeout_flag_through_the_chain() {
         "agent.timeout_secs",
         "config.stream_idle_timeout_secs",
         "agent.stream_idle_timeout_secs",
-        "zhipu_config.stream_idle_timeout_secs",
+        "COMPAT_STREAM_IDLE_SECS",
     ] {
         assert!(
             src.contains(needle),

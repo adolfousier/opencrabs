@@ -24,12 +24,12 @@ fn the_stream_idle_knob_is_documented() {
 }
 
 /// The three defaults a user needs before the knob means anything: what they
-/// get on a CLI or local provider, on the z.ai host with a documented cut, and
-/// on every other remote provider.
+/// get on a CLI or local provider, on every OpenAI-compatible remote provider
+/// (#2021), and on the native families.
 #[test]
 fn the_documented_defaults_name_all_three_tiers() {
     let readme = readme();
-    for token in ["3600s", "45s", "20s"] {
+    for token in ["3600s", "120s", "20s"] {
         assert!(
             readme.contains(token),
             "README does not state the {token} idle-timeout default tier"

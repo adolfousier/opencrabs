@@ -255,7 +255,7 @@ https://github.com/user-attachments/assets/7f45c5f8-acdf-48d5-b6a4-0e4811a9ee23
 |---------|-------------|
 | **Multi-Provider** | **Xiaomi MiMo**, Anthropic Claude, OpenAI, GitHub Copilot (uses your Copilot subscription), OpenRouter (400+ models), MiniMax, Google Gemini, z.ai GLM (General API + Coding API), Moonshot Kimi (API plan + Coding plan), Claude CLI, OpenCode CLI, Codex CLI (uses your ChatGPT/Codex subscription), Qwen Native (free OAuth with multi-account rotation), Qwen Code CLI (1k free req/day), and any OpenAI-compatible API (Ollama, LM Studio, LocalAI). Model lists fetched live from provider APIs — new models available instantly. Custom provider dialog: paste-by-default for API keys, Enter-to-load live models, typed-not-in-list models accepted and merged. Each session remembers its provider + model and restores it on switch |
 | **Fallback Providers** | Configure a chain of fallback providers — if the primary fails, each fallback is tried in sequence automatically. Any configured provider can be a fallback. Config: `[providers.fallback] providers = ["openrouter", "anthropic"]` |
-| **Per-Provider Timeouts** | `timeout_secs` caps a non-streaming request (one that buffers a whole body); it never caps a stream. `stream_idle_timeout_secs` is the only stream timer — it caps inter-chunk silence before the stream is treated as dropped and retried, so a long turn that keeps delivering is never cut. Defaults when unset: 3600s for CLI and local providers, 45s for z.ai on `api.z.ai` (whose host closes idle streams at ~30s), 20s for every other remote provider |
+| **Per-Provider Timeouts** | `timeout_secs` caps a non-streaming request (one that buffers a whole body); it never caps a stream. `stream_idle_timeout_secs` is the only stream timer; it caps inter-chunk silence before the stream is treated as dropped and retried, so a long turn that keeps delivering is never cut. Defaults when unset: 3600s for CLI and local providers, 120s for every OpenAI-compatible remote provider (z.ai included), 20s for the native Anthropic and Gemini families |
 | **Per-Provider Vision** | Set `vision_model` per provider — the LLM calls `analyze_image` as a tool, which uses the vision model on the same provider API to describe images. The chat model stays the same and gets vision capability via tool call. Gemini vision takes priority when configured. Auto-configured for known providers (e.g. MiniMax) on first run |
 | **Prompt Caching** | Caches the stable context prefix (system prompt, brain files, earlier turns) on every caching-capable provider — Anthropic native (default), OpenAI/OpenRouter (`cache_enabled`), Qwen/Alibaba (zero-config auto), Xiaomi (server-side). Averaging ~87% cache efficiency in real use; watch it live in the Cache Efficiency card of `/usage`. Big reason a larger context window stays affordable |
 | **Context Window & Auto-Compaction** | Per-provider `context_window` override (default 200k, works on every provider); transparent auto-compaction at 65% (soft, background) / 90% (hard) of the window gives effectively unlimited session memory with no manual clearing |
@@ -1368,7 +1368,7 @@ z.ai GLM (Zhipu AI) offers two endpoint types selectable during onboarding or vi
 
 Both use the same API key and model names. The endpoint type can be toggled in the onboarding wizard or `/models` dialog.
 
-The default host is `api.z.ai`, which closes an idle streaming connection after about 30 seconds; the mainland host `open.bigmodel.cn` serves the same API without that cut. On `api.z.ai` the idle tolerance defaults to 45s so the host's own close is what we observe rather than our timer firing first; override it per provider with `stream_idle_timeout_secs`. To use it, or any other z.ai-compatible host, set `base_url` and it wins over `endpoint_type`:
+The default host is `api.z.ai`, which closes an idle streaming connection after about 30 seconds; the mainland host `open.bigmodel.cn` serves the same API without that cut. On `api.z.ai` the idle tolerance is the shared 120s default for OpenAI-compatible providers, well above the host's own close, so a request the host is still queuing is not cut by our timer; override it per provider with `stream_idle_timeout_secs`. To use it, or any other z.ai-compatible host, set `base_url` and it wins over `endpoint_type`:
 
 ```toml
 [providers.zai]
@@ -1665,7 +1665,7 @@ Both keys resolve through three tiers, and the most specific tier that is set wi
 |---|---|---|
 | 1 | `[providers.<name>] timeout_secs` | that provider alone |
 | 2 | `[agent] timeout_secs` and `[agent] stream_idle_timeout_secs` | every provider that names no tier-1 value |
-| 3 | the family's compiled default | 300s for the non-streaming ceiling. Stream idle has **no compiled floor**: the runtime table below applies instead |
+| 3 | the family's compiled default | 300s for the non-streaming ceiling. Stream idle has **no compiled floor** on the native families: the runtime table below applies instead. OpenAI-compatible providers use the shared 120s default (#2021) |
 
 ```toml
 [agent]
@@ -1686,8 +1686,8 @@ Defaults when the key is absent:
 | Provider | Idle tolerance |
 |---|---|
 | CLI providers (`claude_cli`, `codex_cli`, ...) and local base URLs | 3600s |
-| `zai` on the default `api.z.ai` host | 45s, deliberately above that host's own ~30s idle close |
-| Every other remote provider | 20s |
+| Every OpenAI-compatible remote provider (OpenRouter, z.ai, Moonshot, MiniMax, custom, ...) | 120s, one shared value (#2021) |
+| Native `anthropic` and `gemini` remote | 20s |
 
 `0` means "use the default", not "no timer". Raise the value if you see `Stream ended without [DONE] ... connection likely dropped` on turns with a long prefill pause: that message means our own idle timer fired, not that the network died.
 

@@ -1798,36 +1798,11 @@ fn try_create_zhipu(config: &Config) -> Result<Option<Arc<dyn Provider>>> {
         zhipu_config.endpoint_type,
         zhipu_config.base_url.is_some()
     );
-    let mut provider = configure_openai_compatible(
+    let provider = configure_openai_compatible(
         OpenAIProvider::with_base_url(api_key.clone(), base_url).with_name("zai"),
         zhipu_config,
         &config.agent,
     );
-    // Neither tier configured an idle timeout, so the host-aware default is the
-    // only thing standing between z.ai and the generic 20s remote default, which
-    // would cut a host the code documents as holding an idle stream to ~30s and
-    // blame the connection for our own timer (#1666). Resolved across BOTH tiers
-    // (#1688): reading only the per-provider key here would let this default
-    // overwrite an explicit `[agent] stream_idle_timeout_secs`.
-    let idle_cfg = resolve_timeout(
-        zhipu_config.stream_idle_timeout_secs,
-        config.agent.stream_idle_timeout_secs,
-        None,
-    );
-    let host_aware_idle = idle_cfg
-        .effective
-        .is_none()
-        .then(|| {
-            super::zhipu_endpoint::default_idle_timeout_secs(
-                zhipu_config.base_url.as_deref(),
-                zhipu_config.endpoint_type.as_deref(),
-            )
-        })
-        .flatten();
-    if let Some(secs) = host_aware_idle {
-        provider = provider.with_stream_idle_timeout(std::time::Duration::from_secs(secs));
-        tracing::info!("z.ai host-aware stream idle timeout: {}s", secs);
-    }
     Ok(Some(Arc::new(provider)))
 }
 
@@ -1976,10 +1951,11 @@ fn try_create_custom(config: &Config) -> Result<Option<Arc<dyn Provider>>> {
 /// accessors ([`crate::config::timeout::TimeoutResolution::override_duration`]).
 ///
 /// `compiled_default` is `None` for a flag whose default is picked at runtime
-/// rather than baked into a family: `stream_idle_timeout_secs` is resolved in
-/// `brain/agent/service/helpers.rs` (3600s local/CLI, 45s z.ai, 20s remote), so
-/// a value unset at both tiers must defer to that table instead of overriding
-/// it with a number from the transport layer.
+/// rather than baked into a family: `stream_idle_timeout_secs` on a native family
+/// is resolved in `brain/agent/service/helpers.rs` (3600s local/CLI, 20s remote),
+/// so a value unset at both tiers must defer to that table instead of overriding
+/// it with a number from the transport layer. OpenAI-compatible providers carry
+/// their own compiled idle default, [`COMPAT_STREAM_IDLE_SECS`].
 ///
 /// A `0` at either tier is skipped, never honoured: a zero-second reqwest
 /// timeout is an instant deadline, and a zero-second idle timer fires before
@@ -1990,11 +1966,19 @@ fn resolve_and_report(
     provider_value: Option<u64>,
     agent_value: Option<u64>,
     compiled_default: Option<u64>,
+    compiled_is_override: bool,
     flag: &str,
     label: &str,
 ) -> Option<Duration> {
     let resolution = resolve_timeout(provider_value, agent_value, compiled_default);
-    let duration = resolution.override_duration();
+    // A family that bakes in its own floor (#2021) has chosen that value, so it
+    // is an override, not an absent one. Otherwise the floor stays internal and
+    // the provider keeps reporting "no override" to the trait accessors.
+    let duration = if compiled_is_override {
+        resolution.duration()
+    } else {
+        resolution.override_duration()
+    };
     if let Some(dur) = duration {
         tracing::info!("{label}: {}s (from {})", dur.as_secs(), resolution.tier);
     }
@@ -2021,18 +2005,21 @@ fn report_timeout_chain(
     config: &ProviderConfig,
     agent: &AgentConfig,
     compiled_request_secs: u64,
+    compiled_idle_secs: Option<u64>,
 ) -> (Option<Duration>, Option<Duration>, u64) {
     let request = resolve_and_report(
         config.timeout_secs,
         agent.timeout_secs,
         Some(compiled_request_secs),
+        false,
         "timeout_secs",
         "Non-streaming request ceiling",
     );
     let idle = resolve_and_report(
         config.stream_idle_timeout_secs,
         agent.stream_idle_timeout_secs,
-        None,
+        compiled_idle_secs,
+        compiled_idle_secs.is_some(),
         "stream_idle_timeout_secs",
         "Stream idle timeout",
     );
@@ -2041,6 +2028,19 @@ fn report_timeout_chain(
         agent.thinking_loop_timeout_secs,
     );
     (request, idle, thinking_loop)
+}
+
+/// Stream idle tolerance, in seconds, for every OpenAI-compatible provider that
+/// names no `stream_idle_timeout_secs` at either tier. One value for the whole
+/// family, so a host that queues a request before its first byte gets the same
+/// grace whichever compat provider it is.
+pub(crate) const COMPAT_STREAM_IDLE_SECS: u64 = 120;
+
+/// The compiled idle default for an OpenAI-compatible provider. Local base URLs
+/// return `None` and keep the runtime default in `helpers.rs` (3600s), because
+/// local prefill can legitimately stall for minutes.
+pub(crate) fn compat_idle_default(is_local: bool) -> Option<u64> {
+    (!is_local).then_some(COMPAT_STREAM_IDLE_SECS)
 }
 
 /// Configure OpenAI-compatible provider with custom model
@@ -2106,10 +2106,12 @@ fn configure_openai_compatible(
     // read anywhere in the tree, so `[agent] timeout_secs = 120` was parsed,
     // stored, and then quietly ignored. #1689 put the same chain behind
     // `report_timeout_chain` so anthropic and gemini read it too.
+    let is_local = provider.base_url().is_some_and(is_local_base_url);
     let (request, idle, thinking_loop) = report_timeout_chain(
         config,
         agent,
         super::custom_openai_compatible::DEFAULT_TIMEOUT.as_secs(),
+        compat_idle_default(is_local),
     );
     if let Some(dur) = request {
         provider = provider.with_timeout(dur);
@@ -2189,6 +2191,7 @@ fn try_create_gemini(config: &Config) -> Result<Option<Arc<dyn Provider>>> {
         gemini_config,
         &config.agent,
         super::gemini::DEFAULT_TIMEOUT.as_secs(),
+        None,
     );
     if let Some(dur) = request {
         provider = provider.with_timeout(dur);
@@ -2392,6 +2395,7 @@ fn try_create_anthropic(config: &Config) -> Result<Option<Arc<dyn Provider>>> {
         anthropic_config,
         &config.agent,
         super::anthropic::DEFAULT_TIMEOUT.as_secs(),
+        None,
     );
     if let Some(dur) = request {
         provider = provider.with_timeout(dur);

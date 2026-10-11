@@ -128,8 +128,8 @@ async fn unset_timeouts_are_reported_as_no_override_not_as_a_number() {
     // The accessors answer "what did the user ask for?", not "what is in force".
     // The request ceiling's in-force default is the family's compiled
     // `DEFAULT_TIMEOUT`, already on the client `new()` built; the idle
-    // default is picked per-request in `helpers.rs` (3600s local/CLI, 45s
-    // z.ai, 20s remote). Reporting either as a number here would make the
+    // default is picked per-request in `helpers.rs` (3600s local/CLI, 20s
+    // remote). Reporting either as a number here would make the
     // runtime table look like an override it never was.
     for family in ["anthropic", "gemini"] {
         let config = config_with(family, native(None, None));
