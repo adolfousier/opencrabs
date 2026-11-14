@@ -34,6 +34,13 @@ LIMIT = 10 * 1024 * 1024  # 10,485,760 bytes, the hard crates.io ceiling
 # tag should not be the thing that rediscovers the limit.
 DEFAULT_BUDGET = 10 * 1000 * 1000  # 10,000,000 bytes
 
+# `cargo package --list` also names files cargo writes into the archive at
+# package time, so they ship but do not exist in the working tree:
+# `.cargo_vcs_info.json` carries the commit hash. They cannot be stat-ed, so
+# each is charged a fixed allowance instead of being dropped, which would
+# under-measure the crate.
+GENERATED_ALLOWANCE = 512
+
 
 def manifest_excludes(manifest: str) -> list[str]:
     """Read `package.exclude` from Cargo.toml without a TOML dependency."""
@@ -106,12 +113,21 @@ def files_from_cargo(root: str) -> list[str] | None:
 
 
 def packaged_size(root: str, files: list[str]) -> int:
-    """Gzipped tar of exactly these files, the way a `.crate` is built."""
+    """Gzipped tar of exactly these files, the way a `.crate` is built.
+
+    Entries cargo generates at package time have no file on disk, so they are
+    counted at GENERATED_ALLOWANCE rather than read.
+    """
     buffer = io.BytesIO()
+    generated = 0
     with tarfile.open(fileobj=buffer, mode="w:gz", compresslevel=9) as archive:
         for rel in sorted(files):
-            archive.add(os.path.join(root, rel), arcname=rel, recursive=False)
-    return len(buffer.getvalue())
+            path = os.path.join(root, rel)
+            if not os.path.isfile(path):
+                generated += GENERATED_ALLOWANCE
+                continue
+            archive.add(path, arcname=rel, recursive=False)
+    return len(buffer.getvalue()) + generated
 
 
 def self_test(root: str) -> int:
@@ -168,6 +184,15 @@ def self_test(root: str) -> int:
         if must_drop in files:
             failures.append(f"{must_drop} is packaged and should not be")
 
+    # v0.6.0's first Lint run died here: `cargo package --list` reports
+    # `.cargo_vcs_info.json`, which cargo writes during packaging, and
+    # measuring it raised FileNotFoundError. A generated entry has to be
+    # counted, not crash the check.
+    plain = packaged_size(root, ["Cargo.toml"])
+    generated = packaged_size(root, ["Cargo.toml", ".cargo_vcs_info.json"])
+    if generated <= plain:
+        failures.append("a cargo-generated archive entry was not counted")
+
     for failure in failures:
         print(f"FAIL: {failure}", file=sys.stderr)
     if failures:
@@ -215,7 +240,12 @@ def main() -> int:
 
     size = packaged_size(root, files)
     biggest = sorted(
-        ((os.path.getsize(os.path.join(root, f)), f) for f in files), reverse=True
+        (
+            (os.path.getsize(os.path.join(root, f)), f)
+            for f in files
+            if os.path.isfile(os.path.join(root, f))
+        ),
+        reverse=True,
     )[:10]
 
     print(f"file list   : {source} ({len(files)} files)")
