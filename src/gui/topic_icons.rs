@@ -6,12 +6,13 @@
 //! - [`TOPIC_ICONS`] are the illustrated crab badges under
 //!   `src/assets/icon-packs/topics/`. They belong to topic creation: a topic
 //!   tab draws one before its name, the way Telegram's topic bar does. The
-//!   current pack ships, 98 pictures in two families, downscaled to 256x256
+//!   current pack ships, 98 pictures in two families, downscaled to 96x96
 //!   so the binary carries every badge without carrying the originals (#2824,
-//!   #2897).
+//!   #2897, #2929).
 //! - [`CRAB_ICONS`] are the reaction-style crabs under
 //!   `src/assets/icon-packs/emojis/`. They are the input's emoji set, and they
-//!   are embedded here so nothing has to load a file at run time.
+//!   are embedded here so nothing has to load a file at run time. Each is
+//!   64x64: they are drawn at 1.4 rems, so 64 covers a 2x screen (#2929).
 //!
 //! Every byte is `include_bytes!`, so the binary carries its icons and never
 //! depends on the checkout it was built from, the same contract as the brand
@@ -46,10 +47,11 @@ macro_rules! topic_png {
 /// database has to be rewritten. A name is the pack's own file stem, so the
 /// value a row holds names the picture it draws.
 ///
-/// Every offered picture ships. Each is downscaled to 256x256 (#2824): the
-/// tab draws one at about 26px and the picker at 64px, so 256 covers a 2x
-/// screen, and embedding the 30.8 MB of 1024x1024 originals would have cost
-/// 4 MB of RGBA per icon decoded.
+/// Every offered picture ships. Each is downscaled to 96x96 (#2824, #2929):
+/// the tab draws one at 2.5 rems, which is 40px and 80px on a 2x screen, and
+/// the picker draws it at 64px, so 96 covers both with room to spare. The pack
+/// is measured against the crates.io cap on every push, which is what set that
+/// size: at 256x256 it cost 6.87 MiB and pushed the crate over the limit.
 pub const TOPIC_ICONS: &[(&str, &[u8])] = &[
     // The OpenCrabs renders, one per piece of work.
     ("crab_agents", topic_png!("crab_agents")),

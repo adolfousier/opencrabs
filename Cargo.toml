@@ -12,7 +12,33 @@ documentation = "https://docs.opencrabs.com"
 keywords = ["ai", "terminal", "assistant", "llm", "cli"]
 categories = ["command-line-utilities", "development-tools"]
 readme = "README.md"
-# exclude = ["src/assets/"]
+# crates.io rejects any crate over 10 MiB (10,485,760 bytes) with a 413, and
+# 0.6.0 came in over that: the publish step failed and, because the release
+# job waited on it, the five successful platform builds were thrown away with
+# it. Everything listed here is needed to develop OpenCrabs, never to build it,
+# so it stays in the repository and out of the published crate. `ci.yml` weighs
+# the packaged crate on every push, so the next release cannot discover the
+# ceiling the way this one did.
+exclude = [
+    # The test suite is 2.7 MiB compressed on its own. `src/lib.rs` gates it
+    # behind `#[cfg(test)]`, so a plain build never reads it.
+    "src/tests/**",
+    # Release bookkeeping: the release workflow reads the changelog from the
+    # tag checkout, not from the crate.
+    "CHANGELOG.md",
+    "scripts/**",
+    "packaging/**",
+    ".github/**",
+    # Documentation screenshots. Only `split-panes.png` is kept because the
+    # README embeds it and crates.io renders that README; the rest appear
+    # nowhere in the compiled crate.
+    "src/assets/onboard*.png",
+    "src/assets/sessions_screen.png",
+    "src/assets/usage_screen.png",
+    "src/assets/splash.png",
+    "src/assets/opencrabs-xiaomi-mimo-collab.png",
+    "src/assets/opencrabs-logo.jpg",
+]
 
 [dependencies]
 # Async Runtime
