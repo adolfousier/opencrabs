@@ -151,7 +151,10 @@ jobs:
 
   publish-crate:
     name: Publish to crates.io
-    needs: [wait-for-ci, build-release]
+    # Last, deliberately. The binaries are already published by the time this
+    # runs, so a crates.io outage, a rate limit or the 10 MiB cap can only mark
+    # this job red: it can no longer take the release down with it.
+    needs: [wait-for-ci, build-release, create-release]
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.check.outputs.version }}
@@ -209,9 +212,11 @@ jobs:
         if: steps.check.outputs.published == 'false'
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev
 
-      # No continue-on-error: a failed crates.io publish must FAIL this job so
-      # the GitHub Release (binaries) is never dropped while crates.io lags
-      # behind. An already-published version skips this step (job still succeeds).
+      # The GitHub release already exists by the time this runs, so a failure
+      # here marks only this job. A crates.io rejection (the 10 MiB cap, a
+      # rate limit, a token problem) is visible in the run without costing the
+      # binaries that `install.sh` and `/evolve` serve. An already-published
+      # version skips this step (job still succeeds).
       - name: Publish
         if: steps.check.outputs.published == 'false'
         env:
@@ -589,12 +594,15 @@ jobs:
 
   create-release:
     name: Create Release
-    needs: [publish-crate, build-release]
-    # Drop the release binaries ONLY when everything succeeded — every platform
-    # build AND the crates.io publish. Previously this was `always()`, so a
-    # failed publish still shipped binaries: users auto-updated past the version
-    # crates.io actually had, then had to update manually. All-or-nothing now.
-    if: needs.build-release.result == 'success' && needs.publish-crate.result == 'success'
+    needs: [build-release]
+    # Ship the binaries as soon as every platform built. crates.io used to gate
+    # this, on the reasoning that users must never auto-update past what
+    # `cargo install` serves. That made the smallest channel able to sink
+    # the whole release: v0.6.0 hit crates.io's 10 MiB cap with a 413 and five
+    # successful builds were discarded with it. The GitHub release is the
+    # primary channel (`/evolve` and `install.sh` both resolve its assets), so
+    # it publishes first and crates.io follows, last.
+    if: needs.build-release.result == 'success'
     runs-on: ubuntu-latest
     permissions:
       contents: write
