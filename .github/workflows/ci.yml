@@ -116,6 +116,17 @@ jobs:
         # checker, so it ships its own teeth (#2221).
         run: python3 scripts/check-byte-slice-ratchet.py --self-test
 
+      - name: Crate size fits crates.io
+        # crates.io answers anything over 10 MiB with a 413, and it says so at
+        # the very end of a release: v0.6.0 built all five platforms, failed
+        # the publish, and lost the builds with it (#2929). Weighing the crate
+        # here turns that into a red check on the commit that crossed the line.
+        # The self-test runs first: a size check that silently measures an
+        # empty file list would pass every push and prove nothing.
+        run: |
+          python3 scripts/check-crate-size.py --self-test
+          python3 scripts/check-crate-size.py
+
       - name: Clippy, with the byte-slice ratchet
         # One clippy run does both jobs. -D warnings is still the gate for every
         # other lint; clippy::string_slice is held at warn by --force-warn (a
