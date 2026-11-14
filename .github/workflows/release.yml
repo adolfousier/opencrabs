@@ -296,7 +296,22 @@ jobs:
       - name: Set version
         id: version
         shell: bash
-        run: echo "version=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"
+        run: |
+          # A tag push carries the version in the ref. A manual dispatch can
+          # point at main instead, where the ref is `refs/heads/main` and the
+          # version lives in Cargo.toml. Without this branch the artifact
+          # names became `opencrabs-vrefs/heads/main-*`, which cannot be
+          # uploaded and does not match the release the next job looks for.
+          case "${GITHUB_REF}" in
+            refs/tags/v*) version="${GITHUB_REF#refs/tags/v}" ;;
+            *) version=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/') ;;
+          esac
+          if [ -z "$version" ]; then
+            echo "::error::could not resolve a version from ${GITHUB_REF} or Cargo.toml"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "building v$version from ${GITHUB_REF}"
 
       - name: Refuse to administer the host's rustup
         # dtolnay/rust-toolchain manages rustup on whatever machine it runs
