@@ -142,9 +142,24 @@ pub const PAGES: &[DocPage] = &[
         keywords: "trello board card api key token",
     },
     DocPage {
+        title: "Desktop App",
+        path: "/features/desktop-app.html",
+        keywords: "desktop app window gui native graphical client opencrabs-gui bundle dmg exe launcher",
+    },
+    DocPage {
         title: "Sessions",
         path: "/features/sessions.html",
         keywords: "session sessions conversation resume history rail favorite favourite pin star sidebar side bar open close show hide reveal collapse drawer list",
+    },
+    DocPage {
+        title: "Seeker",
+        path: "/features/seeker.html",
+        keywords: "seeker find search palette command palette lookup jump go to navigate filter discover",
+    },
+    DocPage {
+        title: "Message actions",
+        path: "/features/message-actions.html",
+        keywords: "message messages edit react reaction reply forward copy markdown select actions hover menu transcript",
     },
     DocPage {
         title: "Cron jobs",
@@ -332,7 +347,10 @@ pub const SITEMAP: &[&str] = &[
     "/channels/slack.html",
     "/channels/whatsapp.html",
     "/channels/trello.html",
+    "/features/desktop-app.html",
     "/features/sessions.html",
+    "/features/seeker.html",
+    "/features/message-actions.html",
     "/features/cron-jobs.html",
     "/features/plans.html",
     "/features/a2a.html",
