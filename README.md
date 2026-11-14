@@ -2235,9 +2235,11 @@ It is safe to run with nobody watching, which is the point for scripted and agen
 |---|---|
 | `--dir <path>` | Install the CLI somewhere else, for example `--dir "$HOME/.local/bin"` |
 | `--version <tag>` | Pin a release instead of taking the latest |
+| `--client <which>` | Install `desktop`, `terminal` or `both` (the default). Every archive carries both clients, so this picks what lands on disk |
 | `--dry-run` | Resolve and print the plan, install nothing |
 | `--no-deps` | Leave the system package manager alone (skips poppler) |
 | `--no-path` | Install without touching your shell startup file, for example when you manage PATH yourself |
+| `--no-launch` | Install without starting OpenCrabs at the end, for scripted installs |
 
 ```bash
 # Inspect first, then install without touching system packages

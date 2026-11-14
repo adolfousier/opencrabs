@@ -16,6 +16,7 @@ set -euo pipefail
 #   --dry-run         Resolve and print the plan, install nothing
 #   --no-deps         Leave the system package manager alone
 #   --no-path         Do not add the install dir to your shell startup file
+#   --no-launch       Do not start OpenCrabs after installing
 #   -h, --help        Show this help
 #
 # Two archive layouts exist and both are handled: releases up to v0.5.11 ship a
@@ -56,6 +57,7 @@ Options:
   --dry-run         Resolve and print the plan, install nothing
   --no-deps         Leave the system package manager alone
   --no-path         Do not add the install dir to your shell startup file
+  --no-launch       Do not start OpenCrabs after installing
   -h, --help        Show this help
 
 Two archive layouts exist and both are handled: releases up to v0.5.11 ship a
@@ -79,6 +81,10 @@ CLIENT="${OPENCRABS_CLIENT:-both}"
 DRY_RUN=0
 WITH_DEPS=1
 WITH_PATH_ENTRY=1
+# A one-liner that installs and then asks for a second command is not a
+# one-liner, so the install hands over to the agent itself. --no-launch keeps
+# the old behaviour for anyone driving this from a script.
+WITH_LAUN=1
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -119,6 +125,10 @@ while [ $# -gt 0 ]; do
       ;;
     --no-path)
       WITH_PATH_ENTRY=0
+      shift
+      ;;
+    --no-launch)
+      WITH_LAUN=0
       shift
       ;;
     -h | --help)
@@ -229,6 +239,8 @@ if [ "$DRY_RUN" -eq 1 ]; then
   [ "$WITH_DEPS" -eq 1 ] && info "Dry run: would also make sure poppler (pdftoppm) is present"
   [ "$WITH_PATH_ENTRY" -eq 1 ] &&
     info "Dry run: would add ${INSTALL_DIR} to your shell startup file if it is not already on PATH"
+  [ "$WITH_LAUN" -eq 1 ] &&
+    info "Dry run: would start OpenCrabs when the install finishes"
   exit 0
 fi
 
@@ -423,4 +435,26 @@ if [ "$WITH_PATH_ENTRY" -eq 1 ]; then
      export PATH=\"${INSTALL_DIR}:\$PATH\""
 fi
 
-info "Run 'opencrabs' to get started!"
+# Hand the terminal to the crab. A one-liner that installs and then asks for a
+# second command is not a one-liner: for a first-time user the first thing they
+# should see is the agent itself. A desktop-only install has no CLI to start,
+# so the launch is skipped rather than pointing at a binary that is not there.
+if [ "$WITH_LAUN" -eq 0 ]; then
+  info "Run 'opencrabs' to get started!"
+elif [ "$CLIENT" = "desktop" ]; then
+  info "OpenCrabs Desktop is installed. Run 'opencrabs' if you also want the terminal client."
+elif [ -n "${CI:-}" ]; then
+  info "Run 'opencrabs' to get started! (launch skipped: CI is set)"
+elif [ ! -t 1 ] || [ ! -t 2 ] || [ ! -r /dev/tty ]; then
+  info "Run 'opencrabs' to get started! (launch skipped: no terminal attached)"
+else
+  info "Starting OpenCrabs..."
+  # stdin is the curl pipe here, not a terminal: without the /dev/tty redirect
+  # the TUI inherits an exhausted pipe and dies in enable_raw_mode. Running it
+  # in the foreground, rather than exec or `open`, keeps the terminal attached
+  # and gives the user their prompt back when they quit.
+  launch_status=0
+  "${INSTALL_DIR}/opencrabs" </dev/tty || launch_status=$?
+  [ "$launch_status" -eq 0 ] ||
+    warn "OpenCrabs exited with status ${launch_status}. Run 'opencrabs' to try again."
+fi

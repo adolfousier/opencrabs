@@ -381,3 +381,77 @@ fn the_readme_linux_one_liners_install_rtk() {
          check above silently covers nothing if the block is renamed"
     );
 }
+
+// Witness for the client choice and the launch hand-off. Every archive from
+// v0.6.0 carries both clients, so the installer has to be told which one the
+// reader picked, and a one-liner should end in the agent rather than in an
+// instruction to type a second command. Both flags are useless if the README
+// does not list them, since that table is the only place a reader looks.
+
+#[test]
+fn the_installer_takes_a_client_choice() {
+    let src = script();
+    assert!(
+        src.contains("--client <which>"),
+        "install.sh must accept --client, or the download page cannot pass the \
+         choice it just asked for"
+    );
+    assert!(
+        src.contains("CLIENT=\"${OPENCRABS_CLIENT:-both}\""),
+        "the default must stay `both`, which is what the script did before the \
+         desktop client existed, so a bare pipe installs the same as before"
+    );
+    assert!(
+        src.contains(r#"error "--client takes desktop, terminal or both"#),
+        "an unknown client must fail with a message naming the three values, \
+         not install something the reader did not ask for"
+    );
+}
+
+#[test]
+fn the_installer_can_skip_the_launch() {
+    let src = script();
+    assert!(
+        src.contains("--no-launch"),
+        "install.sh must accept --no-launch for scripted installs"
+    );
+    assert!(
+        src.contains("WITH_LAUN=0"),
+        "--no-launch must actually switch the launch off, and the variable it \
+         sets must be the one the hand-off reads"
+    );
+    assert!(
+        src.contains(r#""$WITH_LAUN" -eq 0"#),
+        "the hand-off must read the same variable --no-launch writes, or the \
+         flag is accepted and silently ignored"
+    );
+}
+
+#[test]
+fn the_installer_does_not_launch_a_client_it_did_not_install() {
+    let src = script();
+    let launch = src
+        .find("Starting OpenCrabs...")
+        .expect("install.sh must hand over to the agent when it can");
+    let head = &src[..launch];
+    assert!(
+        head.contains(r#"[ "$CLIENT" = "desktop" ]"#),
+        "--client desktop installs no CLI, so the hand-off must skip the \
+         launch instead of pointing at a binary that is not there"
+    );
+}
+
+#[test]
+fn the_readme_documents_the_client_and_launch_flags() {
+    let readme = fs::read_to_string("README.md").expect("README.md readable");
+    assert!(
+        readme.contains("| `--client <which>` |"),
+        "install.sh accepts --client but the README flag table does not list \
+         it, so the only way to find it is to read the script"
+    );
+    assert!(
+        readme.contains("| `--no-launch` |"),
+        "install.sh accepts --no-launch but the README flag table does not \
+         list it, so the only way to find it is to read the script"
+    );
+}
