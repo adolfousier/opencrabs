@@ -430,10 +430,9 @@ fn the_installer_can_skip_the_launch() {
 #[test]
 fn the_installer_does_not_launch_a_client_it_did_not_install() {
     let src = script();
-    let launch = src
-        .find("Starting OpenCrabs...")
+    let (head, _) = src
+        .split_once("Starting OpenCrabs...")
         .expect("install.sh must hand over to the agent when it can");
-    let head = &src[..launch];
     assert!(
         head.contains(r#"[ "$CLIENT" = "desktop" ]"#),
         "--client desktop installs no CLI, so the hand-off must skip the \
