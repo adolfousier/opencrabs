@@ -609,9 +609,24 @@ jobs:
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
-      - name: Extract version from tag
+      - name: Resolve version
         id: version
-        run: echo "version=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"
+        run: |
+          # A tag push carries the version in the ref. A manual dispatch can
+          # point at main instead, where the ref is `refs/heads/main` and the
+          # version lives in Cargo.toml. Publishing from the tag is not an
+          # option when the crate fix landed after it: v0.6.0's size fix came
+          # four commits late, and the tag checkout hit the same 413 again.
+          case "${GITHUB_REF}" in
+            refs/tags/v*) version="${GITHUB_REF#refs/tags/v}" ;;
+            *) version=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/') ;;
+          esac
+          if [ -z "$version" ]; then
+            echo "::error::could not resolve a version from ${GITHUB_REF} or Cargo.toml"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "releasing v$version from ${GITHUB_REF}"
 
       - name: Extract changelog for this version
         id: changelog
