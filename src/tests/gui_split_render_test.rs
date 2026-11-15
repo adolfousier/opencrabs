@@ -824,8 +824,11 @@ fn a_task_label_is_rebuilt_on_its_own_tick() {
         ),
         "the tick is a second: the label cannot print anything finer"
     );
+    // Pinned without the trailing brace: the strip now opens a let-chain so the
+    // area is drawn only when there is a label to draw, and rustfmt decides
+    // where that chain breaks. The rule is the read itself, not the layout.
     assert!(
-        body.contains("if let Some(label) = self.frame_tasks.get(session).cloned() {"),
+        body.contains("if let Some(label) = self.frame_tasks.get(session).cloned()"),
         "the chat leaf's strip reads the line the walk resolved, not a second lock and a second string"
     );
 }
