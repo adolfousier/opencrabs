@@ -64,8 +64,11 @@ pub(crate) fn pane_footer(
         .max_w_full()
         .overflow_hidden()
         .gap_2()
-        .px_2()
-        .py_1()
+        // The row sits inside the pane's 24 px corner, and at 8 px of padding
+        // the arc reaches the first character. 12 px horizontal and 8 px
+        // vertical clear the curve without turning the row into a toolbar.
+        .px_3()
+        .py_2()
         .text_xs()
         .whitespace_nowrap()
         .text_color(rgb(color))
@@ -172,8 +175,10 @@ pub(crate) fn pane_header(
         .items_center()
         .justify_between()
         .gap_2()
-        .px_2()
-        .py_1()
+        // Same clearance as the footer: the title and the close glyph have to
+        // sit inside the pane's rounded corner, not on its arc.
+        .px_3()
+        .py_2()
         .bg(rgb(header_bg))
         .border_b_2()
         .border_color(rgb(rule_color))
@@ -196,6 +201,9 @@ pub(crate) fn pane_header(
                 .min_w_0()
                 .truncate()
                 .text_xs()
+                // The title is the pane's name, so it carries the weight of a
+                // heading instead of reading as one more line of body text.
+                .font_weight(gpui::FontWeight::BOLD)
                 .text_color(rgb(title_color))
                 .child(title),
         )
