@@ -28,6 +28,7 @@ pub(crate) mod responsive;
 mod session_files;
 mod sessions;
 pub(crate) mod skills_dialog;
+pub(crate) mod tasks_overlay;
 pub(crate) mod theme;
 mod theme_lookup;
 pub(crate) mod theme_picker;

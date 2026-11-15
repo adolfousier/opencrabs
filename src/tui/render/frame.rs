@@ -27,7 +27,7 @@ use super::session_files::render_session_files;
 use super::sessions::render_sessions;
 use super::theme;
 use super::title::{render_app_title, split_title_area};
-use super::{mission_control, panes, plan_overlay, profiles_dialog, skills_dialog};
+use super::{mission_control, panes, plan_overlay, profiles_dialog, skills_dialog, tasks_overlay};
 
 /// Paint the canvas the rest of the frame draws on, when the active theme
 /// declares one (#1634).
@@ -247,6 +247,12 @@ pub fn render(f: &mut Frame, app: &mut App) {
             let (title_area, content_area) = split_title_area(full_content_area);
             render_app_title(f, title_area);
             plan_overlay::render_plan_overlay(f, app, content_area);
+        }
+        AppMode::TasksOverlay => {
+            f.render_widget(Clear, full_content_area);
+            let (title_area, content_area) = split_title_area(full_content_area);
+            render_app_title(f, title_area);
+            tasks_overlay::render_tasks_overlay(f, app, content_area);
         }
         AppMode::MissionControl => {
             // Full-screen overlay (like /sessions and /help). Clears the

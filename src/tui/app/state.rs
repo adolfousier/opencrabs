@@ -560,6 +560,12 @@ pub struct App {
     pub help_viewport_rows: usize,
     /// Scroll offset for the Plan overlay (Editing design .md viewer).
     pub plan_overlay_scroll: usize,
+    /// Selected row in the Tasks overlay. Clamped at render time, because
+    /// the roster shrinks under it as tasks finish.
+    pub tasks_overlay_selected: usize,
+    /// The task opened into its full view from the Tasks overlay. It
+    /// outlives the task, so the last output stays readable once it ends.
+    pub(crate) tasks_detail: Option<crate::tui::render::tasks_overlay::TaskDetail>,
 
     /// Model name for display (from provider default)
     pub default_model_name: String,
@@ -1142,6 +1148,8 @@ impl App {
             help_content_rows: 0,
             help_viewport_rows: 0,
             plan_overlay_scroll: 0,
+            tasks_overlay_selected: 0,
+            tasks_detail: None,
             approval_auto_session,
             approval_auto_always,
             file_picker_files: Vec::new(),
@@ -2680,6 +2688,25 @@ impl App {
             TuiEvent::Tick => {
                 // Update animation frame for spinner
                 self.animation_frame = self.animation_frame.wrapping_add(1);
+
+                // The Tasks overlay shows running work, so it has nothing
+                // to show once the last task settles: it closes itself
+                // here, on the tick, and the renderer stays a pure read.
+                // A task opened into its full view keeps the overlay up
+                // past the task's end: its last lines are what the reader
+                // stayed for, and Esc is what closes it.
+                if self.mode == AppMode::TasksOverlay {
+                    self.refresh_task_detail();
+                } else {
+                    self.tasks_detail = None;
+                }
+                if self.mode == AppMode::TasksOverlay
+                    && self.tasks_detail.is_none()
+                    && self.running_background_tasks() == 0
+                {
+                    self.tasks_overlay_selected = 0;
+                    self.mode = AppMode::Chat;
+                }
 
                 // Resolve deferred health checks (shows Pending for one frame first)
                 if let Some(ref mut wizard) = self.onboarding
@@ -4861,6 +4888,47 @@ impl App {
                     self.plan_overlay_scroll = 0;
                     self.switch_mode(AppMode::Chat).await?;
                     let _ = self.handle_slash_command("/discard").await;
+                }
+            }
+            AppMode::TasksOverlay => {
+                use crate::brain::agent::service::background_tasks::CancelOutcome;
+                let running = self.running_background_tasks();
+                let at = self.tasks_overlay_selected.min(running.saturating_sub(1));
+                if self.tasks_detail.is_some() {
+                    self.task_detail_key(&event);
+                } else if keys::is_enter(&event) {
+                    // Enter lifts the task under the cursor into its full
+                    // view: everything it wrote, scrollable, with its stop.
+                    self.open_task_detail(at);
+                } else if keys::is_cancel(&event) {
+                    // Esc stops the task under the cursor and stays, so
+                    // several are cancelled one press each. A task that is
+                    // not this process's to stop (a mirrored claude-cli one)
+                    // cannot be cancelled from here, so there Esc is the way
+                    // out instead of a key that does nothing.
+                    let outcome = self
+                        .send_target_session_id()
+                        .zip(self.agent_service.background_manager())
+                        .and_then(|(session_id, mgr)| {
+                            let task = mgr.running_tasks(session_id).get(at)?.task_id;
+                            Some(mgr.cancel(session_id, task))
+                        });
+                    if outcome != Some(CancelOutcome::Signalled) {
+                        self.tasks_overlay_selected = 0;
+                        self.switch_mode(AppMode::Chat).await?;
+                    }
+                } else if keys::is_up(&event) && at == 0 {
+                    // Up off the first row hands the keyboard back to the
+                    // composer, the mirror of the Down that came in.
+                    self.tasks_overlay_selected = 0;
+                    self.switch_mode(AppMode::Chat).await?;
+                } else if keys::is_up(&event) {
+                    self.tasks_overlay_selected = at - 1;
+                } else if keys::is_down(&event) {
+                    self.tasks_overlay_selected = self
+                        .tasks_overlay_selected
+                        .saturating_add(1)
+                        .min(running.saturating_sub(1));
                 }
             }
             AppMode::MissionControl => {

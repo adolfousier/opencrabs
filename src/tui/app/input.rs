@@ -1336,6 +1336,7 @@ impl App {
             AppMode::RestartPending => Some(DialogScope::RestartPending),
             AppMode::UpdatePrompt => Some(DialogScope::UpdatePrompt),
             AppMode::PlanOverlay => Some(DialogScope::PlanOverlay),
+            AppMode::TasksOverlay => Some(DialogScope::TasksOverlay),
             AppMode::SkillsList => Some(DialogScope::SkillsDialog),
             AppMode::Profiles => Some(DialogScope::ProfilesDialog),
             AppMode::MissionControl => Some(if self.mc.log_viewer.is_some() {
@@ -2544,6 +2545,17 @@ impl App {
                 }
                 self.cursor_position = self.input_buffer.len();
             }
+        } else if keys::is_down(&event)
+            && !self.slash_suggestions_active
+            && self.cursor_position >= self.input_buffer.len()
+            && self.running_background_tasks() > 0
+        {
+            // Down with the caret at the very end and no history walk in
+            // progress has nowhere left to go in the field, so it reaches the
+            // tasks running under it. Up already belongs to attachments and
+            // history, which is why the tasks sit on the other arrow.
+            self.tasks_overlay_selected = 0;
+            self.switch_mode(AppMode::TasksOverlay).await?;
         } else {
             // Regular character input
             match event.code {

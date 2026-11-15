@@ -29,6 +29,8 @@ pub enum DialogScope {
     UpdatePrompt,
     ThemePicker,
     PlanOverlay,
+    /// The `/tasks` overlay: running background tasks and their output.
+    TasksOverlay,
     Help,
     Settings,
     UsageDashboard,
@@ -66,6 +68,7 @@ impl DialogScope {
             DialogScope::UpdatePrompt => "Update",
             DialogScope::ThemePicker => "Theme picker",
             DialogScope::PlanOverlay => "Plan",
+            DialogScope::TasksOverlay => "Tasks",
             DialogScope::Help => "Help",
             DialogScope::Settings => "Settings",
             DialogScope::UsageDashboard => "Usage",
@@ -710,6 +713,26 @@ const TABLE_19: &[DialogKey] = &[
     },
 ];
 
+/// The tasks overlay (`/tasks`, or Down from the composer): pick a task,
+/// read its output, stop it. Up off the first row goes back to the composer.
+const TABLE_20: &[DialogKey] = &[
+    DialogKey {
+        events: &[k(KeyCode::Up), k(KeyCode::Down)],
+        label: "↑↓",
+        verb: "select task (\u{2191} at the top goes back)",
+    },
+    DialogKey {
+        events: &[k(KeyCode::Enter)],
+        label: "Enter",
+        verb: "open full output",
+    },
+    DialogKey {
+        events: &[k(KeyCode::Esc)],
+        label: "Esc",
+        verb: "cancel this task",
+    },
+];
+
 pub fn dialog_keys(scope: DialogScope) -> &'static [DialogKey] {
     match scope {
         DialogScope::FilePicker => TABLE_1,
@@ -734,6 +757,7 @@ pub fn dialog_keys(scope: DialogScope) -> &'static [DialogKey] {
         DialogScope::ApprovePolicyMenu => TABLE_16,
         DialogScope::SshPassword => TABLE_17,
         DialogScope::Sessions => TABLE_19,
+        DialogScope::TasksOverlay => TABLE_20,
     }
 }
 
@@ -787,6 +811,7 @@ mod tests {
             DialogScope::ApprovePolicyMenu,
             DialogScope::SshPassword,
             DialogScope::Sessions,
+            DialogScope::TasksOverlay,
         ]
     }
 

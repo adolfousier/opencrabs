@@ -65,6 +65,21 @@ impl Dashboard {
             commands::GuiAction::OpenModels => self.open_models(arg, session, cx),
             commands::GuiAction::OpenSkills => self.open_skills(cx),
             commands::GuiAction::OpenProjects => self.open_projects(cx),
+            commands::GuiAction::OpenTasks => {
+                // Nothing running has no list to open, and a command that
+                // does nothing reads as a broken one: say so, as the
+                // terminal does.
+                match session.filter(|id| !self.task_rows(*id).is_empty()) {
+                    Some(id) => self.focus_tasks(id, cx),
+                    None => {
+                        self.turn
+                            .live
+                            .notices
+                            .push("No background tasks running.".to_string());
+                        cx.notify();
+                    }
+                }
+            }
             commands::GuiAction::OpenOnboard(name) => self.open_onboard(name, arg, cx),
             commands::GuiAction::Text(command) => self.run_text_command(command, arg, session, cx),
             commands::GuiAction::Quit => cx.quit(),
