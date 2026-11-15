@@ -891,13 +891,20 @@ fn a_claude_task_id_cannot_steer_the_lookup_out_of_the_tree() {
 async fn a_detached_command_publishes_its_log_while_it_runs() {
     let mgr = Arc::new(BackgroundTaskManager::new());
     let sid = Uuid::new_v4();
-    let marker = format!("visible-{}", Uuid::new_v4().as_simple());
+    // Hyphenated, so the log scrub leaves it alone: a bare run of 32 hex
+    // characters reads as a service token to `HEX_TOKEN_RE` and comes back as
+    // `[REDACTED_TOKEN]`, which a marker built from `as_simple()` always hits.
+    let marker = format!("visible-{}", Uuid::new_v4());
 
+    // The command outlives the whole poll window below, by a wide margin, so
+    // "its first line is readable while it runs" stays true on a loaded runner
+    // instead of being a race between a five-second sleep and five seconds of
+    // polling.
     Arc::clone(&mgr).spawn_command(
         sid,
         std::env::temp_dir(),
         "echo then wait".to_string(),
-        format!("echo {marker}; sleep 5"),
+        format!("echo {marker}; sleep 30"),
         None,
     );
     let rows = mgr.running_tasks(sid);
@@ -908,9 +915,12 @@ async fn a_detached_command_publishes_its_log_while_it_runs() {
         .output_path_for(sid, rows[0].task_id)
         .expect("a spawned command knows its own log");
 
-    // The command is still sleeping when its first line is readable.
+    // The command is still sleeping when its first line is readable. The
+    // window is twenty seconds, not five: under a full suite the child may wait
+    // seconds for a core, and the log stays empty until it runs.
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(20);
     let mut tail = String::new();
-    for _ in 0..100 {
+    while tokio::time::Instant::now() < deadline {
         tail = mgr.output_tail(&path, 8);
         if tail.contains(&marker) {
             break;
@@ -919,7 +929,9 @@ async fn a_detached_command_publishes_its_log_while_it_runs() {
     }
     assert!(
         tail.contains(&marker),
-        "output is readable mid-run: {tail:?}"
+        "output is readable mid-run: {tail:?} (log present: {}, running: {})",
+        path.exists(),
+        mgr.running_for(sid),
     );
     assert_eq!(mgr.running_for(sid), 1, "and the command has not finished");
     assert_eq!(
@@ -927,6 +939,9 @@ async fn a_detached_command_publishes_its_log_while_it_runs() {
         None,
         "an unknown task has no output"
     );
+    // Stop the sleeper rather than leaving thirty seconds of it to the rest of
+    // the suite.
+    let _ = mgr.cancel(sid, rows[0].task_id);
 }
 
 #[cfg(unix)]
