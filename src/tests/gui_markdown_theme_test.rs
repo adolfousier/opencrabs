@@ -21,7 +21,7 @@ impl MdPalette for Palette {
 }
 
 fn one_line(src: &str) -> MdLine {
-    let mut parsed = markdown::blocks(src);
+    let mut parsed = markdown::blocks_flow(src, markdown::MdFlow::Prose);
     assert_eq!(parsed.len(), 1, "{src:?} must produce one line");
     match parsed.pop().expect("length checked") {
         MdBlock::Line(line) => line,
@@ -120,7 +120,10 @@ fn parsed_markdown_carries_the_structure_the_transcript_paints() {
     assert!(fenced.mono);
     assert_eq!(fenced.text, "fn main() {}");
 
-    let blocks = markdown::blocks("| [a](https://example.com) | b |\n| --- | --- |\n| 1 | 2 |");
+    let blocks = markdown::blocks_flow(
+        "| [a](https://example.com) | b |\n| --- | --- |\n| 1 | 2 |",
+        markdown::MdFlow::Prose,
+    );
     assert_eq!(blocks.len(), 1, "a table is one block, never flattened");
     let table = match blocks.into_iter().next().expect("one block") {
         MdBlock::Table(table) => table,

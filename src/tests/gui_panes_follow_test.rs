@@ -109,7 +109,7 @@ fn markdown_is_parsed_once_per_source() {
     // `md_block` ran the parser over every visible answer on every frame,
     // which is 4 MB of markdown twenty times a second on a long session.
     assert!(
-        TRANSCRIPT.contains("fn md_blocks(src: &str) -> Rc<Vec<markdown::MdBlock>>"),
+        TRANSCRIPT.contains("fn md_blocks(src: &str, flow: markdown::MdFlow) -> Rc<Vec<markdown::MdBlock>>"),
         "the parse is behind a cache"
     );
     assert!(
@@ -117,7 +117,7 @@ fn markdown_is_parsed_once_per_source() {
         "a repeated source is a cache hit"
     );
     assert!(
-        TRANSCRIPT.contains("let parsed = md_blocks(src);"),
+        TRANSCRIPT.contains("let parsed = md_blocks(src, flow);"),
         "the renderer asks the cache, never the parser"
     );
     assert!(

@@ -1590,7 +1590,7 @@ pub(crate) fn small_style(size: f32, color: u32) -> TextStyle {
     }
 }
 
-fn mono_style() -> TextStyle {
+fn mono_style(size: f32) -> TextStyle {
     TextStyle {
         // The mono walk, not a fixed name (#2786): `Menlo` ships on macOS
         // only, and the platform resolves an unknown family through a chain
@@ -1598,18 +1598,71 @@ fn mono_style() -> TextStyle {
         // alignment on Windows and Linux.
         font_family: crate::fonts::current_mono().into(),
         color: rgb(palette::current().text_normal).into(),
-        font_size: AbsoluteLength::Pixels(px(12.0)),
+        font_size: AbsoluteLength::Pixels(px(size)),
         ..Default::default()
     }
 }
 
-/// Heading size ladder (#2521): h1 20px, h2 17px, h3+ 15px, body 13px.
-fn heading_size(level: u8) -> f32 {
-    match level {
-        1 => 20.0,
-        2 => 17.0,
-        3..=6 => 15.0,
-        _ => 13.0,
+/// How a markdown block is drawn: the body size, and the ink it starts from.
+///
+/// The size is the body's; headings and fences are derived from it, so one
+/// number keeps a whole block in proportion. The ink matters because a
+/// reasoning block is muted and a quote is muted while an answer is not, and
+/// the parse itself is the same in all three cases.
+#[derive(Clone, Copy)]
+struct MdLook {
+    base: f32,
+    color: u32,
+    italic: bool,
+}
+
+impl MdLook {
+    /// Body ink at `base` size.
+    fn body(base: f32) -> Self {
+        Self {
+            base,
+            color: palette::current().text,
+            italic: false,
+        }
+    }
+
+    /// Muted ink at `base` size: quoted context.
+    fn muted(base: f32) -> Self {
+        Self {
+            base,
+            color: palette::current().text_muted,
+            italic: false,
+        }
+    }
+
+    /// Muted and italic: a reasoning block, where the slant is what tells the
+    /// reader this is the model thinking rather than something it said
+    /// (#2639, #2640).
+    fn thinking(base: f32) -> Self {
+        Self {
+            base,
+            color: palette::current().text_muted,
+            italic: true,
+        }
+    }
+}
+
+/// A code fence sits one step under the body it belongs to: 12px in a 13px
+/// answer, 14px in a 16px user row, never smaller than 10px.
+fn mono_size_for(base: f32) -> f32 {
+    (base - 1.0).max(10.0)
+}
+
+/// Heading size ladder (#2521), relative to the row's own body size: h1 is
+/// base+7, h2 base+4, h3+ base+2, and body is the base. At the 13px answer
+/// base that is 20/17/15/13, and a 16px user row keeps the same steps above
+/// its own text instead of dropping to the answer's scale.
+fn heading_size(level: u8, base: f32) -> f32 {
+    base + match level {
+        1 => 7.0,
+        2 => 4.0,
+        3..=6 => 2.0,
+        _ => 0.0,
     }
 }
 
@@ -1623,9 +1676,24 @@ fn heading_weight(level: u8) -> gpui::FontWeight {
 }
 
 /// One styled markdown line; indent in list/quote depth steps.
-fn md_line(l: &markdown::MdLine, selection: Option<&SelectionContext>) -> Div {
-    let size = heading_size(l.heading_level);
-    let mut style = body_style(size);
+fn md_line(l: &markdown::MdLine, look: MdLook, selection: Option<&SelectionContext>) -> Div {
+    // A thematic break is a divider, not text: a hairline takes the width the
+    // pane gives it, where a run of box characters stopped wherever the string
+    // ended.
+    if l.rule {
+        return div()
+            .pl(rems(f32::from(l.indent) * 0.9))
+            .my(px(RHYTHM_BLOCK_MARGIN))
+            .w_full()
+            .h(px(1.0))
+            .bg(rgb(palette::current().track));
+    }
+    let size = heading_size(l.heading_level, look.base);
+    let mut style = small_style(size, look.color);
+    if look.italic {
+        // gpui's `TextStyle` carries the style itself, not an `Option`.
+        style.font_style = gpui::FontStyle::Italic;
+    }
     style.font_weight = heading_weight(l.heading_level);
     let text = inline_crabs(
         l.text.clone(),
@@ -1666,11 +1734,19 @@ fn table_cell(cell: &markdown::MdCell, header: bool, selection: Option<&Selectio
         &cell.links,
         selection,
     );
+    // The delimiter row decides where a column sits: `|---:|` is a number
+    // column and reads right-aligned, which the parser used to discard.
+    let align = match cell.align {
+        markdown::MdAlign::Left => gpui::TextAlign::Left,
+        markdown::MdAlign::Center => gpui::TextAlign::Center,
+        markdown::MdAlign::Right => gpui::TextAlign::Right,
+    };
     div()
         .flex_1()
         .min_w_0()
         .px(px(RHYTHM_CELL_PAD_X))
         .py(px(RHYTHM_CELL_PAD_Y))
+        .text_align(align)
         .child(text)
 }
 
@@ -1721,6 +1797,7 @@ fn md_table(t: &markdown::MdTable, selection: Option<&SelectionContext>) -> Div 
         text: String::new(),
         highlights: Vec::new(),
         links: Vec::new(),
+        align: markdown::MdAlign::Left,
     };
     let mut grid = div()
         .flex()
@@ -1815,19 +1892,19 @@ const MD_CACHE_BYTES: usize = 16 * 1024 * 1024;
 /// rebuilt per frame.
 #[derive(Default)]
 struct MdCache {
-    by_key: HashMap<(u64, usize), Rc<Vec<markdown::MdBlock>>>,
+    by_key: HashMap<(u64, usize, u8), Rc<Vec<markdown::MdBlock>>>,
     /// Insertion order, oldest first, for eviction.
-    order: VecDeque<(u64, usize)>,
+    order: VecDeque<(u64, usize, u8)>,
     /// Source bytes currently held, for the byte budget.
     bytes: usize,
 }
 
 impl MdCache {
-    fn get(&mut self, key: (u64, usize)) -> Option<Rc<Vec<markdown::MdBlock>>> {
+    fn get(&mut self, key: (u64, usize, u8)) -> Option<Rc<Vec<markdown::MdBlock>>> {
         self.by_key.get(&key).cloned()
     }
 
-    fn insert(&mut self, key: (u64, usize), blocks: Rc<Vec<markdown::MdBlock>>) {
+    fn insert(&mut self, key: (u64, usize, u8), blocks: Rc<Vec<markdown::MdBlock>>) {
         let weight = key.1;
         if self.by_key.insert(key, blocks).is_none() {
             self.order.push_back(key);
@@ -1853,15 +1930,15 @@ thread_local! {
 /// The parsed blocks for `src`, from the cache when this source was already
 /// parsed (#2688). Keyed on a hash of the whole string plus its length, so a
 /// different answer never reads another one's parse.
-fn md_blocks(src: &str) -> Rc<Vec<markdown::MdBlock>> {
+fn md_blocks(src: &str, flow: markdown::MdFlow) -> Rc<Vec<markdown::MdBlock>> {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     src.hash(&mut hasher);
-    let key = (hasher.finish(), src.len());
+    let key = (hasher.finish(), src.len(), flow as u8);
     if let Some(hit) = MD_CACHE.with(|c| c.borrow_mut().get(key)) {
         return hit;
     }
-    let parsed = Rc::new(markdown::blocks(src));
+    let parsed = Rc::new(markdown::blocks_flow(src, flow));
     MD_CACHE.with(|c| c.borrow_mut().insert(key, parsed.clone()));
     parsed
 }
@@ -1869,8 +1946,13 @@ fn md_blocks(src: &str) -> Rc<Vec<markdown::MdBlock>> {
 /// Assistant content as markdown. Consecutive fence lines group under one
 /// padded mono container so a code block reads as one shape, while a table
 /// block keeps its grid instead of being flattened into text rows.
-fn md_block(src: &str, selection: Option<&SelectionContext>) -> Div {
-    let parsed = md_blocks(src);
+fn md_block(
+    src: &str,
+    look: MdLook,
+    flow: markdown::MdFlow,
+    selection: Option<&SelectionContext>,
+) -> Div {
+    let parsed = md_blocks(src, flow);
     let blocks = parsed.as_slice();
     let mut out = div().flex().flex_col().gap(px(RHYTHM_BASE_GAP));
     let mut i = 0;
@@ -1895,7 +1977,7 @@ fn md_block(src: &str, selection: Option<&SelectionContext>) -> Div {
                         markdown::MdBlock::Line(l) if l.mono => {
                             code = code.child(selectable_styled_text(
                                 l.text.clone(),
-                                mono_style(),
+                                mono_style(mono_size_for(look.base)),
                                 markdown::resolve_highlights(&l.highlights, &palette::current()),
                                 &[],
                                 selection,
@@ -1908,7 +1990,7 @@ fn md_block(src: &str, selection: Option<&SelectionContext>) -> Div {
                 out = out.child(code);
             }
             markdown::MdBlock::Line(line) => {
-                out = out.child(md_line(line, selection));
+                out = out.child(md_line(line, look, selection));
                 i += 1;
             }
         }
@@ -1925,11 +2007,27 @@ fn reply_text(row: &Message) -> String {
     row_blocks(row, None)
         .into_iter()
         .filter_map(|block| match block {
-            Block::Msg { content, .. } => Some(content),
+            Block::Msg { role, content, .. } => Some(visible_text(&role, &content)),
             _ => None,
         })
         .collect::<Vec<_>>()
         .join("\n\n")
+}
+
+/// The visible text of one row's content: what the row paints, with the
+/// source markdown flattened away.
+///
+/// One rule for the copy path, the reply preview and the quote block. Before
+/// this, a quoted answer carried its `##` and its backticks into the composer
+/// chip and the quote, because the quote read stored bytes while the row
+/// painted a parse.
+fn visible_text(role: &str, content: &str) -> String {
+    let text = strip_markers(content);
+    match role {
+        "assistant" => markdown_copy_text(&text, markdown::MdFlow::Prose),
+        "user" => markdown_copy_text(&text, markdown::MdFlow::Verbatim),
+        _ => text.into_owned(),
+    }
 }
 
 /// The first visible line of a reply, capped for the composer's chip (#2868).
@@ -1998,33 +2096,40 @@ fn split_quote(text: &str) -> (Vec<&str>, &str) {
 /// The quoted block above a reply (#2827): a bar down the left edge and the
 /// picked rows in a quieter size, so what was answered reads as context and not
 /// as something the user just said.
-fn quote_block(lines: &[&str]) -> Div {
+///
+/// It paints through `md_block` like every other prose surface. The quote's
+/// own text is already flattened by `quote_prefix`, so this is the same text
+/// the reader saw, at the muted look, with `Verbatim` keeping each quoted line
+/// on its own line. Painting it as one bare `div` per line left shortcodes
+/// unrendered and made the quote the one surface that could not be selected
+/// line by line.
+fn quote_block(lines: &[&str], selection: Option<&SelectionContext>) -> Div {
     let palette = palette::current();
-    let mut col = div()
+    let body = lines.join("\n");
+    div()
         .flex()
         .flex_col()
-        .gap_0p5()
         .min_w_0()
         .w_full()
         .pl(px(8.0))
         .border_l_2()
-        .border_color(rgb(palette.text_faint));
-    for line in lines {
-        col = col.child(
-            div()
-                .min_w_0()
-                .text_sm()
-                .text_color(rgb(palette.text_muted))
-                .child(SharedString::from((*line).to_string())),
-        );
-    }
-    col
+        .border_color(rgb(palette.text_faint))
+        .child(md_block(
+            &body,
+            MdLook::muted(SMALL_TEXT_SIZE),
+            markdown::MdFlow::Verbatim,
+            selection,
+        ))
 }
 
-/// User/system content stays plain: the TUI renders input verbatim, markdown
-/// styling is an answer-text treatment. A line whose shortcodes name the crab
-/// pack still draws those pictures (#2771), so a user who picks an emoji from
-/// the composer sees the emoji, not its name.
+/// The rows that are notices rather than prose: errors, the stopped marker,
+/// system lines and model changes. They stay plain because they are one-line
+/// status text with no markdown in them, and a stray `*` in an error message
+/// should not start an italic run. User content is NOT plain any more: it goes
+/// through `md_block` like an answer, at its own size and with `Verbatim`
+/// line breaks. A line whose shortcodes name the crab pack still draws those
+/// pictures (#2771), so a user who picks an emoji from the composer sees the
+/// emoji, not its name.
 fn plain_block(content: &str, size: f32, selection: Option<&SelectionContext>) -> Div {
     let mut lines = div().flex().flex_col().gap_0p5();
     for line in content.split('\n') {
@@ -2262,21 +2367,28 @@ fn bubble(
         (Vec::new(), text.as_ref())
     };
     if !quote.is_empty() {
-        col = col.child(quote_block(&quote));
+        col = col.child(quote_block(&quote, selection));
     }
     if !text.trim().is_empty() {
-        col = col.child(if role == "assistant" {
-            md_block(text, selection)
-        } else {
-            plain_block(
+        // Every role that carries prose is parsed the same way. The user row
+        // renders at its own 16px with `Verbatim`, so a heading typed by hand
+        // is a heading and a single Enter is still a line break. The harness
+        // notices (error, stopped, model change) stay plain: they are one-line
+        // status text, not a document.
+        col = col.child(match role {
+            "assistant" => md_block(
                 text,
-                if role == "user" {
-                    USER_TEXT_SIZE
-                } else {
-                    PLAIN_TEXT_SIZE
-                },
+                MdLook::body(PLAIN_TEXT_SIZE),
+                markdown::MdFlow::Prose,
                 selection,
-            )
+            ),
+            "user" => md_block(
+                text,
+                MdLook::body(USER_TEXT_SIZE),
+                markdown::MdFlow::Verbatim,
+                selection,
+            ),
+            _ => plain_block(text, PLAIN_TEXT_SIZE, selection),
         });
     }
     if !paths.is_empty() {
@@ -2345,7 +2457,15 @@ fn forward_block(
         );
     }
     if !text.trim().is_empty() {
-        col = col.child(plain_block(&text, PLAIN_TEXT_SIZE, selection));
+        // A forward is somebody else's message, usually hand-typed in another
+        // channel, so it parses with `Verbatim`: their line breaks are part of
+        // what they wrote and a forwarded list stays a list.
+        col = col.child(md_block(
+            &text,
+            MdLook::body(PLAIN_TEXT_SIZE),
+            markdown::MdFlow::Verbatim,
+            selection,
+        ));
     }
     if !paths.is_empty() {
         col = col.child(history_attachments(&paths, attachment_width, handlers));
@@ -2530,17 +2650,19 @@ fn fold_cell(folded: usize, side: f32) -> AnyElement {
 /// a second widget inside the first, and the caption above the rows said only
 /// what the italic type already says (#2639, #2640).
 fn thinking_block(content: &str, full: bool) -> Div {
-    div().flex().flex_col().gap_0p5().min_w_0().child(
-        div()
-            .text_xs()
-            .italic()
-            .min_w_0()
-            .text_color(rgb(palette::current().text_muted))
-            .child(SharedString::from(if full {
-                content.trim().to_string()
-            } else {
-                fit(content.trim(), 600)
-            })),
+    // The 600-character preview still applies before the parse, so a long
+    // reasoning run cannot take over the pane. `Prose` keeps it a paragraph:
+    // reasoning is model text, not something a person typed with Enter.
+    let shown = if full {
+        content.trim().to_string()
+    } else {
+        fit(content.trim(), 600)
+    };
+    md_block(
+        &shown,
+        MdLook::thinking(SMALL_TEXT_SIZE),
+        markdown::MdFlow::Prose,
+        None,
     )
 }
 
@@ -3058,8 +3180,10 @@ fn live_card_body(
 fn live_card_line_text(line: &LiveCardLine) -> String {
     match line {
         LiveCardLine::Tool { mark, text, .. } => format!("{mark} {text}"),
-        LiveCardLine::Narration(text) => markdown_copy_text(text),
-        LiveCardLine::Reasoning(text) => text.clone(),
+        LiveCardLine::Narration(text) => markdown_copy_text(text, markdown::MdFlow::Prose),
+        // Reasoning is parsed for the pixels now, so its copy text is the
+        // visible segments of that same parse.
+        LiveCardLine::Reasoning(text) => markdown_copy_text(text, markdown::MdFlow::Prose),
     }
 }
 
@@ -3075,12 +3199,17 @@ fn live_card_line(line: LiveCardLine, selection: Option<&SelectionContext>) -> A
             selection,
         )
         .into_any_element(),
-        LiveCardLine::Narration(text) => md_block(&text, selection).into_any_element(),
-        LiveCardLine::Reasoning(text) => selectable_styled_text(
-            text,
-            small_style(SMALL_TEXT_SIZE, palette::current().text_muted),
-            Vec::new(),
-            &[],
+        LiveCardLine::Narration(text) => md_block(
+            &text,
+            MdLook::body(SMALL_TEXT_SIZE),
+            markdown::MdFlow::Prose,
+            selection,
+        )
+        .into_any_element(),
+        LiveCardLine::Reasoning(text) => md_block(
+            &text,
+            MdLook::muted(SMALL_TEXT_SIZE),
+            markdown::MdFlow::Prose,
             selection,
         )
         .into_any_element(),
@@ -4464,14 +4593,17 @@ fn selectable_row<E: gpui::IntoElement>(
 /// The visible text of a markdown block in exactly the segment order used by
 /// `md_block`: table cells follow their header and rows, and every segment is
 /// separated by one newline in the copy coordinate space.
-fn markdown_copy_text(src: &str) -> String {
+fn markdown_copy_text(src: &str, flow: markdown::MdFlow) -> String {
     let mut segments = Vec::new();
     // The same parse `md_block` already did for these pixels (#2817). Calling
     // `markdown::blocks` here parsed every assistant answer a second time on
     // every paint, which on a 4 MB window was ~80 MB/s of throwaway strings
     // per pane; the cache makes the copy text free once the row has rendered.
-    for block in md_blocks(src).iter() {
+    for block in md_blocks(src, flow).iter() {
         match block {
+            // A rule paints no text, so it contributes no copy segment: an
+            // empty one would add a blank line the reader never saw.
+            markdown::MdBlock::Line(line) if line.rule => {}
             markdown::MdBlock::Line(line) => segments.push(line.text.clone()),
             markdown::MdBlock::Table(table) => {
                 let cols = table.columns().max(1);
@@ -4517,12 +4649,10 @@ fn stored_copy_text(id: uuid::Uuid, role: &str, content: &str) -> Rc<str> {
     if let Some(hit) = CACHE.with(|c| c.borrow().get(&id).cloned()) {
         return hit;
     }
-    let text = strip_markers(content);
-    let built: Rc<str> = if role == "assistant" {
-        Rc::from(markdown_copy_text(&text).as_str())
-    } else {
-        Rc::from(&*text)
-    };
+    // The copy path has to flatten exactly what the row paints, or a drag
+    // selects bytes that are not on screen. One rule, shared with the quote
+    // and the preview, so the three can never drift apart.
+    let built: Rc<str> = Rc::from(visible_text(role, content).as_str());
     CACHE.with(|c| {
         let mut cache = c.borrow_mut();
         if cache.len() >= CACHE_ENTRIES {
@@ -4549,14 +4679,7 @@ fn block_text(block: &Block) -> Rc<str> {
             message_id: Some(id),
             ..
         } => stored_copy_text(*id, role, content),
-        Block::Msg { role, content, .. } => {
-            let text = strip_markers(content);
-            if role == "assistant" {
-                Rc::from(markdown_copy_text(&text).as_str())
-            } else {
-                Rc::from(&*text)
-            }
-        }
+        Block::Msg { role, content, .. } => Rc::from(visible_text(role, content).as_str()),
         Block::Thinking { content } => Rc::from(content.trim()),
         Block::Tools { calls } => {
             Rc::from(calls.iter().map(tool_line).collect::<Vec<_>>().join("\n"))
@@ -5089,9 +5212,15 @@ mod tests {
 
     #[test]
     fn drag_copy_markdown_copy_text_matches_visible_segments() {
-        assert_eq!(markdown_copy_text("## Head\n\nbody"), "Head\nbody");
         assert_eq!(
-            markdown_copy_text("| A | B |\n| --- | --- |\n| 1 | 2 |"),
+            markdown_copy_text("## Head\n\nbody", markdown::MdFlow::Prose),
+            "Head\nbody"
+        );
+        assert_eq!(
+            markdown_copy_text(
+                "| A | B |\n| --- | --- |\n| 1 | 2 |",
+                markdown::MdFlow::Prose
+            ),
             "A\nB\n1\n2"
         );
     }
@@ -5100,10 +5229,17 @@ mod tests {
     /// heading can never look like prose again (#2521).
     #[test]
     fn headings_step_down_from_h1_to_body() {
-        assert!(heading_size(1) > heading_size(2));
-        assert!(heading_size(2) > heading_size(3));
-        assert!(heading_size(3) > heading_size(0), "h3 still beats body");
-        assert_eq!(heading_size(0), 13.0, "body stays 13px");
+        assert!(heading_size(1, 13.0) > heading_size(2, 13.0));
+        assert!(heading_size(2, 13.0) > heading_size(3, 13.0));
+        assert!(
+            heading_size(3, 13.0) > heading_size(0, 13.0),
+            "h3 still beats body"
+        );
+        assert_eq!(heading_size(0, 13.0), 13.0, "body stays 13px");
+        // The ladder rides the row's own size, so a 16px user row keeps its
+        // heading steps above 16 instead of dropping to the answer's scale.
+        assert_eq!(heading_size(0, 16.0), 16.0);
+        assert_eq!(heading_size(1, 16.0), 23.0);
         assert_eq!(heading_weight(1), gpui::FontWeight::BOLD);
         assert_eq!(heading_weight(0), gpui::FontWeight::NORMAL);
     }
@@ -6164,8 +6300,9 @@ mod tests {
 
     #[test]
     fn markdown_structure_survives_parsing() {
-        let blocks = crate::markdown::blocks(
+        let blocks = crate::markdown::blocks_flow(
             "## Heading\n\n- one\n- two\n\nuse `speed` here\n\n```\ncode line\n```",
+            crate::markdown::MdFlow::Prose,
         );
         let lines: Vec<_> = blocks
             .into_iter()
@@ -6195,8 +6332,9 @@ mod tests {
     /// drew a grid. It must parse as a table block with real columns.
     #[test]
     fn table_parses_as_a_grid_not_as_loose_lines() {
-        let blocks = crate::markdown::blocks(
+        let blocks = crate::markdown::blocks_flow(
             "| model | cost | note |\n|---|---|---|\n| a | $1 | fast |\n| b | $2 | slow |\n",
+            crate::markdown::MdFlow::Prose,
         );
         let table = blocks
             .iter()

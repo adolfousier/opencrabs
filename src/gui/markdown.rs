@@ -398,12 +398,10 @@ fn heading_level(level: pulldown_cmark::HeadingLevel) -> u8 {
 
 /// Parse markdown source into renderable blocks. Tables stay tables; every
 /// other construct is a run of [`MdLine`]s.
-pub fn blocks(src: &str) -> Vec<MdBlock> {
-    blocks_flow(src, MdFlow::Prose)
-}
-
-/// Parse markdown with an explicit soft-break rule. [`blocks`] is this with
-/// [`MdFlow::Prose`].
+///
+/// `flow` decides what a single newline means, so a caller states which
+/// surface it is parsing for instead of getting one rule that is wrong for
+/// half of them.
 pub fn blocks_flow(src: &str, flow: MdFlow) -> Vec<MdBlock> {
     // Every option here is one an event handler below already serves. The
     // task-list marker, footnote reference and math arms used to be dead code
@@ -657,7 +655,7 @@ mod tests {
     /// The line texts of a parse, tables dropped: every assertion below is
     /// about what a row of prose says and how far it is indented.
     fn lines(src: &str) -> Vec<MdLine> {
-        blocks(src)
+        blocks_flow(src, MdFlow::Prose)
             .into_iter()
             .filter_map(|b| match b {
                 MdBlock::Line(l) => Some(l),
@@ -713,7 +711,7 @@ mod tests {
     /// hand-typed row wants its Enter key to survive.
     #[test]
     fn verbatim_flow_keeps_single_newlines() {
-        let prose = blocks("one\ntwo\n");
+        let prose = blocks_flow("one\ntwo\n", MdFlow::Prose);
         let prose_texts: Vec<&str> = prose
             .iter()
             .filter_map(|b| match b {
@@ -738,7 +736,7 @@ mod tests {
     /// painted left like prose. Each cell now carries its column's alignment.
     #[test]
     fn table_cells_carry_their_column_alignment() {
-        let parsed = blocks("| name | qty |\n|:--|--:|\n| a | 1 |\n");
+        let parsed = blocks_flow("| name | qty |\n|:--|--:|\n| a | 1 |\n", MdFlow::Prose);
         let table = parsed
             .into_iter()
             .find_map(|b| match b {

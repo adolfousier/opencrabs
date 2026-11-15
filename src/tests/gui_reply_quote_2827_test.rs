@@ -67,6 +67,56 @@ fn every_quoted_line_carries_the_marker() {
     );
 }
 
+/// A quote is what the reader saw, not the bytes that produced it. The row
+/// paints a markdown parse, so the quote has to flatten the same parse or the
+/// composer chip and the quote carry `##` and backticks the reader never saw.
+#[test]
+fn the_quote_flattens_the_markdown_it_copies() {
+    let reply = TRANSCRIPT
+        .split("fn reply_text(")
+        .nth(1)
+        .expect("one reader turns a row into its visible text")
+        .split("fn reply_preview(")
+        .next()
+        .unwrap_or_default();
+    assert!(
+        reply.contains("Some(visible_text(&role, &content))"),
+        "the quoted text is the flattened row, not the stored markdown"
+    );
+    let rule = TRANSCRIPT
+        .split("fn visible_text(")
+        .nth(1)
+        .expect("one rule decides what a row's visible text is")
+        .split("fn reply_preview(")
+        .next()
+        .unwrap_or_default();
+    assert!(
+        rule.contains("markdown_copy_text(&text, markdown::MdFlow::Prose)"),
+        "an answer is flattened at its prose flow"
+    );
+    assert!(
+        rule.contains("markdown_copy_text(&text, markdown::MdFlow::Verbatim)"),
+        "a user row keeps its own line breaks, the way it paints"
+    );
+    // And the block above the reply paints that text through the markdown
+    // path, so it is selectable and renders shortcodes like every other row.
+    let block = TRANSCRIPT
+        .split("fn quote_block(")
+        .nth(1)
+        .expect("one renderer draws the quote")
+        .split("fn plain_block(")
+        .next()
+        .unwrap_or_default();
+    assert!(
+        block.contains("MdLook::muted(SMALL_TEXT_SIZE)"),
+        "the quote keeps the quieter size and colour it always had"
+    );
+    assert!(
+        block.contains("md_block("),
+        "and it paints through the markdown block, not one bare div per line"
+    );
+}
+
 /// The bar offers it next to Forward, which is where a reader who has just
 /// picked rows looks for what to do with them.
 #[test]
@@ -108,7 +158,7 @@ fn only_a_user_row_lifts_the_quote_out() {
         "the quote is lifted for the user role only"
     );
     assert!(
-        bubble.contains("col = col.child(quote_block(&quote))"),
+        bubble.contains("col = col.child(quote_block(&quote, selection))"),
         "and it is drawn above the reply"
     );
     let split = TRANSCRIPT
