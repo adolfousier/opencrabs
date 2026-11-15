@@ -509,8 +509,8 @@ mod tests {
     #[test]
     fn the_subtitle_and_the_notice_read_as_sentences() {
         assert_eq!(
-            subtitle_text("claude", 65, false, Some("/tmp/x.output")),
-            "claude \u{b7} running 1m 05s \u{b7} /tmp/x.output"
+            subtitle_text("claude", 65, false, Some("x.output")),
+            "claude \u{b7} running 1m 05s \u{b7} x.output"
         );
         assert_eq!(
             subtitle_text("detached", 9, true, None),
