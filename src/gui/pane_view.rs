@@ -37,6 +37,7 @@ use crate::agent_bridge;
 use crate::chat_leaf;
 use crate::composer_view::{command_popup_view, emoji_popup_view, options_strip, queue_strip};
 use crate::editor;
+use crate::palette;
 use crate::pane_chrome::{
     UNFOCUSED_PANE_OPACITY, drop_indicator, focus_ring_color, pane_composer_dim, pane_footer,
     pane_header,
@@ -793,9 +794,15 @@ pub(crate) fn leaf_box(leaf: LeafBox) -> AnyElement {
         // and the leaves that do not are drawn back so a split reads as one
         // live pane beside disabled ones (#2612). Same border width on both
         // states, so focus never shifts a row.
+        //
+        // The pane paints its own fill and clips its children: the chat body
+        // used to paint a square box over the ring's corner arc, so the chat
+        // colour showed where the ring should curve.
+        .bg(rgb(palette::current().bg))
         .rounded(px(CARD_RADIUS))
         .border_1()
         .border_color(rgb(focus_ring_color(focused)))
+        .overflow_hidden()
         .when(!focused, |d| d.opacity(UNFOCUSED_PANE_OPACITY))
         .when(interactive, |d| {
             // Capture, not bubble. A transcript row stops the press on its way

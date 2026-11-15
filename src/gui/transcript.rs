@@ -4836,6 +4836,12 @@ pub fn view(
         .track_scroll(scroll)
         .gap_2()
         .p_2()
+        // The chat surface carries the same corner the plan card and the
+        // suggested options carry, so inside a pane its fill follows the ring
+        // instead of painting a square box over the corner arc. No clip here:
+        // `overflow_y_scroll` above is this element's scroll, and a later
+        // `overflow_hidden` would replace it and stop the transcript scrolling.
+        .rounded(px(CARD_RADIUS))
         .bg(rgb(palette::current().bg));
     // The wheel is the reader's own hand on the transcript: the owning view
     // decides whether a tick releases its follow or gives it back (#2698).
