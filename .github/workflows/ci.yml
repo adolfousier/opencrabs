@@ -525,8 +525,8 @@ jobs:
       # cli::service_windows is NOT in the slice yet: its carrier belongs to
       # #1821 and does not exist here, so listing it would make this step
       # permanently red on a zero-match and defeat the flip noted below.
-      # This step is SOFT (`continue-on-error: true`), and the receipt below
-      # is why it has to stay soft: the slice is not green.
+      # This step is a HARD GATE (`continue-on-error: false`): it was soft only
+      # while the slice was red, and the receipt below is why it is green now.
       #
       # Profile: the slices run `citest` (opt-level 1), not `ci`. The build
       # step above stays on `--profile ci` because it validates the shipped
@@ -536,22 +536,22 @@ jobs:
       #
       # Measured on Windows 11 (26320), x86_64-pc-windows-msvc, rustc 1.98.1
       # (pinned by rust-toolchain.toml), --profile ci, --locked, one filter
-      # per module, on a clean run against origin/main 565c9dec with the rtk
-      # fix applied: 75 passed / 3 failed / 13 ignored across the 91
-      # collected. Per-module counts and the failing assertions are in
-      # VERIFY.md in the submission bundle.
+      # per module, against origin/main 2bbe80c57: 78 passed / 0 failed /
+      # 13 ignored across the 91 collected. Per-module counts and the exact
+      # command lines are on #2942.
       #
-      # The three failures are NOT caused by the rtk change, and both
-      # blockers predate it:
+      # The slice previously reported three failures out of 91 collected.
+      # None of them was a test bug, and none was caused by the rtk change —
+      # all were product bugs, and all are now fixed:
       #   - config::winlock::non_blocking_second_handle_reports_held
-      #     (#1863: still failing in effect — winlock.rs is byte-identical
-      #     to main and the assert still fires).
+      #     (#1863, fixed by 21c7b4021).
       #   - tests::profile_test::create_profile_seeds_all_brain_templates
       #     and ::create_profile_brain_files_are_non_trivial_size, both
       #     "failed to lock profiles.toml.lock: invalid byte range
-      #     (os error 307)".
+      #     (os error 307)" — the same winlock overflow, so the same fix.
       #
-      # Both share one root cause, and it is a PRODUCT bug, not a test bug:
+      # That root cause, kept because it is why this step was soft at all,
+      # is a PRODUCT bug and not a test bug:
       # winlock::exclusive asks LockFileEx for a range starting at the 1 MiB
       # sentinel with length (u32::MAX, u32::MAX) = 2^64-1 bytes. 1 MiB plus
       # (2^64-1) overflows the 64-bit range, so Windows rejects the call with
