@@ -2343,6 +2343,10 @@ fn bubble(
         .gap_1()
         .min_w_0()
         .flex_shrink_0()
+        // The right-aligned body makes this column a flex item, and a
+        // `flex_shrink_0` item sizes to max-content: without this cap a long
+        // message would paint one line past the pane instead of wrapping.
+        .max_w_full()
         .px(px(MESSAGE_PAD_X))
         .py(px(MESSAGE_PAD_Y));
     if bubble_has_surface(role) {
@@ -3690,7 +3694,15 @@ fn live_user_row(
         // the containing block.
         row = row.relative().group(group.clone());
     }
-    row = row.child(div().flex_1().min_w_0().child(child));
+    row = row.child(
+        div()
+            .flex_1()
+            .min_w_0()
+            .flex()
+            .flex_row()
+            .justify_end()
+            .child(child),
+    );
     if let Some(handler) = edit {
         let handler = handler.clone();
         let palette = palette::current();
@@ -4225,6 +4237,10 @@ fn selectable_text_segment(
 fn message_row(
     id: uuid::Uuid,
     child: Div,
+    // Whether this row is the reader's own. His row hugs the right edge and
+    // the answer keeps the left margin, so a conversation reads as two voices
+    // instead of one left column.
+    mine: bool,
     click: Option<&ClickHandler>,
     press: Option<&PressHandler>,
     picked: Option<bool>,
@@ -4274,6 +4290,12 @@ fn message_row(
         .flex_1()
         .min_w_0()
         .child(child);
+    if mine {
+        // The body becomes a row of one pushed to its end. A bare `div()` is a
+        // block box, so it hands the bubble the whole column and every message
+        // starts at the left margin, whatever its role.
+        body = body.flex().flex_row().justify_end();
+    }
     if let Some(handler) = click {
         let handler = handler.clone();
         body = body
@@ -5020,6 +5042,7 @@ pub fn view(
                             Some(editing) => inline_edit_box(editing),
                             None => child,
                         },
+                        role.as_str() == "user",
                         message_click.get(id),
                         message_press.get(id),
                         picked,
@@ -5042,13 +5065,21 @@ pub fn view(
                         reactions.get(id).map_or(&[][..], Vec::as_slice),
                         &reaction_click,
                     ) {
-                        Some(chips) => div()
-                            .flex()
-                            .flex_col()
-                            .w_full()
-                            .child(row)
-                            .child(chips)
-                            .into_any_element(),
+                        Some(chips) => {
+                            let mut column = div()
+                                .flex()
+                                .flex_col()
+                                .w_full()
+                                .child(row)
+                                .child(chips);
+                            if role.as_str() == "user" {
+                                // The chips belong to the bubble above them,
+                                // so they follow its right edge instead of
+                                // stranding at the left margin.
+                                column = column.items_end();
+                            }
+                            column.into_any_element()
+                        }
                         None => row,
                     }
                 }
