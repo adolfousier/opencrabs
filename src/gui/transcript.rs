@@ -4237,6 +4237,28 @@ fn selectable_text_segment(
     })
 }
 
+/// What a stored row answers to, and what it paints (#2613, #2750, #2826,
+/// #2923).
+///
+/// They travel together because the caller builds every one of them from the
+/// same per-row maps, and passing them loose made the builder eight arguments
+/// wide, past clippy's limit. `mine` stays out of here: it decides the row's
+/// layout, not its affordances.
+struct RowActions<'a> {
+    /// Left click on the body: opens the row, or toggles it in select mode.
+    click: Option<&'a ClickHandler>,
+    /// Right press anywhere on the row, padding and cards included (#2923).
+    press: Option<&'a PressHandler>,
+    /// The pick box state, present only while select mode is on (#2613).
+    picked: Option<bool>,
+    /// The pencil, on a user row that is not already being rewritten (#2826).
+    edit: Option<&'a ClickHandler>,
+    /// The copy mark and whether this row is the one just copied (#2750).
+    /// They travel together: the handler without the state paints the wrong
+    /// glyph, and the state without the handler has nothing to paint.
+    copy: Option<(&'a ClickHandler, bool)>,
+}
+
 /// One stored message row: its own right-press handler and select-mode
 /// checkbox (#2613).
 ///
@@ -4250,15 +4272,15 @@ fn message_row(
     // the answer keeps the left margin, so a conversation reads as two voices
     // instead of one left column.
     mine: bool,
-    click: Option<&ClickHandler>,
-    press: Option<&PressHandler>,
-    picked: Option<bool>,
-    edit: Option<&ClickHandler>,
-    // The copy mark and whether this row is the one just copied (#2750).
-    // They travel together: the handler without the state paints the wrong
-    // glyph, and the state without the handler has nothing to paint.
-    copy: Option<(&ClickHandler, bool)>,
+    actions: RowActions<'_>,
 ) -> Stateful<Div> {
+    let RowActions {
+        click,
+        press,
+        picked,
+        edit,
+        copy,
+    } = actions;
     // The hover group a row's edit button answers to (#2826). One name per
     // row, or hovering any message would light up every button on screen.
     let group = SharedString::from(format!("msg-hover-{id}"));
@@ -5058,11 +5080,13 @@ pub fn view(
                             None => child,
                         },
                         role.as_str() == "user",
-                        message_click.get(id),
-                        message_press.get(id),
-                        picked,
-                        edit_click,
-                        copy_click.map(|handler| (handler, copied == Some(*id))),
+                        RowActions {
+                            click: message_click.get(id),
+                            press: message_press.get(id),
+                            picked,
+                            edit: edit_click,
+                            copy: copy_click.map(|handler| (handler, copied == Some(*id))),
+                        },
                     )
                     .into_any_element();
                     let row = match (&drag, selectable, picked) {
