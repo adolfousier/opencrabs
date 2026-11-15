@@ -2344,8 +2344,17 @@ fn bubble(
         .min_w_0()
         .flex_shrink_0()
         // The right-aligned body makes this column a flex item, and a
-        // `flex_shrink_0` item sizes to max-content: without this cap a long
+        // `flex_shrink_0` item sizes to max-content: without a cap a long
         // message would paint one line past the pane instead of wrapping.
+        //
+        // `max_w_full` is a percentage, and a percentage max resolves against
+        // a parent whose width is still indefinite while the row is measured
+        // for a narrow split, so it was ignored exactly where it mattered: the
+        // bubble sized to max-content, `justify_end` pushed the overflow out of
+        // the left edge, and the reader's own message lost its beginning in a
+        // tight pane (#2937). The cap is in pixels from the width the row was
+        // planned against, so no layout pass can ignore it.
+        .when(content_width > 0.0, |d| d.max_w(px(content_width)))
         .max_w_full()
         .px(px(MESSAGE_PAD_X))
         .py(px(MESSAGE_PAD_Y));

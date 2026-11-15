@@ -164,3 +164,24 @@ fn both_chrome_rows_clear_the_corner() {
         "the close glyph keeps its own padding"
     );
 }
+
+/// A percentage cap is ignored while the row's width is indefinite, which is
+/// exactly the narrow split pane: the bubble then sized to max-content and
+/// `justify_end` pushed its beginning out of the left edge. The pixel cap comes
+/// from the width the row was planned against, so no pass can ignore it
+/// (#2937).
+#[test]
+fn the_bubble_is_capped_in_pixels() {
+    let bubble = body_after(TRANSCRIPT, "fn bubble(");
+    assert!(
+        bubble.contains(".when(content_width > 0.0, |d| d.max_w(px(content_width)))"),
+        "the bubble is capped in pixels, from the planned row width"
+    );
+    let cap = bubble
+        .find("d.max_w(px(content_width))")
+        .expect("the pixel cap is present");
+    let percent = bubble
+        .find(".max_w_full()")
+        .expect("the percentage cap stays as a second belt");
+    assert!(cap < percent, "the pixel cap is what holds in a tight pane");
+}
