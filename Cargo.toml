@@ -391,35 +391,6 @@ inherits = "release"
 lto = "thin"
 codegen-units = 16
 
-# Wall-clock profile for the Linux test leg. Same tests, same assertions, and
-# the same `--all-features` set; only the optimisation level differs.
-#
-# The leg was spending 43 of its 46 minutes compiling 250k lines of test code
-# at release optimisation to execute a suite that finishes in 2m46s, which is
-# what made a warm Linux run slower than a cold macOS one. Tests run once and
-# never ship, so paying opt-level 3 plus thin LTO for them buys nothing.
-#
-# `Test` stays on `ci` on purpose: release-mode correctness (overflow checks
-# off, different codegen) is a property that leg exists to prove, so it keeps
-# running the shipped configuration. This profile is only for the leg whose
-# job is "does the suite pass on Linux" (#2216).
-#
-# debug = 1 keeps line tables for panics without the full type debug info,
-# and 256 codegen units lets rustc fan out instead of walking 16.
-#
-# debug-assertions and overflow-checks are pinned OFF to match `ci`. They
-# default to on under `dev`, and leaving them on would silently change what
-# this leg proves: the same suite would run with different semantics than the
-# macOS leg, so a divergence would read as a platform bug. The point of this
-# profile is cheaper codegen, not different assertions.
-[profile.citest]
-inherits = "dev"
-opt-level = 1
-debug = 1
-codegen-units = 256
-debug-assertions = false
-overflow-checks = false
-
 [[bin]]
 name = "opencrabs"
 path = "src/main.rs"

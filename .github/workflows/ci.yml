@@ -528,12 +528,6 @@ jobs:
       # This step is SOFT (`continue-on-error: true`), and the receipt below
       # is why it has to stay soft: the slice is not green.
       #
-      # Profile: the slices run `citest` (opt-level 1), not `ci`. The build
-      # step above stays on `--profile ci` because it validates the shipped
-      # binary; these slices only ask whether these modules' tests pass on
-      # Windows, and paying release optimisation for that is the same waste
-      # the Linux leg was paying.
-      #
       # Measured on Windows 11 (26320), x86_64-pc-windows-msvc, rustc 1.98.1
       # (pinned by rust-toolchain.toml), --profile ci, --locked, one filter
       # per module, on a clean run against origin/main 565c9dec with the rtk
@@ -592,7 +586,7 @@ jobs:
                    tests::utils_cwd_test tests::browser_default_windows_test \
                    tests::profile_test tests::rtk_path_test; do
             set +e
-            out=$(cargo test --locked --profile citest --target x86_64-pc-windows-msvc \
+            out=$(cargo test --locked --profile ci --target x86_64-pc-windows-msvc \
                     --lib -- "$m" 2>&1)
             rc=$?
             set -e
@@ -682,12 +676,6 @@ jobs:
     # 36078125556 and 36069934718, both cancelled at ~30 while green code
     # waited). Warm hosted fits in 20; 60 is the cold-cache ceiling.
     timeout-minutes: 60
-    # Release-mode profile on purpose: this leg proves the shipped
-    # configuration passes (opt-level 3, thin LTO), which is a property no
-    # other job checks. `test-linux` runs the cheap `citest` profile instead,
-    # because its job is Linux coverage, not release-mode correctness.
-    env:
-      TEST_PROFILE: ci
     steps: &test-steps
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
@@ -768,30 +756,25 @@ jobs:
         # 8662 MB and 6334 MB, mem_used 15.7 GB of 16, and no `test result:`
         # line in the log.
         #
-        # CARGO_BUILD_JOBS defaults to 1 here: cargo then compiles one unit at
-        # a time, so the peak is a single rustc (~9 GB) instead of two, and
-        # each unit still fans its codegen across all four cores. That default
-        # is for the release-mode profile, where a unit really is that big.
-        # `test-linux` sets the variable at job level because its `citest`
-        # profile makes two units fit.
+        # CARGO_BUILD_JOBS=1 is the fix: cargo then compiles one unit at a time,
+        # so the peak is a single rustc (~9 GB) instead of two, and each unit
+        # still fans its codegen across all four cores. The suite command is
+        # untouched: opt-level 3 and thin LTO still run, so this stays the
+        # release-mode correctness check the leg exists for.
         #
         # Do NOT pin CARGO_PROFILE_CI_CODEGEN_UNITS here. Codegen-units is part
         # of cargo's fingerprint, so overriding it rebuilds the entire dependency
         # tree from source: the first attempt at this fix did exactly that (913
         # `Compiling` lines, 17 minutes of cold deps on a warm cache) and was
         # still evicted, because the two units ran concurrently anyway.
-        #
-        # The profile comes from the job, not from this line: `test` keeps
-        # release-mode `ci` so the shipped configuration is proven, while
-        # `test-linux` runs `citest` because its job is Linux coverage.
         run: |
           if [ "$RUNNER_OS" = "Linux" ]; then
-            export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-1}"
+            export CARGO_BUILD_JOBS=1
             bash scripts/ci-resource-sampler.sh 10 &
             sampler=$!
             trap 'kill "$sampler" 2>/dev/null || true' EXIT
           fi
-          bash scripts/test-stall-watchdog.sh cargo test --locked --profile "${TEST_PROFILE:-ci}" --all-features --verbose
+          bash scripts/test-stall-watchdog.sh cargo test --locked --profile ci --all-features --verbose
 
       # #2598: the definitive out-of-memory receipt, for the runs that live
       # long enough to execute a step after the suite. A platform-killed job
@@ -842,28 +825,7 @@ jobs:
     # 90, not 60 (#2699): the leg compiles one unit at a time on four cores so
     # the 16 GB VM is not evicted, which costs wall clock. A cold dependency
     # build on top of that is ~20 minutes before our own crate starts.
-    #
-    # C+D: `citest` (opt-level 1, 256 codegen units) is what the leg compiles
-    # its own crate with. The ceiling stays at 90 until a measured run shows
-    # the new floor; the first run after this change rebuilds dependencies
-    # under the new profile, so it is the slowest one and a lower ceiling
-    # would cut it short.
-    #
-    # Parallelism stays at 1. Raising it to 2 evicted the VM on run
-    # 43676233062: peak 8737 MB and 6304 MB in two concurrent rustc, mem_used
-    # 15.8 GB of 16, mem_avail 164 MB, then the stall watchdog took SIGTERM
-    # and the job died at 05:05:31 without a single test running.
-    #
-    # The assumption that a cheaper profile lowers per-unit memory was wrong,
-    # and the reason is `[profile.dev.package."*"] opt-level = 2` in
-    # Cargo.toml: `citest` inherits `dev`, so dependencies keep building at
-    # opt-level 2 and a dependency unit is just as large as a release one.
-    # Only our own crate gets the cheaper settings, and that is where the
-    # 250k lines of test code live, so the win survives at one job.
     timeout-minutes: 90
-    env:
-      TEST_PROFILE: citest
-      CARGO_BUILD_JOBS: 1
     steps: *test-steps
 
   # ── Stage 2a3: GUI path filter (decides whether Stage 2c runs) ───────────
