@@ -61,6 +61,83 @@ pub struct RunningTask {
     /// reach the surface that drew the row. `None` for mirrored external
     /// tasks, which emit no events.
     pub progress: Option<ProgressCallback>,
+    /// Where the task came from, which decides how a surface tags it and
+    /// where its live output can be found.
+    pub source: TaskSource,
+    /// The identity a mirrored row is removed by, when it differs from the
+    /// label a surface prints. A claude-cli task is keyed on `claude-cli <id>`
+    /// but shows the description the CLI gave it; `None` means the label is
+    /// the identity, which is every spawned command.
+    pub key: Option<String>,
+    /// The file the task's merged output is being written to while it runs,
+    /// when this process knows it. See [`RunningTask::output_path`].
+    pub output: Option<PathBuf>,
+    /// The signal that stops the command, for a row this process spawned.
+    /// `None` for a mirrored task: its process belongs to someone else, and
+    /// a row that merely vanished would claim a stop that never happened.
+    pub cancel: Option<std::sync::Arc<tokio::sync::Notify>>,
+}
+
+/// What asking to cancel one running task came to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CancelOutcome {
+    /// The stop was signalled. The row leaves the roster when the command's
+    /// own completion path runs, the same way a finished task leaves it.
+    Signalled,
+    /// The task is running but is not this process's to stop (a mirrored
+    /// claude-cli task).
+    NotOurs,
+    /// No such task is running in that session.
+    NotFound,
+}
+
+impl CancelOutcome {
+    /// Whether the stop was actually signalled. A surface outside this crate
+    /// cannot name the variants, and this is the one thing it needs to know.
+    pub fn signalled(self) -> bool {
+        self == CancelOutcome::Signalled
+    }
+}
+
+/// Where a running row came from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TaskSource {
+    /// A command this process spawned detached.
+    Detached,
+    /// A claude-cli background task, mirrored in by its CLI task id.
+    Claude { id: String },
+    /// Any other mirrored external task.
+    Mirror,
+}
+
+impl TaskSource {
+    /// The short tag a surface prints beside the row.
+    pub fn tag(&self) -> &'static str {
+        match self {
+            TaskSource::Detached => "detached",
+            TaskSource::Claude { .. } => "claude",
+            TaskSource::Mirror => "task",
+        }
+    }
+}
+
+impl RunningTask {
+    /// The file holding this task's output so far, if one can be found.
+    ///
+    /// A spawned command knows its own log. A claude-cli task writes to a
+    /// path inside the CLI's temp tree that no event reports while the task
+    /// runs, so it is looked up by task id on demand. `None` is an ordinary
+    /// answer: the file may not exist yet, and the layout is the CLI's own
+    /// detail rather than a contract.
+    pub fn output_path(&self) -> Option<PathBuf> {
+        if let Some(path) = self.output.as_ref() {
+            return Some(path.clone());
+        }
+        match &self.source {
+            TaskSource::Claude { id } => claude_task_output(&std::env::temp_dir(), id),
+            _ => None,
+        }
+    }
 }
 
 impl std::fmt::Debug for RunningTask {
@@ -114,6 +191,53 @@ impl BackgroundTaskManager {
             .unwrap_or_default()
     }
 
+    /// Where task `task_id` of `session_id` is writing its output, if it is
+    /// still running and a file can be found (see [`RunningTask::output_path`]).
+    pub fn output_path_for(&self, session_id: Uuid, task_id: Uuid) -> Option<PathBuf> {
+        self.running_tasks(session_id)
+            .into_iter()
+            .find(|t| t.task_id == task_id)?
+            .output_path()
+    }
+
+    /// Ask task `task_id` of `session_id` to stop.
+    ///
+    /// Only a command this process spawned can be stopped: its shell and the
+    /// work the shell started are killed, and the task then finishes through
+    /// the ordinary completion path with a receipt that says it was cancelled,
+    /// so the agent learns of it the same way it learns of any other exit.
+    pub fn cancel(&self, session_id: Uuid, task_id: Uuid) -> CancelOutcome {
+        let Some(task) = self
+            .running_tasks(session_id)
+            .into_iter()
+            .find(|t| t.task_id == task_id)
+        else {
+            return CancelOutcome::NotFound;
+        };
+        match task.cancel {
+            Some(signal) => {
+                // `notify_one` keeps a permit when the waiter is not parked
+                // yet, so a cancel that lands before the command is spawned
+                // still stops it.
+                signal.notify_one();
+                CancelOutcome::Signalled
+            }
+            None => CancelOutcome::NotOurs,
+        }
+    }
+
+    /// The scrubbed tail of a task's output file (see [`output_tail`]). A
+    /// method so a surface outside this crate can read what it was handed.
+    pub fn output_tail(&self, path: &std::path::Path, max_lines: usize) -> String {
+        output_tail(path, max_lines)
+    }
+
+    /// The scrubbed output a task's full view scrolls through (see
+    /// [`output_history`]).
+    pub fn output_history(&self, path: &std::path::Path) -> String {
+        output_history(path)
+    }
+
     fn mark_started(
         &self,
         session_id: Uuid,
@@ -121,13 +245,24 @@ impl BackgroundTaskManager {
         label: &str,
         progress: Option<ProgressCallback>,
     ) {
-        if let Ok(mut m) = self.running.lock() {
-            m.entry(session_id).or_default().push(RunningTask {
+        self.push_row(
+            session_id,
+            RunningTask {
                 task_id,
                 label: label.to_string(),
                 started: std::time::Instant::now(),
                 progress,
-            });
+                source: TaskSource::Mirror,
+                key: None,
+                output: None,
+                cancel: None,
+            },
+        );
+    }
+
+    fn push_row(&self, session_id: Uuid, row: RunningTask) {
+        if let Ok(mut m) = self.running.lock() {
+            m.entry(session_id).or_default().push(row);
         }
     }
 
@@ -150,7 +285,10 @@ impl BackgroundTaskManager {
             // Remove the OLDEST entry with this label: two `cargo test` runs are
             // indistinguishable here, and dropping the oldest keeps the elapsed
             // time shown for the survivor honest.
-            if let Some(pos) = tasks.iter().position(|t| t.label == label) {
+            if let Some(pos) = tasks
+                .iter()
+                .position(|t| t.key.as_deref().unwrap_or(&t.label) == label)
+            {
                 tasks.remove(pos);
             }
             if tasks.is_empty() {
@@ -187,6 +325,35 @@ impl BackgroundTaskManager {
     /// mirrored row is never updated in place (#2145).
     pub fn mirror_started(&self, session_id: Uuid, label: &str) {
         self.mark_started(session_id, Uuid::new_v4(), label, None);
+    }
+
+    /// Mirror a claude-cli background task under the name the CLI gave it.
+    ///
+    /// The row is still removed by `claude-cli <id>` ([`claude_task_label`]),
+    /// so [`Self::mirror_finished`] is unchanged, but a surface prints the
+    /// task's own description instead of an opaque id. A missing or blank
+    /// description falls back to the keyed label.
+    pub fn mirror_started_claude(&self, session_id: Uuid, id: &str, description: Option<&str>) {
+        let key = claude_task_label(id);
+        let label = description
+            .and_then(|d| d.lines().next())
+            .map(str::trim)
+            .filter(|d| !d.is_empty())
+            .map(str::to_string)
+            .unwrap_or_else(|| key.clone());
+        self.push_row(
+            session_id,
+            RunningTask {
+                task_id: Uuid::new_v4(),
+                label,
+                started: std::time::Instant::now(),
+                progress: None,
+                source: TaskSource::Claude { id: id.to_string() },
+                key: Some(key),
+                output: None,
+                cancel: None,
+            },
+        );
     }
 
     /// Remove a mirrored external task row (see [`Self::mirror_started`]).
@@ -241,7 +408,23 @@ impl BackgroundTaskManager {
         progress: Option<ProgressCallback>,
     ) {
         let task_id = Uuid::new_v4();
-        self.mark_started(session_id, task_id, &label, progress.clone());
+        // The log path is chosen here rather than inside the run so the row
+        // can carry it: a surface reads the same file while the command runs.
+        let log_path = detached_log_path(session_id);
+        let cancel = std::sync::Arc::new(tokio::sync::Notify::new());
+        self.push_row(
+            session_id,
+            RunningTask {
+                task_id,
+                label: label.clone(),
+                started: std::time::Instant::now(),
+                progress: progress.clone(),
+                source: TaskSource::Detached,
+                key: None,
+                output: Some(log_path.clone()),
+                cancel: Some(cancel.clone()),
+            },
+        );
         // #2145: emit the start NOW, while the caller's turn is still live, so
         // the surface draws the row in the block that holds the `bash` call
         // that detached this task. Emitted before the tokio spawn because the
@@ -300,7 +483,15 @@ impl BackgroundTaskManager {
                 }
             }
             let started = std::time::Instant::now();
-            let result = run_detached(&command, &cwd, session_id, DETACH_CEILING).await;
+            let result = run_detached_to(
+                &command,
+                &cwd,
+                session_id,
+                DETACH_CEILING,
+                log_path,
+                Some(cancel),
+            )
+            .await;
             // Capture ONCE: the log line, the status file and the receipt
             // payload (#15) must all report the same runtime.
             let elapsed_secs = started.elapsed().as_secs_f32();
@@ -547,17 +738,32 @@ pub(crate) const DETACH_CEILING: std::time::Duration = std::time::Duration::from
 /// reports. Output now goes to a temp file and the wait observes the SHELL
 /// only, bounded by `ceiling`: a survivor may keep appending to the file, and
 /// that is fine, because nobody waits on it any more.
+#[cfg(test)]
 pub(crate) async fn run_detached(
     command: &str,
     cwd: &std::path::Path,
     session_id: Uuid,
     ceiling: std::time::Duration,
 ) -> CmdResult {
-    use crate::utils::shell::PushShellCommand;
-    use tokio::process::Command;
-    let (shell, shell_arg) = crate::utils::shell::shell_pair();
+    run_detached_to(
+        command,
+        cwd,
+        session_id,
+        ceiling,
+        detached_log_path(session_id),
+        None,
+    )
+    .await
+}
 
-    let log_path = std::env::temp_dir().join(format!(
+/// How a cancelled command's receipt opens, so the agent reads the stop as
+/// the user's decision rather than as a failure to investigate.
+pub(crate) const CANCELLED_NOTE: &str =
+    "[cancelled by the user from the task list; the command was stopped]";
+
+/// A fresh temp log path for one detached command of `session_id`.
+fn detached_log_path(session_id: Uuid) -> PathBuf {
+    std::env::temp_dir().join(format!(
         "opencrabs-bg-{}-{}-{}.log",
         session_id.as_simple(),
         std::process::id(),
@@ -565,7 +771,23 @@ pub(crate) async fn run_detached(
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_nanos())
             .unwrap_or_default(),
-    ));
+    ))
+}
+
+/// [`run_detached`] writing to a log path the caller chose, so the caller can
+/// publish that path before the command starts.
+pub(crate) async fn run_detached_to(
+    command: &str,
+    cwd: &std::path::Path,
+    session_id: Uuid,
+    ceiling: std::time::Duration,
+    log_path: PathBuf,
+    cancel: Option<std::sync::Arc<tokio::sync::Notify>>,
+) -> CmdResult {
+    use crate::utils::shell::PushShellCommand;
+    use tokio::process::Command;
+    let (shell, shell_arg) = crate::utils::shell::shell_pair();
+
     let launch_fail = |note: String| {
         // Distinct from a command that ran and failed: nothing executed at
         // all, so the exit code below is not one the command produced.
@@ -609,7 +831,37 @@ pub(crate) async fn run_detached(
         }
     };
 
-    let outcome = match tokio::time::timeout(ceiling, child.wait()).await {
+    // A cancel ends the wait the same way the ceiling does. With no signal
+    // to wait on, that arm never resolves.
+    let cancelled = async {
+        match cancel.as_ref() {
+            Some(signal) => signal.notified().await,
+            None => std::future::pending().await,
+        }
+    };
+    let waited = tokio::select! {
+        waited = tokio::time::timeout(ceiling, child.wait()) => Some(waited),
+        _ = cancelled => None,
+    };
+    let Some(waited) = waited else {
+        // The user asked for this one to stop. The shell's own children go
+        // first, while the shell is still their parent and can be asked for
+        // them: killing only the shell would leave the build it started
+        // running, and the row would claim a stop that never happened.
+        if let Some(pid) = child.id() {
+            crate::utils::shell::kill_process_tree(pid);
+        }
+        let _ = child.start_kill();
+        let _ = child.wait().await;
+        let output = format!("{CANCELLED_NOTE}\n{}", read_log_tail(&log_path));
+        let _ = std::fs::remove_file(&log_path);
+        return CmdResult {
+            success: false,
+            code: -1,
+            output,
+        };
+    };
+    let outcome = match waited {
         Ok(Ok(status)) => CmdResult {
             success: status.success(),
             code: status.code().unwrap_or(-1),
@@ -675,6 +927,148 @@ fn read_log_tail(path: &std::path::Path) -> String {
         text = text[nl + 1..].to_string();
     }
     text
+}
+
+/// The last `max_lines` lines of a running task's output, ready to draw.
+///
+/// Reads at most the final 16 KiB, drops terminal escapes and carriage-return
+/// overwrites, and passes the text through the same secret scrub the log
+/// writers use: a command's raw output can print a token, and a surface must
+/// not be the one place that shows it. A missing or unreadable file is an
+/// empty string, never an error, because the file belongs to a process that
+/// may not have written yet or may already have cleaned up.
+pub fn output_tail(path: &std::path::Path, max_lines: usize) -> String {
+    output_tail_within(path, max_lines, 16 * 1024)
+}
+
+/// How many lines of a task's output the full view keeps.
+pub const HISTORY_LINES: usize = 2000;
+
+/// How many bytes off the end of the file the full view reads. A build log
+/// can run to tens of megabytes, and a surface that re-reads it while the
+/// task runs must not pay for all of it.
+pub const HISTORY_BYTES: u64 = 512 * 1024;
+
+/// The output a task's full view scrolls through: the last
+/// [`HISTORY_LINES`] lines within the final [`HISTORY_BYTES`], cleaned and
+/// scrubbed exactly as [`output_tail`] cleans its handful.
+pub fn output_history(path: &std::path::Path) -> String {
+    output_tail_within(path, HISTORY_LINES, HISTORY_BYTES)
+}
+
+/// [`output_tail`] reading at most `max_bytes` off the end of the file.
+pub fn output_tail_within(path: &std::path::Path, max_lines: usize, max_bytes: u64) -> String {
+    use std::io::{Read, Seek, SeekFrom};
+    let size = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+    let Ok(mut file) = std::fs::File::open(path) else {
+        return String::new();
+    };
+    let clipped = size > max_bytes;
+    if clipped && file.seek(SeekFrom::End(-(max_bytes as i64))).is_err() {
+        return String::new();
+    }
+    let mut buf = Vec::new();
+    let _ = file.take(max_bytes).read_to_end(&mut buf);
+    let raw = String::from_utf8_lossy(&buf);
+    let plain = super::tool_loop::strip_ansi_output(&raw);
+    let mut lines: Vec<&str> = plain
+        .lines()
+        // A progress bar redraws one line with `\r`; only the last draw is
+        // what a terminal would be showing.
+        .map(|l| l.rsplit('\r').find(|part| !part.is_empty()).unwrap_or(""))
+        .map(str::trim_end)
+        .collect();
+    if clipped && !lines.is_empty() {
+        // The seek landed mid-line; drop the fragment.
+        lines.remove(0);
+    }
+    while lines.last().is_some_and(|l| l.is_empty()) {
+        lines.pop();
+    }
+    let from = lines.len().saturating_sub(max_lines);
+    let text = lines[from..].join("\n");
+    crate::logging::redact::scrub(&text).into_owned()
+}
+
+/// Find a claude-cli background task's output file under `temp`.
+///
+/// The CLI writes it to `<temp>/claude-<uid>/<cwd slug>/<session>/tasks/<id>.output`
+/// and reports that path in no event while the task runs, so it is found by
+/// walking the three levels above `tasks/`. The newest match wins, in case a
+/// task id was ever reused across sessions. Ids that are not a plain token are
+/// refused so a hostile id cannot steer the lookup out of the tree.
+///
+/// The temp directory is shared with every other user on the machine, so
+/// each level has to be ours and real: a directory or file owned by someone
+/// else, or reached through a symlink, is skipped, and the match must be a
+/// regular file. Otherwise anyone could plant a `claude-x` tree whose
+/// "output" is a link to a file only we can read, or a pipe that never ends.
+pub fn claude_task_output(temp: &std::path::Path, id: &str) -> Option<PathBuf> {
+    if id.is_empty()
+        || !id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    {
+        return None;
+    }
+    let file = format!("{id}.output");
+    let dirs = |p: &std::path::Path| -> Vec<PathBuf> {
+        std::fs::read_dir(p)
+            .map(|rd| {
+                rd.flatten()
+                    .map(|e| e.path())
+                    .filter(|p| ours_and_real(p).is_some_and(|m| m.is_dir()))
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    let mut best: Option<(std::time::SystemTime, PathBuf)> = None;
+    for root in dirs(temp) {
+        let is_claude = root
+            .file_name()
+            .and_then(|n| n.to_str())
+            .is_some_and(|n| n.starts_with("claude-"));
+        if !is_claude {
+            continue;
+        }
+        for cwd in dirs(&root) {
+            for session in dirs(&cwd) {
+                let tasks = session.join("tasks");
+                if !ours_and_real(&tasks).is_some_and(|m| m.is_dir()) {
+                    continue;
+                }
+                let candidate = tasks.join(&file);
+                let Some(meta) = ours_and_real(&candidate).filter(|m| m.is_file()) else {
+                    continue;
+                };
+                let at = meta.modified().unwrap_or(std::time::UNIX_EPOCH);
+                if best.as_ref().is_none_or(|(seen, _)| at > *seen) {
+                    best = Some((at, candidate));
+                }
+            }
+        }
+    }
+    best.map(|(_, path)| path)
+}
+
+/// The metadata of `path` itself when it is not a symlink and, on unix,
+/// belongs to the user running this process. `None` for anything else,
+/// including a path that cannot be read.
+fn ours_and_real(path: &std::path::Path) -> Option<std::fs::Metadata> {
+    let meta = std::fs::symlink_metadata(path).ok()?;
+    if meta.file_type().is_symlink() {
+        return None;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        // SAFETY: getuid has no preconditions and cannot fail.
+        let uid = unsafe { libc::getuid() };
+        if meta.uid() != uid {
+            return None;
+        }
+    }
+    Some(meta)
 }
 
 /// A short human label for a command (first meaningful token sequence), for the
