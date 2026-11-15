@@ -54,6 +54,20 @@ impl Dashboard {
                 return;
             }
         }
+        // The task list holds the keyboard after Down from the composer: the
+        // arrows walk its rows and Esc stops the one they stand on. It reads
+        // ahead of the turn's own Esc on purpose, so a press aimed at one
+        // task never stops the whole turn.
+        if self.task_detail.is_some() {
+            self.task_detail_key(&ev.keystroke, cx);
+            return;
+        }
+        if let Some(session) = self.task_focus
+            && self.screen == Screen::Chat
+        {
+            self.task_key(session, &ev.keystroke, cx);
+            return;
+        }
         // Split panes (#2438): the chord opens a split, and while one waits for
         // its session, N makes a new one and Esc drops the pick.
         if self.screen == Screen::Chat {

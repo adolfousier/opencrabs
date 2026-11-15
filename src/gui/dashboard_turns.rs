@@ -1737,7 +1737,522 @@ impl Dashboard {
             .into_iter()
             .map(|t| (t.label, t.started.elapsed().as_secs()))
             .collect();
-        opencrabs::tui::render::format_background_tasks(&tasks, opencrabs::tui::render::LABEL_CHARS)
+        opencrabs::tui::render::format_background_tasks(&tasks, task_list::STRIP_LABEL_CHARS)
+    }
+
+    /// One session's running tasks as the card prints them, oldest first.
+    pub(crate) fn task_rows(&self, session: Uuid) -> Vec<task_list::TaskRow> {
+        let Some(mgr) = agent_bridge::bridge().and_then(|b| b.service.background_manager()) else {
+            return Vec::new();
+        };
+        mgr.running_tasks(session)
+            .into_iter()
+            .map(|t| task_list::TaskRow {
+                id: t.task_id,
+                tag: t.source.tag(),
+                secs: t.started.elapsed().as_secs(),
+                ours: t.cancel.is_some(),
+                label: t.label,
+            })
+            .collect()
+    }
+
+    /// What sits above the composer while `session` has work running: the one
+    /// line, or the list it opens into. `label` is the line the caller already
+    /// formatted for this frame.
+    ///
+    /// At rest it is always the one line: the list shows only after a click
+    /// or a Down from the composer. `None` when nothing runs, which also
+    /// forgets that the list was open, so the card closes on its own when the
+    /// last task ends and the next task starts collapsed.
+    pub(crate) fn task_area(
+        &mut self,
+        session: Uuid,
+        label: &str,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let rows = self.task_rows(session);
+        if rows.is_empty() {
+            self.forget_tasks(session);
+            return None;
+        }
+        if !self.tasks_open.contains(&session) {
+            let weak = cx.entity().downgrade();
+            let tap: StripTap = Rc::new(move |_window, app| {
+                let _ = weak.update(app, |this, cx| this.toggle_tasks(session, cx));
+            });
+            return Some(task_strip(label.to_string(), Some(tap)).into_any_element());
+        }
+        let focused = self.task_focus == Some(session);
+        // A row that finished takes its output with it: the card must not go
+        // on pointing at a task that is no longer there.
+        let open = self
+            .task_open
+            .get(&session)
+            .copied()
+            .filter(|id| rows.iter().any(|row| row.id == *id));
+        if open.is_none()
+            && let Some(gone) = self.task_open.remove(&session)
+        {
+            self.task_tails.remove(&gone);
+        }
+        // With the keyboard on the list a row is always selected: when the
+        // one it stood on finishes or is cancelled, the cursor lands on the
+        // oldest task left, so the next Esc has a visible target.
+        let open = match open {
+            None if focused => {
+                let first = rows[0].id;
+                self.task_open.insert(session, first);
+                Some(first)
+            }
+            other => other,
+        };
+        let tail = open.and_then(|task| self.task_tail(session, task));
+        let on_header: transcript::ClickHandler = Rc::new(cx.listener(
+            move |this: &mut Self, _ev: &gpui::ClickEvent, _window, cx| {
+                cx.stop_propagation();
+                this.toggle_tasks(session, cx);
+            },
+        ));
+        let on_rows: Vec<transcript::ClickHandler> = rows
+            .iter()
+            .map(|row| {
+                let task = row.id;
+                let pick: transcript::ClickHandler = Rc::new(cx.listener(
+                    move |this: &mut Self, _ev: &gpui::ClickEvent, _window, cx| {
+                        cx.stop_propagation();
+                        this.toggle_task_output(session, task, cx);
+                    },
+                ));
+                pick
+            })
+            .collect();
+        let on_open: Vec<transcript::ClickHandler> = rows
+            .iter()
+            .map(|row| {
+                let task = row.id;
+                let door: transcript::ClickHandler = Rc::new(cx.listener(
+                    move |this: &mut Self, _ev: &gpui::ClickEvent, _window, cx| {
+                        cx.stop_propagation();
+                        this.open_task_detail(session, task, cx);
+                    },
+                ));
+                door
+            })
+            .collect();
+        Some(
+            task_list::task_card(
+                session,
+                &rows,
+                open,
+                focused,
+                tail.as_ref().map(|t| t.as_ref()),
+                task_list::CardClicks {
+                    header: on_header,
+                    rows: on_rows,
+                    open: on_open,
+                },
+            )
+            .into_any_element(),
+        )
+    }
+
+    /// The open task's output, re-read at most once a tick. The file is
+    /// looked up until it is found and then remembered, because a claude-cli
+    /// task's file appears a moment after the task does.
+    fn task_tail(&mut self, session: Uuid, task: Uuid) -> Option<SharedString> {
+        let fresh = self
+            .task_tails
+            .get(&task)
+            .is_some_and(|tail| tail.read_at.elapsed() < task_list::TAIL_TICK);
+        if !fresh {
+            let mgr = agent_bridge::bridge().and_then(|b| b.service.background_manager())?;
+            let path = self
+                .task_tails
+                .get(&task)
+                .and_then(|tail| tail.path.clone())
+                .or_else(|| mgr.output_path_for(session, task));
+            let text = path
+                .as_deref()
+                .map(|p| SharedString::from(mgr.output_tail(p, task_list::TAIL_LINES)));
+            self.task_tails.insert(
+                task,
+                TaskTail {
+                    read_at: std::time::Instant::now(),
+                    path,
+                    text,
+                },
+            );
+        }
+        self.task_tails
+            .get(&task)
+            .and_then(|tail| tail.text.clone())
+    }
+
+    /// Open or close a session's task list with the pointer. Closing a list
+    /// that held the keyboard gives the keyboard back.
+    pub(crate) fn toggle_tasks(&mut self, session: Uuid, cx: &mut Context<Self>) {
+        if self.tasks_open.remove(&session) {
+            if self.task_focus == Some(session) {
+                self.task_focus = None;
+            }
+        } else {
+            self.tasks_open.insert(session);
+        }
+        self.task_area_resized(session, cx);
+    }
+
+    /// Down from the composer: open the session's task list and hand it the
+    /// keyboard, the cursor on the row already showing or on the oldest task.
+    /// Nothing running leaves the keyboard where it was.
+    pub(crate) fn focus_tasks(&mut self, session: Uuid, cx: &mut Context<Self>) {
+        let rows = self.task_rows(session);
+        let Some(first) = rows.first() else {
+            return;
+        };
+        let standing = self
+            .task_open
+            .get(&session)
+            .is_some_and(|id| rows.iter().any(|row| row.id == *id));
+        if !standing && let Some(was) = self.task_open.insert(session, first.id) {
+            self.task_tails.remove(&was);
+        }
+        self.tasks_open.insert(session);
+        self.task_focus = Some(session);
+        self.task_area_resized(session, cx);
+    }
+
+    /// One key while the task list holds the keyboard (see
+    /// [`task_list::key_step`]).
+    pub(crate) fn task_key(&mut self, session: Uuid, ks: &gpui::Keystroke, cx: &mut Context<Self>) {
+        let rows = self.task_rows(session);
+        let at = self
+            .task_open
+            .get(&session)
+            .and_then(|id| rows.iter().position(|row| row.id == *id));
+        match task_list::key_step(ks.key.as_str(), at, rows.len()) {
+            task_list::KeyStep::Select(ix) => {
+                let task = rows[ix].id;
+                if let Some(was) = self.task_open.insert(session, task)
+                    && was != task
+                {
+                    self.task_tails.remove(&was);
+                }
+                self.task_area_resized(session, cx);
+            }
+            task_list::KeyStep::Cancel(ix) => {
+                let outcome = agent_bridge::bridge()
+                    .and_then(|b| b.service.background_manager())
+                    .map(|mgr| mgr.cancel(session, rows[ix].id));
+                logging::debug(&format!(
+                    "task list: esc on {:?} -> {outcome:?}",
+                    rows[ix].label
+                ));
+                // A stopped task leaves the roster through its own completion
+                // path, and the cursor then moves to the next row. A task that
+                // is not ours to stop cannot be cancelled from here, so Esc is
+                // the way out instead of a key that does nothing.
+                if !outcome.is_some_and(|outcome| outcome.signalled()) {
+                    self.leave_tasks(session, cx);
+                } else {
+                    cx.notify();
+                }
+            }
+            task_list::KeyStep::Open(ix) => self.open_task_detail(session, rows[ix].id, cx),
+            task_list::KeyStep::Leave => self.leave_tasks(session, cx),
+        }
+    }
+
+    /// Lift one running task into its full view (see [`task_detail`]).
+    pub(crate) fn open_task_detail(&mut self, session: Uuid, task: Uuid, cx: &mut Context<Self>) {
+        let Some(row) = self.task_rows(session).into_iter().find(|r| r.id == task) else {
+            return;
+        };
+        logging::info(&format!("task detail: opened {:?}", row.label));
+        self.task_detail = Some(task_detail::TaskDetail::new(
+            session, task, row.label, row.tag, row.ours, row.secs,
+        ));
+        // A fresh handle: the last view's offset belongs to another output.
+        self.task_detail_scroll = ScrollHandle::new();
+        self.task_detail_generation = self.task_detail_generation.wrapping_add(1);
+        let generation = self.task_detail_generation;
+        self.refresh_task_detail();
+        // The view repaints on its own beat while it is open: a new line and
+        // the pin to the end must land even when nothing else in the window
+        // changes. The loop ends with the view it was started for.
+        cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor()
+                    .timer(task_detail::REPAINT_TICK)
+                    .await;
+                let open = this
+                    .update(cx, |view, cx| {
+                        if view.task_detail.is_none() || view.task_detail_generation != generation {
+                            return false;
+                        }
+                        cx.notify();
+                        true
+                    })
+                    .unwrap_or(false);
+                if !open {
+                    break;
+                }
+            }
+        })
+        .detach();
+        self.refocus_overlay();
+        cx.notify();
+    }
+
+    /// Close the view. The keyboard goes back to the task list when it is
+    /// still open, and to the composer otherwise.
+    pub(crate) fn close_task_detail(&mut self, cx: &mut Context<Self>) {
+        if self.task_detail.take().is_some() {
+            logging::info("task detail: closed");
+        }
+        self.refocus_screen();
+        cx.notify();
+    }
+
+    /// Look at the open task again, at most once a [`task_detail::READ_TICK`]:
+    /// whether it still runs, where its output is, and what it wrote since.
+    fn refresh_task_detail(&mut self) {
+        let Some(detail) = self.task_detail.as_mut() else {
+            return;
+        };
+        if detail
+            .read_at
+            .is_some_and(|at| at.elapsed() < task_detail::READ_TICK)
+        {
+            return;
+        }
+        detail.read_at = Some(std::time::Instant::now());
+        let Some(mgr) = agent_bridge::bridge().and_then(|b| b.service.background_manager()) else {
+            return;
+        };
+        let running = mgr
+            .running_tasks(detail.session)
+            .iter()
+            .any(|t| t.task_id == detail.task);
+        if !running && detail.ended.is_none() {
+            detail.ended = Some(detail.started.elapsed().as_secs());
+            detail.confirm_stop = false;
+        }
+        if detail.path.is_none() && running {
+            detail.path = mgr.output_path_for(detail.session, detail.task);
+        }
+        let Some(path) = detail.path.clone() else {
+            return;
+        };
+        // A file that has not changed is not read again: the read scrubs up
+        // to half a megabyte, which is not worth doing once a second for a
+        // task that is thinking.
+        let stamp = std::fs::metadata(&path)
+            .ok()
+            .map(|m| (m.len(), m.modified().unwrap_or(std::time::UNIX_EPOCH)));
+        if stamp.is_some() && stamp == detail.stamp {
+            return;
+        }
+        detail.stamp = stamp;
+        detail.absorb(mgr.output_history(&path));
+    }
+
+    /// One key while the full view holds the keyboard (see
+    /// [`task_detail::detail_key`]).
+    pub(crate) fn task_detail_key(&mut self, ks: &gpui::Keystroke, cx: &mut Context<Self>) {
+        let Some(detail) = self.task_detail.as_mut() else {
+            return;
+        };
+        let step =
+            task_detail::detail_key(ks.key.as_str(), detail.confirm_stop, detail.stoppable());
+        let scroll = self.task_detail_scroll.clone();
+        match step {
+            task_detail::DetailStep::Close => self.close_task_detail(cx),
+            task_detail::DetailStep::Scroll(dy) => {
+                let offset = scroll.offset();
+                let max = scroll.max_offset().height;
+                let y = (offset.y - px(dy)).min(px(0.0)).max(-max);
+                scroll.set_offset(gpui::point(offset.x, y));
+                // Up leaves the newest line; the render decides whether a
+                // Down that reached the end is following again.
+                if dy < 0.0 {
+                    detail.following = false;
+                }
+                cx.notify();
+            }
+            task_detail::DetailStep::Top => {
+                scroll.set_offset(gpui::point(scroll.offset().x, px(0.0)));
+                detail.following = false;
+                cx.notify();
+            }
+            task_detail::DetailStep::Follow => self.follow_task_detail(cx),
+            task_detail::DetailStep::AskStop => {
+                detail.confirm_stop = true;
+                cx.notify();
+            }
+            task_detail::DetailStep::ConfirmStop => self.stop_task_detail(cx),
+            task_detail::DetailStep::DropConfirm => {
+                detail.confirm_stop = false;
+                cx.notify();
+            }
+            task_detail::DetailStep::Ignore => {}
+        }
+    }
+
+    /// Jump to the newest line and stay on it.
+    fn follow_task_detail(&mut self, cx: &mut Context<Self>) {
+        if let Some(detail) = self.task_detail.as_mut() {
+            detail.following = true;
+            detail.unseen = 0;
+            let scroll = &self.task_detail_scroll;
+            let max = scroll.max_offset().height;
+            scroll.set_offset(gpui::point(scroll.offset().x, -max));
+            detail.pinned_max = f32::from(max);
+        }
+        cx.notify();
+    }
+
+    /// The stop door: the first press asks, the second stops. The task then
+    /// ends through its own exit path, and the view says so when it does.
+    fn stop_task_detail(&mut self, cx: &mut Context<Self>) {
+        let Some(detail) = self.task_detail.as_mut() else {
+            return;
+        };
+        if !detail.stoppable() {
+            return;
+        }
+        if !detail.confirm_stop {
+            detail.confirm_stop = true;
+            cx.notify();
+            return;
+        }
+        detail.confirm_stop = false;
+        let outcome = agent_bridge::bridge()
+            .and_then(|b| b.service.background_manager())
+            .map(|mgr| mgr.cancel(detail.session, detail.task));
+        logging::info(&format!(
+            "task detail: stop on {:?} -> {outcome:?}",
+            detail.label
+        ));
+        detail.stop_sent = outcome.is_some_and(|outcome| outcome.signalled());
+        cx.notify();
+    }
+
+    /// The modal for this frame: a fresh look at the task, the follow
+    /// reconciled with where the reader is, and the doors minted.
+    pub(crate) fn task_detail_overlay(
+        &mut self,
+        viewport: (f32, f32),
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        self.refresh_task_detail();
+        let scroll = self.task_detail_scroll.clone();
+        let detail = self.task_detail.as_mut()?;
+        let offset = scroll.offset();
+        let max = f32::from(scroll.max_offset().height);
+        let (following, pin) = task_detail::follow_step(
+            detail.following,
+            -f32::from(offset.y),
+            max,
+            detail.pinned_max,
+        );
+        detail.following = following;
+        if let Some(pin) = pin {
+            scroll.set_offset(gpui::point(offset.x, px(-pin)));
+            detail.pinned_max = pin;
+            detail.unseen = 0;
+        }
+        let close: transcript::ClickHandler = Rc::new(cx.listener(
+            |this: &mut Self, _ev: &gpui::ClickEvent, _window, cx| this.close_task_detail(cx),
+        ));
+        let stop: transcript::ClickHandler = Rc::new(cx.listener(
+            |this: &mut Self, _ev: &gpui::ClickEvent, _window, cx| {
+                cx.stop_propagation();
+                this.stop_task_detail(cx);
+            },
+        ));
+        let follow: transcript::ClickHandler = Rc::new(cx.listener(
+            |this: &mut Self, _ev: &gpui::ClickEvent, _window, cx| {
+                cx.stop_propagation();
+                this.follow_task_detail(cx);
+            },
+        ));
+        let detail = self.task_detail.as_ref()?;
+        Some(
+            task_detail::detail_modal(
+                detail,
+                &scroll,
+                viewport,
+                task_detail::DetailDoors {
+                    close,
+                    stop,
+                    follow,
+                },
+            )
+            .into_any_element(),
+        )
+    }
+
+    /// Give the keyboard back to the composer and fold the list to its one
+    /// line, which is how it rests.
+    fn leave_tasks(&mut self, session: Uuid, cx: &mut Context<Self>) {
+        self.forget_tasks(session);
+        self.task_area_resized(session, cx);
+    }
+
+    /// Drop the open and focused state of every session that has nothing
+    /// running any more. The render asks before it decides who owns the
+    /// keyboard, because a session with no task draws no strip and so never
+    /// reaches [`Self::task_area`] to be forgotten there.
+    pub(crate) fn prune_task_state(&mut self) {
+        if self.tasks_open.is_empty() && self.task_focus.is_none() {
+            return;
+        }
+        let stale: Vec<Uuid> = self
+            .tasks_open
+            .iter()
+            .copied()
+            .chain(self.task_focus)
+            .filter(|session| self.task_rows(*session).is_empty())
+            .collect();
+        for session in stale {
+            self.forget_tasks(session);
+        }
+    }
+
+    /// Show one task's output, or hide it when it is the one already showing.
+    fn toggle_task_output(&mut self, session: Uuid, task: Uuid, cx: &mut Context<Self>) {
+        if let Some(was) = self.task_open.remove(&session) {
+            self.task_tails.remove(&was);
+            if was != task {
+                self.task_open.insert(session, task);
+            }
+        } else {
+            self.task_open.insert(session, task);
+        }
+        self.task_area_resized(session, cx);
+    }
+
+    fn forget_tasks(&mut self, session: Uuid) {
+        self.tasks_open.remove(&session);
+        if self.task_focus == Some(session) {
+            self.task_focus = None;
+        }
+        if let Some(task) = self.task_open.remove(&session) {
+            self.task_tails.remove(&task);
+        }
+    }
+
+    /// The card takes its room from the transcript above it, so a reader at
+    /// the bottom must stay at the bottom, the same care the plan strip takes
+    /// (#2685, #2624).
+    fn task_area_resized(&mut self, session: Uuid, cx: &mut Context<Self>) {
+        if Some(session) == self.chat_session {
+            self.chat_state.follow.rearm();
+        } else if let Some(pane) = self.pane_states.get(&session) {
+            pane.update(cx, |pane, _| pane.follow.rearm());
+        }
+        cx.notify();
     }
 
     /// Whether any rail row is animating, resolved at the repaint cadence

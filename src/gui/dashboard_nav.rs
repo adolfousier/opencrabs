@@ -662,6 +662,11 @@ impl Dashboard {
         if self.rail_open && self.rail_focused {
             open.push(OverlayId::Rail);
         }
+        // The task list sits low in the stack: anything opened over it
+        // answers first, and it takes the keys from the composer only.
+        if self.task_focus.is_some() {
+            open.push(OverlayId::Tasks);
+        }
         if self.split_pick.is_some() {
             open.push(OverlayId::SplitPick);
         }
@@ -673,6 +678,9 @@ impl Dashboard {
         }
         if self.help_open {
             open.push(OverlayId::Help);
+        }
+        if self.task_detail.is_some() {
+            open.push(OverlayId::TaskDetail);
         }
         if self.preview.is_some() {
             open.push(OverlayId::Preview);

@@ -262,6 +262,10 @@ pub enum EditorEvent {
     /// A chip's thumbnail was clicked. The editor does not own a preview
     /// overlay, so it hands the path to whoever does instead of opening one.
     Preview(std::path::PathBuf),
+    /// Down was pressed with nowhere left to go: the caret is at the very
+    /// end and there is no later history entry. What sits under the field is
+    /// the window's to decide, so the editor only says it was asked.
+    Below,
 }
 
 /// A queue recall the composer is holding: every message Up took out of one
@@ -1105,6 +1109,7 @@ impl Editor {
             cx.notify();
         } else {
             self.move_to(target, cx);
+            cx.emit(EditorEvent::Below);
         }
     }
 

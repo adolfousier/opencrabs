@@ -90,6 +90,8 @@ mod settings_view;
 mod settings_view_test;
 mod skills_view;
 mod status;
+mod task_detail;
+mod task_list;
 mod telegram_topics;
 mod text_commands;
 mod theme;
@@ -1068,6 +1070,28 @@ struct Dashboard {
     /// the conversation's room for the checklist, per pane, so expanding one
     /// leaf never grows the card in the others.
     plan_expanded: std::collections::HashSet<Uuid>,
+    /// Sessions whose task list is open. At rest it is always the one line:
+    /// a session is here only after a click or a Down from the composer, and
+    /// leaves when it has nothing running, so the next task starts collapsed.
+    tasks_open: std::collections::HashSet<Uuid>,
+    /// The session whose task list holds the keyboard, after Down from its
+    /// composer. The row the keys stand on is that session's `task_open`.
+    task_focus: Option<Uuid>,
+    /// The task whose output is showing, per session.
+    task_open: HashMap<Uuid, Uuid>,
+    /// The last output read for an open task, with when it was read and the
+    /// file it came from once that file was found. Re-read on a one-second
+    /// tick, the same cadence the strip's elapsed time moves at.
+    task_tails: HashMap<Uuid, TaskTail>,
+    /// The task opened into its full view, with Enter on its row or the
+    /// row's open door. It outlives the task: the view stays on the last
+    /// output once the task ends, until the reader closes it.
+    task_detail: Option<task_detail::TaskDetail>,
+    /// The scroll of that view's output.
+    task_detail_scroll: ScrollHandle,
+    /// Bumped on every open, so the repaint loop of a view that was closed
+    /// and reopened ends instead of doubling up.
+    task_detail_generation: u64,
     /// Plan tasks whose completion already rang (#2691). One set for the
     /// whole window, shared by the window strip and every pane strip, so a
     /// plan drawn in two places rings once. The terminal keeps the same
@@ -2068,6 +2092,10 @@ impl Render for Dashboard {
         // forgot to ask would leave the composer answering under an open
         // field, which is the bug class #2455 came from, so the owner is
         // reconciled every frame instead of trusted from each call site.
+        //
+        // A task list whose last task ended lets go first, so the keyboard is
+        // back on the composer in the same frame the card disappears.
+        self.prune_task_state();
         let owner = keyboard_owner(&self.open_overlays(), self.screen);
         if self.last_owner != Some(owner) {
             // A receipt in the daily log, the same shape as `pane focus ->`
@@ -4307,12 +4335,11 @@ impl Render for Dashboard {
                     // A detached command sits directly above the editor: the same
                     // place the TUI puts it (on the input box's top border), which
                     // is where the eye goes while waiting.
-                    if let Some(label) = self.running_tasks_label() {
-                        col = col.child(central(
-                            task_strip(label).into_any_element(),
-                            centred_chat,
-                            chat_measure_px,
-                        ));
+                    if let Some(label) = self.running_tasks_label()
+                        && let Some(sid) = self.chat_session
+                        && let Some(area) = self.task_area(sid, &label, cx)
+                    {
+                        col = col.child(central(area, centred_chat, chat_measure_px));
                     }
                     // The unsplit chat uses the same composer swap as a split
                     // leaf (#2924). Without this arm the forward state changed
@@ -4931,6 +4958,15 @@ impl Render for Dashboard {
             };
             root = root.child(help_screen(&view));
         }
+        // One task's full output, over everything in the chat: it is where
+        // the reader went to look, so nothing behind it takes a click.
+        if self.task_detail.is_some() {
+            let size = window.viewport_size();
+            let viewport = (f32::from(size.width), f32::from(size.height));
+            if let Some(modal) = self.task_detail_overlay(viewport, cx) {
+                root = root.child(modal);
+            }
+        }
         // The topic info panel sits above the panes, like the key reference (#2304).
         if let Some(info) = self.topic_info.clone() {
             let close = cx.listener(|this, _ev, _window, cx| {
@@ -5532,6 +5568,13 @@ fn main() {
                         editor::EditorEvent::Preview(path) => {
                             this.open_preview(path.clone(), cx);
                         }
+                        // Down off the end of the field reaches the tasks
+                        // running under it, when there are any.
+                        editor::EditorEvent::Below => {
+                            if let Some(session) = this.chat_session {
+                                this.focus_tasks(session, cx);
+                            }
+                        }
                     })
                     .detach();
                     // The poll tick: drains bridge events onto the UI thread
@@ -5807,6 +5850,13 @@ fn main() {
                         plan: plan_strip::PlanStripState::default(),
                         plan_for: None,
                         plan_expanded: std::collections::HashSet::new(),
+                        tasks_open: std::collections::HashSet::new(),
+                        task_focus: None,
+                        task_open: HashMap::new(),
+                        task_tails: HashMap::new(),
+                        task_detail: None,
+                        task_detail_scroll: ScrollHandle::new(),
+                        task_detail_generation: 0,
                         announced_task_completions: std::collections::HashSet::new(),
                         plan_flash_until: HashMap::new(),
                         chat_state: chat_leaf::ChatState {
@@ -6109,6 +6159,10 @@ fn settle_landed(expect: Option<usize>, total: i64) -> bool {
     expect.is_none_or(|want| total.max(0) as usize >= want)
 }
 
+/// What a click on the task strip runs: the window mints it, the strip only
+/// calls it.
+type StripTap = Rc<dyn Fn(&mut Window, &mut App)>;
+
 /// The running detached command, above the input.
 ///
 /// Same formatter as the TUI (`tui::render::background`), so the two surfaces
@@ -6121,17 +6175,30 @@ fn settle_landed(expect: Option<usize>, total: i64) -> bool {
 /// clip, so in a narrow pane it stops at the pane's padding instead of
 /// touching the border, and a long command ellipsizes instead of painting
 /// over the neighbouring leaf (#2622).
-fn task_strip(text: String) -> Div {
+///
+/// A plain click, the press and release the drag test below lets through,
+/// opens the session's task list. `on_tap` is that click, minted by the
+/// window, and `None` leaves the strip a label.
+fn task_strip(text: String, on_tap: Option<StripTap>) -> Div {
     // #2678: the roster above the composer is the line the user quotes back at
     // the agent ("that job is stuck"), so a drag over it copies it. The strip
     // is one truncated line with no character grid of its own, so there is
     // nothing to select inside it: the gesture is the copy, and it copies the
     // whole label rather than the part that survived truncation.
-    let press: Rc<std::cell::Cell<Option<Point<Pixels>>>> = Rc::new(std::cell::Cell::new(None));
-    let down = press.clone();
-    let up = press.clone();
+    //
+    // The press outlives the frame it landed in. The strip is rebuilt on every
+    // render, and while a turn streams or the elapsed time ticks a render
+    // lands between most presses and their release: a press kept in a cell
+    // minted here was gone by the time the release looked for it, so the
+    // click opened the list only when no frame happened to fall in between.
+    thread_local! {
+        static STRIP_PRESS: std::cell::Cell<Option<Point<Pixels>>> =
+            const { std::cell::Cell::new(None) };
+    }
     let copied = format!("⏳ {text}");
+    let clickable = on_tap.is_some();
     div()
+        .when(clickable, |d| d.cursor_pointer())
         .flex()
         .flex_row()
         .items_center()
@@ -6143,12 +6210,16 @@ fn task_strip(text: String) -> Div {
         .text_xs()
         .text_color(rgb(palette::current().teal))
         .on_mouse_down(MouseButton::Left, move |ev, _window, _app| {
-            down.set(Some(ev.position));
+            STRIP_PRESS.with(|press| press.set(Some(ev.position)));
         })
-        .on_mouse_up(MouseButton::Left, move |ev, _window, app| {
-            let Some(from) = up.get() else { return };
-            up.set(None);
+        .on_mouse_up(MouseButton::Left, move |ev, window, app| {
+            let Some(from) = STRIP_PRESS.with(|press| press.take()) else {
+                return;
+            };
             if (ev.position - from).magnitude() <= 2.0 {
+                if let Some(tap) = on_tap.as_ref() {
+                    tap(window, app);
+                }
                 return;
             }
             app.write_to_clipboard(ClipboardItem::new_string(copied.clone()));
@@ -6160,6 +6231,13 @@ fn task_strip(text: String) -> Div {
                 .truncate()
                 .child(SharedString::from(format!("⏳ {text}"))),
         )
+}
+
+/// One open task's output as the window last read it.
+struct TaskTail {
+    read_at: std::time::Instant,
+    path: Option<std::path::PathBuf>,
+    text: Option<SharedString>,
 }
 
 /// The leaf that owns the keyboard in a split, `None` meaning the chat leaf.

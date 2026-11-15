@@ -43,7 +43,6 @@ use crate::pane_chrome::{
     pane_header,
 };
 use crate::plan_strip;
-use crate::task_strip;
 use crate::transcript::{self, ClickHandler, CopyDrag, TranscriptState};
 use crate::{Dashboard, PaneDrag, wheel_dy};
 
@@ -307,8 +306,11 @@ impl PaneView {
                 .collect();
             col = col.child(options_strip(&rows));
         }
-        if let Some(label) = running {
-            col = col.child(task_strip(label.to_string()));
+        if let Some(label) = running
+            && let Some(area) =
+                window.update(cx, |win, cx| win.task_area(session, label.as_ref(), cx))
+        {
+            col = col.child(area);
         }
         // The pane holding the keyboard draws the real composer; the others
         // show the draft they hold, dimmed and inert, which is the same

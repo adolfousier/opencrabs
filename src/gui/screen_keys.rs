@@ -109,6 +109,10 @@ pub fn screen_chord(key: &str, mods: ChordMods, screen: Screen) -> Option<Screen
 pub enum OverlayId {
     /// The session rail, armed with Tab.
     Rail,
+    /// A session's running tasks, armed with Down from the composer.
+    Tasks,
+    /// One task opened into its full view, which covers the window.
+    TaskDetail,
     /// The rail's find field, armed with ctrl+f.
     RailFind,
     /// The topic name prompt.
