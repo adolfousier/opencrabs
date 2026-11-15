@@ -34,7 +34,10 @@ fn body_after<'a>(source: &'a str, anchor: &str) -> &'a str {
             end = end.min(at);
         }
     }
-    &rest[..end]
+    // Every candidate is a byte offset returned by `find`, or `rest.len()`, so
+    // `end` always lands on a char boundary. `split_at` says that once instead
+    // of an index expression the byte-slice ratchet has to re-litigate.
+    rest.split_at(end).0
 }
 
 /// The reader's stored row hugs the right edge, and only his row does. The
