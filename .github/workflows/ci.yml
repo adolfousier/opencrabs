@@ -586,7 +586,7 @@ jobs:
                    tests::utils_cwd_test tests::browser_default_windows_test \
                    tests::profile_test tests::rtk_path_test; do
             set +e
-            out=$(cargo test --locked --profile ci --target x86_64-pc-windows-msvc \
+            out=$(cargo test --locked --profile citest --target x86_64-pc-windows-msvc \
                     --lib -- "$m" 2>&1)
             rc=$?
             set -e
@@ -671,6 +671,12 @@ jobs:
     name: Test
     needs: [lint, audit]
     runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork) && 'ubuntu-latest' || 'self-hosted' }}
+    # This leg is the release-mode correctness check, so it stays on
+    # `--profile ci` (release, thin LTO). The cheap `citest` profile is
+    # only for the legs that exist to prove the code works, not to prove
+    # it works optimised.
+    env:
+      TEST_PROFILE: ci
     # 60: fork PRs run this on hosted runners at roughly 3x self-hosted
     # speed, and the 30 cap killed cold-cache fork runs twice (runs
     # 36078125556 and 36069934718, both cancelled at ~30 while green code
@@ -758,9 +764,13 @@ jobs:
         #
         # CARGO_BUILD_JOBS=1 is the fix: cargo then compiles one unit at a time,
         # so the peak is a single rustc (~9 GB) instead of two, and each unit
-        # still fans its codegen across all four cores. The suite command is
-        # untouched: opt-level 3 and thin LTO still run, so this stays the
-        # release-mode correctness check the leg exists for.
+        # still fans its codegen across all four cores.
+        #
+        # The profile is per-leg (#2934): macOS keeps `ci` and stays the
+        # release-mode correctness check, while `test-linux` sets
+        # TEST_PROFILE=citest, opt-level 1 with 256 codegen units. The suite
+        # is 166 s of testing behind 43 minutes of rustc, so most of that leg
+        # was optimising test code nobody ships.
         #
         # Do NOT pin CARGO_PROFILE_CI_CODEGEN_UNITS here. Codegen-units is part
         # of cargo's fingerprint, so overriding it rebuilds the entire dependency
@@ -774,7 +784,7 @@ jobs:
             sampler=$!
             trap 'kill "$sampler" 2>/dev/null || true' EXIT
           fi
-          bash scripts/test-stall-watchdog.sh cargo test --locked --profile ci --all-features --verbose
+          bash scripts/test-stall-watchdog.sh cargo test --locked --profile "${TEST_PROFILE:-ci}" --all-features --verbose
 
       # #2598: the definitive out-of-memory receipt, for the runs that live
       # long enough to execute a step after the suite. A platform-killed job
@@ -822,10 +832,18 @@ jobs:
     needs: [lint, audit]
     if: ${{ !(github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork) }}
     runs-on: ubuntu-24.04
-    # 90, not 60 (#2699): the leg compiles one unit at a time on four cores so
-    # the 16 GB VM is not evicted, which costs wall clock. A cold dependency
-    # build on top of that is ~20 minutes before our own crate starts.
-    timeout-minutes: 90
+    # 180, not 90 (#2934): the citest profile changed `Cargo.toml`, and
+    # rust-cache keys on that file, so the run that introduces the profile
+    # rebuilds every dependency from source. At 90 that run hit the ceiling
+    # mid-compile and then failed to save the cache, so the profile could
+    # never warm itself: every attempt started cold and died the same way.
+    # A ceiling is not a target, a warm run never approaches it.
+    timeout-minutes: 180
+    env:
+      # Cheaper than the macOS leg on purpose: see [profile.citest] in
+      # Cargo.toml. macOS keeps `ci` so release-mode correctness is still
+      # proven on every push.
+      TEST_PROFILE: citest
     steps: *test-steps
 
   # ── Stage 2a3: GUI path filter (decides whether Stage 2c runs) ───────────

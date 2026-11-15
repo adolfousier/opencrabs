@@ -391,6 +391,33 @@ inherits = "release"
 lto = "thin"
 codegen-units = 16
 
+# Cheap profile for the test slices that do not exist to prove release
+# behaviour. `[profile.ci]` is release with thin LTO, which is right for a
+# shipped binary and wrong for 250k lines of test code that run once and
+# take 166 s: 43 of the 46 minutes that leg costs are rustc, not tests.
+#
+# The macOS leg keeps `ci` so every push still proves release-mode
+# correctness. This profile is only for the Linux leg and the Windows
+# module slices.
+#
+# debug-assertions and overflow-checks are pinned off deliberately.
+# `inherits = "dev"` turns both ON, which would make this leg assert a
+# different program than the macOS leg and turn any divergence into a
+# phantom platform bug.
+#
+# Do NOT raise CARGO_BUILD_JOBS on a job using this profile.
+# `[profile.dev.package."*"]` sets opt-level 2, so dependencies still build
+# at opt-level 2 and a dependency unit is as large as a release one: two
+# concurrent units evicted the 16 GB runner at 15.8 GB in run 43676233062.
+[profile.citest]
+inherits = "dev"
+opt-level = 1
+debug = 1
+codegen-units = 256
+lto = false
+debug-assertions = false
+overflow-checks = false
+
 [[bin]]
 name = "opencrabs"
 path = "src/main.rs"
