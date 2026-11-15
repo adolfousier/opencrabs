@@ -367,6 +367,7 @@ pub mod group_history_test;
 pub mod gui_accent_test;
 pub mod gui_accent_wheel_test;
 pub mod gui_cancel_test;
+pub mod gui_chat_align_test;
 pub mod gui_chat_menu_2480_test;
 pub mod gui_clickable_links_test;
 pub mod gui_completion_sound_test;
