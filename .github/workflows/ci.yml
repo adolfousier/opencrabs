@@ -843,15 +843,27 @@ jobs:
     # the 16 GB VM is not evicted, which costs wall clock. A cold dependency
     # build on top of that is ~20 minutes before our own crate starts.
     #
-    # C+D: `citest` (opt-level 1, 256 codegen units) is what makes two
-    # concurrent units affordable, so the leg stops serialising. The ceiling
-    # stays at 90 until a measured run shows the new floor; the first run
-    # after this change rebuilds dependencies under the new profile, so it is
-    # the slowest one and a lower ceiling would cut it short.
+    # C+D: `citest` (opt-level 1, 256 codegen units) is what the leg compiles
+    # its own crate with. The ceiling stays at 90 until a measured run shows
+    # the new floor; the first run after this change rebuilds dependencies
+    # under the new profile, so it is the slowest one and a lower ceiling
+    # would cut it short.
+    #
+    # Parallelism stays at 1. Raising it to 2 evicted the VM on run
+    # 43676233062: peak 8737 MB and 6304 MB in two concurrent rustc, mem_used
+    # 15.8 GB of 16, mem_avail 164 MB, then the stall watchdog took SIGTERM
+    # and the job died at 05:05:31 without a single test running.
+    #
+    # The assumption that a cheaper profile lowers per-unit memory was wrong,
+    # and the reason is `[profile.dev.package."*"] opt-level = 2` in
+    # Cargo.toml: `citest` inherits `dev`, so dependencies keep building at
+    # opt-level 2 and a dependency unit is just as large as a release one.
+    # Only our own crate gets the cheaper settings, and that is where the
+    # 250k lines of test code live, so the win survives at one job.
     timeout-minutes: 90
     env:
       TEST_PROFILE: citest
-      CARGO_BUILD_JOBS: 2
+      CARGO_BUILD_JOBS: 1
     steps: *test-steps
 
   # ── Stage 2a3: GUI path filter (decides whether Stage 2c runs) ───────────
