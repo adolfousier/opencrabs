@@ -5105,12 +5105,8 @@ pub fn view(
                         &reaction_click,
                     ) {
                         Some(chips) => {
-                            let mut column = div()
-                                .flex()
-                                .flex_col()
-                                .w_full()
-                                .child(row)
-                                .child(chips);
+                            let mut column =
+                                div().flex().flex_col().w_full().child(row).child(chips);
                             if role.as_str() == "user" {
                                 // The chips belong to the bubble above them,
                                 // so they follow its right edge instead of

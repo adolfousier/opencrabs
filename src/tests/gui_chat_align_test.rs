@@ -204,4 +204,3 @@ fn the_header_fill_follows_the_ring() {
         .expect("the header paints its own fill");
     assert!(round < fill, "the radius is set before the fill it shapes");
 }
-

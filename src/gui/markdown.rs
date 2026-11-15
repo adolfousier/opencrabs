@@ -759,7 +759,11 @@ mod tests {
             .iter()
             .find(|l| l.rule)
             .expect("a thematic break must parse as a rule line");
-        assert!(rule.text.is_empty(), "a rule carries no text: {:?}", rule.text);
+        assert!(
+            rule.text.is_empty(),
+            "a rule carries no text: {:?}",
+            rule.text
+        );
         assert!(
             parsed.iter().any(|l| !l.rule && l.text.contains("above")),
             "the prose around the rule survives"
@@ -809,7 +813,10 @@ mod tests {
             line.highlights
                 .iter()
                 .any(|(range, style)| style.background.is_some()
-                    && line.text.get(range.clone()).is_some_and(|t| t.contains("x^2"))),
+                    && line
+                        .text
+                        .get(range.clone())
+                        .is_some_and(|t| t.contains("x^2"))),
             "the math run carries the code background: {:?}",
             line.highlights
         );
