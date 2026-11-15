@@ -1968,7 +1968,9 @@ impl Dashboard {
         let Some(row) = self.task_rows(session).into_iter().find(|r| r.id == task) else {
             return;
         };
-        logging::info(&format!("task detail: opened {:?}", row.label));
+        // The id, not the label: a label is a command or a description and
+        // can carry whatever the user typed into it.
+        logging::info(&format!("task detail: opened {task}"));
         self.task_detail = Some(task_detail::TaskDetail::new(
             session, task, row.label, row.tag, row.ours, row.secs,
         ));
@@ -2131,8 +2133,8 @@ impl Dashboard {
             .and_then(|b| b.service.background_manager())
             .map(|mgr| mgr.cancel(detail.session, detail.task));
         logging::info(&format!(
-            "task detail: stop on {:?} -> {outcome:?}",
-            detail.label
+            "task detail: stop on {} -> {outcome:?}",
+            detail.task
         ));
         detail.stop_sent = outcome.is_some_and(|outcome| outcome.signalled());
         cx.notify();
