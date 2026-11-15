@@ -564,13 +564,13 @@ jobs:
       # If it goes red on a GitHub Windows runner, the gap is in that
       # measurement's environment, not a reason to soften this step again.
       #
-      # Scope, so the reach of this gate is not over-read either: windows-build
-      # in ci-gate's needs (2x billing, 51m cold), so a red here does not set
-      # the required check by itself. It reaches the run through the `abort`
-      # job, which DOES need windows-build: red here cancels the run, and a
-      # cancelled run cannot report a green required gate. The smoke step
-      # above is deliberately NOT soft, because a binary that does not start
-      # is a hard fail.
+      # Scope, so the reach of this gate is not over-read either:
+      # windows-build is NOT in ci-gate's needs (2x billing, 51m cold), so a
+      # red here does not set the required check by itself. It reaches the run
+      # through the `abort` job, which DOES need windows-build: red here
+      # cancels the run, and a cancelled run cannot report a green required
+      # gate. The smoke step above is deliberately NOT soft, because a binary
+      # that does not start is a hard fail.
       - name: "Scoped tests (windows): platform-behaviour slice"
         continue-on-error: false
         shell: bash
@@ -587,12 +587,18 @@ jobs:
           # the same guard for the same reason. One more trap: with `--lib`,
           # cargo writes "test result: FAILED. N passed" on failure, so
           # parsing $out must not assume the ok-form.
+          #
+          # --profile ci, not the cheap `citest` the Linux leg uses: `citest`
+          # cannot link on Windows at all (LNK2038, see the note above), so
+          # `ci` is the only profile this slice has ever been measured green
+          # on. It is also the profile this job's build step already used, so
+          # the dependency graph is warm here either way.
           status=0
           for m in config::winlock tests::utils_shell_test \
                    tests::utils_cwd_test tests::browser_default_windows_test \
                    tests::profile_test tests::rtk_path_test; do
             set +e
-            out=$(cargo test --locked --profile citest --target x86_64-pc-windows-msvc \
+            out=$(cargo test --locked --profile ci --target x86_64-pc-windows-msvc \
                     --lib -- "$m" 2>&1)
             rc=$?
             set -e
