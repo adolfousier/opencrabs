@@ -4824,15 +4824,25 @@ pub struct ViewHooks {
     pub edit_row: Option<InlineEditView>,
 }
 
+/// The callers measure the transcript's outer box. Its `.p_2()` consumes half
+/// a rem on each horizontal side, so rows and attachment plans get one rem
+/// less. Without this conversion a right-aligned bubble is capped to the outer
+/// box and its excess escapes through the left edge (#2947).
+fn transcript_content_width(outer_width: f32, rem_size: f32) -> f32 {
+    (outer_width - rem_size).max(0.0)
+}
+
 pub fn view(
     state: &TranscriptState,
     scroll: &ScrollHandle,
     live: &LiveTurn,
     busy: bool,
     content_width: f32,
+    rem_size: f32,
     mut handlers: HashMap<String, ClickHandler>,
     hooks: ViewHooks,
 ) -> Stateful<Div> {
+    let content_width = transcript_content_width(content_width, rem_size);
     let ViewHooks {
         attachments: attachment_handlers,
         drag,
@@ -5211,6 +5221,14 @@ mod tests {
             (ink * a + canvas * (255 - a)) / 255
         };
         (mix(16) << 16) | (mix(8) << 8) | mix(0)
+    }
+
+    /// #2947: `.p_2()` spends half a rem at each side, at every UI scale.
+    #[test]
+    fn transcript_width_excludes_both_horizontal_padding_sides() {
+        assert_eq!(transcript_content_width(660.0, 16.0), 644.0);
+        assert_eq!(transcript_content_width(660.0, 20.0), 640.0);
+        assert_eq!(transcript_content_width(8.0, 16.0), 0.0);
     }
 
     #[test]

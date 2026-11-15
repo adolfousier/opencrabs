@@ -2591,6 +2591,7 @@ impl Render for Dashboard {
                     &self.turn.live,
                     self.turn.busy,
                     measure,
+                    f32::from(window.rem_size()),
                     fold_handlers,
                     transcript::ViewHooks {
                         attachments: attachment_handlers,

@@ -624,6 +624,7 @@ impl Render for PaneView {
             // pane's live card never knew its turn was running.
             self.busy,
             self.width,
+            f32::from(_window.rem_size()),
             fold_handlers,
             transcript::ViewHooks {
                 // The pane's own budget (#2854), not the window's.
