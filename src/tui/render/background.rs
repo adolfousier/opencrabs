@@ -77,7 +77,7 @@ fn truncate_label(label: &str, max: usize) -> String {
 
 /// `32s` / `4m 20s` / `1h 5m`, matching the turn header's duration style so the
 /// two read as the same kind of number.
-fn humanize_elapsed(secs: u64) -> String {
+pub(super) fn humanize_elapsed(secs: u64) -> String {
     match secs {
         s if s < 60 => format!("{s}s"),
         s if s < 3600 => {

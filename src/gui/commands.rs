@@ -48,6 +48,9 @@ pub enum GuiAction {
     OpenSkills,
     /// The project organizer and its sessions (#2669).
     OpenProjects,
+    /// The session's running background tasks, opened with the keyboard on
+    /// the list, as Down from the composer does (#2940).
+    OpenTasks,
     /// The onboarding wizard, opened at the step this command names
     /// (`/channels`, `/voice`, `/daemon`, ...). The name travels with the
     /// action so each door lands on its own step and no two share an arm.
@@ -147,6 +150,7 @@ fn action_for(name: &str) -> Option<GuiAction> {
         "/models" => GuiAction::OpenModels,
         "/skills" => GuiAction::OpenSkills,
         "/projects" => GuiAction::OpenProjects,
+        "/tasks" => GuiAction::OpenTasks,
         "/mission-control" => GuiAction::OpenMissionControl,
         "/onboard" => GuiAction::OpenOnboard("/onboard"),
         // The workspace step exists in the wizard already; the window just
@@ -403,6 +407,7 @@ mod tests {
             GuiAction::OpenModels => "OpenModels",
             GuiAction::OpenSkills => "OpenSkills",
             GuiAction::OpenProjects => "OpenProjects",
+            GuiAction::OpenTasks => "OpenTasks",
             GuiAction::OpenOnboard(_) => "OpenOnboard",
             GuiAction::Quit => "Quit",
             GuiAction::Text(_) => "Text",
@@ -428,6 +433,7 @@ mod tests {
         "OpenModels",
         "OpenSkills",
         "OpenProjects",
+        "OpenTasks",
         "OpenOnboard",
         "Quit",
         "Text",

@@ -1172,7 +1172,7 @@ impl AgentService {
                                 .expect("claude turn-task lock")
                                 .insert((session_id, id.to_string()));
                             if let Some(mgr) = self.background_manager() {
-                                mgr.mirror_started(session_id, &label);
+                                mgr.mirror_started_claude(session_id, id, description.as_deref());
                             }
                         }
                         ("task_notification", st) => {

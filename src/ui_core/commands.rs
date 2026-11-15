@@ -64,6 +64,10 @@ pub const SLASH_COMMANDS: &[SlashCommand] = &[
         description: "Show the current plan state",
     },
     SlashCommand {
+        name: "/tasks",
+        description: "Show running background tasks and their live output",
+    },
+    SlashCommand {
         name: "/execute",
         description: "Approve the design plan / retry the checklist seed",
     },
@@ -198,6 +202,7 @@ pub const GUI_SUPPORTED: &[&str] = &[
     "/new",
     "/stop",
     "/sessions",
+    "/tasks",
     "/projects",
     "/mission-control",
     "/models",

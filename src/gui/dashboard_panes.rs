@@ -306,6 +306,15 @@ impl Dashboard {
         self.composer.queue_expanded.hash(&mut hasher);
         self.topic_draft.is_none().hash(&mut hasher);
         self.frame_tasks.get(&session).hash(&mut hasher);
+        self.tasks_open.contains(&session).hash(&mut hasher);
+        (self.task_focus == Some(session)).hash(&mut hasher);
+        self.task_open.get(&session).hash(&mut hasher);
+        // An open card prints each task's elapsed seconds and a tail of its
+        // output, and past a minute the strip's own label only moves once a
+        // minute. The tick the labels are rebuilt on keeps the card moving.
+        if self.frame_tasks.contains_key(&session) && self.tasks_open.contains(&session) {
+            self.frame_tasks_at.hash(&mut hasher);
+        }
         // The forward picker replaces this leaf's composer (#2827). Its query
         // and cursor are window state, so both belong in the cache key while
         // this leaf owns the picker.
@@ -518,6 +527,7 @@ impl Dashboard {
                 this.send_from_pane(id, text.clone(), None, SendOrigin::Composer, cx);
             }
             editor::EditorEvent::Preview(path) => this.open_preview(path.clone(), cx),
+            editor::EditorEvent::Below => this.focus_tasks(id, cx),
         })
         .detach();
         // The pane's own drag-to-copy (#2623). The transcript cannot reach a
@@ -1109,8 +1119,10 @@ impl Dashboard {
                 // The same line the walk resolved above (#2805): asking for
                 // it again here took the manager's lock a second time for a
                 // string the window already held.
-                if let Some(label) = self.frame_tasks.get(session).cloned() {
-                    col = col.child(task_strip(label.to_string()));
+                if let Some(label) = self.frame_tasks.get(session).cloned()
+                    && let Some(area) = self.task_area(*session, label.as_ref(), cx)
+                {
+                    col = col.child(area);
                 }
                 // The pane holding the keyboard draws the real composer; the
                 // others show the draft they hold, dimmed and inert, which is

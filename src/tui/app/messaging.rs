@@ -1845,6 +1845,20 @@ impl App {
                 }
                 true
             }
+            "/tasks" => {
+                // Nothing running means nothing to open: say so in the
+                // chat instead of flashing an overlay the tick would
+                // close on its next beat.
+                if self.running_background_tasks() == 0 {
+                    self.push_system_message("No background tasks running.".to_string());
+                } else {
+                    self.tasks_overlay_selected = 0;
+                    if let Err(e) = self.switch_mode(AppMode::TasksOverlay).await {
+                        tracing::warn!("Failed to open tasks overlay: {e}");
+                    }
+                }
+                true
+            }
             "/show-plan" | "/showplan" | "/show_plan" => {
                 if let Some(sid) = self.current_session.as_ref().map(|s| s.id) {
                     self.reload_plan();
@@ -3639,6 +3653,14 @@ impl App {
     /// split mode, the window-level current session in single mode. The
     /// send path resolves through this so a pane's message can never ride
     /// a stale window-level bind into another pane's conversation.
+    /// How many background tasks the composer's session has running.
+    pub(crate) fn running_background_tasks(&self) -> usize {
+        self.send_target_session_id()
+            .zip(self.agent_service.background_manager())
+            .map(|(session_id, mgr)| mgr.running_for(session_id))
+            .unwrap_or(0)
+    }
+
     pub(crate) fn send_target_session_id(&self) -> Option<Uuid> {
         if self.pane_manager.is_split() {
             self.pane_manager.focused_pane().and_then(|p| p.session_id)

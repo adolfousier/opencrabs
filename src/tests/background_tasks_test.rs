@@ -7,9 +7,10 @@ use crate::brain::agent::service::ProgressCallback;
 use crate::brain::agent::service::ProgressEvent;
 use crate::brain::agent::service::QueuedUserMessage;
 use crate::brain::agent::service::background_tasks::{
-    BackgroundTaskManager, ClaudeTurnTasks, CmdResult, claude_completion_message,
-    claude_needs_survival_delivery, claude_task_label, clear_claude_mirrors_for_session,
-    completion_message, format_elapsed, short_label, tail_lines,
+    BackgroundTaskManager, ClaudeTurnTasks, CmdResult, TaskSource, claude_completion_message,
+    claude_needs_survival_delivery, claude_task_label, claude_task_output,
+    clear_claude_mirrors_for_session, completion_message, format_elapsed, output_tail, short_label,
+    tail_lines,
 };
 // `run_detached`'s tests drive shell job control (`&`), so they are unix-only.
 #[cfg(unix)]
@@ -653,5 +654,361 @@ fn a_command_finalizes_after_its_spawning_runtime_is_dropped() {
         mgr.running_for(sid),
         0,
         "a settled task must leave the running roster"
+    );
+}
+
+// ── The task list a surface opens from the running strip ──────────────────
+
+#[test]
+fn a_claude_task_shows_its_description_and_is_removed_by_its_id() {
+    let mgr = BackgroundTaskManager::new();
+    let sid = Uuid::new_v4();
+
+    mgr.mirror_started_claude(sid, "blfh19p61", Some("Build the GUI at two jobs"));
+    let rows = mgr.running_tasks(sid);
+    assert_eq!(rows.len(), 1);
+    assert_eq!(
+        rows[0].label, "Build the GUI at two jobs",
+        "the row prints what the CLI called the task, not its id"
+    );
+    assert_eq!(
+        rows[0].source,
+        TaskSource::Claude {
+            id: "blfh19p61".to_string()
+        }
+    );
+    assert_eq!(rows[0].source.tag(), "claude");
+
+    // The notification still keys on `claude-cli <id>`, exactly as before.
+    mgr.mirror_finished(sid, &claude_task_label("blfh19p61"));
+    assert_eq!(mgr.running_for(sid), 0);
+}
+
+#[test]
+fn a_claude_task_without_a_description_falls_back_to_its_keyed_label() {
+    let mgr = BackgroundTaskManager::new();
+    let sid = Uuid::new_v4();
+
+    mgr.mirror_started_claude(sid, "b1", None);
+    mgr.mirror_started_claude(sid, "b2", Some("   "));
+    mgr.mirror_started_claude(sid, "b3", Some("first line\nsecond line"));
+    let labels: Vec<String> = mgr
+        .running_tasks(sid)
+        .into_iter()
+        .map(|t| t.label)
+        .collect();
+    assert_eq!(labels, ["claude-cli b1", "claude-cli b2", "first line"]);
+}
+
+#[test]
+fn two_claude_tasks_with_one_description_finish_separately() {
+    let mgr = BackgroundTaskManager::new();
+    let sid = Uuid::new_v4();
+
+    mgr.mirror_started_claude(sid, "aaa", Some("cargo test"));
+    mgr.mirror_started_claude(sid, "bbb", Some("cargo test"));
+    mgr.mirror_finished(sid, &claude_task_label("bbb"));
+    let rows = mgr.running_tasks(sid);
+    assert_eq!(rows.len(), 1, "only the task that finished is removed");
+    assert_eq!(
+        rows[0].source,
+        TaskSource::Claude {
+            id: "aaa".to_string()
+        },
+        "the survivor is the other task, though both print the same words"
+    );
+}
+
+#[test]
+fn a_plain_mirror_keeps_its_label_as_its_identity() {
+    let mgr = BackgroundTaskManager::new();
+    let sid = Uuid::new_v4();
+
+    mgr.mirror_started(sid, "cargo build");
+    let rows = mgr.running_tasks(sid);
+    assert_eq!(rows[0].source, TaskSource::Mirror);
+    assert!(rows[0].output_path().is_none(), "nothing to read for it");
+    mgr.mirror_finished(sid, "cargo build");
+    assert_eq!(mgr.running_for(sid), 0);
+}
+
+#[test]
+fn the_output_tail_is_the_last_lines_without_escapes() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let path = dir.path().join("task.log");
+    let mut body = String::new();
+    for n in 1..=20 {
+        body.push_str(&format!("line {n}\n"));
+    }
+    body.push_str("\u{1b}[32m   Compiling\u{1b}[0m opencrabs\n\n");
+    std::fs::write(&path, body).expect("write log");
+
+    assert_eq!(
+        output_tail(&path, 3),
+        "line 19\nline 20\n   Compiling opencrabs",
+        "colour codes and the trailing blank line are gone"
+    );
+}
+
+#[test]
+fn the_output_tail_shows_only_the_last_draw_of_a_progress_line() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let path = dir.path().join("task.log");
+    std::fs::write(&path, "start\n10%\r50%\r100%\ndone\n").expect("write log");
+
+    assert_eq!(output_tail(&path, 8), "start\n100%\ndone");
+}
+
+#[test]
+fn the_output_tail_never_shows_a_secret() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let path = dir.path().join("task.log");
+    let token = format!("bot123456:{}", "A".repeat(35));
+    std::fs::write(
+        &path,
+        format!("GET https://api.telegram.org/{token}/getMe\n"),
+    )
+    .expect("write log");
+
+    let tail = output_tail(&path, 8);
+    assert!(
+        tail.contains("api.telegram.org"),
+        "the line itself survives"
+    );
+    assert!(
+        !crate::logging::redact::contains_token(&tail),
+        "a surface must not be the one place a token is shown: {tail}"
+    );
+}
+
+#[test]
+fn the_output_tail_of_a_long_log_starts_on_a_whole_line() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let path = dir.path().join("task.log");
+    let mut body = String::new();
+    for n in 0..4000 {
+        body.push_str(&format!("row number {n:05}\n"));
+    }
+    std::fs::write(&path, body).expect("write log");
+
+    let tail = output_tail(&path, 10_000);
+    let first = tail.lines().next().expect("some lines");
+    assert!(
+        first.starts_with("row number ") && first.len() == "row number 00000".len(),
+        "the fragment the seek landed in is dropped: {first:?}"
+    );
+    assert!(tail.ends_with("row number 03999"));
+}
+
+#[test]
+fn a_missing_output_file_is_empty_not_an_error() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    assert_eq!(output_tail(&dir.path().join("never-written.log"), 8), "");
+}
+
+#[test]
+fn a_claude_task_output_is_found_by_its_id() {
+    let temp = tempfile::tempdir().expect("temp dir");
+    let tasks = temp
+        .path()
+        .join("claude-1000")
+        .join("-home-someone-project")
+        .join("0e17f469-67de-4046-af86-5fdbd4c8be05")
+        .join("tasks");
+    std::fs::create_dir_all(&tasks).expect("task dir");
+    std::fs::write(tasks.join("bh2o5pwot.output"), "hello\n").expect("write output");
+    // A neighbour that is not the CLI's tree must not be searched.
+    let other = temp
+        .path()
+        .join("other-1000")
+        .join("x")
+        .join("y")
+        .join("tasks");
+    std::fs::create_dir_all(&other).expect("other dir");
+    std::fs::write(other.join("zzz.output"), "nope\n").expect("write other");
+
+    assert_eq!(
+        claude_task_output(temp.path(), "bh2o5pwot"),
+        Some(tasks.join("bh2o5pwot.output"))
+    );
+    assert_eq!(claude_task_output(temp.path(), "unknown"), None);
+    assert_eq!(
+        claude_task_output(temp.path(), "zzz"),
+        None,
+        "only claude-* trees are searched"
+    );
+}
+
+/// The temp directory is shared: a tree someone else planted can point its
+/// "output" at any file this user can read. A link is never followed, at
+/// the file or at any directory above it.
+#[cfg(unix)]
+#[test]
+fn a_claude_task_output_reached_through_a_link_is_refused() {
+    let temp = tempfile::tempdir().expect("temp dir");
+    let secret = temp.path().join("secret.txt");
+    std::fs::write(&secret, "token\n").expect("write secret");
+
+    // A linked file inside an otherwise ordinary tree.
+    let tasks = temp
+        .path()
+        .join("claude-1000")
+        .join("cwd")
+        .join("session")
+        .join("tasks");
+    std::fs::create_dir_all(&tasks).expect("task dir");
+    std::os::unix::fs::symlink(&secret, tasks.join("linked.output")).expect("link file");
+    assert_eq!(claude_task_output(temp.path(), "linked"), None);
+
+    // A real file behind a linked directory.
+    let real = temp.path().join("elsewhere");
+    std::fs::create_dir_all(&real).expect("real dir");
+    std::fs::write(real.join("behind.output"), "x\n").expect("write behind");
+    let session = temp.path().join("claude-1000").join("cwd").join("other");
+    std::fs::create_dir_all(&session).expect("session dir");
+    std::os::unix::fs::symlink(&real, session.join("tasks")).expect("link dir");
+    assert_eq!(claude_task_output(temp.path(), "behind"), None);
+
+    // A directory named like an output file is not one.
+    std::fs::create_dir_all(tasks.join("folder.output")).expect("dir as file");
+    assert_eq!(claude_task_output(temp.path(), "folder"), None);
+}
+
+#[test]
+fn a_claude_task_id_cannot_steer_the_lookup_out_of_the_tree() {
+    let temp = tempfile::tempdir().expect("temp dir");
+    let session = temp.path().join("claude-1000").join("cwd").join("session");
+    std::fs::create_dir_all(session.join("tasks")).expect("task dir");
+    std::fs::write(session.join("secret.output"), "x").expect("write");
+
+    assert_eq!(claude_task_output(temp.path(), "../secret"), None);
+    assert_eq!(claude_task_output(temp.path(), ""), None);
+    assert_eq!(claude_task_output(temp.path(), "a/b"), None);
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_detached_command_publishes_its_log_while_it_runs() {
+    let mgr = Arc::new(BackgroundTaskManager::new());
+    let sid = Uuid::new_v4();
+    let marker = format!("visible-{}", Uuid::new_v4().as_simple());
+
+    Arc::clone(&mgr).spawn_command(
+        sid,
+        std::env::temp_dir(),
+        "echo then wait".to_string(),
+        format!("echo {marker}; sleep 5"),
+        None,
+    );
+    let rows = mgr.running_tasks(sid);
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].source, TaskSource::Detached);
+    assert_eq!(rows[0].source.tag(), "detached");
+    let path = mgr
+        .output_path_for(sid, rows[0].task_id)
+        .expect("a spawned command knows its own log");
+
+    // The command is still sleeping when its first line is readable.
+    let mut tail = String::new();
+    for _ in 0..100 {
+        tail = mgr.output_tail(&path, 8);
+        if tail.contains(&marker) {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    assert!(
+        tail.contains(&marker),
+        "output is readable mid-run: {tail:?}"
+    );
+    assert_eq!(mgr.running_for(sid), 1, "and the command has not finished");
+    assert_eq!(
+        mgr.output_path_for(sid, Uuid::new_v4()),
+        None,
+        "an unknown task has no output"
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn cancelling_a_detached_command_stops_it_and_clears_its_row() {
+    use crate::brain::agent::service::background_tasks::CancelOutcome;
+    let mgr = Arc::new(BackgroundTaskManager::new());
+    let sid = Uuid::new_v4();
+    Arc::clone(&mgr).spawn_command(
+        sid,
+        std::env::temp_dir(),
+        "long sleep".to_string(),
+        "sleep 30".to_string(),
+        None,
+    );
+    let task = mgr.running_tasks(sid)[0].task_id;
+
+    assert_eq!(mgr.cancel(sid, task), CancelOutcome::Signalled);
+    assert!(mgr.cancel(sid, task).signalled() || mgr.running_for(sid) == 0);
+
+    // The row leaves through the command's own completion path, long before
+    // the thirty seconds the command would have slept.
+    let started = std::time::Instant::now();
+    while mgr.running_for(sid) > 0 && started.elapsed() < std::time::Duration::from_secs(10) {
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    assert_eq!(mgr.running_for(sid), 0, "the cancelled row is gone");
+    assert_eq!(
+        mgr.cancel(sid, task),
+        CancelOutcome::NotFound,
+        "a finished task is no longer there to cancel"
+    );
+}
+
+#[test]
+fn a_mirrored_task_is_not_ours_to_cancel_and_keeps_its_row() {
+    use crate::brain::agent::service::background_tasks::CancelOutcome;
+    let mgr = BackgroundTaskManager::new();
+    let sid = Uuid::new_v4();
+    mgr.mirror_started_claude(sid, "abc123", Some("Build the thing"));
+    let task = mgr.running_tasks(sid)[0].task_id;
+
+    let outcome = mgr.cancel(sid, task);
+    assert_eq!(outcome, CancelOutcome::NotOurs);
+    assert!(!outcome.signalled());
+    assert_eq!(
+        mgr.running_for(sid),
+        1,
+        "a row that vanished would claim a stop that never happened"
+    );
+    assert_eq!(mgr.cancel(sid, Uuid::new_v4()), CancelOutcome::NotFound);
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_cancelled_run_reports_the_cancel_in_its_receipt() {
+    use crate::brain::agent::service::background_tasks::{CANCELLED_NOTE, run_detached_to};
+    let log = std::env::temp_dir().join(format!("oc-cancel-test-{}.log", Uuid::new_v4()));
+    let cancel = Arc::new(tokio::sync::Notify::new());
+    // Signalled before the command is even spawned: the permit is kept.
+    cancel.notify_one();
+
+    let started = std::time::Instant::now();
+    let result = run_detached_to(
+        "echo before-the-stop; sleep 30",
+        &std::env::temp_dir(),
+        Uuid::new_v4(),
+        std::time::Duration::from_secs(60),
+        log.clone(),
+        Some(cancel),
+    )
+    .await;
+
+    assert!(started.elapsed() < std::time::Duration::from_secs(10));
+    assert!(!result.success);
+    assert!(
+        result.output.starts_with(CANCELLED_NOTE),
+        "the receipt opens with the cancel: {:?}",
+        result.output
+    );
+    assert!(
+        !log.exists(),
+        "the log is cleaned up like any finished run's"
     );
 }

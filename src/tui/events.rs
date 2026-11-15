@@ -447,6 +447,9 @@ pub enum AppMode {
     Help,
     /// Plan overlay: scrollable design .md with Approve/Discard footer
     PlanOverlay,
+    /// Tasks overlay: the session's running background tasks and the
+    /// live output of the selected one (triggered by /tasks)
+    TasksOverlay,
     /// Settings
     Settings,
     /// File picker dialog (triggered by @)
