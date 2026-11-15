@@ -179,6 +179,12 @@ pub(crate) fn pane_header(
         // sit inside the pane's rounded corner, not on its arc.
         .px_3()
         .py_2()
+        // The header is the pane's top edge, so its fill has to follow the
+        // ring's curve instead of squaring off inside it. gpui clips children
+        // to a rectangle (a `ContentMask` carries bounds and no corner radii),
+        // so `overflow_hidden` on the pane could never round this fill: the
+        // header's own top corners carry the radius the pane draws (#2936).
+        .rounded_t(px(CARD_RADIUS))
         .bg(rgb(header_bg))
         .border_b_2()
         .border_color(rgb(rule_color))

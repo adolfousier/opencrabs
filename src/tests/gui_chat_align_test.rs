@@ -185,3 +185,20 @@ fn the_bubble_is_capped_in_pixels() {
         .expect("the percentage cap stays as a second belt");
     assert!(cap < percent, "the pixel cap is what holds in a tight pane");
 }
+
+/// gpui clips children to a rectangle: `ContentMask` carries bounds and no
+/// corner radii, so a clip on the pane can never round a child's own fill. The
+/// header paints the pane's top edge, so it carries the radius itself, and the
+/// radius is set before the fill it shapes (#2936).
+#[test]
+fn the_header_fill_follows_the_ring() {
+    let header = body_after(PANE_CHROME, "pub(crate) fn pane_header(");
+    let round = header
+        .find(".rounded_t(px(CARD_RADIUS))")
+        .expect("the header rounds its own top corners");
+    let fill = header
+        .find(".bg(rgb(header_bg))")
+        .expect("the header paints its own fill");
+    assert!(round < fill, "the radius is set before the fill it shapes");
+}
+
