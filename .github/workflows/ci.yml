@@ -559,12 +559,18 @@ jobs:
       # offset acquires fine, and the same 2^64-1 length at offset 0 acquires
       # fine, which isolates the overflow as the cause.
       #
-      # Do NOT flip this to a hard gate until both blockers are fixed: a hard
-      # gate over a red slice turns every Windows PR red on day one. The flip
-      # is the follow-up #1863 already names, and it belongs in the PR that
-      # reports green receipts — not in the rtk fix.
+      # Both blockers named above have landed on main: 4c7658766 (rtk PATH) and
+      # 21c7b4021 (winlock sentinel range). The flip is the follow-up #1863
+      # asked for, and #2942 carries the receipts that justify it: six modules
+      # green on 2bbe80c57 — 78 passed, 0 failed, 13 pre-existing #[ignore]s —
+      # measured on Windows x64 / MSVC with --profile ci, because `citest`
+      # cannot link on that host (LNK2038: esaxx /MT against llama /MD, with no
+      # LTO to dead-strip it). As of this change the slice is a hard gate.
       #
-      # Scope, so nobody over-reads the softness either: windows-build is NOT
+      # If it goes red on a GitHub Windows runner, the gap is in that
+      # measurement's environment, not a reason to soften this step again.
+      #
+      # Scope, so the reach of this gate is not over-read either: windows-build
       # in ci-gate's needs (2x billing, 51m cold), so a red here does not set
       # the required check by itself. It reaches the run through the `abort`
       # job, which DOES need windows-build: red here cancels the run, and a
@@ -572,7 +578,7 @@ jobs:
       # above is deliberately NOT soft, because a binary that does not start
       # is a hard fail.
       - name: "Scoped tests (windows): platform-behaviour slice"
-        continue-on-error: true
+        continue-on-error: false
         shell: bash
         run: |
           # One filter per module, each individually judged. A combined
