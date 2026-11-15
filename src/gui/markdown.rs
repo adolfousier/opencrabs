@@ -73,6 +73,22 @@ pub fn resolve_highlights<P: MdPalette>(
         .collect()
 }
 
+/// How a single newline in the source is read.
+///
+/// CommonMark folds a soft break into a space, which is right for an answer:
+/// the model wraps its own prose and a paragraph should reflow with the pane.
+/// It is wrong for anything a person typed. Someone who presses Enter twice
+/// expects two lines, and a reply that silently joins them reads as if the
+/// window ate the break.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum MdFlow {
+    /// A soft break is a space (CommonMark).
+    #[default]
+    Prose,
+    /// A soft break is a line break.
+    Verbatim,
+}
+
 /// One renderable line: the text plus byte-range highlight runs into it,
 /// whether it belongs to a code fence (mono, grouped by the renderer), the
 /// list/quote nesting depth, and whether it is a heading line.
@@ -87,6 +103,22 @@ pub struct MdLine {
     pub indent: u8,
     pub heading: bool,
     pub heading_level: u8,
+    /// A thematic break. It carries no text: the renderer draws a full-width
+    /// hairline for it, so the rule follows the pane instead of being a fixed
+    /// run of box characters that stopped a third of the way across.
+    pub rule: bool,
+}
+
+/// A column's alignment, as the table header declared it.
+///
+/// Own enum rather than `pulldown_cmark::Alignment` so the renderer does not
+/// have to import the parser to read a cell.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum MdAlign {
+    #[default]
+    Left,
+    Center,
+    Right,
 }
 
 /// One table cell: its text plus the inline highlight runs into it, byte
@@ -97,6 +129,9 @@ pub struct MdCell {
     /// Link labels inside the cell, ranges relative to `text` like the
     /// highlights above (#2317).
     pub links: Vec<(Range<usize>, String)>,
+    /// How the column this cell belongs to asked to be aligned. It used to be
+    /// thrown away, so `|---:|` painted left like every other column.
+    pub align: MdAlign,
 }
 
 /// A whole table, header row first. Column count is `header.len()` (or the
@@ -168,6 +203,18 @@ impl Inline {
     }
 }
 
+/// One open list: whether it numbers its items, and the number the next item
+/// takes.
+///
+/// A stack, not a single slot. The old builder kept one `Option<u64>` that
+/// `Tag::Item` took, so the first item printed its number and every item after
+/// it fell back to a bullet, and a nested list's end wiped the outer list's
+/// counter on the way out.
+struct ListState {
+    ordered: bool,
+    next: u64,
+}
+
 struct Builder {
     out: Vec<MdBlock>,
     buf: String,
@@ -176,8 +223,8 @@ struct Builder {
     mono: bool,
     indent: u8,
     inline: Inline,
-    /// `Some(n)` while inside an ordered list item: the marker to print.
-    ordered_marker: Option<u64>,
+    /// Every list currently open, outermost first.
+    list_stack: Vec<ListState>,
     /// `Some` while inside a table: text collects into cells instead of
     /// lines, because a cell is not a line and flattening it hides the grid.
     table: Option<TableBuild>,
@@ -188,6 +235,8 @@ struct TableBuild {
     rows: Vec<Vec<MdCell>>,
     row: Vec<MdCell>,
     in_head: bool,
+    /// One entry per column, from the table's delimiter row.
+    aligns: Vec<MdAlign>,
 }
 
 impl TableBuild {
@@ -236,19 +285,34 @@ impl Builder {
         }
     }
 
+    /// Depth steps a list adds to a line's indent: one per nesting level past
+    /// the first, so a top-level list stays flush with the body and a bullet
+    /// under a bullet steps in instead of painting flush left.
+    fn list_indent(&self) -> u8 {
+        (self.list_stack.len().saturating_sub(1)).min(6) as u8
+    }
+
     fn flush(&mut self) {
         let text = std::mem::take(&mut self.buf);
         let hl = std::mem::take(&mut self.hl);
         let links = std::mem::take(&mut self.links);
         let mono = self.mono;
-        let indent = self.indent;
+        let indent = self.indent.saturating_add(self.list_indent());
         let heading = self.inline.heading;
         let heading_level = self.inline.heading_level;
         if text.trim().is_empty() {
             return;
         }
         if let Some(table) = &mut self.table {
-            let cell = cell_from(text, hl, links);
+            // The column is the cell's position in the row being built, which
+            // is also how the delimiter row's alignments are indexed.
+            let column = if table.in_head {
+                table.header.len()
+            } else {
+                table.row.len()
+            };
+            let align = table.aligns.get(column).copied().unwrap_or_default();
+            let cell = cell_from(text, hl, links, align);
             if table.in_head {
                 table.header.push(cell);
             } else {
@@ -264,19 +328,21 @@ impl Builder {
             indent,
             heading,
             heading_level,
+            rule: false,
         }));
     }
 
     fn rule(&mut self) {
         self.flush();
         self.out.push(MdBlock::Line(MdLine {
-            text: "────────────────────────".into(),
+            text: String::new(),
             highlights: Vec::new(),
             links: Vec::new(),
             mono: false,
-            indent: self.indent,
+            indent: self.indent.saturating_add(self.list_indent()),
             heading: false,
             heading_level: 0,
+            rule: true,
         }));
     }
 }
@@ -287,6 +353,7 @@ fn cell_from(
     text: String,
     hl: Vec<(Range<usize>, MdStyle)>,
     links: Vec<(Range<usize>, String)>,
+    align: MdAlign,
 ) -> MdCell {
     let trimmed = text.trim();
     let lead = text.len() - text.trim_start().len();
@@ -312,6 +379,7 @@ fn cell_from(
         text: trimmed.to_string(),
         highlights: moved,
         links: moved_links,
+        align,
     }
 }
 
@@ -331,7 +399,22 @@ fn heading_level(level: pulldown_cmark::HeadingLevel) -> u8 {
 /// Parse markdown source into renderable blocks. Tables stay tables; every
 /// other construct is a run of [`MdLine`]s.
 pub fn blocks(src: &str) -> Vec<MdBlock> {
-    let options = Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH;
+    blocks_flow(src, MdFlow::Prose)
+}
+
+/// Parse markdown with an explicit soft-break rule. [`blocks`] is this with
+/// [`MdFlow::Prose`].
+pub fn blocks_flow(src: &str, flow: MdFlow) -> Vec<MdBlock> {
+    // Every option here is one an event handler below already serves. The
+    // task-list marker, footnote reference and math arms used to be dead code
+    // because the parser never emitted their events: `TABLES` and
+    // `STRIKETHROUGH` were the only options enabled, so `[x]`, `[^1]` and `$x$`
+    // all arrived as plain text.
+    let options = Options::ENABLE_TABLES
+        | Options::ENABLE_STRIKETHROUGH
+        | Options::ENABLE_TASKLISTS
+        | Options::ENABLE_FOOTNOTES
+        | Options::ENABLE_MATH;
     let mut b = Builder {
         out: Vec::new(),
         buf: String::new(),
@@ -340,7 +423,7 @@ pub fn blocks(src: &str) -> Vec<MdBlock> {
         mono: false,
         indent: 0,
         inline: Inline::default(),
-        ordered_marker: None,
+        list_stack: Vec::new(),
         table: None,
     };
     for event in Parser::new_ext(src, options) {
@@ -361,7 +444,10 @@ pub fn blocks(src: &str) -> Vec<MdBlock> {
                 }
             }
             Event::Code(t) => b.push_inline(t.trim(), true),
-            Event::SoftBreak => b.push_inline(" ", false),
+            Event::SoftBreak => match flow {
+                MdFlow::Prose => b.push_inline(" ", false),
+                MdFlow::Verbatim => b.flush(),
+            },
             Event::HardBreak => b.flush(),
             Event::Rule => b.rule(),
             Event::TaskListMarker(done) => {
@@ -406,34 +492,34 @@ fn start_tag(b: &mut Builder, tag: Tag) {
         }
         Tag::List(start) => {
             b.flush();
-            b.ordered_marker = start;
+            b.list_stack.push(ListState {
+                ordered: start.is_some(),
+                next: start.unwrap_or(1),
+            });
         }
         Tag::Item => {
             b.flush();
-            match b.ordered_marker.take() {
-                Some(n) => {
-                    let start = b.buf.len();
-                    b.buf.push_str(&format!("{n}. "));
-                    b.hl.push((
-                        start..b.buf.len(),
-                        MdStyle {
-                            color: Some(MdTint::Muted),
-                            ..Default::default()
-                        },
-                    ));
+            // The marker is read from the innermost open list and the counter
+            // advances, so item 2 prints 2. and not a bullet. A list that
+            // started at 3 keeps counting from 3.
+            let marker = match b.list_stack.last_mut() {
+                Some(list) if list.ordered => {
+                    let n = list.next;
+                    list.next = list.next.saturating_add(1);
+                    format!("{n}. ")
                 }
-                None => {
-                    let start = b.buf.len();
-                    b.buf.push_str("\u{2022}  ");
-                    b.hl.push((
-                        start..b.buf.len(),
-                        MdStyle {
-                            color: Some(MdTint::Muted),
-                            ..Default::default()
-                        },
-                    ));
-                }
-            }
+                Some(_) => "\u{2022}  ".to_string(),
+                None => "\u{2022}  ".to_string(),
+            };
+            let start = b.buf.len();
+            b.buf.push_str(&marker);
+            b.hl.push((
+                start..b.buf.len(),
+                MdStyle {
+                    color: Some(MdTint::Muted),
+                    ..Default::default()
+                },
+            ));
         }
         Tag::Strong => b.inline.strong += 1,
         Tag::Emphasis => b.inline.emphasis += 1,
@@ -444,13 +530,21 @@ fn start_tag(b: &mut Builder, tag: Tag) {
         }
         // A table is collected as a table, never as lines: the window draws
         // the grid, and flattening here is what made cells look like a list.
-        Tag::Table(_) => {
+        Tag::Table(aligns) => {
             b.flush();
             b.table = Some(TableBuild {
                 header: Vec::new(),
                 rows: Vec::new(),
                 row: Vec::new(),
                 in_head: false,
+                aligns: aligns
+                    .iter()
+                    .map(|a| match a {
+                        pulldown_cmark::Alignment::Center => MdAlign::Center,
+                        pulldown_cmark::Alignment::Right => MdAlign::Right,
+                        _ => MdAlign::Left,
+                    })
+                    .collect(),
             });
         }
         Tag::TableHead => {
@@ -501,7 +595,9 @@ fn end_tag(b: &mut Builder, tag: TagEnd) {
         }
         TagEnd::List(_) => {
             b.flush();
-            b.ordered_marker = None;
+            // Only the list that just closed leaves the stack: a nested list's
+            // end must not reset the outer counter.
+            b.list_stack.pop();
         }
         TagEnd::Item => b.flush(),
         TagEnd::Strong => b.inline.strong = b.inline.strong.saturating_sub(1),
@@ -551,5 +647,173 @@ fn end_tag(b: &mut Builder, tag: TagEnd) {
         | TagEnd::Subscript
         | TagEnd::HtmlBlock
         | TagEnd::Image => b.flush(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The line texts of a parse, tables dropped: every assertion below is
+    /// about what a row of prose says and how far it is indented.
+    fn lines(src: &str) -> Vec<MdLine> {
+        blocks(src)
+            .into_iter()
+            .filter_map(|b| match b {
+                MdBlock::Line(l) => Some(l),
+                MdBlock::Table(_) => None,
+            })
+            .collect()
+    }
+
+    /// The defect this stack exists for: item one printed `1.` and every item
+    /// after it printed a bullet, because `Tag::Item` took the only stored
+    /// number and nothing put it back.
+    #[test]
+    fn ordered_list_numbers_every_item() {
+        let parsed = lines("1. one\n2. two\n3. three\n");
+        let texts: Vec<&str> = parsed.iter().map(|l| l.text.as_str()).collect();
+        assert_eq!(texts, vec!["1. one", "2. two", "3. three"]);
+    }
+
+    /// A list that starts at a number other than one keeps counting from it.
+    #[test]
+    fn ordered_list_honours_its_start_number() {
+        let parsed = lines("3. three\n4. four\n");
+        let texts: Vec<&str> = parsed.iter().map(|l| l.text.as_str()).collect();
+        assert_eq!(texts, vec!["3. three", "4. four"]);
+    }
+
+    /// A bullet list stays bullets: the counter only advances for an ordered
+    /// list.
+    #[test]
+    fn bullet_list_never_prints_numbers() {
+        let parsed = lines("- one\n- two\n");
+        let texts: Vec<&str> = parsed.iter().map(|l| l.text.as_str()).collect();
+        assert_eq!(texts, vec!["\u{2022}  one", "\u{2022}  two"]);
+    }
+
+    /// A nested list steps in one level and leaves the outer counter alone:
+    /// the end of the inner list must not reset what the outer one was up to.
+    #[test]
+    fn nested_list_indents_and_keeps_the_outer_counter() {
+        let parsed = lines("1. one\n   - inner\n2. two\n");
+        let texts: Vec<&str> = parsed.iter().map(|l| l.text.as_str()).collect();
+        assert_eq!(
+            texts,
+            vec!["1. one", "\u{2022}  inner", "2. two"],
+            "the outer list keeps counting past the nested one"
+        );
+        assert_eq!(parsed[0].indent, 0, "a top-level item stays flush");
+        assert_eq!(parsed[1].indent, 1, "the nested item steps in");
+        assert_eq!(parsed[2].indent, 0, "the outer item steps back out");
+    }
+
+    /// CommonMark folds a soft break into a space. Prose wants that; a
+    /// hand-typed row wants its Enter key to survive.
+    #[test]
+    fn verbatim_flow_keeps_single_newlines() {
+        let prose = blocks("one\ntwo\n");
+        let prose_texts: Vec<&str> = prose
+            .iter()
+            .filter_map(|b| match b {
+                MdBlock::Line(l) => Some(l.text.as_str()),
+                MdBlock::Table(_) => None,
+            })
+            .collect();
+        assert_eq!(prose_texts, vec!["one two"], "prose folds the break");
+
+        let verbatim = blocks_flow("one\ntwo\n", MdFlow::Verbatim);
+        let verbatim_texts: Vec<&str> = verbatim
+            .iter()
+            .filter_map(|b| match b {
+                MdBlock::Line(l) => Some(l.text.as_str()),
+                MdBlock::Table(_) => None,
+            })
+            .collect();
+        assert_eq!(verbatim_texts, vec!["one", "two"], "verbatim keeps it");
+    }
+
+    /// The delimiter row's alignment used to be dropped, so a numeric column
+    /// painted left like prose. Each cell now carries its column's alignment.
+    #[test]
+    fn table_cells_carry_their_column_alignment() {
+        let parsed = blocks("| name | qty |\n|:--|--:|\n| a | 1 |\n");
+        let table = parsed
+            .into_iter()
+            .find_map(|b| match b {
+                MdBlock::Table(t) => Some(t),
+                MdBlock::Line(_) => None,
+            })
+            .expect("a table");
+        assert_eq!(table.header[0].align, MdAlign::Left);
+        assert_eq!(table.header[1].align, MdAlign::Right);
+        assert_eq!(table.rows[0][0].align, MdAlign::Left, "body cells too");
+        assert_eq!(table.rows[0][1].align, MdAlign::Right, "body cells too");
+    }
+
+    /// A thematic break is a flag, not a string: the renderer draws a
+    /// hairline that follows the pane width.
+    #[test]
+    fn rule_is_a_flag_with_no_text() {
+        let parsed = lines("above\n\n---\n\nbelow\n");
+        let rule = parsed
+            .iter()
+            .find(|l| l.rule)
+            .expect("a thematic break must parse as a rule line");
+        assert!(rule.text.is_empty(), "a rule carries no text: {:?}", rule.text);
+        assert!(
+            parsed.iter().any(|l| !l.rule && l.text.contains("above")),
+            "the prose around the rule survives"
+        );
+    }
+
+    /// `TaskListMarker` could never fire while task lists were disabled, so
+    /// `- [x] done` reached the window as literal brackets.
+    #[test]
+    fn task_list_marker_is_rendered() {
+        let parsed = lines("- [x] done\n- [ ] todo\n");
+        let texts: Vec<&str> = parsed.iter().map(|l| l.text.as_str()).collect();
+        assert!(
+            texts.iter().any(|t| t.contains("[x] done")),
+            "a checked task keeps its mark: {texts:?}"
+        );
+        assert!(
+            texts.iter().any(|t| t.contains("[ ] todo")),
+            "an open task keeps its empty box: {texts:?}"
+        );
+    }
+
+    /// Same dead-arm problem: `FootnoteReference` needs `ENABLE_FOOTNOTES`.
+    #[test]
+    fn footnote_reference_is_rendered() {
+        let parsed = lines("body[^1]\n\n[^1]: the note\n");
+        assert!(
+            parsed.iter().any(|l| l.text.contains("body[1]")),
+            "a footnote reference becomes a bracketed number: {:?}",
+            parsed.iter().map(|l| l.text.as_str()).collect::<Vec<_>>()
+        );
+    }
+
+    /// `InlineMath` needs `ENABLE_MATH` to be emitted at all. Math is drawn
+    /// with the code treatment (the parser cannot give one inline run its own
+    /// font family), which is what keeps `$x^2$` from reading as prose.
+    #[test]
+    fn inline_math_keeps_its_code_treatment() {
+        let parsed = lines("cost is $x^2$ per unit");
+        let line = parsed.first().expect("one line of prose");
+        assert!(
+            line.text.contains("x^2"),
+            "the expression survives: {:?}",
+            line.text
+        );
+        assert!(
+            line.highlights
+                .iter()
+                .any(|(range, style)| style.background.is_some()
+                    && line.text.get(range.clone()).is_some_and(|t| t.contains("x^2"))),
+            "the math run carries the code background: {:?}",
+            line.highlights
+        );
     }
 }
