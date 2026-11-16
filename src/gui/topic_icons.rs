@@ -573,6 +573,25 @@ pub fn inline_pieces(text: &str) -> Option<Vec<InlinePiece>> {
     Some(pieces)
 }
 
+const ALL_ICON_SVG: &[u8] = include_bytes!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/src/assets/topic-all.svg"
+));
+
+/// The neutral double-chat symbol for the All entry. It is deliberately not
+/// part of the topic pack: All collects every topic and must not look like a
+/// crab-themed topic of its own.
+pub fn all_icon(size: f32, colour: u32) -> impl IntoElement {
+    let svg = String::from_utf8_lossy(ALL_ICON_SVG)
+        .replace("#8a8a8a", &format!("#{colour:06x}"))
+        .into_bytes();
+    img(Arc::new(Image::from_bytes(ImageFormat::Svg, svg)))
+        .w(rems(size))
+        .h(rems(size))
+        .flex_none()
+        .object_fit(ObjectFit::Contain)
+}
+
 const ORIENTATION_ICON_SVG: &[u8] = include_bytes!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/src/assets/topic-orientation.svg"
@@ -879,6 +898,18 @@ mod tests {
         assert_eq!(stored, "topic:ops");
         assert_eq!(topic_icon(&stored), topic_icon("ops"));
         assert_eq!(topic_icon("topic:nope"), None);
+    }
+
+    #[test]
+    fn all_topics_icon_is_a_neutral_double_chat_vector() {
+        let svg = std::str::from_utf8(ALL_ICON_SVG).expect("All SVG is UTF-8");
+        assert!(svg.starts_with("<svg"));
+        assert!(svg.contains("width=\"96\" height=\"96\""));
+        assert!(svg.contains("viewBox=\"0 0 24 24\""));
+        assert_eq!(svg.matches("<path").count(), 2);
+        assert!(svg.contains("stroke=\"#8a8a8a\""));
+        assert!(!svg.contains("<image"));
+        assert!(!svg.contains("crab"));
     }
 
     #[test]

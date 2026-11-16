@@ -199,7 +199,13 @@ mod tests {
             .split("topic_bar::BarEntry::Topic(id) =>")
             .next()
             .expect("All body");
-        assert!(all.contains("store_name(\"general\")"));
+        assert!(all.contains("topic_icons::all_icon(icon_rems, colour)"));
+        assert!(
+            !all.contains("store_name(\"general\")"),
+            "All is not a crab-themed topic"
+        );
+        assert!(all.contains("topic_tabs::TELEGRAM_ACCENT"));
+        assert!(all.contains("crate::palette::current().text_muted"));
         assert!(src.contains("topic_icons::tab_glyph(icon, icon_rems)"));
         assert!(!src.contains("format!(\"{icon} {label}\")"));
         assert!(src.contains("topic_tabs::TELEGRAM_ACCENT"));

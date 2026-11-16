@@ -221,12 +221,21 @@ impl Dashboard {
             // A busy topic is marked with a dot, the same signal the rail uses
             // for work in flight.
             let activity = chips.iter().any(|chip| chip.id == id && chip.activity);
-            // `All` has the same icon slot and cell geometry as a topic.
+            // `All` has the same icon slot and cell geometry as a topic, but
+            // uses Telegram's neutral double-chat symbol instead of pretending
+            // to be another crab-themed topic.
             let (label, picture) = match entry {
-                topic_bar::BarEntry::All => (
-                    "All".to_string(),
-                    topic_icons::tab_icon(topic_icons::store_name("general").as_str(), icon_rems),
-                ),
+                topic_bar::BarEntry::All => {
+                    let colour = if current {
+                        topic_tabs::TELEGRAM_ACCENT
+                    } else {
+                        crate::palette::current().text_muted
+                    };
+                    (
+                        "All".to_string(),
+                        Some(topic_icons::all_icon(icon_rems, colour).into_any_element()),
+                    )
+                }
                 topic_bar::BarEntry::Topic(id) => {
                     // The icon sits before the name and is not a word, so the
                     // two-word shortening (#2477) is applied to the name alone.
