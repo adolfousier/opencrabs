@@ -241,17 +241,31 @@ pub fn choose_resolve_source(
 
 /// Whether to overwrite a stored session title with the freshly built template.
 ///
-/// - Default DM titles: refresh when the template default changed (display name).
-/// - Auto-titled / custom DM titles: never clobber (issue #121).
-/// - Telegram groups: refresh when the visible group label changed (suffix stable).
-pub fn should_refresh_label(stored: &str, template: &str) -> bool {
+/// - A title the user typed is final and is never touched here.
+/// - A title the auto-title model wrote is the drift rule's business, not this
+///   one's: refreshing it back to the template is what made a group row flip
+///   between the two labels on every message (#2956).
+/// - The channel template itself: refresh when the template changed, i.e. the
+///   DM display name changed, or the visible group label changed (suffix stable).
+pub fn should_refresh_label(
+    stored: &str,
+    template: &str,
+    source: crate::db::models::TitleSource,
+) -> bool {
+    use crate::db::models::TitleSource;
+
     if stored == template {
         return false;
     }
 
+    // Only the channel's own label may be rewritten. Anything else was chosen,
+    // by the user or by the model, and a channel rename does not outrank it.
+    if source != TitleSource::Template {
+        return false;
+    }
+
     if crate::brain::agent::service::AgentService::is_default_channel_title(stored) {
-        return crate::brain::agent::service::AgentService::is_default_channel_title(template)
-            && stored != template;
+        return crate::brain::agent::service::AgentService::is_default_channel_title(template);
     }
 
     if is_telegram_group_session_title(stored) && is_telegram_group_session_title(template) {

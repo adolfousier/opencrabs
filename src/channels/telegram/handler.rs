@@ -1644,6 +1644,7 @@ pub(crate) async fn handle_message(
                 if session_resolve::should_refresh_label(
                     bound.title.as_deref().unwrap_or(""),
                     &session_title,
+                    bound.title_source,
                 ) {
                     let mut renamed = bound.clone();
                     renamed.title = Some(session_title.clone());
@@ -1794,6 +1795,7 @@ pub(crate) async fn handle_message(
                     if session_resolve::should_refresh_label(
                         session.title.as_deref().unwrap_or(""),
                         &session_title,
+                        session.title_source,
                     ) {
                         let mut renamed = session.clone();
                         let prev_title = renamed.title.clone().unwrap_or_default();

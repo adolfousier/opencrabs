@@ -6,7 +6,7 @@ use crate::channels::telegram::session_resolve::{
     session_idle_expired, should_refresh_label, topic_session_id,
 };
 use crate::db::Database;
-use crate::db::models::Session;
+use crate::db::models::{Session, TitleSource};
 use crate::db::repository::SessionRepository;
 use crate::services::{ServiceContext, SessionService};
 use uuid::Uuid;
@@ -53,7 +53,7 @@ fn should_not_clobber_auto_titled_dm_title() {
     let auto = "Telegram: Fix deploy pipeline [chat:133526395]";
     let template = build_session_title(true, "Alexey", 133526395, "", 133526395, None, None);
     assert!(
-        !should_refresh_label(auto, &template),
+        !should_refresh_label(auto, &template, TitleSource::Auto),
         "auto-titled DM must not revert to default template"
     );
 }
@@ -62,7 +62,7 @@ fn should_not_clobber_auto_titled_dm_title() {
 fn group_rename_still_refreshes() {
     let old = "Telegram: Old Group [chat:-5246593256]";
     let new = "Telegram: New Group [chat:-5246593256]";
-    assert!(should_refresh_label(old, new));
+    assert!(should_refresh_label(old, new, TitleSource::Template));
 }
 
 #[tokio::test]
@@ -96,7 +96,7 @@ async fn suffix_lookup_after_switch_touch_picks_switched_row() {
 async fn auto_titled_title_survives_should_refresh_check() {
     let template = build_session_title(true, "Alice", 1, "", 99, None, None);
     let auto_titled = format!("Telegram: Deploy fix {}", chat_id_suffix(99, None));
-    assert!(!should_refresh_label(&auto_titled, &template));
+    assert!(!should_refresh_label(&auto_titled, &template, TitleSource::Auto));
 }
 
 /// Mirrors handler chat-bound idle branch: archive stale bound row, create replacement.
@@ -210,7 +210,7 @@ fn refresh_label_promotes_id_titled_topic_session_to_named() {
     let id_titled = "Telegram: Build [chat:-100:topic:2]";
     let named = build_session_title(false, "", 0, "Build", -100, Some(2), Some("Devops"));
     assert!(
-        should_refresh_label(id_titled, &named),
+        should_refresh_label(id_titled, &named, TitleSource::Template),
         "id-titled topic session should be promoted to the named form"
     );
 }

@@ -1,4 +1,5 @@
 use crate::channels::telegram::session_resolve::*;
+use crate::db::models::TitleSource;
 
 #[test]
 fn dm_template_format() {
@@ -10,21 +11,21 @@ fn dm_template_format() {
 fn should_not_clobber_auto_titled_dm() {
     let auto = "Telegram: Fix deploy [chat:133526395]";
     let template = build_session_title(true, "Alexey", 133526395, "", 133526395, None, None);
-    assert!(!should_refresh_label(auto, &template));
+    assert!(!should_refresh_label(auto, &template, TitleSource::Auto));
 }
 
 #[test]
 fn should_refresh_group_rename() {
     let old = "Telegram: Old Group [chat:-1]";
     let new = "Telegram: New Group [chat:-1]";
-    assert!(should_refresh_label(old, new));
+    assert!(should_refresh_label(old, new, TitleSource::Template));
 }
 
 #[test]
 fn default_dm_still_refreshes_on_name_change() {
     let old = build_session_title(true, "Alice", 1, "", 99, None, None);
     let new = build_session_title(true, "Bob", 1, "", 99, None, None);
-    assert!(should_refresh_label(&old, &new));
+    assert!(should_refresh_label(&old, &new, TitleSource::Template));
 }
 
 #[test]
