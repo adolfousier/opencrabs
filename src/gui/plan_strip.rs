@@ -22,7 +22,7 @@ use std::path::PathBuf;
 use std::time::SystemTime;
 
 use gpui::{Div, MouseButton, SharedString, Stateful, div, prelude::*, px, rgb};
-use opencrabs::tui::plan::{PlanDocument, PlanStatus, TaskStatus};
+use opencrabs::tui::plan::{PlanDocument, PlanStatus, PlanTask, TaskStatus};
 
 /// The strip's state: the plan file it is showing, the mtime it last read,
 /// and the parsed document.
@@ -170,6 +170,8 @@ impl PlanStripState {
         if !matches!(plan.status, PlanStatus::Editing) {
             return None;
         }
+        let mut lines = editing_lines(plan).into_iter();
+        let head = lines.next().map(|(_, line)| line).unwrap_or_default();
         let mut col = div()
             .flex()
             .flex_col()
@@ -178,23 +180,22 @@ impl PlanStripState {
             .min_w_0()
             .rounded(px(CARD_RADIUS))
             .bg(glass_fill(palette::current().panel));
-        for (kind, line) in editing_lines(plan) {
+        // A plan that already carries its checklist shows what is being
+        // approved: the same `done/total`, the same bar and the same six-row
+        // window the live card draws once it is running. A bare count hid the
+        // progress and every task behind it (#2970).
+        if plan.tasks.is_empty() {
+            col = col.child(card_line(head, palette::current().text_muted));
+        } else {
+            col = col.child(progress_header_row(plan, head));
+            col = task_rows(col, plan);
+        }
+        for (kind, line) in lines {
             let color = match kind {
                 LineKind::Title => palette::current().text_muted,
                 _ => palette::current().text_faint,
             };
-            col = col.child(
-                div().flex().flex_row().w_full().min_w_0().child(
-                    div()
-                        .flex_1()
-                        .min_w_0()
-                        .overflow_hidden()
-                        .truncate()
-                        .text_xs()
-                        .text_color(rgb(color))
-                        .child(SharedString::from(line)),
-                ),
-            );
+            col = col.child(card_line(line, color));
         }
         if let Some(actions) = actions {
             col = col.child(
@@ -311,14 +312,21 @@ pub const APPROVE_HINT: &str = "Approve with /execute, or discard with /discard.
 
 /// The lines the approval card prints, split out of the view so the copy is
 /// testable without a frame (#2755).
+///
+/// A plan that already carries its checklist says how much of it is done, not
+/// just how many rows it has. "6 tasks" told the reader the size of the plan
+/// and nothing else, while the live card two states later prints `done/total`,
+/// Telegram prints every row, and Discord prints `done/total` beside them
+/// (#2970). A design plan with no checklist keeps the bare header, because
+/// there is nothing to count.
 pub fn editing_lines(plan: &PlanDocument) -> Vec<(LineKind, String)> {
     let header = if plan.tasks.is_empty() {
         format!("✍️ Editing plan · {}", fit(&plan.title, 60))
     } else {
+        let (done, total) = progress_counts(plan);
         format!(
-            "✍️ Editing plan · {} · {} tasks",
-            fit(&plan.title, 60),
-            plan.tasks.len()
+            "✍️ Editing plan · {} · {done}/{total}",
+            fit(&plan.title, 60)
         )
     };
     vec![
@@ -518,22 +526,113 @@ pub(crate) fn progress_bar(done: usize, total: usize) -> (usize, String) {
     opencrabs::ui_core::plan_index::progress_bar(done, total)
 }
 
+/// The header row of a plan card: the line the caller wrote, then the bar and
+/// the percentage at the trailing edge (#2496). The title takes the slack and
+/// cuts, so a long plan name never pushes the metrics out of the card.
+fn progress_header_row(plan: &PlanDocument, text: String) -> Div {
+    let (_, _, percent, bar) = progress(plan);
+    div()
+        .flex()
+        .flex_row()
+        .items_center()
+        .gap_2()
+        .min_w_0()
+        .w_full()
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .overflow_hidden()
+                .truncate()
+                .text_xs()
+                .text_color(rgb(palette::current().text_muted))
+                .child(SharedString::from(text)),
+        )
+        .child(
+            div()
+                .flex_none()
+                .text_xs()
+                .text_color(rgb(palette::current().teal))
+                .child(bar),
+        )
+        .child(
+            div()
+                .flex_none()
+                .text_xs()
+                .text_color(rgb(palette::current().text_faint))
+                .child(SharedString::from(format!("{percent}%"))),
+        )
+}
+
+/// One task row: the status mark and the numbered title. Shared by the live
+/// checklist and the approval card, so the six tasks a plan is approved on are
+/// spelled exactly the way that plan then reports its progress.
+fn task_row(task: &PlanTask) -> Div {
+    let (mark, color) = match &task.status {
+        TaskStatus::Completed | TaskStatus::Skipped => ("☑", palette::current().teal),
+        TaskStatus::InProgress => ("▶", palette::current().accent),
+        TaskStatus::Failed => ("✗", palette::current().warn),
+        TaskStatus::Blocked(_) => ("⊘", palette::current().warn),
+        TaskStatus::Pending => ("☐", palette::current().text_faint),
+    };
+    div()
+        .flex()
+        .flex_row()
+        .gap_2()
+        .child(div().text_xs().text_color(rgb(color)).child(mark))
+        .child(
+            div()
+                .text_xs()
+                .text_color(rgb(if matches!(task.status, TaskStatus::InProgress) {
+                    palette::current().text
+                } else {
+                    palette::current().text_muted
+                }))
+                .child(SharedString::from(format!(
+                    "{}. {}",
+                    task.order,
+                    fit(&task.title, 70)
+                ))),
+        )
+}
+
+/// One plain line of a card: the text owns the row and cuts when it is long.
+fn card_line(text: String, color: u32) -> Div {
+    div().flex().flex_row().w_full().min_w_0().child(
+        div()
+            .flex_1()
+            .min_w_0()
+            .overflow_hidden()
+            .truncate()
+            .text_xs()
+            .text_color(rgb(color))
+            .child(SharedString::from(text)),
+    )
+}
+
+/// The task window a card draws: six rows centred on the running task, the
+/// same window the terminal and the compact pane use. `visible_window` returns
+/// the slice; this walks it into the column.
+fn task_rows(col: Div, plan: &PlanDocument) -> Div {
+    let current = plan
+        .tasks
+        .iter()
+        .position(|t| matches!(t.status, TaskStatus::InProgress));
+    let (start, len) = visible_window(plan.tasks.len(), current);
+    let mut col = col;
+    for task in plan.tasks.iter().skip(start).take(len) {
+        col = col.child(task_row(task));
+    }
+    col
+}
+
 /// The checklist body: header line, progress bar, then the visible tasks
 /// windowed around the running one so a long plan cannot push the editor off
 /// the screen. Six task rows is what fits above the editor at the default
 /// window height without squeezing the chat pane.
 fn checklist(plan: &PlanDocument) -> Div {
-    let (done, total, percent, bar) = progress(plan);
-
-    let current = plan
-        .tasks
-        .iter()
-        .position(|t| matches!(t.status, TaskStatus::InProgress));
-    // The header row fills the column (#2496): the title takes the slack and
-    // truncates, the metric group keeps its width at the trailing edge. Before
-    // this, the row packed to the left and left a dead band on the right, and
-    // a long title pushed the bar out of the card.
-    let mut col = div()
+    let (done, total) = progress_counts(plan);
+    let col = div()
         .flex()
         .flex_col()
         .gap_1()
@@ -541,78 +640,11 @@ fn checklist(plan: &PlanDocument) -> Div {
         .min_w_0()
         .rounded(px(CARD_RADIUS))
         .bg(glass_fill(palette::current().panel))
-        .child(
-            div()
-                .flex()
-                .flex_row()
-                .items_center()
-                .gap_2()
-                .min_w_0()
-                .w_full()
-                .child(
-                    div()
-                        .flex_1()
-                        .min_w_0()
-                        .overflow_hidden()
-                        .truncate()
-                        .text_xs()
-                        .text_color(rgb(palette::current().text_muted))
-                        .child(SharedString::from(format!(
-                            "📋 {} · {}/{}",
-                            fit(&plan.title, 60),
-                            done,
-                            total
-                        ))),
-                )
-                .child(
-                    div()
-                        .flex_none()
-                        .text_xs()
-                        .text_color(rgb(palette::current().teal))
-                        .child(bar),
-                )
-                .child(
-                    div()
-                        .flex_none()
-                        .text_xs()
-                        .text_color(rgb(palette::current().text_faint))
-                        .child(SharedString::from(format!("{percent}%"))),
-                ),
-        );
-
-    let window = visible_window(total, current);
-    let (start, len) = window;
-    for task in plan.tasks.iter().skip(start).take(len) {
-        let (mark, color) = match &task.status {
-            TaskStatus::Completed | TaskStatus::Skipped => ("☑", palette::current().teal),
-            TaskStatus::InProgress => ("▶", palette::current().accent),
-            TaskStatus::Failed => ("✗", palette::current().warn),
-            TaskStatus::Blocked(_) => ("⊘", palette::current().warn),
-            TaskStatus::Pending => ("☐", palette::current().text_faint),
-        };
-        col = col.child(
-            div()
-                .flex()
-                .flex_row()
-                .gap_2()
-                .child(div().text_xs().text_color(rgb(color)).child(mark))
-                .child(
-                    div()
-                        .text_xs()
-                        .text_color(rgb(if matches!(task.status, TaskStatus::InProgress) {
-                            palette::current().text
-                        } else {
-                            palette::current().text_muted
-                        }))
-                        .child(SharedString::from(format!(
-                            "{}. {}",
-                            task.order,
-                            fit(&task.title, 70)
-                        ))),
-                ),
-        );
-    }
-    col
+        .child(progress_header_row(
+            plan,
+            format!("📋 {} · {done}/{total}", fit(&plan.title, 60)),
+        ));
+    task_rows(col, plan)
 }
 
 /// A historical checklist in the transcript. Unlike the live strip above the
@@ -838,15 +870,63 @@ mod tests {
         assert!(super::APPROVE_HINT.contains("/execute"));
         assert!(super::APPROVE_HINT.contains("/discard"));
 
-        // A plan with work says how much; an empty one still says it waits.
+        // A plan with work says how much of it is done, not just how many rows
+        // it has; an empty one still says it waits (#2970).
         let sized = plan_with(3, 0, None);
-        assert!(super::editing_lines(&sized)[0].1.contains("3 tasks"));
+        assert!(
+            super::editing_lines(&sized)[0].1.ends_with("0/3"),
+            "{:?}",
+            super::editing_lines(&sized)[0]
+        );
+        assert!(
+            super::editing_lines(&plan_with(3, 2, None))[0]
+                .1
+                .ends_with("2/3"),
+            "the count is progress, so a half-done plan says so"
+        );
         assert!(
             super::editing_lines(&plan)[0]
                 .1
                 .starts_with("\u{270d}\u{fe0f} Editing plan"),
             "an empty plan is still waiting: {:?}",
             super::editing_lines(&plan)[0]
+        );
+        assert!(
+            !super::editing_lines(&plan)[0].1.contains('/'),
+            "a design plan has nothing to count, so it prints no fraction: {:?}",
+            super::editing_lines(&plan)[0]
+        );
+    }
+
+    /// #2970: the approval card named a count and stopped, so a reader asked to
+    /// approve a six-task checklist could not see the progress or a single row
+    /// of it. Telegram draws every row whatever its status, Discord draws the
+    /// rows beside `done/total`, and the window's own live card draws
+    /// `done/total`, the bar and the windowed rows. The one card that carries
+    /// the Approve button was the only surface that showed none of them.
+    #[test]
+    fn the_approval_card_shows_the_progress_and_the_rows_it_asks_to_approve() {
+        let src = include_str!("plan_strip.rs");
+        let body = src
+            .split("pub fn editing_view(")
+            .nth(1)
+            .and_then(|rest| rest.split("/// The plan as a split pane draws it").next())
+            .expect("the editing view body");
+        assert!(
+            body.contains("progress_header_row(plan, head)"),
+            "a checklist plan's header keeps the metrics the live card prints"
+        );
+        assert!(
+            body.contains("task_rows(col, plan)"),
+            "the six-row window the live card uses draws here too"
+        );
+        assert!(
+            body.contains("if plan.tasks.is_empty()"),
+            "only a plan with nothing to count falls back to the bare header"
+        );
+        assert_eq!(
+            super::editing_lines(&plan_with(6, 0, None))[0].1,
+            "\u{270d}\u{fe0f} Editing plan · Landing · 0/6"
         );
     }
 
@@ -1046,19 +1126,25 @@ mod tests {
         // #2496: the header row packed to the left, so a wide card carried a
         // dead band on the right and a long title pushed the bar out of it.
         // The title takes the slack and truncates; the metrics keep their
-        // width at the trailing edge.
+        // width at the trailing edge. The row is one helper now, because the
+        // approval card prints the same metrics as the live card (#2970).
         let src = include_str!("plan_strip.rs");
         let body = src
-            .split("fn checklist(plan: &PlanDocument) -> Div {")
+            .split("fn progress_header_row(plan: &PlanDocument, text: String) -> Div {")
             .nth(1)
             .and_then(|rest| rest.split("\nfn ").next())
-            .expect("the checklist body");
+            .expect("the header row body");
         assert!(body.contains(".flex_1()"), "the title takes the slack");
         assert!(
             body.contains(".flex_none()"),
             "the metric group keeps its width"
         );
         assert!(body.contains(".truncate()"), "a long title is cut");
+        assert!(
+            src.contains("progress_header_row(plan, head)")
+                && src.contains("progress_header_row(\n            plan,"),
+            "the live card and the approval card both draw through it"
+        );
     }
 
     /// #2678: a finished plan's card is text the user reads, so each of its
