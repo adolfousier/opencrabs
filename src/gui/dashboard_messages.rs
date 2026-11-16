@@ -1228,6 +1228,16 @@ impl Dashboard {
                         // Taken before `rows` is moved out below: every retry
                         // log names the row total it was comparing against.
                         let total = loaded.total;
+                        // #2981: a chat that paints as an empty surface has no
+                        // line of its own in this log, so an occurrence cannot
+                        // be told apart from a read that came back with
+                        // nothing. One line per reload names the counts the
+                        // frame was drawn from: rows in the session, turns the
+                        // rows produced, and how many the window folded away.
+                        logging::info(&format!(
+                            "transcript reload: rows {total} turns {} hidden {hidden} landed {landed}",
+                            turns.len(),
+                        ));
                         this.chat_state.transcript.hidden = hidden;
                         this.chat_state.transcript.turns = turns;
                         // The rows now carry the question the card opened the
