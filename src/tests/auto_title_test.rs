@@ -475,8 +475,8 @@ mod title_drift {
             "the poster job needs a darker crop on the left side and a tighter bleed margin",
             "send the finished files to the client on Thursday morning once the numbers agree",
         ]);
-        let mut session = crate::db::models::Session::new(None, None, None);
-        session.title = Some("PRs/Issues".to_string());
+        let mut session = stale_auto_session();
+        session.channel_chat_key = None;
         assert!(
             !AgentService::title_drift_applies(&session, &recent),
             "a local session keeps its own name"
@@ -485,6 +485,77 @@ mod title_drift {
         assert!(
             AgentService::title_drift_applies(&session, &recent),
             "the same stale title on a channel session is still drift"
+        );
+    }
+
+    /// A channel session whose title the model wrote, named the way a DM row is
+    /// named. This is the only shape the drift rule is allowed to touch.
+    fn stale_auto_session() -> crate::db::models::Session {
+        use crate::db::models::TitleSource;
+
+        let mut session = crate::db::models::Session::new(None, None, None);
+        session.title = Some("Telegram: PayrollTSJ v5 September [chat:42]".to_string());
+        session.channel_chat_key = Some("[chat:42]".to_string());
+        session.title_source = TitleSource::Auto;
+        session
+    }
+
+    /// #2956: the retitle renamed Telegram rows the owner had named himself,
+    /// because the only test was "shares no word with recent turns". A name the
+    /// user typed is not stale, whatever it says.
+    #[test]
+    fn a_title_the_user_typed_is_never_re_titled() {
+        use crate::db::models::TitleSource;
+
+        let recent = turns(&[
+            "harvest workbook for November, three sheets to reconcile before the Friday deadline",
+            "the poster job needs a darker crop on the left side and a tighter bleed margin",
+            "send the finished files to the client on Thursday morning once the numbers agree",
+        ]);
+        let mut session = stale_auto_session();
+        session.title_source = TitleSource::Manual;
+        assert!(
+            !AgentService::title_drift_applies(&session, &recent),
+            "a name the owner typed is final"
+        );
+        session.title_source = TitleSource::Template;
+        assert!(
+            !AgentService::title_drift_applies(&session, &recent),
+            "a channel template is not the model's to rewrite either"
+        );
+    }
+
+    /// A group or topic row carries the chat's own label, and that label is how
+    /// the owner finds the row in the list. Drift must never rewrite it, even
+    /// when the label shares no word with the work happening inside.
+    #[test]
+    fn a_title_naming_the_chat_itself_is_never_re_titled() {
+        let recent = turns(&[
+            "harvest workbook for November, three sheets to reconcile before the Friday deadline",
+            "the poster job needs a darker crop on the left side and a tighter bleed margin",
+            "send the finished files to the client on Thursday morning once the numbers agree",
+        ]);
+
+        let mut group = stale_auto_session();
+        group.channel_chat_key = Some("[chat:-5246593256]".to_string());
+        assert!(
+            !AgentService::title_drift_applies(&group, &recent),
+            "a group row keeps the group name"
+        );
+
+        let mut topic = stale_auto_session();
+        topic.channel_chat_key = Some("[chat:-100:topic:2]".to_string());
+        assert!(
+            !AgentService::title_drift_applies(&topic, &recent),
+            "a forum topic row keeps the topic name"
+        );
+
+        let mut slack = stale_auto_session();
+        slack.title = Some("Slack: #harvest-ops [chat:C0123]".to_string());
+        slack.channel_chat_key = Some("[chat:C0123]".to_string());
+        assert!(
+            !AgentService::title_drift_applies(&slack, &recent),
+            "a Slack channel row keeps its #channel name"
         );
     }
 }

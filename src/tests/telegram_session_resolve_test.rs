@@ -65,6 +65,24 @@ fn group_rename_still_refreshes() {
     assert!(should_refresh_label(old, new, TitleSource::Template));
 }
 
+/// #2956: the refresh path is what made a renamed group row flip. It put the
+/// group's own label back on every message, so the drift retitle had something
+/// to rename again and again. A row that is no longer the plain template is
+/// not the refresh path's to rewrite.
+#[test]
+fn group_refresh_leaves_a_chosen_title_alone() {
+    let stored = "Telegram: Payroll cleanup [chat:-5246593256]";
+    let template = "Telegram: OC Dev [chat:-5246593256]";
+    assert!(
+        !should_refresh_label(stored, template, TitleSource::Manual),
+        "a name the owner typed survives a group rename"
+    );
+    assert!(
+        !should_refresh_label(stored, template, TitleSource::Auto),
+        "a title the model wrote is the drift rule's business, not the refresh path's"
+    );
+}
+
 #[tokio::test]
 async fn suffix_lookup_after_switch_touch_picks_switched_row() {
     let (_db, repo) = fresh_repo().await;
