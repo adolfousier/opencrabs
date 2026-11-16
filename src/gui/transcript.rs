@@ -3561,9 +3561,22 @@ fn block_view(
         ),
         Block::Thinking { content } => thinking_block(content, false),
         Block::Tools { calls } => tools_block(calls, selection),
-        Block::CompletedPlan { message_id, plan } => div().child(
-            crate::plan_strip::completed_plan_card(*message_id, plan, selection),
-        ),
+        Block::CompletedPlan { message_id, plan } => div()
+            .flex()
+            .flex_col()
+            .min_w_0()
+            // A plan card is a row that draws outside the turn's card, so it
+            // takes the same two thirds cap as a message (#2969). Left alone it
+            // ran the pane edge to edge, which is what made a finished plan
+            // read as another band across the conversation.
+            .when(content_width > 0.0, |d| {
+                d.max_w(px(message_max_width(content_width)))
+            })
+            .child(crate::plan_strip::completed_plan_card(
+                *message_id,
+                plan,
+                selection,
+            )),
         Block::Marker { hidden } => div()
             .text_xs()
             .text_color(rgb(palette::current().text_muted))
