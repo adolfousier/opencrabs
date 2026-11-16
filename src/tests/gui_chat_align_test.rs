@@ -1,11 +1,11 @@
-//! The chat gives each voice its own side, and the pane chrome clears its ring.
+//! Every row starts at the left margin, and the pane chrome clears its ring.
 //!
 //! The window has no headless harness, so the shape is read from source, the
 //! way the other gui tests do it. Three defects are guarded here:
 //!
-//! - the reader's message sat on the same left margin as the answer, because
-//!   the body that wraps the bubble was a block box and handed it the whole
-//!   column;
+//! - a row pushed to its end lost the start of its own line when it was wider
+//!   than the pane, so the body that wraps the bubble is a block box that hands
+//!   it the whole column (#2981);
 //! - the split-pane title carried no weight and both chrome rows sat inside
 //!   the 24 px corner arc;
 //! - the chat surface had no corner, so inside a pane its square fill painted
@@ -40,35 +40,42 @@ fn body_after<'a>(source: &'a str, anchor: &str) -> &'a str {
     rest.split_at(end).0
 }
 
-/// The reader's stored row hugs the right edge, and only his row does. The
-/// body is a row of one pushed to its end; a block body would hand the bubble
-/// the whole column, which is exactly what put both roles on the left.
+/// Every stored row starts at the left margin. The body that wraps the bubble
+/// is a block box, so it hands the bubble the whole column: a flex row pushed
+/// to its end instead put the excess out of the left edge and left the reader
+/// scrolling past blank height before the text (#2981). The row is not told
+/// whose message it draws, because both voices take the same shape.
 #[test]
-fn the_readers_stored_row_is_pushed_to_the_right() {
+fn every_stored_row_starts_at_the_left_margin() {
     let builder = body_after(TRANSCRIPT, "fn message_row(\n    id: uuid::Uuid,");
     assert!(
-        builder.contains("mine: bool"),
-        "the row is told whose message it draws"
+        !builder.contains("mine: bool"),
+        "the row is not told whose message it draws, because both take one shape"
     );
     assert!(
-        builder.contains(".flex().flex_row().justify_end()"),
-        "the reader's body is a row pushed to its end"
+        !builder.contains("justify_end()"),
+        "nothing is pushed to the row's end, so the body keeps the left edge"
     );
     assert!(
-        builder.contains("if mine"),
-        "the push is conditional, so an answer keeps the left margin"
+        builder.contains(".flex_1()") && builder.contains(".min_w_0()"),
+        "the body hands the bubble the whole column and still shrinks"
     );
 }
 
-/// A live turn is drawn by a second builder. If only the stored row moved, the
-/// bubble would jump to the left the moment the turn persisted.
+/// A live turn is drawn by a second builder. If only the stored row changed
+/// shape, the bubble would jump sideways the moment the turn persisted, so the
+/// live body takes the same block box the stored row does (#2981).
 #[test]
 fn the_live_turn_sits_where_the_stored_row_will() {
     let builder = body_after(TRANSCRIPT, "fn live_user_row(\n    slot: LiveSlot,");
     assert_eq!(
         builder.matches(".justify_end()").count(),
-        1,
-        "the live body is pushed right, once"
+        0,
+        "the live body is a block box, so the sent turn keeps the left margin"
+    );
+    assert!(
+        builder.contains(".flex_1()") && builder.contains(".min_w_0()"),
+        "and it takes the whole column, the same body the stored row uses"
     );
 }
 
