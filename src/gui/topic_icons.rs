@@ -905,7 +905,6 @@ mod tests {
         assert_eq!(all_icon_bytes(true), black);
         assert_eq!(all_icon_bytes(false), white);
         assert_eq!(ALL_ICON_SIZE_SCALE, 0.8);
-        assert!(ALL_ICON_SIZE_SCALE < 1.0);
     }
 
     #[test]
