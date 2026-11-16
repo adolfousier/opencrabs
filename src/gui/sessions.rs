@@ -334,6 +334,17 @@ impl SessionsState {
         self.rail_target()
     }
 
+    /// Whether a card owns the open conversation (#3006). Opening All selects
+    /// the parent itself; opening a topic selects its child id, so the direct
+    /// parent keeps the same accent bar. Cursor is deliberately not an input.
+    pub fn card_selected(&self, id: uuid::Uuid) -> bool {
+        self.selected == Some(id)
+            || self
+                .selected
+                .and_then(|selected| self.parents.get(&selected))
+                .is_some_and(|parent| *parent == id)
+    }
+
     /// Which conversation owns a parent card's activity/preview line (#2804).
     /// A selected child takes its own parent's line. Cursor is deliberately not
     /// an input, and a selection owned by another card leaves this parent alone.
@@ -3621,6 +3632,41 @@ mod tests {
         assert!(rail_source.contains(".px_2()"), "controls keep their inset");
         assert!(!rail_source.contains(".p_2()"));
         assert!(!rail_source.contains(".gap_1()"));
+    }
+
+    /// #3006: All and every child topic keep their owning card focused.
+    /// A sibling topic and an unrelated parent never inherit that state.
+    #[test]
+    fn card_selection_covers_all_and_only_the_open_topics_parent() {
+        let parent = uuid::Uuid::from_u128(101);
+        let topic = uuid::Uuid::from_u128(102);
+        let sibling = uuid::Uuid::from_u128(103);
+        let other_parent = uuid::Uuid::from_u128(201);
+        let other_topic = uuid::Uuid::from_u128(202);
+        let mut state = SessionsState::default();
+        state.parents.extend([
+            (topic, parent),
+            (sibling, parent),
+            (other_topic, other_parent),
+        ]);
+
+        state.selected = Some(parent);
+        assert!(state.card_selected(parent), "All selects the parent");
+        assert!(!state.card_selected(other_parent));
+
+        state.selected = Some(topic);
+        assert!(state.card_selected(parent), "the topic's parent stays lit");
+        assert!(state.card_selected(topic), "the open topic stays selected");
+        assert!(!state.card_selected(sibling), "a sibling does not light");
+        assert!(!state.card_selected(other_parent));
+
+        state.selected = Some(other_topic);
+        assert!(state.card_selected(other_parent));
+        assert!(!state.card_selected(parent));
+
+        state.selected = None;
+        assert!(!state.card_selected(parent));
+        assert!(!state.card_selected(other_parent));
     }
 
     /// The bar is the open conversation's mark, never the cursor's: all

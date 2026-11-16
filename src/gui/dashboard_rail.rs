@@ -674,7 +674,7 @@ impl Dashboard {
             if chip_children.contains(&id) {
                 continue;
             }
-            let selected = self.sessions.selected == Some(id);
+            let selected = self.sessions.card_selected(id);
             let cursored = self.sessions.cursor == Some(id);
             let favorite = self.sessions.is_favorite(id);
             let indented = indented_ids.contains(&id);

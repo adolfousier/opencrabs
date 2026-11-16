@@ -518,6 +518,31 @@ fn rail_pin_toggles_without_opening_the_card() {
     assert!(RAIL_VIEW.contains("pin_toggle: Some(pin_toggle)"));
 }
 
+/// #3006: the parent card and its open topic read as one active hierarchy.
+/// The parent keeps the left accent; the chip keeps only its thin outline.
+#[test]
+fn selected_topic_keeps_the_parent_card_focused() {
+    let rows = block(DASH_RAIL, "for s in rail_order {", "let footer =");
+    assert!(
+        rows.contains("let selected = self.sessions.card_selected(id);"),
+        "card focus resolves both All and a selected child topic"
+    );
+    assert!(
+        !rows.contains("let selected = self.sessions.selected == Some(id);"),
+        "a direct-id-only check drops the parent's focus for child topics"
+    );
+
+    let chip = block(SESSIONS, "pub fn topic_chip(", "pub fn count_chip(");
+    assert!(
+        chip.contains(".border_1().border_color(rgb(pal.accent))"),
+        "the active topic keeps its 1px accent outline"
+    );
+    assert!(
+        !chip.contains(".border_2()") && !chip.contains(".box_shadow("),
+        "the topic indicator never becomes a thick ring or a glow"
+    );
+}
+
 #[test]
 fn selected_topic_owns_the_parent_activity_line() {
     let resolution = block(
