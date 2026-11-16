@@ -8226,7 +8226,9 @@ mod tests {
         // `min_h(px(CONVERSATION_FLOOR))` rather than `min_h_0` (#3000).
         let flat: String = body.split_whitespace().collect::<Vec<_>>().join(" ");
         assert!(
-            flat.contains(".flex_shrink() .min_h_0() .min_w_0() .overflow_hidden() .child(chrome),"),
+            flat.contains(
+                ".flex_shrink() .min_h_0() .min_w_0() .overflow_hidden() .child(chrome),"
+            ),
             "the chrome stack is not shrinkable"
         );
         assert!(
