@@ -104,6 +104,62 @@ pub fn page_landing(offset: f32, max_offset: f32, page: f32, up: bool) -> PageLa
     }
 }
 
+/// Pointer travel that does not scroll yet, in px (#2964).
+pub const AUTO_SCROLL_DEAD_ZONE_PX: f32 = 10.0;
+/// The fastest a stationary pointer can walk a transcript, in px per second.
+pub const AUTO_SCROLL_MAX_SPEED_PX_PER_SEC: f32 = 1600.0;
+/// A delayed frame must not turn elapsed wall time into one large jump.
+const AUTO_SCROLL_MAX_FRAME_SECS: f32 = 0.1;
+
+/// One frame of middle-click auto-scroll, on GPUI's negative-offset scale.
+///
+/// The pointer above the anchor raises the content toward older rows, and the
+/// pointer below it lowers the content toward newer rows. Speed grows with
+/// travel outside the dead zone and then caps. Non-finite input and a frame
+/// with no positive elapsed time move nothing.
+pub fn auto_scroll_delta(anchor_y: f32, pointer_y: f32, elapsed_secs: f32) -> f32 {
+    if !anchor_y.is_finite() || !pointer_y.is_finite() || !elapsed_secs.is_finite() {
+        return 0.0;
+    }
+    let distance = pointer_y - anchor_y;
+    let travel = distance.abs() - AUTO_SCROLL_DEAD_ZONE_PX;
+    if travel <= 0.0 || elapsed_secs <= 0.0 {
+        return 0.0;
+    }
+    let speed = (travel * 6.0).min(AUTO_SCROLL_MAX_SPEED_PX_PER_SEC);
+    -distance.signum() * speed * elapsed_secs.min(AUTO_SCROLL_MAX_FRAME_SECS)
+}
+
+/// Where one auto-scroll frame lands, and whether the gesture is exhausted.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct AutoScrollLanding {
+    /// The offset to write, on GPUI's own scale.
+    pub offset: f32,
+    /// Whether the landing reaches the newest row and can re-arm the follow.
+    pub at_end: bool,
+    /// Whether the viewport actually moved. False at a boundary or without a
+    /// valid measurement, which lets the window retire the frame loop.
+    pub moved: bool,
+}
+
+/// Clamp one auto-scroll frame to the measured transcript (#2964).
+pub fn auto_scroll_landing(offset: f32, max_offset: f32, delta: f32) -> AutoScrollLanding {
+    if !offset.is_finite() || !max_offset.is_finite() || !delta.is_finite() {
+        return AutoScrollLanding {
+            offset,
+            at_end: false,
+            moved: false,
+        };
+    }
+    let max = max_offset.max(0.0);
+    let next = (offset + delta).min(0.0).max(-max);
+    AutoScrollLanding {
+        offset: next,
+        at_end: at_bottom(scrolled_from_top(next), max),
+        moved: next != offset,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
