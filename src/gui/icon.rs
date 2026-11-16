@@ -91,7 +91,7 @@ fn disclosure_svg(expanded: bool, colour: u32) -> Vec<u8> {
         r#"<path d="m9 6 6 6-6 6"/>"#
     };
     format!(
-        r#"<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 24 24" fill="none" stroke="#{colour:06x}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">{path}</svg>"#
+        r##"<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 24 24" fill="none" stroke="#{colour:06x}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">{path}</svg>"##
     )
     .into_bytes()
 }
