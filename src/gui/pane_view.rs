@@ -637,10 +637,6 @@ impl Render for PaneView {
             self.busy,
             self.width,
             f32::from(_window.rem_size()),
-            // A split window's rows take the pane's full width (#2978): the
-            // pane is already a share of the window, so the single-pane two
-            // thirds rule would leave a bubble a column one glyph wide.
-            false,
             fold_handlers,
             transcript::ViewHooks {
                 // The pane's own budget (#2854), not the window's.

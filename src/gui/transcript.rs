@@ -1903,39 +1903,17 @@ const RHYTHM_CELL_PAD_Y: f32 = 6.0;
 const MESSAGE_PAD_X: f32 = 16.0;
 const MESSAGE_PAD_Y: f32 = 12.0;
 
-/// A row never fills the transcript in a single-pane window, whatever its role
-/// (#2969). One card running edge to edge turns the chat into a page: the
-/// reader cannot tell his own words from the answer at a glance, and the
-/// longest row sets the rhythm for everything beside it. Two thirds is the
-/// width every chat client settles on, and the remaining third is the margin
-/// that names the speaker.
+/// The width a row may occupy inside a column of `content_width` (#2979).
 ///
-/// This is a single-pane rule only (#2978). A split window hands every pane a
-/// share of the same width, so a pane is already the measure and its rows take
-/// the whole of it; two thirds of a half is a column one glyph wide.
-const MESSAGE_MAX_FRACTION: f32 = 2.0 / 3.0;
-
-/// The width one message row may occupy inside a column of `content_width`.
-///
-/// Callers pass zero instead of this when the window is split: a zero cap
-/// means "the row's own width", which is the pane.
+/// The whole column. Rows used to stop at two thirds of it (#2969), and in a
+/// single pane that cap measured the bubble against a width the row never had:
+/// the column collapsed to a few pixels, the text wrapped one glyph per line,
+/// and the rest of the pane sat empty underneath it. The same row in a split
+/// took no cap and drew correctly (#2978), which is what named the cap as the
+/// fault rather than the fix. There is one rule now, single pane and split
+/// alike, and it is the box the row is painted into.
 fn message_max_width(content_width: f32) -> f32 {
-    (content_width * MESSAGE_MAX_FRACTION).max(0.0)
-}
-
-/// The cap a row takes, given the width the transcript was planned against and
-/// whether the window is a single pane (#2978).
-///
-/// A single pane keeps two thirds. A split gets zero, which every row reads as
-/// "keep your own width": the pane there is already a share of the window, and
-/// capping a share again is what left the bubble 64 px wide with its text
-/// wrapped one glyph per line.
-fn row_cap_for(content_width: f32, cap_rows: bool) -> f32 {
-    if cap_rows {
-        message_max_width(content_width)
-    } else {
-        0.0
-    }
+    content_width.max(0.0)
 }
 
 /// The message surface carries a tighter corner than the cards around it, so a
@@ -2443,25 +2421,21 @@ fn bubble(
         .flex_col()
         .gap_1()
         .min_w_0()
-        // The only max on the column, and only when the caller passes a cap.
-        // It has to be pixels: a percentage max resolves against a parent
-        // whose width is still indefinite while the row is measured for a
-        // narrow split, so it is ignored exactly where it matters. `max_w`
-        // and `max_w_full` also write the same field
+        // The column fills the row it is painted into (#2979). Without a width
+        // of its own the column sized to max-content, which made gpui shape the
+        // text as one endless line, or, measured against a width the row did
+        // not have, collapse to a single glyph. `w_full` makes the text wrap at
+        // the box actually painted, not at a number computed a frame earlier.
+        //
+        // The max stays, and it has to be pixels: a percentage max resolves
+        // against a parent whose width is still indefinite while the row is
+        // measured, so it is ignored exactly where it matters. `max_w` and
+        // `max_w_full` also write the same field
         // (`gpui-macros-0.2.2/src/styles.rs`, both land on `max_size.width`),
         // so a percentage max after this line silently replaced the cap and
         // handed the row back its max-content line (#2976).
-        //
-        // A split window passes no cap at all (#2978). Every pane there is
-        // already a share of the window, and two thirds of a half is a column
-        // one glyph wide, so the row's own width is the measure: `w_full`
-        // makes the column fill it and the text wraps at the box actually
-        // painted, not at a number computed a frame earlier. Two thirds is the
-        // single-pane rule, where the window is wide enough to want the margin
-        // that names the speaker (#2969), and there the bubble keeps hugging
-        // its own text.
+        .w_full()
         .when(row_cap > 0.0, |d| d.max_w(px(row_cap)))
-        .when(row_cap <= 0.0, |d| d.w_full())
         .px(px(MESSAGE_PAD_X))
         .py(px(MESSAGE_PAD_Y));
     if bubble_has_surface(role) {
@@ -2562,11 +2536,8 @@ fn forward_block(
         .min_w_0()
         .flex_shrink_0()
         .w_full()
-        // A forward is a row like any other, so it stops where the bubble
-        // stops: two thirds in a single-pane window, the pane's own width in a
-        // split (#2969, #2978). The bar on its left marks the source; the
-        // freed margin is what keeps a pasted report from reading as the
-        // reader's own page.
+        // A forward is a row like any other, so it takes the same column the
+        // bubble takes (#2979). The bar on its left marks the source.
         .when(row_cap > 0.0, |d| d.max_w(px(row_cap)))
         .pl(px(FORWARD_BAR_GAP))
         .pr(px(MESSAGE_PAD_X))
@@ -2929,10 +2900,7 @@ fn settled_card(
         .flex_col()
         .w_full()
         // A history card is a row in the transcript like a message, so it
-        // takes the same cap (#2969): two thirds in a single-pane window, the
-        // pane's own width in a split, where no cap arrives at all (#2978).
-        // Full width in one pane made every finished turn read as a band
-        // across it, which is what buried the conversation between them.
+        // takes the same column (#2979).
         .when(max_width > 0.0, |d| d.max_w(px(max_width)))
         .min_w_0()
         .flex_shrink_0()
@@ -3479,9 +3447,8 @@ fn live_card(
         .flex()
         .flex_col()
         .w_full()
-        // The live card follows the same rule as the settled one (#2969), so a
-        // turn does not change width the moment it finishes: two thirds in one
-        // pane, the pane's full width in a split (#2978).
+        // The live card follows the same rule as the settled one (#2979), so a
+        // turn does not change width the moment it finishes.
         .when(max_width > 0.0, |d| d.max_w(px(max_width)))
         .min_w_0()
         .flex_shrink_0()
@@ -3607,10 +3574,7 @@ fn block_view(
             .min_w_0()
             .w_full()
             // A plan card is a row that draws outside the turn's card, so it
-            // takes the same cap as a message (#2969): two thirds in a
-            // single-pane window, the pane's own width in a split (#2978).
-            // Left alone it ran the pane edge to edge, which is what made a
-            // finished plan read as another band across the conversation.
+            // takes the same column as a message (#2979).
             .when(row_cap > 0.0, |d| d.max_w(px(row_cap)))
             .child(crate::plan_strip::completed_plan_card(
                 *message_id,
@@ -4003,8 +3967,7 @@ fn live_view(
     // anything (#2895). The notices above still draw; the card does not.
     if live.has_turn_content() {
         // The live card is a row of the same conversation, so it takes the
-        // same cap the settled rows take: two thirds in a single-pane window,
-        // the pane's own width in a split (#2969, #2978).
+        // same column the settled rows take (#2979).
         let card = live_card(live, expanded, ctx, drag, press, row_cap);
         col = col.child(match live_click {
             Some(click) => {
@@ -5032,18 +4995,14 @@ pub fn view(
     busy: bool,
     content_width: f32,
     rem_size: f32,
-    cap_rows: bool,
     mut handlers: HashMap<String, ClickHandler>,
     hooks: ViewHooks,
 ) -> Stateful<Div> {
     let content_width = transcript_content_width(content_width, rem_size);
-    // Two thirds is the single-pane rule (#2969). A split window hands each
-    // pane a share of the same width, so a pane is already the measure and its
-    // rows take the whole of it: two thirds of a half left a bubble a column
-    // one glyph wide, with the rest of the pane empty (#2978). A zero cap is
-    // the way every row says "no cap" without a second flag travelling beside
-    // it.
-    let row_cap = row_cap_for(content_width, cap_rows);
+    // Every row takes that column, single pane and split alike (#2979). The
+    // two thirds cap that used to be computed here is what broke a single-pane
+    // window: it measured the bubble against a width the row never had.
+    let row_cap = message_max_width(content_width);
     let ViewHooks {
         attachments: attachment_handlers,
         drag,
@@ -5745,33 +5704,22 @@ mod tests {
         }
     }
 
-    /// #2978: a split window's rows take the pane's whole width. The cap is a
-    /// single-pane rule, so the flag alone decides whether one is handed out:
-    /// two thirds of the planned width when the window is one pane, and no cap
-    /// at all when it is split, where the pane is already a share of the
-    /// window and capping it again left the bubble 64 px wide with its text
-    /// wrapped one glyph per line.
+    /// #2979: every row takes the column it is painted into, single pane and
+    /// split alike. The two thirds cap is gone: in a single pane it measured
+    /// the bubble against a width the row never had, so the column collapsed to
+    /// a few pixels and the text wrapped one glyph per line, while the same row
+    /// in a split, which took no cap, drew correctly.
     #[test]
-    fn a_split_row_takes_no_cap_and_a_single_pane_keeps_two_thirds() {
+    fn every_row_takes_the_whole_column() {
         assert_eq!(
-            row_cap_for(600.0, true),
             message_max_width(600.0),
-            "a single pane keeps the two thirds cap"
+            600.0,
+            "a row may use the whole column"
         );
         assert_eq!(
-            row_cap_for(600.0, true),
-            400.0,
-            "two thirds of the planned width, to the pixel"
-        );
-        assert_eq!(
-            row_cap_for(600.0, false),
+            message_max_width(0.0),
             0.0,
-            "a split hands out no cap, so the row keeps its own width"
-        );
-        assert_eq!(
-            row_cap_for(0.0, true),
-            0.0,
-            "an unmeasured window caps at nothing rather than going negative"
+            "an unmeasured window gives no width rather than going negative"
         );
     }
 
