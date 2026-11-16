@@ -1058,11 +1058,16 @@ impl AgentService {
         // Recent user turns, read before the compaction load takes ownership of
         // the list below. The title's staleness is judged against these (#2882):
         // a summary row is not a user turn, so marker banners are skipped.
+        //
+        // Twenty turns, not five. Against a five-turn window a retitle the model
+        // had just written fell word-disjoint again after three new turns and the
+        // row was renamed over and over; the wider window makes the test a real
+        // staleness signal (#2956).
         let recent_user_texts: Vec<String> = all_db_messages
             .iter()
             .rev()
             .filter(|msg| msg.role == "user" && !msg.content.starts_with("[CONTEXT COMPACTION"))
-            .take(5)
+            .take(20)
             .map(|msg| msg.content.clone())
             .collect();
 

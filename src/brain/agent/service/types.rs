@@ -690,9 +690,16 @@ impl AgentService {
     /// Deliberately conservative. It needs at least three substantial turns
     /// (20+ characters each) totalling 200+ characters, so a one-word follow-up
     /// ("ok", "thanks") never re-titles anything, and a title sharing even one
-    /// distinctive word ("payrolltsj", "harvest") is left alone. The retitle it
-    /// authorises is self-limiting: the new title is generated from these same
-    /// recent turns, so it stops drifting.
+    /// distinctive word ("payrolltsj", "harvest") is left alone.
+    ///
+    /// The window it compares against is the last twenty substantial turns, not
+    /// the last few. An earlier version of this comment called the retitle
+    /// "self-limiting" because the new title comes from the same turns, and that
+    /// was wrong: against a five-turn window the generated title fell
+    /// word-disjoint again after three new turns and the row was renamed over
+    /// and over. Twenty turns make the retitle a real staleness signal instead
+    /// of a cycle, and a title the model just wrote shares words with the
+    /// newest turns by construction.
     pub(crate) fn title_drifted_from(title: Option<&str>, recent_user_texts: &[String]) -> bool {
         let Some(title) = title else {
             return false;
@@ -716,20 +723,53 @@ impl AgentService {
         title_tokens.is_disjoint(&recent)
     }
 
-    /// Does the drift rule apply to this session at all? (#2882 follow-up)
+    /// Does the drift rule apply to this session at all? (#2882 follow-up, #2956)
     ///
-    /// Channel sessions only. A local/TUI row carries a name the owner picked
-    /// or the first turn produced, and a short hand-picked name ("Fmt",
-    /// "PRs/Issues") is nearly always word-disjoint from the last few turns, so
-    /// applying drift there re-titled local sessions over and over against the
-    /// owner's will. A row is a channel session exactly when it has a chat key
-    /// (#1721); local rows leave it NULL.
+    /// Three conditions, and every one of them exists because the rule shipped
+    /// without it and renamed a row it had no business touching.
+    ///
+    /// 1. A channel session. A local/TUI row carries a name the owner picked or
+    ///    the first turn produced, and a short hand-picked name ("Fmt",
+    ///    "PRs/Issues") is nearly always word-disjoint from the last few turns,
+    ///    so applying drift there re-titled local sessions against the owner's
+    ///    will. A row is a channel session exactly when it has a chat key
+    ///    (#1721); local rows leave it NULL.
+    /// 2. A title the auto-title model wrote. `manual` is a name the user typed
+    ///    and `template` is the channel's own label, and neither may be
+    ///    rewritten by a model (#2956).
+    /// 3. Not a title that names a place. See [`Self::title_names_a_place`].
     pub(crate) fn title_drift_applies(
         session: &crate::db::models::Session,
         recent_user_texts: &[String],
     ) -> bool {
         session.channel_chat_key.is_some()
+            && session.title_source == crate::db::models::TitleSource::Auto
+            && !Self::title_names_a_place(session)
             && Self::title_drifted_from(session.title.as_deref(), recent_user_texts)
+    }
+
+    /// Does this title name the chat itself rather than the work in it? (#2956)
+    ///
+    /// A group or topic row carries the chat's own label, and that label is what
+    /// makes the row findable in the list, so the retitle must never rewrite it.
+    /// The chat key carries the signal where the platform does: a Telegram group
+    /// id is negative, and a forum topic only exists inside a group, so both
+    /// show up in the key. A Slack channel title keeps its `#` form.
+    ///
+    /// A channel whose key looks like a DM keeps drift eligibility, which is the
+    /// safe direction to be wrong in: condition 2 already limits drift to a
+    /// title the model wrote, so a place that slips through is renamed by the
+    /// model and not over a name the user typed.
+    pub(crate) fn title_names_a_place(session: &crate::db::models::Session) -> bool {
+        if let Some(key) = session.channel_chat_key.as_deref()
+            && (key.contains(":-") || key.contains(":topic:"))
+        {
+            return true;
+        }
+        session
+            .title
+            .as_deref()
+            .is_some_and(|title| title.contains(": #"))
     }
 
     /// Check if a session title is a default channel-generated title that
