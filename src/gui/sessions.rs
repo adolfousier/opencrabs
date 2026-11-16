@@ -1421,6 +1421,8 @@ pub fn pin_mark(favorited: bool) -> (bool, u32) {
 /// Full rail cards use one media size for stored pictures, platform marks and
 /// initials placeholders.
 pub const RAIL_MARK_REMS: f32 = 1.75;
+/// The closed rail keeps only its brand mark and reopen button (#2982).
+pub const COLLAPSED_RAIL_REM: f32 = 3.5;
 const RAIL_CHANNEL_BADGE_REMS: f32 = 0.75;
 const RAIL_CHANNEL_GLYPH_REMS: f32 = 0.45;
 
@@ -2409,6 +2411,26 @@ pub fn rail(
         col = col.child(div().w_full().mt_auto().px_2().pb_2().child(footer));
     }
     col
+}
+
+/// The closed rail keeps the brand and its reopen button in the same thin
+/// column, without resolving any session rows or filter chrome (#2982).
+pub fn collapsed_rail(toggle: Stateful<Div>) -> Stateful<Div> {
+    div()
+        .id("session-rail-collapsed")
+        .flex()
+        .flex_col()
+        .flex_none()
+        .items_center()
+        .gap_2()
+        .w(rems(COLLAPSED_RAIL_REM))
+        .h_full()
+        .py_3()
+        .bg(rgb(palette::current().panel))
+        .border_r_1()
+        .border_color(rgb(palette::current().panel_hi))
+        .child(icon::banner_logo())
+        .child(toggle)
 }
 
 /// A compact brand header instead of a second session counter.

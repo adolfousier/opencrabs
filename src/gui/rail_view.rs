@@ -196,7 +196,7 @@ impl Link {
 /// The padding is the hit box: an icon alone is a 16px target, and the header
 /// row is the one place in the rail where a miss costs a whole repaint of the
 /// list underneath it.
-fn header_button(id: &'static str, glyph: impl IntoElement) -> Stateful<Div> {
+pub(crate) fn header_button(id: &'static str, glyph: impl IntoElement) -> Stateful<Div> {
     div()
         .id(id)
         .flex()

@@ -2251,18 +2251,13 @@ impl Render for Dashboard {
         // pane that settles between frames is caught on the next one.
         self.chime_settled_plan_tasks(cx);
 
-        // The rail is a cached view of its own (#2933). The window resolves one
-        // frame of plain data and hands it over; the rows, the topic chips, the
-        // badges and the filter menu are built there, and a frame that compares
-        // equal replays the last prepaint instead of minting every listener
-        // again. Built only when something draws it: an element nobody seats is
-        // work nobody asked for, the rail is closed most of the time, and with
-        // it closed the frame would resolve every map under it and paint
-        // nothing (#2805).
+        // The expanded rail is a cached view of its own (#2933). The closed
+        // rail never resolves that frame: it keeps only the logo and reopen
+        // button, so no session maps are built behind the compact strip.
         let rail = if self.rail_open || self.screen == Screen::Onboard {
             self.rail_element(cx)
         } else {
-            div().into_any_element()
+            self.collapsed_rail_element(cx)
         };
 
         // One label drives the in-window chrome and the OS titlebar: the old
@@ -2562,7 +2557,7 @@ impl Render for Dashboard {
         // (#2395). The usage screen loses its side panel from the same number.
         let pane_width = attachment_view::content_width(
             f32::from(window.viewport_size().width),
-            self.rail_width * self.rem,
+            self.visible_rail_width() * self.rem,
         );
         let picker_layout = model_layout::model_layout(
             pane_width,
@@ -2981,11 +2976,7 @@ impl Render for Dashboard {
                 // from the live window so a resize lands on the same frame
                 // (#2459). The rail is subtracted only when it is drawn.
                 let viewport = f32::from(window.viewport_size().width);
-                let rail = if self.rail_open {
-                    self.rail_width * self.rem
-                } else {
-                    0.0
-                };
+                let rail = self.visible_rail_width() * self.rem;
                 let cols = mission_control::grid_columns(viewport - rail, self.rem);
                 // The cards draw the snapshot the four services produced on
                 // entry; the frame itself never reads SQLite (#2426).
@@ -4652,6 +4643,8 @@ impl Render for Dashboard {
                 this.drag_from = Some((f32::from(window.mouse_position().x), width * this.rem));
             });
             root = root.child(rail).child(splitter(grab));
+        } else if self.screen != Screen::Onboard {
+            root = root.child(rail);
         }
         // The panes go in before every overlay. gpui paints children in the
         // order they are added, so a pane added after an overlay covers it:
@@ -5097,7 +5090,7 @@ impl Render for Dashboard {
         // While a split waits for its session the chat dims, and a card says what
         // to do. The sidebar is left bright so its rows can be picked (#2438).
         if let Some(layout) = self.split_pick {
-            let rail_px = px(self.rail_width * self.rem);
+            let rail_px = px(self.visible_rail_width() * self.rem);
             root = root.child(split_pick_overlay(layout, rail_px));
         }
         // The name prompt takes the whole window: the scrim darkens everything

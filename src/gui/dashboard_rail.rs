@@ -478,6 +478,31 @@ impl Dashboard {
 }
 
 impl Dashboard {
+    /// The width the current rail state reserves beside the conversation.
+    pub(crate) fn visible_rail_width(&self) -> f32 {
+        if self.rail_open {
+            self.rail_width
+        } else {
+            sessions::COLLAPSED_RAIL_REM
+        }
+    }
+
+    /// The closed rail is deliberately cheap: no cached frame, rows or menus,
+    /// only the real mark and the same toggle action the expanded header uses.
+    pub(crate) fn collapsed_rail_element(&self, cx: &mut Context<Self>) -> AnyElement {
+        let open_rail = cx.listener(|this, _ev: &ClickEvent, _window, cx| {
+            this.toggle_rail(cx);
+        });
+        sessions::collapsed_rail(
+            rail_view::header_button(
+                "collapsed-rail-open",
+                sessions::sidebar_icon(1.0, palette::current().text_muted),
+            )
+            .on_click(open_rail),
+        )
+        .into_any_element()
+    }
+
     /// The rail column, drawn from the frame this window resolved for it
     /// (#2933).
     ///

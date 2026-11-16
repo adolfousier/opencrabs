@@ -14,6 +14,7 @@ const SESSIONS: &str = include_str!("../gui/sessions.rs");
 const RAIL_VIEW: &str = include_str!("../gui/rail_view.rs");
 const DASH_RAIL: &str = include_str!("../gui/dashboard_rail.rs");
 const DASH_TOPICS: &str = include_str!("../gui/dashboard_topics.rs");
+const MAIN: &str = include_str!("../gui/main.rs");
 
 fn block<'a>(source: &'a str, start: &str, end: &str) -> &'a str {
     let (_, tail) = source.split_once(start).expect("source block starts");
@@ -230,6 +231,83 @@ fn the_rail_header_holds_its_buttons_inline() {
     assert!(
         RAIL_VIEW.contains("fn header_button(id: &'static str, glyph: impl IntoElement)"),
         "both header buttons share one hit box"
+    );
+}
+
+/// #2982: closing the sidebar leaves a useful compact rail, not a blank edge.
+#[test]
+fn collapsed_rail_keeps_the_logo_above_a_working_reopen_button() {
+    let rail = block(
+        SESSIONS,
+        "pub fn collapsed_rail(",
+        "/// A compact brand header",
+    );
+    for needle in [
+        ".flex_col()",
+        ".items_center()",
+        ".w(rems(COLLAPSED_RAIL_REM))",
+        ".h_full()",
+        ".border_r_1()",
+    ] {
+        assert!(rail.contains(needle), "collapsed rail misses {needle}");
+    }
+    let logo = rail.find("icon::banner_logo()").expect("real logo");
+    let toggle = rail.find(".child(toggle)").expect("toggle below logo");
+    assert!(logo < toggle, "the logo is the top item");
+    assert!(
+        !rail.contains("\"OpenCrabs\""),
+        "the thin rail has no expanded text label"
+    );
+
+    let element = block(
+        DASH_RAIL,
+        "pub(crate) fn collapsed_rail_element",
+        "/// The rail column",
+    );
+    assert!(element.contains("\"collapsed-rail-open\""));
+    assert!(element.contains("sessions::sidebar_icon("));
+    assert!(
+        element.contains("this.toggle_rail(cx)"),
+        "the pointer control uses the same reopen path as ctrl+s"
+    );
+    assert!(
+        !element.contains("rail_frame"),
+        "a closed rail does not resolve session rows or activity maps"
+    );
+
+    let branch = block(
+        MAIN,
+        "let rail = if self.rail_open || self.screen == Screen::Onboard",
+        "// One label drives",
+    );
+    assert!(branch.contains("self.collapsed_rail_element(cx)"));
+    assert!(
+        !branch.contains("div().into_any_element()"),
+        "the closed branch is no longer an empty element"
+    );
+    let root = block(
+        MAIN,
+        "if self.rail_open {\n            let width = self.rail_width;",
+        "// The panes go in before every overlay.",
+    );
+    assert!(root.contains("} else if self.screen != Screen::Onboard {"));
+    assert!(root.contains("root = root.child(rail);"));
+}
+
+#[test]
+fn adjacent_layouts_subtract_the_actual_collapsed_rail_width() {
+    let width = block(
+        DASH_RAIL,
+        "pub(crate) fn visible_rail_width",
+        "/// The closed rail",
+    );
+    assert!(width.contains("if self.rail_open"));
+    assert!(width.contains("self.rail_width"));
+    assert!(width.contains("sessions::COLLAPSED_RAIL_REM"));
+    assert_eq!(
+        MAIN.matches("self.visible_rail_width() * self.rem").count(),
+        3,
+        "attachments, Mission Control, and split picking share the visible width"
     );
 }
 
