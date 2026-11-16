@@ -329,14 +329,14 @@ mod tests {
             .expect("the strip body");
         assert_eq!(
             row.matches(".when(scroll,").count(),
-            2,
-            "both edges bound the expanded strip"
+            1,
+            "only the side column changes when the strip expands"
         );
-        // Across the top the expanded row is ONE line that scrolls sideways
-        // (#2949). It used to wrap, so a family of 46 topics drew four rows and
-        // pushed the transcript down by its own height.
-        assert!(row.contains(".when(!scroll, |d| d.flex_wrap())"));
-        assert!(row.contains(".when(scroll, |d| d.flex_nowrap().overflow_x_scroll())"));
+        // Across the top or bottom the row is ALWAYS one line that scrolls
+        // sideways, collapsed or expanded (#3002). Gating this on `scroll`
+        // left the collapsed row wrapping onto extra lines.
+        assert!(!row.contains(".flex_wrap()"));
+        assert!(row.contains(".flex_nowrap().overflow_x_scroll()"));
         assert_eq!(
             row.matches("overflow_x_scroll()").count(),
             1,

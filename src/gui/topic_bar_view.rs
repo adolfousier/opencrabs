@@ -28,9 +28,9 @@ use crate::topic_tabs;
 /// chat's top right and floats over the transcript instead of growing this
 /// strip by five rows when it opens.
 ///
-/// `scroll` lets the tabs scroll once the row is expanded, which only the
-/// expanded state asks for (#2949). Collapsed, the row is the cap plus a pill
-/// and fits the height it always had.
+/// `scroll` bounds and scrolls the vertical column once it is expanded.
+/// Across the top or bottom the tabs always stay on one row and scroll
+/// sideways, collapsed or expanded (#3002).
 ///
 /// `pill` is the expand or fold control, and it is drawn as a sibling of the
 /// scroller rather than as one of its children (#2949). Inside the scroller a
@@ -117,15 +117,13 @@ pub(crate) fn topic_strip(
             .border_b_1()
             .border_color(separator)
             .child(leading)
-            // Collapsed, the tabs wrap onto a second line rather than being cut
-            // off, so a narrow window never hides a topic (#2414). Expanded
-            // they stay on one line and scroll sideways (#2949): a family of 46
-            // topics wrapped into four rows and pushed the transcript down by
-            // its own height, which is not a topic row any more.
+            // One row at the top or bottom, in both states (#3002). A narrow
+            // window scrolls the tabs sideways instead of wrapping them onto
+            // another line and taking height from the transcript.
             .child(
                 div()
-                    // Stateful for the expanded scroll, and keyed per pane so
-                    // two strips never share one element's state.
+                    // Stateful for the scroll, and keyed per pane so two
+                    // strips never share one element's state.
                     .id(SharedString::from(format!("topic-strip-tabs-{key}")))
                     .flex_1()
                     .min_w_0()
@@ -133,10 +131,7 @@ pub(crate) fn topic_strip(
                     .flex_row()
                     .items_center()
                     .gap_1()
-                    .when(!scroll, |d| d.flex_wrap())
-                    // One row, wider than the window, moving under the reader
-                    // instead of growing taller than the chat it labels.
-                    .when(scroll, |d| d.flex_nowrap().overflow_x_scroll())
+                    .flex_nowrap().overflow_x_scroll()
                     .children(tabs),
             )
             // Outside the scroller, so the fold control sits at the row's end
