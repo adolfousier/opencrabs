@@ -63,8 +63,8 @@ pub fn platform_icon(platform: &str, size: f32) -> Option<AnyElement> {
 /// A platform mark in an explicit colour, drawn at `size` rems. The rail uses
 /// this for the small accent badge over a stored session picture (#2800).
 ///
-/// `None` when no mark is embedded for that platform: the caller then paints
-/// the name alone rather than inventing a picture for it.
+/// `None` when no mark is embedded for that platform, so the caller can choose
+/// its own fallback.
 pub fn platform_icon_with_colour(platform: &str, size: f32, colour: u32) -> Option<AnyElement> {
     let svg = platform_svg(platform)?;
     // GPUI rasterizes a vector from its intrinsic size, so the source carries

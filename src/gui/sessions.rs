@@ -1418,10 +1418,55 @@ pub fn pin_mark(favorited: bool) -> (bool, u32) {
     }
 }
 
-/// Full rail cards use one media size for stored pictures and platform marks.
+/// Full rail cards use one media size for stored pictures, platform marks and
+/// initials placeholders.
 pub const RAIL_MARK_REMS: f32 = 1.75;
 const RAIL_CHANNEL_BADGE_REMS: f32 = 0.75;
 const RAIL_CHANNEL_GLYPH_REMS: f32 = 0.45;
+
+/// Telegram-like placeholder colours. The session id picks one, so a refresh
+/// or a rename cannot repaint the same conversation.
+const PLACEHOLDER_COLOURS: [u32; 7] = [
+    0x408acf, 0x8a63d2, 0x3ca374, 0xd66a4e, 0xc94f63, 0x278ea5, 0xb07a28,
+];
+
+/// The first letter-like character in the already-cleaned row title. Punctuation
+/// and emoji are skipped; a title with no letters or digits gets a neutral mark.
+fn placeholder_initial(label: &str) -> String {
+    label
+        .chars()
+        .find(|character| character.is_alphanumeric())
+        .map(|character| character.to_uppercase().collect())
+        .unwrap_or_else(|| "?".to_string())
+}
+
+fn placeholder_colour(id: uuid::Uuid) -> u32 {
+    let index = (id.as_u128() % PLACEHOLDER_COLOURS.len() as u128) as usize;
+    PLACEHOLDER_COLOURS[index]
+}
+
+/// A same-size avatar for a session with neither stored artwork nor a platform
+/// mark. Reserving this slot keeps every title on the same vertical rhythm.
+fn initial_placeholder(id: uuid::Uuid, label: &str) -> AnyElement {
+    let base = placeholder_colour(id);
+    let highlight = gui_theme::mix(base, 0xffffff, 18, 100);
+    div()
+        .flex_none()
+        .size(rems(RAIL_MARK_REMS))
+        .rounded_full()
+        .items_center()
+        .justify_center()
+        .bg(linear_gradient(
+            135.0,
+            linear_color_stop(rgb(highlight), 0.0),
+            linear_color_stop(rgb(base), 1.0),
+        ))
+        .text_xs()
+        .font_weight(gpui::FontWeight::BOLD)
+        .text_color(rgb(0xffffff))
+        .child(SharedString::from(placeholder_initial(label)))
+        .into_any_element()
+}
 
 /// The card's quiet stamp, Telegram style: a session touched today shows its
 /// clock alone, and anything older collapses to its calendar day. A rail only
@@ -1912,8 +1957,8 @@ pub fn row(card: &RailCard, flags: RowFlags, chips: Option<Stateful<Div>>) -> St
     };
     // One media slot, never two side-by-side icons (#2800). A stored picture
     // carries a small accent channel badge at its top right. Without a picture,
-    // a supported channel keeps only its standalone mark; GUI-only sessions
-    // get no invented avatar.
+    // a supported channel keeps its standalone mark; every other session gets
+    // a stable initial placeholder so its title never shifts left.
     let platform = rail::platform_of(stored.filter(|_| !indented));
     let picture = icon.map(|icon| {
         let badge = platform
@@ -1947,9 +1992,11 @@ pub fn row(card: &RailCard, flags: RowFlags, chips: Option<Stateful<Div>>) -> St
             .when_some(badge, |d, badge| d.child(badge))
             .into_any_element()
     });
-    let marks = picture.or_else(|| {
-        platform.and_then(|platform| platform_icons::platform_icon(platform, RAIL_MARK_REMS))
-    });
+    let marks = picture
+        .or_else(|| {
+            platform.and_then(|platform| platform_icons::platform_icon(platform, RAIL_MARK_REMS))
+        })
+        .unwrap_or_else(|| initial_placeholder(card.id, &label));
     let title_text = div()
         // A closed topic reads dimmed: still there, no longer taking work.
         .text_color(rgb(if closed {
@@ -2010,7 +2057,7 @@ pub fn row(card: &RailCard, flags: RowFlags, chips: Option<Stateful<Div>>) -> St
         // has free space to push against. Without this it shrinks to its text
         // and the glyph parks right after the name (#2636 follow-up).
         .w_full()
-        .when_some(marks, |d, marks| d.child(marks))
+        .child(marks)
         .child(title_text)
         // The stamp, the pin and the activity glyph keep the right edge of
         // the name line. `ml_auto` carries them there in one group, and
@@ -2366,7 +2413,8 @@ mod tests {
         Database, FindMatch, MenuKind, PlanFilter, RailChip, RailFilter, SessionsState,
         accent_bar_visible, chip_order_key, chip_width_at, filter_is_active, fit,
         icon_write_needed, load_sessions, merge_find_results, pack_rows, palette, pin_mark,
-        preview_line, rail_cost, rail_filter_allows, rail_menu_entries, rail_stamp, strip_budgets,
+        placeholder_colour, placeholder_initial, preview_line, rail_cost, rail_filter_allows,
+        rail_menu_entries, rail_stamp, strip_budgets,
     };
     use opencrabs::db::models::Session;
     use opencrabs::db::repository::ContentSearchRow;
@@ -2538,6 +2586,30 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn imageless_session_placeholder_uses_the_first_uppercase_letter() {
+        for (title, expected) in [
+            ("Copy env and replace config", "C"),
+            ("  adolfo", "A"),
+            ("(untitled)", "U"),
+            ("émilie", "É"),
+            ("日本語のセッション", "日"),
+            ("🦀 crab", "C"),
+            ("🦀", "?"),
+            ("", "?"),
+        ] {
+            assert_eq!(placeholder_initial(title), expected, "title: {title:?}");
+        }
+    }
+
+    #[test]
+    fn imageless_session_placeholder_colour_is_stable_per_id() {
+        let first = uuid::Uuid::from_u128(0);
+        let second = uuid::Uuid::from_u128(1);
+        assert_eq!(placeholder_colour(first), placeholder_colour(first));
+        assert_ne!(placeholder_colour(first), placeholder_colour(second));
     }
 
     /// The 4 MB thread pattern, seated. The phase-0 crash: DB work running on

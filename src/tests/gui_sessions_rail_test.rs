@@ -108,10 +108,27 @@ fn rail_card_media_is_large_dual_and_the_title_is_bold() {
         );
     }
     assert!(
-        media.contains("let marks = picture.or_else")
-            && media.contains("platform_icons::platform_icon(platform, RAIL_MARK_REMS)"),
-        "only a missing picture falls back to the standalone 28px channel mark"
+        media.contains("let marks = picture")
+            && media.contains("platform_icons::platform_icon(platform, RAIL_MARK_REMS)")
+            && media.contains(".unwrap_or_else(|| initial_placeholder(card.id, &label))"),
+        "stored art wins, then a channel mark, then a same-size initial placeholder"
     );
+    let placeholder = block(
+        SESSIONS,
+        "fn initial_placeholder(",
+        "/// The card's quiet stamp",
+    );
+    for needle in [
+        ".size(rems(RAIL_MARK_REMS))",
+        ".rounded_full()",
+        "placeholder_colour(id)",
+        "placeholder_initial(label)",
+    ] {
+        assert!(
+            placeholder.contains(needle),
+            "the fallback is a stable, colored, same-size initials circle: {needle}"
+        );
+    }
     assert!(
         !media.contains(".when_some(platform_mark,") && !media.contains(".gap_2()"),
         "the side-by-side double-icon group is gone"
@@ -123,9 +140,12 @@ fn rail_card_media_is_large_dual_and_the_title_is_bold() {
         "the media slot adds no margin of its own: one 8px gap carries the air"
     );
     assert!(
-        title.contains(".gap_2()")
-            && title.contains(".when_some(marks, |d, marks| d.child(marks))"),
-        "the name line keeps one tight gap beside the name"
+        title.contains(".gap_2()") && title.contains(".child(marks)"),
+        "every row reserves the media slot and one tight gap beside the name"
+    );
+    assert!(
+        !title.contains(".when_some(marks,"),
+        "an imageless row can never drop its media slot"
     );
     let title_weight = block(row, "let title_text = if indented", "let title = div()");
     assert!(title_weight.contains("title_text.text_xs()"));
