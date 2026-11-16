@@ -1352,12 +1352,12 @@ impl Dashboard {
         // claim the turn did nothing (#2632).
         turn.summary.tool_calls = turn.summary.tool_calls.max(metrics.tool_calls);
         let anchor = turn.anchor.clone();
-        self.metrics.by_anchor.insert(anchor.clone(), metrics);
-        // The card the user was watching keeps its rows once it settles
-        // (#2632): a turn that folds its ledger away the moment it finishes
-        // reads as if the work never happened. The chevron still folds it, and
-        // older turns keep the terminal's folded default.
-        self.chat_state.transcript.expanded.insert(anchor);
+        self.metrics.by_anchor.insert(anchor, metrics);
+        // The card settles folded, like every other turn (#2951). The count
+        // above is what keeps #2632 honest: a row that lost its ledger still
+        // reports the calls the user watched, and the chevron opens the rows.
+        // Opening them here moved the reader on every completion and buried
+        // the answer under the ledger, without the reader asking for it.
     }
 
     /// Give a freshly loaded pane the numbers its turn recorded at settle: the
