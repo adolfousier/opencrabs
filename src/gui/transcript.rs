@@ -5140,7 +5140,16 @@ pub fn view(
         );
         return col;
     }
-    if let Some(err) = &state.error {
+    // A read that failed must not erase a conversation the window already
+    // holds (#2981). The error used to replace the whole transcript with one
+    // line, and a line that carries no text paints as the surface's own fill,
+    // which is a chat that reads as completely black until something reloads
+    // it. The notice now rides above the rows that are still on screen, and
+    // only stands alone when there is nothing else to draw.
+    if let Some(err) = &state.error
+        && state.turns.is_empty()
+        && live.is_empty()
+    {
         col = col.child(
             div()
                 .text_sm()
@@ -5157,6 +5166,18 @@ pub fn view(
                 .child("No messages in this session"),
         );
         return col;
+    }
+
+    // The same notice, above the rows that are still there. It is the reason
+    // the last reload did not land, which the reader needs, and it costs the
+    // conversation nothing: the rows below it are the ones already on screen.
+    if let Some(err) = &state.error {
+        col = col.child(
+            div()
+                .text_xs()
+                .text_color(rgb(palette::current().amber))
+                .child(err.clone()),
+        );
     }
 
     if state.hidden > 0 {
