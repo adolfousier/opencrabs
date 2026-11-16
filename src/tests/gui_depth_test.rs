@@ -23,12 +23,17 @@ fn the_header_has_a_panel_background_and_a_divider() {
 
 #[test]
 fn the_input_has_a_panel_background_and_a_shadow() {
+    // The chain, not a byte window: the dock comment (#2987) pushed the fill
+    // past the 400 bytes a fixed slice used to read.
     let start = EDITOR
-        .find(".on_mouse_move(cx.listener(Self::on_mouse_move))")
+        .find("let root = div()")
         .expect("the editor root is built in render");
     let root = EDITOR
-        .get(start..start + 400)
-        .expect("the editor root is in range");
+        .get(start..)
+        .expect("the root block is in range")
+        .split(".child(body);")
+        .next()
+        .expect("the root chain ends at its body");
     // The panel fill comes from the glass helper since #2497; a plain
     // `bg(rgb(..))` is the same surface before that change.
     assert!(
