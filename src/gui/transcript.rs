@@ -2420,14 +2420,18 @@ fn bubble(
         .min_w_0()
         // The right-aligned body makes this column a flex item, so without a
         // cap a long message would paint one line past the pane instead of
-        // wrapping. `max_w_full` is a percentage, and a percentage max resolves
-        // against a parent whose width is still indefinite while the row is
-        // measured for a narrow split, so it is ignored exactly where it
-        // matters. The pixel cap is the one that holds, from the width the row
-        // was planned against (#2937), and it stops at two thirds of that
-        // width so no bubble ever runs the whole pane (#2969).
+        // wrapping. The cap has to be pixels: a percentage max resolves against
+        // a parent whose width is still indefinite while the row is measured
+        // for a narrow split, so it is ignored exactly where it matters. It
+        // stops at two thirds of the planned width so no bubble ever runs the
+        // whole pane (#2969).
+        //
+        // This is the only max on the column, and it must stay the only one
+        // (#2976). `max_w` and `max_w_full` write the same field
+        // (`gpui-macros-0.2.2/src/styles.rs`, both land on `max_size.width`), so
+        // a `max_w_full` after this line silently replaced the cap with a
+        // percentage and handed the row back its max-content line.
         .when(content_width > 0.0, |d| d.max_w(px(message_max_width(content_width))))
-        .max_w_full()
         .px(px(MESSAGE_PAD_X))
         .py(px(MESSAGE_PAD_Y));
     if bubble_has_surface(role) {
@@ -3793,6 +3797,9 @@ fn live_user_row(
             .flex()
             .flex_row()
             .justify_end()
+            // No cross-axis stretch, so a sent bubble hugs its text instead of
+            // painting its surface down the row's full height (#2976).
+            .items_start()
             .child(child),
     );
     if let Some(handler) = edit {
@@ -4409,7 +4416,12 @@ fn message_row(
         // The body becomes a row of one pushed to its end. A bare `div()` is a
         // block box, so it hands the bubble the whole column and every message
         // starts at the left margin, whatever its role.
-        body = body.flex().flex_row().justify_end();
+        //
+        // `items_start` keeps that row from stretching its child. The cross
+        // axis defaults to `stretch`, so the bubble was painting its surface
+        // down to the row's height and left blank space under its last line
+        // (#2976).
+        body = body.flex().flex_row().justify_end().items_start();
     }
     if let Some(handler) = click {
         let handler = handler.clone();
@@ -5628,6 +5640,52 @@ mod tests {
         const {
             assert!(USER_TEXT_SIZE > PLAIN_TEXT_SIZE);
         }
+    }
+
+    /// #2976: `max_w` and `max_w_full` are the same setter, both writing
+    /// `max_size.width` (`gpui-macros-0.2.2/src/styles.rs`), so a percentage max
+    /// placed after the pixel cap silently replaced it. The bubble then had no
+    /// usable cap: a percentage max is ignored while a row is measured, so the
+    /// column sized to max-content and painted one endless line. The cap must
+    /// be the only max on that column, and a user row must not stretch it.
+    #[test]
+    fn the_bubble_max_is_the_pixel_cap_and_nothing_after_it() {
+        let src = include_str!("transcript.rs");
+        let bubble = src
+            .split("fn bubble(")
+            .nth(1)
+            .and_then(|rest| rest.split("/// A forwarded copy").next())
+            .expect("message bubble renderer");
+        assert!(bubble.contains("max_w(px(message_max_width(content_width)))"));
+        // Comments in the body name the helper that used to follow the cap, so
+        // the scan reads code lines only.
+        let code = bubble
+            .lines()
+            .map(|line| line.split_once("//").map_or(line, |(code, _)| code))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            !code.contains("max_w_full"),
+            "a percentage max overwrites the pixel cap on the same field"
+        );
+        let row = src
+            .split("fn message_row(")
+            .nth(1)
+            .and_then(|rest| rest.split("fn inline_edit_box(").next())
+            .expect("message row");
+        assert!(
+            row.contains(".justify_end().items_start()"),
+            "a user row must not stretch the bubble down the row's height"
+        );
+        let live = src
+            .split("fn live_user_row(")
+            .nth(1)
+            .and_then(|rest| rest.split("fn live_view(").next())
+            .expect("live user row");
+        assert!(
+            live.contains(".items_start()"),
+            "a sent bubble must not be stretched by its row"
+        );
     }
 
     /// #2571: only the message surface gets the tighter corner. The shared card
