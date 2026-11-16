@@ -184,6 +184,11 @@ pub(crate) const MIGRATION_SQL: &[&str] = &[
     // existing row, so no heal pass is needed. Appended last per the list
     // invariant above.
     include_str!("../migrations/20261116000002_add_message_turn_metrics.sql"),
+    // #2986: the queued-message rows the agent takes mid-turn, marked so a
+    // rebuilt transcript folds them into the turn they interrupted instead of
+    // opening a card that owns none of its calls. INTEGER NOT NULL DEFAULT 0,
+    // so every existing row reads as the turn boundary it is.
+    include_str!("../migrations/20261116000003_add_message_continuation.sql"),
 ];
 
 pub(crate) fn build_migrations() -> Migrations<'static> {

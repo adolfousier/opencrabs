@@ -1,0 +1,13 @@
+-- Whether the agent took this user row between tool calls (#2986).
+--
+-- A message the user sends while a turn is running is not a new turn: the agent
+-- drains it at its next iteration and keeps working, so the live card never
+-- closed and the reader watched one busy period. The database could not say
+-- that. The queued row was stored as an ordinary `user` row, so a rebuilt
+-- transcript opened a fresh turn on it and the calls that followed were counted
+-- against a card that owned none of them.
+--
+-- The flag lives on the queued row itself, so the reader can tell the two kinds
+-- of user row apart without guessing from timing. Existing rows default to 0,
+-- which is what they are: none of them was written by this path.
+ALTER TABLE messages ADD COLUMN continuation INTEGER NOT NULL DEFAULT 0;

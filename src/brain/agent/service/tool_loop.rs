@@ -5152,8 +5152,17 @@ impl AgentService {
                         &queued_msg.context_text,
                     ));
                     context.add_message(injected);
+                    // Persisted as a continuation rather than as a turn
+                    // boundary: the turn in flight keeps its card, so a
+                    // rebuilt transcript folds this row into it instead of
+                    // opening a second card that owns none of the calls that
+                    // follow (#2986).
                     if let Err(e) = message_service
-                        .create_message(session_id, "user".to_string(), queued_msg.display_text)
+                        .create_continuation_message(
+                            session_id,
+                            "user".to_string(),
+                            queued_msg.display_text,
+                        )
                         .await
                     {
                         tracing::error!("Failed to persist queued user message: {e}");
@@ -8106,9 +8115,15 @@ impl AgentService {
                 let injected = Message::user(queued_msg.context_text.clone());
                 context.add_message(injected);
 
-                // Save to database so conversation history stays consistent
+                // Save to database so conversation history stays consistent.
+                // A continuation, so the rebuild keeps this row inside the
+                // turn it arrived during (#2986).
                 if let Err(e) = message_service
-                    .create_message(session_id, "user".to_string(), queued_msg.display_text)
+                    .create_continuation_message(
+                        session_id,
+                        "user".to_string(),
+                        queued_msg.display_text,
+                    )
                     .await
                 {
                     tracing::error!("Failed to persist queued user message: {e}");

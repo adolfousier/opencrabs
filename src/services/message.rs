@@ -175,6 +175,35 @@ impl MessageService {
         role: String,
         content: String,
     ) -> Result<Message> {
+        self.create_message_with_continuation(session_id, role, content, false)
+            .await
+    }
+
+    /// Create the row for a message the agent took mid-turn, between its own
+    /// tool calls (#2986).
+    ///
+    /// Stored as a continuation rather than as an ordinary user row: the agent
+    /// keeps working in the same busy period, so a rebuilt transcript must fold
+    /// this row into the turn it interrupted. Without the mark the reader opens
+    /// a fresh turn here and every call that follows is counted against a card
+    /// that owns none of them.
+    pub async fn create_continuation_message(
+        &self,
+        session_id: Uuid,
+        role: String,
+        content: String,
+    ) -> Result<Message> {
+        self.create_message_with_continuation(session_id, role, content, true)
+            .await
+    }
+
+    async fn create_message_with_continuation(
+        &self,
+        session_id: Uuid,
+        role: String,
+        content: String,
+        continuation: bool,
+    ) -> Result<Message> {
         let repo = MessageRepository::new(self.context.pool());
 
         // Get the next sequence number for this session
@@ -197,7 +226,7 @@ impl MessageService {
             ctx_window: None,
             tokens_per_sec: None,
             tool_calls: None,
-            continuation: false,
+            continuation,
             // A row written by a turn is never a forward (#2608).
             forward: None,
         };

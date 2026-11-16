@@ -983,11 +983,11 @@ fn insert_message(conn: &rusqlite::Connection, m: &Message) -> rusqlite::Result<
                              created_at, token_count, cost, input_tokens,
                              cache_creation_tokens, cache_read_tokens, thinking,
                              duration_secs, ctx_window, tokens_per_sec,
-                             tool_calls, forwarded_from_session,
+                             tool_calls, continuation, forwarded_from_session,
                              forwarded_from_message, forwarded_from_label,
                              forward_batch_id)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14,
-                 ?15, ?16, ?17, ?18, ?19, ?20)",
+                 ?15, ?16, ?17, ?18, ?19, ?20, ?21)",
         params![
             m.id.to_string(),
             m.session_id.to_string(),
@@ -1005,6 +1005,7 @@ fn insert_message(conn: &rusqlite::Connection, m: &Message) -> rusqlite::Result<
             m.ctx_window,
             m.tokens_per_sec,
             m.tool_calls,
+            m.continuation,
             m.forward.as_ref().map(|f| f.from_session.to_string()),
             m.forward.as_ref().map(|f| f.from_message.to_string()),
             m.forward.as_ref().map(|f| f.label.clone()),

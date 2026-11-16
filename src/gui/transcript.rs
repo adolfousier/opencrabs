@@ -1310,6 +1310,11 @@ fn row_blocks(m: &Message, forward: Option<ForwardMark>) -> Vec<Block> {
 /// produce for the terminal. A turn opens at a user row and runs to the next
 /// one, so the question, the working-out and the answer belong together.
 ///
+/// Two kinds of user row do not open one: a forwarded copy, because a batch is
+/// one block (#2608), and a continuation, because the agent took it mid-turn
+/// and never stopped working (#2986). Both are still drawn, inside the turn
+/// that was already running.
+///
 /// Returns the count of rows the window hid, and the turns in order.
 ///
 /// `metrics` carries the per-turn ctx and rate this process still remembers,
@@ -1345,10 +1350,16 @@ pub fn turns_with_origins(
         let continues_batch = i > 0
             && m.forward.is_some()
             && m.forward.as_ref().map(|f| f.batch) == rows[i - 1].forward.as_ref().map(|f| f.batch);
+        // A message the agent took mid-turn is stored as `user` too, and for
+        // the same reason it is not a boundary: the turn never ended, the live
+        // card never closed, and the calls that follow belong to the card the
+        // reader watched (#2986). Splitting here is what moved one busy
+        // period's calls onto rows that owned none of them.
+        let opens_turn = m.role == "user" && !continues_batch && !m.continuation;
         // A merged read sorts several topics into one stream, and the seam
         // between them is a boundary like any question is (#2762).
         let origin_changed = i > start && origins.get(&rows[i - 1].id) != origins.get(&m.id);
-        if i > start && (origin_changed || (m.role == "user" && !continues_batch)) {
+        if i > start && (origin_changed || opens_turn) {
             bounds.push((start, i));
             start = i;
         }
