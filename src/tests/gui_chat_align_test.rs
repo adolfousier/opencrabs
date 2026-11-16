@@ -163,11 +163,15 @@ fn the_pane_clips_its_children_to_the_ring() {
     let fill = PANE_VIEW
         .find(".bg(rgb(palette::current().bg))")
         .expect("the pane paints its own fill");
-    let clip = PANE_VIEW
-        .find(".overflow_hidden()")
-        .expect("the pane clips its children");
     assert!(fill < ring, "the fill sits on the rounded box");
-    assert!(ring < clip, "the clip comes after the ring in the chain");
+    // The chrome box above the ring clips its own strips (#2980), so the first
+    // `.overflow_hidden()` in the file is no longer the pane's. The clip that
+    // rounds the corner is the one that follows the ring.
+    let tail = PANE_VIEW.split_at(ring).1;
+    assert!(
+        tail.contains(".overflow_hidden()"),
+        "the clip comes after the ring in the chain"
+    );
 }
 
 /// The pane title is the pane's name, so it carries a heading's weight instead
