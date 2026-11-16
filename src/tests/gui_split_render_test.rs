@@ -414,8 +414,10 @@ fn the_page_keys_scroll_the_pane_holding_the_caret() {
         keys.contains(".filter(|id| self.pane_states.contains_key(id));"),
         "the page keys follow the caret into whichever pane holds it"
     );
+    // #2959 renamed the match's bindings, so the pinned string names the read
+    // rather than the tuple it destructures.
     assert!(
-        keys.contains("let (x, y, max) = match target.and_then(|id| self.pane_states.get(&id)) {"),
+        keys.contains("match target.and_then(|id| self.pane_states.get(&id)) {"),
         "the caret's pane is the one the page keys move"
     );
     assert!(
@@ -537,10 +539,6 @@ fn the_window_composer_stands_down_once_the_window_is_split() {
         .split("if !self.window_is_split() {")
         .nth(1)
         .expect("the window chrome is gated on the split");
-    let gated = gated
-        .split("if let Some(strip) = topic_bottom")
-        .next()
-        .expect("the gate closes before the topic strip");
     // The gate keeps the measure wrapper inside it (#2594): the unsplit
     // window still aligns the conversation to one width, and the split leaves
     // stand down. `flat` folds the reflow, so this pins the wrapper itself
