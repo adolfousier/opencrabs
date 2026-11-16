@@ -3,7 +3,7 @@
 //! Provides business logic for session management operations.
 
 use crate::db::{
-    models::Session,
+    models::{Session, TitleSource},
     repository::{
         SessionFavoritesRepository, SessionListOptions, SessionRepository, UsageLedgerRepository,
     },
@@ -206,10 +206,31 @@ impl SessionService {
         Ok(())
     }
 
-    /// Update session title
+    /// Rename a session on the user's behalf.
+    ///
+    /// Every caller is a name the user typed (`/rename`, the `rename_session`
+    /// tool, the TUI prompt), so the row is marked [`TitleSource::Manual`] and
+    /// no automatic path may overwrite it (#2956). The auto-title model uses
+    /// [`Self::update_session_title_with_source`] instead.
     pub async fn update_session_title(&self, id: Uuid, title: Option<String>) -> Result<()> {
+        self.update_session_title_with_source(id, title, TitleSource::Manual)
+            .await
+    }
+
+    /// Write a session title and record who chose it (#2956).
+    ///
+    /// The source decides what may happen to the title later: only `Auto` is
+    /// eligible for the drift retitle, `Template` is a placeholder the first
+    /// turn may replace, and `Manual` is final.
+    pub async fn update_session_title_with_source(
+        &self,
+        id: Uuid,
+        title: Option<String>,
+        source: TitleSource,
+    ) -> Result<()> {
         let mut session = self.get_session_required(id).await?;
         session.title = title;
+        session.title_source = source;
         session.updated_at = Utc::now();
 
         let repo = SessionRepository::new(self.context.pool());
@@ -217,7 +238,7 @@ impl SessionService {
             .await
             .context("Failed to update session title")?;
 
-        tracing::info!("Updated session title: {}", id);
+        tracing::info!("Updated session title: {} (source {})", id, source.as_str());
         Ok(())
     }
 

@@ -6,6 +6,7 @@ use crate::brain::agent::context::AgentContext;
 use crate::brain::agent::error::{AgentError, Result};
 use crate::brain::provider::{ContentBlock, LLMRequest, LLMResponse, Message, Role};
 use crate::brain::tools::ToolExecutionContext;
+use crate::db::models::TitleSource;
 use crate::services::{MessageService, SessionService};
 use crate::utils::is_internal_system_message;
 use serde_json::Value;
@@ -1185,7 +1186,11 @@ impl AgentService {
                                 format!("{}{} {}", prefix, clean_title, chat_suffix)
                             };
                             match session_svc
-                                .update_session_title(session_id, Some(final_title.clone()))
+                                .update_session_title_with_source(
+                                    session_id,
+                                    Some(final_title.clone()),
+                                    TitleSource::Auto,
+                                )
                                 .await
                             {
                                 Ok(()) => {

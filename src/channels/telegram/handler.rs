@@ -11,6 +11,7 @@ use crate::config::{Config, RespondTo};
 use crate::db::ChannelMessageRepository;
 use crate::db::SessionBindingRepository;
 use crate::db::models::ChannelMessage as DbChannelMessage;
+use crate::db::models::TitleSource;
 use crate::services::SessionService;
 use crate::utils::sanitize::redact_secrets;
 use crate::utils::truncate_str;
@@ -1646,6 +1647,9 @@ pub(crate) async fn handle_message(
                 ) {
                     let mut renamed = bound.clone();
                     renamed.title = Some(session_title.clone());
+                    // The refreshed label is the channel's own template, so a
+                    // later turn may still replace it with a real title (#2956).
+                    renamed.title_source = TitleSource::Template;
                     if let Err(e) = session_svc.update_session(&renamed).await {
                         tracing::warn!(
                             "Telegram: failed to refresh session {} label: {}",
@@ -1794,6 +1798,9 @@ pub(crate) async fn handle_message(
                         let mut renamed = session.clone();
                         let prev_title = renamed.title.clone().unwrap_or_default();
                         renamed.title = Some(session_title.clone());
+                        // Back on the channel template, so the row is a
+                        // placeholder again rather than a chosen name (#2956).
+                        renamed.title_source = TitleSource::Template;
                         if let Err(e) = session_svc.update_session(&renamed).await {
                             tracing::warn!(
                                 "Telegram: failed to update renamed session {} title ({} → {}): {}",
