@@ -221,7 +221,7 @@ impl PlanStripState {
 
     /// The plan as a split pane draws it: the task in flight and the next one
     /// or two while there is room, the count and the bar when there is less,
-    /// and a bare bar in a wall of panes (#2622, #2624).
+    /// and a named disclosure with the count in a wall of panes (#2622, #2624).
     ///
     /// The terminal compacts too (`tui::render::panes::pane_strip_lines`), but
     /// it knows one split width. A window has to survive anything from two
@@ -253,7 +253,9 @@ impl PlanStripState {
             .py_1()
             .min_w_0()
             .rounded(px(CARD_RADIUS))
-            .bg(glass_fill(palette::current().panel));
+            .bg(glass_fill(palette::current().panel))
+            .cursor_pointer()
+            .hover(|d| d.bg(rgb(palette::current().panel_hi)));
         for (kind, line) in pane_lines(plan, density, expanded) {
             let color = match kind {
                 LineKind::Title | LineKind::Bar | LineKind::Done => palette::current().teal,
@@ -341,7 +343,7 @@ fn action_chip(id: String, label: &str, accent: bool, handler: ClickHandler) -> 
 /// How much of a plan one pane shows (#2624). A split pane is a fraction of
 /// the window and a wall of eight is a fraction of a fraction, so the card
 /// gives up its detail in the order the eye wants it last: the upcoming
-/// tasks first, then the title, then everything but the bar.
+/// tasks first, then the title, then everything but the disclosure and count.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum PaneDensity {
     /// Up to three panes at a readable width: the running task and the next
@@ -349,9 +351,9 @@ pub enum PaneDensity {
     Tasks,
     /// Four to seven panes: the bar and the task in flight.
     Summary,
-    /// Eight or more panes, or a pane too narrow to read: the bar alone. The
-    /// user asked for exactly this: at eight splits a pane has room for its
-    /// conversation, and the plan expands on a click.
+    /// Eight or more panes, or a pane too narrow to read: the disclosure and
+    /// count alone. At eight splits a pane has room for its conversation, and
+    /// the plan expands on a click.
     Bar,
 }
 
@@ -379,9 +381,15 @@ pub enum LineKind {
     Done,
 }
 
+/// Name the plan beside the disclosure chevron so the compact card reads as
+/// an expandable summary instead of a static progress indicator.
+fn plan_disclosure(expanded: bool) -> &'static str {
+    if expanded { "▾ Plan" } else { "▸ Plan" }
+}
+
 /// The lines a pane draws, split out of the view so the shape is testable
-/// without a frame (#2624). Collapsed, a dense pane shows the bar and nothing
-/// else; expanded, it shows the checklist the terminal shows, windowed so a
+/// without a frame (#2624). Collapsed, a dense pane shows the disclosure and
+/// count; expanded, it shows the checklist the terminal shows, windowed so a
 /// twenty-task plan cannot push the composer off the pane.
 pub fn pane_lines(
     plan: &PlanDocument,
@@ -393,7 +401,14 @@ pub fn pane_lines(
         // Approved design whose checklist is still being seeded, or a seed
         // that failed. Same two states the terminal names.
         return vec![
-            (LineKind::Title, format!("📋 {}", fit(&plan.title, 32))),
+            (
+                LineKind::Title,
+                format!(
+                    "{} · {}",
+                    plan_disclosure(expanded),
+                    fit(&plan.title, 32)
+                ),
+            ),
             (LineKind::Next, CHECKLIST_NOT_SEEDED.to_string()),
         ];
     }
@@ -401,7 +416,11 @@ pub fn pane_lines(
         let mut out = vec![
             (
                 LineKind::Title,
-                format!("📋 {} · {done}/{total}", fit(&plan.title, 32)),
+                format!(
+                    "{} · {} · {done}/{total}",
+                    plan_disclosure(true),
+                    fit(&plan.title, 32)
+                ),
             ),
             (LineKind::Bar, format!("{bar} {percent}%")),
         ];
@@ -430,12 +449,19 @@ pub fn pane_lines(
         None if done == total => "✓ complete".to_string(),
         None => "▸ waiting".to_string(),
     };
+    let progress_line = format!(
+        "{} · {done}/{total} · {bar} {percent}%",
+        plan_disclosure(false)
+    );
     match density {
-        // A wall of panes gets the bar and the count, and the click expands
-        // it. Anything more and eight panes leave no room for conversations.
-        PaneDensity::Bar => vec![(LineKind::Bar, format!("{bar} {percent}% · {done}/{total}"))],
+        // A wall of panes gets the named disclosure and count. The click
+        // expands it, and anything more leaves no room for conversations.
+        PaneDensity::Bar => vec![(
+            LineKind::Bar,
+            format!("{} · {done}/{total}", plan_disclosure(false)),
+        )],
         PaneDensity::Summary => vec![
-            (LineKind::Bar, format!("{bar} {percent}%")),
+            (LineKind::Bar, progress_line),
             (LineKind::Running, running_line),
         ],
         PaneDensity::Tasks => {
@@ -444,7 +470,7 @@ pub fn pane_lines(
             // unsplit card, where there is room for it, and the pane's own
             // header already says which session this is.
             let mut out = vec![
-                (LineKind::Bar, format!("{bar} {percent}%")),
+                (LineKind::Bar, progress_line),
                 (LineKind::Running, running_line),
             ];
             // "The next one or two" means after the task in flight, never a
@@ -755,7 +781,7 @@ mod tests {
     /// Both halves are pinned: the card owns its width, and each row is a flex
     /// row with a growing, shrinkable, truncated child.
     #[test]
-    fn the_pane_card_takes_the_panes_width() {
+    fn the_pane_card_owns_its_width_and_click_affordance() {
         const SRC: &str = include_str!("plan_strip.rs");
         let body = SRC
             .split_once("pub fn pane_view(")
@@ -767,6 +793,10 @@ mod tests {
         assert!(
             body.contains(".w_full()"),
             "the pane card must own its width, not derive it from the text it truncates"
+        );
+        assert!(
+            body.contains(".cursor_pointer()") && body.contains(".hover("),
+            "the active plan card looks clickable in both pane render paths"
         );
         let row = body
             .split_once("col = col.child(")
@@ -888,8 +918,8 @@ mod tests {
         // #2624: three panes at a readable width keep the detail the user
         // asked for: what is running, and the one or two tasks after it.
         let lines = pane_lines(&plan_with(8, 3, Some(4)), PaneDensity::Tasks, false);
-        assert_eq!(lines.len(), 4, "bar, running, two next: {lines:?}");
-        assert_eq!(lines[0].1, "███░░░░░░░ 37%");
+        assert_eq!(lines.len(), 4, "summary, running, two next: {lines:?}");
+        assert_eq!(lines[0].1, "▸ Plan · 3/8 · ███░░░░░░░ 37%");
         assert_eq!(lines[1], (LineKind::Running, "▸ task 4".to_string()));
         assert_eq!(lines[2].0, LineKind::Next);
         assert!(lines[2].1.starts_with("· task 5"), "{:?}", lines[2]);
@@ -901,20 +931,20 @@ mod tests {
     }
 
     #[test]
-    fn a_split_grid_drops_to_the_bar_alone() {
-        // Eight panes have no room for task titles: one line, the bar and the
-        // count, and the click expands the rest.
+    fn a_split_grid_names_the_plan_disclosure() {
+        // Eight panes have no room for task titles or a bar. One named line
+        // carries the count and says that the click expands the rest.
         let lines = pane_lines(&plan_with(8, 3, Some(4)), PaneDensity::Bar, false);
         assert_eq!(lines.len(), 1, "{lines:?}");
-        assert_eq!(lines[0].0, LineKind::Bar);
-        assert!(lines[0].1.ends_with("· 3/8"), "{:?}", lines[0]);
-        // Four to seven keeps the task in flight, and no title.
+        assert_eq!(lines[0], (LineKind::Bar, "▸ Plan · 3/8".to_string()));
+        // Four to seven keeps the same disclosure, progress and running task.
         let summary = pane_lines(&plan_with(8, 3, Some(4)), PaneDensity::Summary, false);
         assert_eq!(summary.len(), 2, "{summary:?}");
+        assert_eq!(summary[0].1, "▸ Plan · 3/8 · ███░░░░░░░ 37%");
         assert_eq!(summary[1], (LineKind::Running, "▸ task 4".to_string()));
         assert!(
             !summary.iter().any(|(kind, _)| *kind == LineKind::Title),
-            "a summary pane spends its rows on the bar and the task"
+            "a summary pane spends its rows on the progress and the task"
         );
     }
 
@@ -937,6 +967,8 @@ mod tests {
         // long plan cannot push the composer out of the pane.
         let lines = pane_lines(&plan_with(20, 3, Some(4)), PaneDensity::Bar, true);
         assert_eq!(lines[0].0, LineKind::Title);
+        assert!(lines[0].1.starts_with("▾ Plan ·"), "{:?}", lines[0]);
+        assert!(lines[0].1.ends_with("· 3/20"), "{:?}", lines[0]);
         assert_eq!(lines[1].0, LineKind::Bar);
         assert_eq!(lines.len(), 8, "header, bar and the six-row window");
         assert!(lines[2].1.starts_with("2. "), "{:?}", lines[2]);
@@ -957,6 +989,7 @@ mod tests {
         seed.status = PlanStatus::Active;
         let lines = pane_lines(&seed, PaneDensity::Tasks, false);
         assert_eq!(lines.len(), 2, "a plan with no checklist is two lines");
+        assert!(lines[0].1.starts_with("▸ Plan ·"), "{:?}", lines[0]);
         assert!(lines[1].1.contains("checklist not seeded"));
     }
 
