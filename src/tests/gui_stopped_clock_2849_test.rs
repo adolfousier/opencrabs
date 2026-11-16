@@ -39,12 +39,25 @@ fn the_stop_takes_the_instant_once() {
         stop.contains("self.stopped = true;"),
         "the stop still has to say the turn was stopped (#2811)"
     );
+    // #2954 moved the stamp into `freeze`, so a turn that ends on its own can
+    // stop the clock without claiming it was stopped. The stop must take it.
     assert!(
-        stop.contains("self.stopped_at = Some(std::time::Instant::now());"),
+        stop.contains("self.freeze();"),
         "the stop must take the instant it landed"
     );
+    let freeze = body
+        .split_once("pub fn freeze(&mut self) {")
+        .expect("one method takes the stop instant")
+        .1
+        .split_once("\n    }")
+        .expect("the freeze method ends")
+        .0;
     assert!(
-        stop.contains("if self.stopped_at.is_none()"),
+        freeze.contains("self.stopped_at = Some(std::time::Instant::now());"),
+        "the freeze must take the instant it landed"
+    );
+    assert!(
+        freeze.contains("if self.stopped_at.is_none()"),
         "the instant is taken once: a second stop repaints, it does not re-stamp"
     );
 }
