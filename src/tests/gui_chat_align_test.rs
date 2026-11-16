@@ -72,22 +72,54 @@ fn the_live_turn_sits_where_the_stored_row_will() {
     );
 }
 
-/// A flex item that refuses to shrink sizes to max-content, so the bubble has
-/// to be capped or a long message paints one line past the pane.
+/// The user bubble is a horizontal flex item, so it must shrink to the real
+/// row width. Attachment height is protected by the strip's own shrink guard.
 #[test]
-fn the_bubble_is_capped_to_the_column() {
+fn the_bubble_shrinks_horizontally_without_shrinking_attachments() {
     let column = body_after(TRANSCRIPT, "fn bubble(\n    role: &str,")
         .split("if bubble_has_surface")
         .next()
         .unwrap_or_default();
     assert!(
-        column.contains(".flex_shrink_0()"),
-        "the column still refuses to be squeezed below its reserved height"
+        !column.contains(".flex_shrink_0()"),
+        "the bubble can shrink below a planned width that exceeds its row"
     );
     assert!(
         column.contains(".max_w_full()"),
         "the bubble wraps at the column width instead of running past the pane"
     );
+    let strip = TRANSCRIPT
+        .split("let mut strip = div()")
+        .nth(1)
+        .and_then(|rest| rest.split(".children(tiles)").next())
+        .expect("the attachment strip is present");
+    assert!(
+        strip.contains(".flex_shrink_0()"),
+        "the attachment strip keeps its planned height"
+    );
+}
+
+/// GPUI wraps text only with a known or definite width. Every wrapper between
+/// the transcript and a text line must preserve that width, including the
+/// otherwise invisible drag-selection row (#2947).
+#[test]
+fn the_text_width_stays_definite_through_the_wrappers() {
+    for body in [
+        body_after(TRANSCRIPT, "fn selectable_row<E: gpui::IntoElement>("),
+        body_after(TRANSCRIPT, "fn message_row(\n    id: uuid::Uuid,"),
+        body_after(TRANSCRIPT, "fn md_block("),
+        body_after(TRANSCRIPT, "fn plain_block("),
+    ] {
+        assert!(body.contains(".w_full()"), "the wrapper takes the row width");
+        assert!(body.contains(".min_w_0()"), "the wrapper can shrink");
+    }
+    let line = body_after(TRANSCRIPT, "fn md_line(")
+        .split("let base = div()")
+        .nth(1)
+        .and_then(|rest| rest.split("if l.heading").next())
+        .expect("the markdown line has a content wrapper");
+    assert!(line.contains(".w_full()"));
+    assert!(line.contains(".min_w_0()"));
 }
 
 /// The chat surface carries the card radius. It must not clip: the element is

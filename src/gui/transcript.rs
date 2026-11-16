@@ -1744,7 +1744,10 @@ fn md_line(l: &markdown::MdLine, look: MdLook, selection: Option<&SelectionConte
         &l.links,
         selection,
     );
-    let base = div().pl(rems(f32::from(l.indent) * 0.9));
+    let base = div()
+        .w_full()
+        .min_w_0()
+        .pl(rems(f32::from(l.indent) * 0.9));
     if l.heading {
         base.mt(px(RHYTHM_HEADING_ABOVE))
             .mb(px(RHYTHM_HEADING_BELOW))
@@ -1996,7 +1999,12 @@ fn md_block(
 ) -> Div {
     let parsed = md_blocks(src, flow);
     let blocks = parsed.as_slice();
-    let mut out = div().flex().flex_col().gap(px(RHYTHM_BASE_GAP));
+    let mut out = div()
+        .flex()
+        .flex_col()
+        .w_full()
+        .min_w_0()
+        .gap(px(RHYTHM_BASE_GAP));
     let mut i = 0;
     while i < blocks.len() {
         match &blocks[i] {
@@ -2173,7 +2181,12 @@ fn quote_block(lines: &[&str], selection: Option<&SelectionContext>) -> Div {
 /// pictures (#2771), so a user who picks an emoji from the composer sees the
 /// emoji, not its name.
 fn plain_block(content: &str, size: f32, selection: Option<&SelectionContext>) -> Div {
-    let mut lines = div().flex().flex_col().gap_0p5();
+    let mut lines = div()
+        .flex()
+        .flex_col()
+        .w_full()
+        .min_w_0()
+        .gap_0p5();
     for line in content.split('\n') {
         let style = body_style(size);
         lines = lines.child(inline_crabs(
@@ -4336,6 +4349,7 @@ fn message_row(
         .items_start()
         .gap_1()
         .w_full()
+        .min_w_0()
         .rounded_sm();
     if edit.is_some() || copy.is_some() {
         // The button is placed against the row's own box, so the row has to be
@@ -4656,8 +4670,13 @@ fn selectable_row<E: gpui::IntoElement>(
     let start = drag.clone();
     let extend = drag.clone();
     let release = drag.clone();
+    // Text wraps only after GPUI receives a definite width. The selection
+    // wrapper must carry the pane's width or the inner `w_full` rows resolve
+    // against an auto-sized parent and keep their max-content line (#2947).
     div()
         .id(SharedString::from(format!("tblock-{ordinal}")))
+        .w_full()
+        .min_w_0()
         .when(selected, |d| d.bg(rgba(selection_rgba())))
         .on_mouse_down(MouseButton::Left, move |_ev, window, _app| {
             start.pending_click.borrow_mut().take();
