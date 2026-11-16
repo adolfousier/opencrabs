@@ -2332,28 +2332,31 @@ fn bubble(
     };
     let paths = marker_paths(&content);
     let text = strip_markers(&content);
-    // `min_w_0` lets a wide row shrink to the pane instead of pushing it wide,
-    // and `flex_shrink_0` stops the column squeezing a row below the height its
-    // tiles reserved. Before #2395 the row had neither, so a tile laid out
-    // taller than `TILE` painted over the line above it.
+    // `min_w_0` lets a wide row shrink to the pane instead of pushing it wide.
+    // Before #2395 the row had neither, so a tile laid out taller than `TILE`
+    // painted over the line above it.
+    //
+    // The column keeps the default shrink on purpose. The cap below is a
+    // planned width, and a plan can ask for more than the box the row is
+    // painted into; a column that refuses to shrink then keeps its full
+    // max-content size, `justify_end` pushes the excess out of the left edge,
+    // and the row loses the start of its own line. That is #2937 all over
+    // again, which is why the layout, not the plan, has the last word here: a
+    // plan wider than the row is corrected by shrinking instead of painting
+    // past it.
     let attachment_width = (content_width - 2.0 * MESSAGE_PAD_X).max(0.0);
     let mut col = div()
         .flex()
         .flex_col()
         .gap_1()
         .min_w_0()
-        .flex_shrink_0()
-        // The right-aligned body makes this column a flex item, and a
-        // `flex_shrink_0` item sizes to max-content: without a cap a long
-        // message would paint one line past the pane instead of wrapping.
-        //
-        // `max_w_full` is a percentage, and a percentage max resolves against
-        // a parent whose width is still indefinite while the row is measured
-        // for a narrow split, so it was ignored exactly where it mattered: the
-        // bubble sized to max-content, `justify_end` pushed the overflow out of
-        // the left edge, and the reader's own message lost its beginning in a
-        // tight pane (#2937). The cap is in pixels from the width the row was
-        // planned against, so no layout pass can ignore it.
+        // The right-aligned body makes this column a flex item, so without a
+        // cap a long message would paint one line past the pane instead of
+        // wrapping. `max_w_full` is a percentage, and a percentage max resolves
+        // against a parent whose width is still indefinite while the row is
+        // measured for a narrow split, so it is ignored exactly where it
+        // matters. The pixel cap is the one that holds, from the width the row
+        // was planned against (#2937).
         .when(content_width > 0.0, |d| d.max_w(px(content_width)))
         .max_w_full()
         .px(px(MESSAGE_PAD_X))
