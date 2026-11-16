@@ -487,6 +487,41 @@ jobs:
           [ "$status" -eq 0 ] || exit 1
           echo "$ver" | grep -qi opencrabs
 
+      # The GUI is a second exe in the same artifact and the smoke step above
+      # never touches it, which is how v0.6.0 shipped a window client that
+      # dies at load: it statically imports TaskDialogIndirect, exported only
+      # by comctl32 v6, and v6 activates only when the exe carries a
+      # Common-Controls manifest (#2965). A window app never exits on its own,
+      # so "still alive at the timeout" is the pass condition, and the only
+      # failure is the loader code for a missing entry point. Any other early
+      # exit is a notice: a runner without a GPU can fail to create a window
+      # for reasons that are not this bug, and a gate that goes red on those
+      # is a gate nobody trusts.
+      - name: "Smoke (windows): the GUI binary survives the loader"
+        shell: pwsh
+        run: |
+          $exe = "target/x86_64-pc-windows-msvc/ci/opencrabs-gui.exe"
+          if (-not (Test-Path $exe)) {
+            Write-Host "::error::$exe is missing from the artifact"
+            exit 1
+          }
+          $p = Start-Process -FilePath $exe -PassThru
+          if (-not $p.WaitForExit(20000)) {
+            Write-Host "GUI still running after 20s: the loader resolved every import."
+            Stop-Process -Id $p.Id -Force
+            exit 0
+          }
+          $code = $p.ExitCode
+          Write-Host "GUI exited early with code $code"
+          # STATUS_ENTRYPOINT_NOT_FOUND, the code a missing comctl32 v6
+          # manifest produces. Everything else stays advisory.
+          if ($code -eq -1073741511) {
+            Write-Host "::error::STATUS_ENTRYPOINT_NOT_FOUND: opencrabs-gui.exe carries no Common-Controls v6 manifest (#2965)"
+            exit 1
+          }
+          Write-Host "::notice::early exit for a reason other than a missing entry point, not treated as a failure"
+          exit 0
+
       # Scoped execution: only the modules whose tests assert platform
       # behaviour. Full-suite Windows was rejected twice (#627 cost, and
       # POSIX-semantics failures that are not bugs). Every member below
