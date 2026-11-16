@@ -1902,6 +1902,18 @@ const RHYTHM_CELL_PAD_Y: f32 = 6.0;
 const MESSAGE_PAD_X: f32 = 16.0;
 const MESSAGE_PAD_Y: f32 = 12.0;
 
+/// A row never fills the transcript, whatever its role (#2969). One card
+/// running edge to edge turns the chat into a page: the reader cannot tell his
+/// own words from the answer at a glance, and the longest row sets the rhythm
+/// for everything beside it. Two thirds is the width every chat client settles
+/// on, and the remaining third is the margin that names the speaker.
+const MESSAGE_MAX_FRACTION: f32 = 2.0 / 3.0;
+
+/// The width one message row may occupy inside a column of `content_width`.
+fn message_max_width(content_width: f32) -> f32 {
+    (content_width * MESSAGE_MAX_FRACTION).max(0.0)
+}
+
 /// The message surface carries a tighter corner than the cards around it, so a
 /// column of chat reads as conversation and not as a stack of panels. This
 /// token belongs to the message bubble alone and never reaches `CARD_RADIUS`
@@ -2399,7 +2411,7 @@ fn bubble(
     // again, which is why the layout, not the plan, has the last word here: a
     // plan wider than the row is corrected by shrinking instead of painting
     // past it.
-    let attachment_width = (content_width - 2.0 * MESSAGE_PAD_X).max(0.0);
+    let attachment_width = (message_max_width(content_width) - 2.0 * MESSAGE_PAD_X).max(0.0);
     let mut col = div()
         .flex()
         .flex_col()
@@ -2411,8 +2423,9 @@ fn bubble(
         // against a parent whose width is still indefinite while the row is
         // measured for a narrow split, so it is ignored exactly where it
         // matters. The pixel cap is the one that holds, from the width the row
-        // was planned against (#2937).
-        .when(content_width > 0.0, |d| d.max_w(px(content_width)))
+        // was planned against (#2937), and it stops at two thirds of that
+        // width so no bubble ever runs the whole pane (#2969).
+        .when(content_width > 0.0, |d| d.max_w(px(message_max_width(content_width))))
         .max_w_full()
         .px(px(MESSAGE_PAD_X))
         .py(px(MESSAGE_PAD_Y));
@@ -2504,13 +2517,17 @@ fn forward_block(
     };
     let paths = marker_paths(&content);
     let text = strip_markers(&content);
-    let attachment_width = (content_width - 2.0 * MESSAGE_PAD_X).max(0.0);
+    let attachment_width = (message_max_width(content_width) - 2.0 * MESSAGE_PAD_X).max(0.0);
     let mut col = div()
         .flex()
         .flex_col()
         .gap_1()
         .min_w_0()
         .flex_shrink_0()
+        // A forward is a row like any other, so it stops at two thirds too
+        // (#2969). The bar on its left marks the source; the freed margin is
+        // what keeps a pasted report from reading as the reader's own page.
+        .when(content_width > 0.0, |d| d.max_w(px(message_max_width(content_width))))
         .pl(px(FORWARD_BAR_GAP))
         .pr(px(MESSAGE_PAD_X))
         .py(px(MESSAGE_PAD_Y))
@@ -2816,7 +2833,12 @@ fn fold_chevron(folded: bool) -> &'static str {
 /// rounded box holding the head row, the working-out rows when the turn is
 /// open, and the footer that keeps the count, the ctx and the clock after the
 /// turn ends. `None` for a turn that did no work, which earns no card (#758).
-fn settled_card(turn: &Turn, folded: bool, body: Vec<AnyElement>) -> Option<Stateful<Div>> {
+fn settled_card(
+    turn: &Turn,
+    folded: bool,
+    body: Vec<AnyElement>,
+    max_width: f32,
+) -> Option<Stateful<Div>> {
     turn.header.as_ref()?;
     let (glyph, verb) = settled_verdict(turn);
     let failed = glyph == "\u{274c}";
@@ -2863,6 +2885,11 @@ fn settled_card(turn: &Turn, folded: bool, body: Vec<AnyElement>) -> Option<Stat
         .flex()
         .flex_col()
         .w_full()
+        // A history card is a row in the transcript like a message, so it
+        // stops at two thirds of the column too (#2969). Full width made every
+        // finished turn read as a band across the pane, which is what buried
+        // the conversation between them.
+        .when(max_width > 0.0, |d| d.max_w(px(max_width)))
         .min_w_0()
         .flex_shrink_0()
         .rounded(px(MESSAGE_RADIUS))
@@ -3304,6 +3331,7 @@ fn live_card(
     ctx: (Option<u32>, u32),
     drag: Option<&Rc<CopyDrag>>,
     press: &HashMap<LiveRow, PressHandler>,
+    max_width: f32,
 ) -> Stateful<Div> {
     // A stop ends the turn where it stood (#2811). A spinner says work is
     // happening and nothing is, so the head keeps a stop glyph and the card
@@ -3403,6 +3431,9 @@ fn live_card(
         .flex()
         .flex_col()
         .w_full()
+        // The live card follows the same two thirds rule as the settled one
+        // (#2969), so a turn does not change width the moment it finishes.
+        .when(max_width > 0.0, |d| d.max_w(px(max_width)))
         .min_w_0()
         .flex_shrink_0()
         .rounded(px(MESSAGE_RADIUS))
@@ -3892,7 +3923,7 @@ fn live_view(
     // "OpenCrabs is thinking" over a spinner on a session that never sent
     // anything (#2895). The notices above still draw; the card does not.
     if live.has_turn_content() {
-        let card = live_card(live, expanded, ctx, drag, press);
+        let card = live_card(live, expanded, ctx, drag, press, message_max_width(content_width));
         col = col.child(match live_click {
             Some(click) => {
                 let click = click.clone();
@@ -5227,7 +5258,9 @@ pub fn view(
             }
         }
         col = col.children(pre);
-        if carded && let Some(card) = settled_card(turn, folded, body) {
+        if carded
+            && let Some(card) = settled_card(turn, folded, body, message_max_width(content_width))
+        {
             // The listener is per turn and used exactly here, so it is taken
             // out of the map instead of cloned.
             col = col.child(match handlers.remove(&turn.anchor) {
@@ -5595,7 +5628,7 @@ mod tests {
         assert!(bubble.contains(".px(px(MESSAGE_PAD_X))"));
         assert!(bubble.contains(".py(px(MESSAGE_PAD_Y))"));
         assert!(bubble.contains("glass_fill(message_surface(role))"));
-        assert!(bubble.contains("content_width - 2.0 * MESSAGE_PAD_X"));
+        assert!(bubble.contains("message_max_width(content_width) - 2.0 * MESSAGE_PAD_X"));
         assert!(bubble.contains("history_attachments(&paths, attachment_width, handlers)"));
         const {
             assert!(USER_TEXT_SIZE > PLAIN_TEXT_SIZE);

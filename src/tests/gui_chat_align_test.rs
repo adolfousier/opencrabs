@@ -209,16 +209,46 @@ fn both_chrome_rows_clear_the_corner() {
 fn the_bubble_is_capped_in_pixels() {
     let bubble = body_after(TRANSCRIPT, "fn bubble(");
     assert!(
-        bubble.contains(".when(content_width > 0.0, |d| d.max_w(px(content_width)))"),
+        bubble.contains("d.max_w(px(message_max_width(content_width)))"),
         "the bubble is capped in pixels, from the planned row width"
     );
     let cap = bubble
-        .find("d.max_w(px(content_width))")
+        .find("d.max_w(px(message_max_width(content_width)))")
         .expect("the pixel cap is present");
     let percent = bubble
         .find(".max_w_full()")
         .expect("the percentage cap stays as a second belt");
     assert!(cap < percent, "the pixel cap is what holds in a tight pane");
+}
+
+/// A row never fills the transcript (#2969). The cap is a fraction of the
+/// planned width, applied to the message bubble, the forwarded row, the
+/// settled turn card and the live one, so no row of any kind runs edge to
+/// edge and the widest one sets no rhythm for the rest.
+#[test]
+fn no_row_fills_the_transcript() {
+    assert!(
+        TRANSCRIPT.contains("const MESSAGE_MAX_FRACTION: f32 = 2.0 / 3.0;"),
+        "the two thirds cap is one named constant"
+    );
+    let helper = body_after(TRANSCRIPT, "fn message_max_width(");
+    assert!(
+        helper.contains("content_width * MESSAGE_MAX_FRACTION"),
+        "the cap is a fraction of the planned width, not a second number"
+    );
+    for (name, anchor) in [
+        ("the bubble", "fn bubble("),
+        ("the forwarded row", "fn forward_block("),
+        ("the settled card", "fn settled_card("),
+        ("the live card", "fn live_card("),
+    ] {
+        let body = body_after(TRANSCRIPT, anchor);
+        assert!(
+            body.contains("max_w(px(message_max_width(content_width)))")
+                || body.contains("max_w(px(max_width))"),
+            "{name} takes the two thirds cap"
+        );
+    }
 }
 
 /// The planned width is the transcript's outer measure, but its root spends
