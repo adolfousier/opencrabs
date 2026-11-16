@@ -230,8 +230,8 @@ pub fn overflow_label(overflow: &Overflow) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        BAR_TOPICS_SHOWN, BarEntry, BarPlan, Overflow, TopicChip, bar_entries, bar_limit,
-        bar_plan, overflow_label,
+        BAR_TOPICS_SHOWN, BarEntry, BarPlan, Overflow, TopicChip, bar_entries, bar_limit, bar_plan,
+        overflow_label,
     };
     use uuid::Uuid;
 

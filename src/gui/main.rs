@@ -58,9 +58,9 @@ mod layout_store;
 mod logging;
 mod markdown;
 mod menu;
+mod middle_scroll;
 mod mission_control;
 mod mission_control_view;
-mod middle_scroll;
 mod modal_shell;
 mod model_fetch;
 mod model_picker;
@@ -139,9 +139,7 @@ use opencrabs::ui_core::model_layout;
 use opencrabs::ui_core::model_selector::{FetchRequest, ProviderSelectorState};
 use opencrabs::ui_core::pane_tree::{DropHalf, PaneTree};
 use opencrabs::ui_core::rail;
-use opencrabs::ui_core::scroll::{
-    Follow, page_landing, scrolled_from_top, wheel_releases_follow,
-};
+use opencrabs::ui_core::scroll::{Follow, page_landing, scrolled_from_top, wheel_releases_follow};
 use opencrabs::ui_core::split::{self, Layout};
 use opencrabs::ui_core::text_field::{self, TextField};
 use opencrabs::ui_core::topic_bar;
@@ -4490,7 +4488,10 @@ impl Render for Dashboard {
                             .overflow_hidden()
                             .child(composer)
                             .child(
-                                div().w_full().h(px(1.)).bg(rgb(palette::current().panel_hi)),
+                                div()
+                                    .w_full()
+                                    .h(px(1.))
+                                    .bg(rgb(palette::current().panel_hi)),
                             )
                             .child(footer.into_any_element())
                             .into_any_element(),
@@ -5465,12 +5466,10 @@ impl Render for Dashboard {
                     .on_mouse_move(cx.listener(|this, ev: &MouseMoveEvent, _window, cx| {
                         this.move_middle_scroll(ev.position, cx);
                     }))
-                    .on_scroll_wheel(cx.listener(
-                        |this, _ev: &ScrollWheelEvent, _window, cx| {
-                            this.cancel_middle_scroll(cx);
-                            cx.stop_propagation();
-                        },
-                    )),
+                    .on_scroll_wheel(cx.listener(|this, _ev: &ScrollWheelEvent, _window, cx| {
+                        this.cancel_middle_scroll(cx);
+                        cx.stop_propagation();
+                    })),
             );
         }
         // A stationary pointer still scrolls. Entering the dead zone lets the
@@ -10016,7 +10015,9 @@ mod gui {
                 "the composer chrome is no longer conditional on the dock"
             );
             for chrome in [".shadow_sm()", ".rounded(px(COMPOSER_RADIUS))"] {
-                let at = editor.find(".when(!self.docked, |d| {").expect("the dock gate");
+                let at = editor
+                    .find(".when(!self.docked, |d| {")
+                    .expect("the dock gate");
                 let end = editor[at..].find(".p_3()").expect("the field's padding");
                 assert!(
                     editor[at..at + end].contains(chrome),
@@ -10024,7 +10025,9 @@ mod gui {
                 );
             }
             assert!(
-                DASHBOARD.contains("editor.docked = self.screen == Screen::Chat && !self.window_is_split();"),
+                DASHBOARD.contains(
+                    "editor.docked = self.screen == Screen::Chat && !self.window_is_split();"
+                ),
                 "the dock flag must be recomputed per frame, not latched"
             );
 

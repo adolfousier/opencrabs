@@ -123,12 +123,13 @@ fn every_exit_and_the_follow_landing_stay_wired() {
     assert!(MAIN.contains(".capture_any_mouse_down("));
     assert!(MAIN.contains("this.move_middle_scroll(ev.position, cx);"));
     assert!(MAIN.contains("this.cancel_middle_scroll(cx);"));
-    assert!(MIDDLE_SCROLL.contains(
-        "self.screen == Screen::Chat && self.chat_session == Some(session)"
-    ));
-    assert!(MIDDLE_SCROLL.contains(
-        "self.screen == Screen::Chat && self.pane_states.contains_key(&session)"
-    ));
+    assert!(
+        MIDDLE_SCROLL.contains("self.screen == Screen::Chat && self.chat_session == Some(session)")
+    );
+    assert!(
+        MIDDLE_SCROLL
+            .contains("self.screen == Screen::Chat && self.pane_states.contains_key(&session)")
+    );
     assert!(MIDDLE_SCROLL.contains("if !target_visible {"));
     assert!(MIDDLE_SCROLL.contains("follow.release();"));
     assert!(MIDDLE_SCROLL.contains("follow.rearm();"));

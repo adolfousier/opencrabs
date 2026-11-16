@@ -77,19 +77,15 @@ impl Dashboard {
     }
 
     pub(super) fn middle_scroll_controls_pane(&self, session: Uuid) -> bool {
-        self.middle_scroll.as_ref().is_some_and(|gesture| {
-            gesture.target == MiddleScrollTarget::Pane(session)
-        })
+        self.middle_scroll
+            .as_ref()
+            .is_some_and(|gesture| gesture.target == MiddleScrollTarget::Pane(session))
     }
 
     /// Restart the clock only when a stationary gesture starts moving. A
     /// pointer that is already outside the dead zone keeps the last frame's
     /// timestamp, so frequent pointer events cannot discard elapsed time.
-    pub(crate) fn move_middle_scroll(
-        &mut self,
-        position: Point<Pixels>,
-        cx: &mut Context<Self>,
-    ) {
+    pub(crate) fn move_middle_scroll(&mut self, position: Point<Pixels>, cx: &mut Context<Self>) {
         if let Some(gesture) = self.middle_scroll.as_mut()
             && gesture.pointer != position
         {
@@ -105,11 +101,7 @@ impl Dashboard {
     /// Queue one redraw for the next animation frame. This mirrors
     /// `Window::request_animation_frame`, with the receipt cleared by the
     /// callback itself: an unrelated repaint must not queue a second loop.
-    pub(crate) fn schedule_middle_scroll_frame(
-        &mut self,
-        window: &Window,
-        cx: &mut Context<Self>,
-    ) {
+    pub(crate) fn schedule_middle_scroll_frame(&mut self, window: &Window, cx: &mut Context<Self>) {
         let animate = self
             .middle_scroll
             .as_ref()
@@ -163,28 +155,23 @@ impl Dashboard {
                 // This dashboard render already paints the new offset.
                 // Notifying it here would queue a second render beside
                 // the animation callback on every moving frame.
-                let landing = apply_delta(
-                    &self.chat_state.scroll,
-                    &mut self.chat_state.follow,
-                    delta,
-                );
+                let landing =
+                    apply_delta(&self.chat_state.scroll, &mut self.chat_state.follow, delta);
                 !landing.moved || (delta < 0.0 && landing.at_end)
             }
-            MiddleScrollTarget::Pane(session) => {
-                match self.pane_states.get(&session).cloned() {
-                    Some(pane) => {
-                        let landing = pane.update(cx, |pane, cx| {
-                            let landing = apply_delta(&pane.scroll, &mut pane.follow, delta);
-                            if landing.moved {
-                                cx.notify();
-                            }
-                            landing
-                        });
-                        !landing.moved || (delta < 0.0 && landing.at_end)
-                    }
-                    None => true,
+            MiddleScrollTarget::Pane(session) => match self.pane_states.get(&session).cloned() {
+                Some(pane) => {
+                    let landing = pane.update(cx, |pane, cx| {
+                        let landing = apply_delta(&pane.scroll, &mut pane.follow, delta);
+                        if landing.moved {
+                            cx.notify();
+                        }
+                        landing
+                    });
+                    !landing.moved || (delta < 0.0 && landing.at_end)
                 }
-            }
+                None => true,
+            },
         };
         if finished {
             self.cancel_middle_scroll(cx);

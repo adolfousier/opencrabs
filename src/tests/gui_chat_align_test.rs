@@ -110,7 +110,10 @@ fn the_text_width_stays_definite_through_the_wrappers() {
         body_after(TRANSCRIPT, "fn md_block("),
         body_after(TRANSCRIPT, "fn plain_block("),
     ] {
-        assert!(body.contains(".w_full()"), "the wrapper takes the row width");
+        assert!(
+            body.contains(".w_full()"),
+            "the wrapper takes the row width"
+        );
         assert!(body.contains(".min_w_0()"), "the wrapper can shrink");
     }
     let line = body_after(TRANSCRIPT, "fn md_line(")

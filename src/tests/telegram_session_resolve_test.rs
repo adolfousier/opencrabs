@@ -114,7 +114,11 @@ async fn suffix_lookup_after_switch_touch_picks_switched_row() {
 async fn auto_titled_title_survives_should_refresh_check() {
     let template = build_session_title(true, "Alice", 1, "", 99, None, None);
     let auto_titled = format!("Telegram: Deploy fix {}", chat_id_suffix(99, None));
-    assert!(!should_refresh_label(&auto_titled, &template, TitleSource::Auto));
+    assert!(!should_refresh_label(
+        &auto_titled,
+        &template,
+        TitleSource::Auto
+    ));
 }
 
 /// Mirrors handler chat-bound idle branch: archive stale bound row, create replacement.

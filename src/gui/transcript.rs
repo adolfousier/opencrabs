@@ -1784,10 +1784,7 @@ fn md_line(l: &markdown::MdLine, look: MdLook, selection: Option<&SelectionConte
         &l.links,
         selection,
     );
-    let base = div()
-        .w_full()
-        .min_w_0()
-        .pl(rems(f32::from(l.indent) * 0.9));
+    let base = div().w_full().min_w_0().pl(rems(f32::from(l.indent) * 0.9));
     if l.heading {
         base.mt(px(RHYTHM_HEADING_ABOVE))
             .mb(px(RHYTHM_HEADING_BELOW))
@@ -2246,12 +2243,7 @@ fn quote_block(lines: &[&str], selection: Option<&SelectionContext>) -> Div {
 /// pictures (#2771), so a user who picks an emoji from the composer sees the
 /// emoji, not its name.
 fn plain_block(content: &str, size: f32, selection: Option<&SelectionContext>) -> Div {
-    let mut lines = div()
-        .flex()
-        .flex_col()
-        .w_full()
-        .min_w_0()
-        .gap_0p5();
+    let mut lines = div().flex().flex_col().w_full().min_w_0().gap_0p5();
     for line in content.split('\n') {
         let style = body_style(size);
         lines = lines.child(inline_crabs(
@@ -2468,7 +2460,11 @@ fn bubble(
     // again, which is why the layout, not the plan, has the last word here: a
     // plan wider than the row is corrected by shrinking instead of painting
     // past it.
-    let max_width = if row_cap > 0.0 { row_cap } else { content_width };
+    let max_width = if row_cap > 0.0 {
+        row_cap
+    } else {
+        content_width
+    };
     let attachment_width = (max_width - 2.0 * MESSAGE_PAD_X).max(0.0);
     let mut col = div()
         .flex()
@@ -2583,7 +2579,11 @@ fn forward_block(
     };
     let paths = marker_paths(&content);
     let text = strip_markers(&content);
-    let max_width = if row_cap > 0.0 { row_cap } else { content_width };
+    let max_width = if row_cap > 0.0 {
+        row_cap
+    } else {
+        content_width
+    };
     let attachment_width = (max_width - 2.0 * MESSAGE_PAD_X).max(0.0);
     let mut col = div()
         .flex()
@@ -2862,20 +2862,16 @@ fn tools_block(calls: &[ToolCall], selection: Option<&SelectionContext>) -> Div 
                 // deep inside two containers, and each level that stays
                 // content sized hands the shaper no width at all.
                 .child(
-                    div()
-                        .flex_1()
-                        .min_w_0()
-                        .line_clamp(3)
-                        .child(
-                            selectable_styled_text(
-                                tool_line(call),
-                                small_style(SMALL_TEXT_SIZE, color),
-                                Vec::new(),
-                                &[],
-                                selection,
-                            )
-                            .w_full(),
-                        ),
+                    div().flex_1().min_w_0().line_clamp(3).child(
+                        selectable_styled_text(
+                            tool_line(call),
+                            small_style(SMALL_TEXT_SIZE, color),
+                            Vec::new(),
+                            &[],
+                            selection,
+                        )
+                        .w_full(),
+                    ),
                 ),
         );
     }
@@ -2920,11 +2916,7 @@ fn tool_ledger_text(calls: &[ToolCall]) -> String {
 /// rounded box holding the head row, the working-out rows when the turn is
 /// open, and the footer that keeps the count, the ctx and the clock after the
 /// turn ends. `None` for a turn that did no work, which earns no card (#758).
-fn settled_card(
-    turn: &Turn,
-    body: Vec<AnyElement>,
-    max_width: f32,
-) -> Option<Stateful<Div>> {
+fn settled_card(turn: &Turn, body: Vec<AnyElement>, max_width: f32) -> Option<Stateful<Div>> {
     turn.header.as_ref()?;
     let (glyph, verb) = settled_verdict(turn);
     let failed = glyph == "\u{274c}";
@@ -4010,7 +4002,15 @@ fn live_view(
         };
         col = col.child(live_user_row(
             slot,
-            live_row_body(slot, drag, &block, content_width, row_cap, handlers, edit_row),
+            live_row_body(
+                slot,
+                drag,
+                &block,
+                content_width,
+                row_cap,
+                handlers,
+                edit_row,
+            ),
             press.get(&LiveRow::User(slot)),
             edit.get(&slot),
         ));
@@ -4044,11 +4044,13 @@ fn live_view(
             message_id: None,
             forward: None,
         };
-        col = col.child(match live_block(drag, &block, content_width, row_cap, handlers) {
-            Some(row) => row,
-            None => block_view(&block, content_width, row_cap, handlers, None, true)
-                .into_any_element(),
-        });
+        col = col.child(
+            match live_block(drag, &block, content_width, row_cap, handlers) {
+                Some(row) => row,
+                None => block_view(&block, content_width, row_cap, handlers, None, true)
+                    .into_any_element(),
+            },
+        );
     }
     col
 }
@@ -5388,9 +5390,7 @@ pub fn view(
             }
         }
         col = col.children(pre);
-        if carded
-            && let Some(card) = settled_card(turn, body, row_cap)
-        {
+        if carded && let Some(card) = settled_card(turn, body, row_cap) {
             // The listener is per turn and used exactly here, so it is taken
             // out of the map instead of cloned.
             col = col.child(match handlers.remove(&turn.anchor) {

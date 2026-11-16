@@ -822,8 +822,7 @@ mod tests {
             "the active plan card looks clickable in both pane render paths"
         );
         assert!(
-            body.contains(".when(index == 0")
-                && body.contains("disclosure_icon(color, 1.0)"),
+            body.contains(".when(index == 0") && body.contains("disclosure_icon(color, 1.0)"),
             "the disclosure arrow uses the progress bar's teal on the summary row"
         );
         let row = body

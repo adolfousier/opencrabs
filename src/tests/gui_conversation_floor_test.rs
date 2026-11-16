@@ -75,9 +75,8 @@ fn the_floor_is_the_one_number_the_transcript_asks_for() {
     // Two floors that drift apart are worse than none: the wrapper would keep
     // a height the transcript already considers collapsed.
     assert!(
-        PANE_CHROME.contains(
-            "pub(crate) const CONVERSATION_FLOOR: f32 = transcript::TRANSCRIPT_MIN_H;"
-        ),
+        PANE_CHROME
+            .contains("pub(crate) const CONVERSATION_FLOOR: f32 = transcript::TRANSCRIPT_MIN_H;"),
         "the wrapper floor is the transcript's own floor, not a second number"
     );
 }

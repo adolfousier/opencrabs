@@ -62,7 +62,7 @@ fn session(title: &str) -> Session {
         auto_title_attempted: false,
         project_id: None,
         channel_chat_key: None,
-            title_source: crate::db::TitleSource::Manual,
+        title_source: crate::db::TitleSource::Manual,
     }
 }
 

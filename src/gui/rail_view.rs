@@ -577,11 +577,13 @@ impl RailView {
             .flex_none()
             .items_center()
             .gap_0p5()
-            .child(header_button(
-                "rail-header-sidebar",
-                sessions::sidebar_icon(1.0, pal.text_muted),
+            .child(
+                header_button(
+                    "rail-header-sidebar",
+                    sessions::sidebar_icon(1.0, pal.text_muted),
+                )
+                .on_click(hide_rail),
             )
-            .on_click(hide_rail))
             .child(
                 header_button(
                     "rail-filter-toggle",
@@ -626,9 +628,8 @@ impl RailView {
                     link.act(cx, move |dash, cx| dash.rail_set_plan_filter(plan, cx));
                 })
             };
-            chips = chips.child(
-                sessions::filter_chip(id, label, rail_filter.plan == plan).on_click(pick),
-            );
+            chips = chips
+                .child(sessions::filter_chip(id, label, rail_filter.plan == plan).on_click(pick));
         }
         let auto = {
             let link = link.clone();

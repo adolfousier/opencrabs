@@ -33,7 +33,11 @@ fn session_rows_paint_edge_to_edge_without_card_chrome() {
     );
     assert!(row.contains(".p_2()"), "the title keeps its internal inset");
 
-    let rail_root = block(SESSIONS, "pub fn rail(", ".child(brand_header(rail_actions))");
+    let rail_root = block(
+        SESSIONS,
+        "pub fn rail(",
+        ".child(brand_header(rail_actions))",
+    );
     assert!(
         !rail_root.contains(".p_2()") && !rail_root.contains(".gap_1()"),
         "the rail adds no outer gutter or gap around its rows"

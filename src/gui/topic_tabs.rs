@@ -383,16 +383,11 @@ mod tests {
         // Same trap for the click target: `on_click` is stateful too, so the
         // id has to come before it in the builder chain or the pill does not
         // compile and, once it does, does not respond.
-        let id_at = pill
-            .find(".id(")
-            .expect("the click target carries an id");
+        let id_at = pill.find(".id(").expect("the click target carries an id");
         let click_at = pill
             .find(".on_click(on_click)")
             .expect("the pill is pressed");
-        assert!(
-            id_at < click_at,
-            "the id comes before the click handler"
-        );
+        assert!(id_at < click_at, "the id comes before the click handler");
     }
 
     /// The rail's chip strip is not bounded (#2949). An earlier pass capped it

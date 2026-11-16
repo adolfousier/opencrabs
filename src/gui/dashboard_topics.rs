@@ -226,8 +226,7 @@ impl Dashboard {
             let (label, picture) = match entry {
                 topic_bar::BarEntry::All => {
                     let bg = crate::palette::current().bg;
-                    let dark =
-                        opencrabs::config::gui_theme::relative_luminance(bg) < 0.18;
+                    let dark = opencrabs::config::gui_theme::relative_luminance(bg) < 0.18;
                     (
                         "All".to_string(),
                         Some(topic_icons::all_icon(icon_rems, dark).into_any_element()),
