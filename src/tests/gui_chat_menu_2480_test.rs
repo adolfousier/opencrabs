@@ -95,9 +95,8 @@ fn the_menu_floats_as_a_card_and_the_strip_nothing_grows_from() {
         "the strip used to hold the button and its items; it holds neither"
     );
     assert!(
-        DASHBOARD
-            .contains("let strip = topic_strip(\"window\", self.topic_edge, toggle_edge, tabs);"),
-        "the strip takes a key, the tabs and the edge button, nothing else"
+        GUI_MAIN.contains("let strip = topic_strip(\n                \"window\","),
+        "the window row asks for a strip keyed by the window, not one holding a menu"
     );
 
     // Painted last, so the conversation cannot cover the open card. It is

@@ -75,7 +75,7 @@ fn a_pane_draws_its_own_topic_strip() {
         "the row is rebuilt in the pane's own render, so a pane that only redraws itself keeps it"
     );
     assert!(
-        DASHBOARD.contains("fn topic_tabs(&self, pane: Option<Uuid>"),
+        DASHBOARD.contains("fn topic_tabs(") && DASHBOARD.contains("pane: Option<Uuid>"),
         "the strip resolves a session instead of reading the chat leaf"
     );
     // The window row stands down only for the unsplit window.

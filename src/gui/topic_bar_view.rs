@@ -20,13 +20,6 @@ use crate::palette;
 use crate::topic_icons;
 use crate::topic_tabs;
 
-/// The most an expanded chat strip draws before it scrolls (#2949). The row
-/// folds its family into a pill, and the pill expands it: past this many rems
-/// of chips the row would push the transcript down by its own length, so it
-/// keeps a fixed height and scrolls instead. Roughly six chip rows, enough to
-/// see where the reader is and still read the conversation under it.
-const CHAT_STRIP_MAX_REMS: f32 = 9.0;
-
 /// The topic row (#2400, #2402): the leading button that moves it and the
 /// tabs. Across the top or bottom it is one row; down a side it is one column.
 ///
@@ -35,15 +28,21 @@ const CHAT_STRIP_MAX_REMS: f32 = 9.0;
 /// chat's top right and floats over the transcript instead of growing this
 /// strip by five rows when it opens.
 ///
-/// `scroll` bounds the tabs and lets them scroll, which only the expanded
-/// state asks for (#2949). Collapsed, the row is the cap plus a pill and fits
-/// the height it always had.
+/// `scroll` lets the tabs scroll once the row is expanded, which only the
+/// expanded state asks for (#2949). Collapsed, the row is the cap plus a pill
+/// and fits the height it always had.
+///
+/// `pill` is the expand or fold control, and it is drawn as a sibling of the
+/// scroller rather than as one of its children (#2949). Inside the scroller a
+/// long family carried the fold control to the far end of the row, where
+/// getting the transcript's height back meant scrolling the whole strip.
 pub(crate) fn topic_strip(
     key: &str,
     edge: topic_tabs::Edge,
     toggle_edge: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     tabs: Vec<AnyElement>,
     scroll: bool,
+    pill: Option<AnyElement>,
 ) -> Div {
     // A split draws one strip per pane (#2687), so the control cannot carry a
     // fixed id: two strips sharing one would share their hover state, and a
@@ -102,6 +101,9 @@ pub(crate) fn topic_strip(
                     .when(scroll, |d| d.flex_1().min_h_0().overflow_y_scroll())
                     .children(tabs),
             )
+            // Outside the scroller, so the fold control stays at the column's
+            // foot instead of travelling with the tail of the family (#2949).
+            .children(pill)
     } else {
         div()
             .flex()
@@ -115,8 +117,11 @@ pub(crate) fn topic_strip(
             .border_b_1()
             .border_color(separator)
             .child(leading)
-            // The tabs wrap onto a second line rather than being cut off, so a
-            // narrow window never hides a topic (#2414).
+            // Collapsed, the tabs wrap onto a second line rather than being cut
+            // off, so a narrow window never hides a topic (#2414). Expanded
+            // they stay on one line and scroll sideways (#2949): a family of 46
+            // topics wrapped into four rows and pushed the transcript down by
+            // its own height, which is not a topic row any more.
             .child(
                 div()
                     // Stateful for the expanded scroll, and keyed per pane so
@@ -126,17 +131,17 @@ pub(crate) fn topic_strip(
                     .min_w_0()
                     .flex()
                     .flex_row()
-                    .flex_wrap()
                     .items_center()
                     .gap_1()
-                    // Expanded, the wrapped rows keep a fixed height and
-                    // scroll, so the family never eats the transcript it sits
-                    // above (#2949).
-                    .when(scroll, |d| {
-                        d.max_h(rems(CHAT_STRIP_MAX_REMS)).overflow_y_scroll()
-                    })
+                    .when(!scroll, |d| d.flex_wrap())
+                    // One row, wider than the window, moving under the reader
+                    // instead of growing taller than the chat it labels.
+                    .when(scroll, |d| d.flex_nowrap().overflow_x_scroll())
                     .children(tabs),
             )
+            // Outside the scroller, so the fold control sits at the row's end
+            // and never scrolls away with the family it folds (#2949).
+            .children(pill)
     }
 }
 

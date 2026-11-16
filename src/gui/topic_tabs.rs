@@ -288,12 +288,23 @@ mod tests {
             .split("} else if self.chat_topics_expanded")
             .nth(1)
             .expect("the fold-back pill")
-            .split("cells")
+            .split("(cells, pill)")
             .next()
             .expect("the fold body");
         assert!(
             fold.contains("this.chat_topics_expanded = false;"),
             "the open row folds back from the same pill"
+        );
+        // The pill never joins the chips (#2949). It used to be pushed into the
+        // cell list, which put the fold control at the end of a scrolled row.
+        assert!(
+            !bar.contains("cells.push(overflow_chip("),
+            "the pill travels beside the chips, not among them"
+        );
+        assert_eq!(
+            bar.matches("pill = Some(overflow_chip(").count(),
+            2,
+            "both the expand and the fold pill come back separately"
         );
         let strip = include_str!("topic_bar_view.rs");
         let row = strip
@@ -308,9 +319,39 @@ mod tests {
             2,
             "both edges bound the expanded strip"
         );
-        assert_eq!(row.matches("overflow_y_scroll()").count(), 2);
-        assert!(row.contains("max_h(rems(CHAT_STRIP_MAX_REMS))"));
+        // Across the top the expanded row is ONE line that scrolls sideways
+        // (#2949). It used to wrap, so a family of 46 topics drew four rows and
+        // pushed the transcript down by its own height.
+        assert!(row.contains(".when(!scroll, |d| d.flex_wrap())"));
+        assert!(row.contains(".when(scroll, |d| d.flex_nowrap().overflow_x_scroll())"));
+        assert_eq!(
+            row.matches("overflow_x_scroll()").count(),
+            1,
+            "the horizontal row is the one that scrolls sideways"
+        );
+        assert_eq!(
+            row.matches("overflow_y_scroll()").count(),
+            1,
+            "only the side column scrolls down"
+        );
         assert!(row.contains("flex_1().min_h_0().overflow_y_scroll()"));
+        assert!(
+            !row.contains("max_h(rems("),
+            "a fixed height was the wrong bound: it wrapped, then clipped"
+        );
+        // The pill is a sibling of the scroller (#2949). Inside it, a long
+        // family carried the fold control to the far end of the row.
+        assert!(row.contains("pill: Option<AnyElement>,"));
+        assert_eq!(
+            row.matches(".children(pill)").count(),
+            2,
+            "both edges draw the pill outside their scroller"
+        );
+        assert_eq!(
+            row.matches(".children(tabs)").count(),
+            2,
+            "both edges scroll the chips alone"
+        );
         // A scroll container is state, so GPUI only offers `overflow_y_scroll`
         // once the element has an id. The first pass asked for the scroll and
         // skipped the id, and the GUI did not build. Both edges carry one.

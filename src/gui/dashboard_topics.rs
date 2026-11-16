@@ -105,7 +105,7 @@ impl Dashboard {
             return None;
         }
         let pane_key = session.to_string();
-        let tabs = self.topic_tabs(Some(session), cx);
+        let (tabs, pill) = self.topic_tabs(Some(session), cx);
         let toggle_edge = cx.listener(|this, _ev: &ClickEvent, _window, cx| {
             cx.stop_propagation();
             this.cycle_topic_edge(cx);
@@ -117,6 +117,7 @@ impl Dashboard {
                 toggle_edge,
                 tabs,
                 self.chat_topics_expanded,
+                pill,
             )
             .into_any_element(),
         )
@@ -131,16 +132,24 @@ impl Dashboard {
     /// made it read as a sibling. The name belongs to the card above, and
     /// `All` is the way back to it.
     ///
+    /// The expand or fold pill comes back beside the chips, not among them
+    /// (#2949): the row draws it outside its scroller so the fold control
+    /// stays put while a long family scrolls under the reader.
+    ///
     /// `pane` names the leaf the strip is drawn in, `None` for the unsplit
     /// window (#2686). Every read and every click resolves against it, so a
     /// pane's strip shows that pane's family and a click moves that pane.
-    pub(crate) fn topic_tabs(&self, pane: Option<Uuid>, cx: &mut Context<Self>) -> Vec<AnyElement> {
+    pub(crate) fn topic_tabs(
+        &self,
+        pane: Option<Uuid>,
+        cx: &mut Context<Self>,
+    ) -> (Vec<AnyElement>, Option<AnyElement>) {
         let Some(open) = pane.or(self.chat_session) else {
-            return Vec::new();
+            return (Vec::new(), None);
         };
         let root = self.sessions.parents.get(&open).copied().unwrap_or(open);
         if !self.sessions.is_topic_enabled(root) {
-            return Vec::new();
+            return (Vec::new(), None);
         }
         // The topic store outranks the stored session name (#2490): a rename
         // in Telegram reaches this label on the next refresh pass. With no live
@@ -183,7 +192,10 @@ impl Dashboard {
             .collect();
         let limit = topic_bar::bar_limit(self.chat_topics_expanded, topics.len());
         let plan = topic_bar::bar_plan(root, open, &chips, limit);
-        let mut cells: Vec<AnyElement> = Vec::with_capacity(plan.entries.len() + 1);
+        let mut cells: Vec<AnyElement> = Vec::with_capacity(plan.entries.len());
+        // The pill is not a chip: the row draws it outside the scroller
+        // (#2949), so it travels back beside the cells instead of inside them.
+        let mut pill: Option<AnyElement> = None;
         for entry in plan.entries {
             let id = entry.session(root);
             let current = entry.is_open(root, open);
@@ -259,7 +271,7 @@ impl Dashboard {
                 this.chat_topics_expanded = true;
                 cx.notify();
             });
-            cells.push(overflow_chip(
+            pill = Some(overflow_chip(
                 topic_bar::overflow_label(&overflow),
                 shape,
                 expand,
@@ -272,9 +284,9 @@ impl Dashboard {
                 this.chat_topics_expanded = false;
                 cx.notify();
             });
-            cells.push(overflow_chip("\u{2212}".to_string(), shape, fold));
+            pill = Some(overflow_chip("\u{2212}".to_string(), shape, fold));
         }
-        cells
+        (cells, pill)
     }
 
     /// Whether a turn is in flight in one topic (#2762).

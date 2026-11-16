@@ -4231,7 +4231,7 @@ impl Render for Dashboard {
             // leading button moves the whole row to another side (#2402).
             // The `...` menu is NOT here any more (#2480): it lives at the
             // conversation's top right, over the chat it acts on.
-            let tabs = self.topic_tabs(None, cx);
+            let (tabs, pill) = self.topic_tabs(None, cx);
             let toggle_edge = cx.listener(|this, _ev: &ClickEvent, _window, cx| {
                 cx.stop_propagation();
                 this.cycle_topic_edge(cx);
@@ -4242,6 +4242,7 @@ impl Render for Dashboard {
                 toggle_edge,
                 tabs,
                 self.chat_topics_expanded,
+                pill,
             );
             topic_row = Some((self.topic_edge, strip.into_any_element()));
         }
