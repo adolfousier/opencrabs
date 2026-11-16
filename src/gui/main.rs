@@ -8220,15 +8220,24 @@ mod tests {
             .split_once("let mut node = div()")
             .map(|(_, leaf)| leaf)
             .expect("the leaf builds its own box");
+        // #2980 made the chrome stack shrinkable and clipped, so the rows
+        // inside give the room and nothing paints past the pane's bottom edge.
+        // #2985 moved the floor onto the wrapper, so the body chain carries
+        // `min_h(px(CONVERSATION_FLOOR))` rather than `min_h_0` (#3000).
+        let flat: String = body.split_whitespace().collect::<Vec<_>>().join(" ");
         assert!(
-            body.contains(".flex_none().min_w_0().child(chrome)"),
+            flat.contains(".flex_shrink() .min_h_0() .min_w_0() .overflow_hidden() .child(chrome),"),
             "the chrome stack is not shrinkable"
         );
         assert!(
-            body.contains(
-                "div()\n                .flex()\n                .flex_col()\n                .flex_1()\n                .min_w_0()\n                .min_h_0()\n                .child(body)"
+            flat.contains(
+                "div() .flex() .flex_col() .flex_1() .min_w_0() .min_h(px(CONVERSATION_FLOOR))"
             ),
-            "the body is the child that shrinks, and it can"
+            "the body wrapper does not carry the conversation floor"
+        );
+        assert!(
+            flat.contains(".child(body),"),
+            "the body is not the child the wrapper shrinks"
         );
     }
 
