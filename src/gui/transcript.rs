@@ -3484,7 +3484,7 @@ fn live_card(
             .filter_map(|(entry, line)| match line {
                 LiveCardLine::Narration(text) => {
                     let paragraph = collapsed_paragraph(text);
-                    (!paragraph.is_empty()).then(|| (*entry, paragraph))
+                    (!paragraph.is_empty()).then_some((*entry, paragraph))
                 }
                 _ => None,
             })
