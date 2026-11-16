@@ -1587,6 +1587,22 @@ impl Dashboard {
                         // stream and now says it was stopped, instead of
                         // waiting on a spinner that will never turn again.
                         self.turn.live.stop();
+                        // A stop is still a turn that ran, so it keeps the
+                        // numbers it measured (#2953). The record was removed
+                        // above and never written back, so the card showed ctx
+                        // and rate on screen and lost both on the next read.
+                        // Same guard as a failure: nothing streamed means no
+                        // reading of its own, and borrowing the previous
+                        // turn's budget would be a lie.
+                        if let Some(metrics) = transcript::TurnMetrics::measured(
+                            self.turn.live.tokens,
+                            self.turn.ctx_tokens,
+                            self.ctx_max,
+                            self.turn.live.tokens_per_sec(),
+                            self.turn.live.tools.len(),
+                        ) {
+                            self.metrics.pending.insert(session, metrics);
+                        }
                         self.turn.cancel = None;
                         logging::info("turn settled after the stop dropped it");
                     } else {
@@ -1594,14 +1610,29 @@ impl Dashboard {
                         // the parked copy of a switched-away turn retires.
                         self.stashed.remove(&session);
                         if let Some(pane) = self.pane_view(session) {
-                            pane.update(cx, |pane, cx| {
+                            let measured = pane.update(cx, |pane, cx| {
                                 pane.live.finalize(None);
                                 pane.live.thinking = false;
                                 pane.live.stop();
                                 pane.busy = false;
                                 pane.cancel = None;
                                 cx.notify();
+                                (
+                                    pane.live.tokens,
+                                    pane.ctx_used,
+                                    pane.ctx_max,
+                                    pane.live.tokens_per_sec(),
+                                    pane.live.tools.len(),
+                                )
                             });
+                            // The leaf keeps its own reading, never the
+                            // window's (#2953, the #2854 split).
+                            let (tokens, ctx_used, ctx_max, tps, tool_calls) = measured;
+                            if let Some(metrics) = transcript::TurnMetrics::measured(
+                                tokens, ctx_used, ctx_max, tps, tool_calls,
+                            ) {
+                                self.metrics.pending.insert(session, metrics);
+                            }
                         }
                         // The stop is acknowledged: the leaf's queue becomes
                         // the next turn now, never while the cancel unwinds

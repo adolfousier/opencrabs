@@ -289,6 +289,34 @@ pub struct TurnMetrics {
 }
 
 impl TurnMetrics {
+    /// The record a turn that ran leaves behind, or `None` when it measured
+    /// nothing of its own (#2953).
+    ///
+    /// A stop ends a turn that did real work, so it keeps the numbers it read
+    /// instead of dropping them. The guard is the one a failure already uses:
+    /// no tokens means the provider never streamed, so there is no reading of
+    /// this turn's own and borrowing the previous turn's budget would be a
+    /// lie. A rate of zero is not a rate, so it stays `None` rather than
+    /// printing `0 tok/s`.
+    pub fn measured(
+        tokens: u32,
+        ctx_used: Option<u32>,
+        ctx_max: u32,
+        tps: f32,
+        tool_calls: usize,
+    ) -> Option<Self> {
+        if tokens == 0 {
+            return None;
+        }
+        let used = ctx_used?;
+        Some(Self {
+            ctx_used: used,
+            ctx_max,
+            tps: Some(f64::from(tps)).filter(|t| *t > 0.0),
+            tool_calls,
+        })
+    }
+
     /// The card's ctx segment, built by the same formatter the Telegram
     /// footer uses (`format_ctx_footer`), so the two surfaces cannot drift
     /// into different spellings of the same number (#2324 D2).
@@ -5206,6 +5234,30 @@ pub fn view(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A stopped turn keeps the numbers it measured, and a turn that never
+    /// streamed keeps none (#2953). The record was removed when the stop
+    /// landed and never written back, so the card showed ctx and rate on
+    /// screen and lost both on the next read of the session.
+    #[test]
+    fn a_stopped_turn_keeps_only_a_reading_of_its_own() {
+        let kept = TurnMetrics::measured(120, Some(4_000), 200_000, 42.0, 6)
+            .expect("a turn that streamed keeps its reading");
+        assert_eq!(kept.ctx_used, 4_000);
+        assert_eq!(kept.ctx_max, 200_000);
+        assert_eq!(kept.tps, Some(42.0));
+        assert_eq!(kept.tool_calls, 6);
+
+        // Nothing streamed: no reading of its own, and the previous turn's
+        // budget must not be borrowed.
+        assert!(TurnMetrics::measured(0, Some(4_000), 200_000, 42.0, 6).is_none());
+        // Streamed, but the budget had not been read yet.
+        assert!(TurnMetrics::measured(120, None, 200_000, 42.0, 6).is_none());
+        // A zero rate is not a rate, and the record still stands.
+        let quiet = TurnMetrics::measured(120, Some(4_000), 200_000, 0.0, 6)
+            .expect("tokens alone still make a record");
+        assert_eq!(quiet.tps, None);
+    }
 
     /// Perceived brightness of a packed RGB colour, 0..=255.
     fn luma(color: u32) -> u32 {
