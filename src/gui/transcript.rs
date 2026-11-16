@@ -82,6 +82,18 @@ const WINDOW: usize = 200;
 /// visible in a folded turn always draws in full (#2855).
 const MSG_EXCERPT_LINES: usize = 20;
 
+/// Lines the full-body path draws before it hands the rest to the reader
+/// (#2981). `full` exists so an answer stays readable in a folded turn (#2855),
+/// but it was uncapped, and one stored row reached 733,574 characters in the
+/// largest local session. A single `|---|` separator row made
+/// `is_deliverable_report` true, which kept that row visible while its turn was
+/// folded, so the uncapped path laid the whole thing out as 8,151 lines. The
+/// row measured 161,920px inside an 887px pane, the scroll pinned to the bottom
+/// of it, and the visible slice was that row's empty tail: a black chat for the
+/// length of the turn. A real report fits well inside this budget, and the rest
+/// is announced rather than silently eaten (#904).
+const MSG_FULL_LINES: usize = 400;
+
 /// Cut a body at `max` lines and report how many lines were left out. The cut
 /// is always announced with its own count: a silent one reads as eaten content
 /// (the #904 trap).
@@ -2454,9 +2466,10 @@ fn bubble(
     // folded non-answer body reads its first rows and the rest is one click
     // away, so `strip_markers` and the markdown parse only ever see the excerpt
     // instead of the tens of kilobytes a single stored row can carry. Answers
-    // arrive with `full = true`; the copy path always reads the whole block.
+    // arrive with `full = true` and read a far larger budget, never the whole
+    // body: the copy path is what reads the block in full (#2981).
     let (content, hidden) = if full {
-        (std::borrow::Cow::Borrowed(content), 0)
+        excerpt_lines(content, MSG_FULL_LINES)
     } else {
         excerpt_lines(content, MSG_EXCERPT_LINES)
     };
@@ -2587,7 +2600,7 @@ fn forward_block(
     // cut lands on the source before anything walks it. A forwarded answer
     // that the fold keeps visible still arrives here with `full = true`.
     let (content, hidden) = if full {
-        (std::borrow::Cow::Borrowed(content), 0)
+        excerpt_lines(content, MSG_FULL_LINES)
     } else {
         excerpt_lines(content, MSG_EXCERPT_LINES)
     };
@@ -2822,8 +2835,19 @@ fn thinking_block(content: &str, full: bool) -> Div {
     // The 600-character preview still applies before the parse, so a long
     // reasoning run cannot take over the pane. `Prose` keeps it a paragraph:
     // reasoning is model text, not something a person typed with Enter.
+    //
+    // `full` is bounded too (#2981). Expanding a turn asks for its working-out,
+    // not for an unbounded wall: one stored row carried 315,010 characters of
+    // reasoning, which drawn whole is 3,500 lines. The TUI caps narration even
+    // when expanded (`NARRATION_EXCERPT_LINES`), and this is the same budget
+    // with the same announced cut.
     let shown = if full {
-        content.trim().to_string()
+        let (cut, hidden) = excerpt_lines(content.trim(), MSG_FULL_LINES);
+        if hidden > 0 {
+            format!("{cut}\n\n\u{2026} +{hidden} more lines hidden")
+        } else {
+            cut.into_owned()
+        }
     } else {
         fit(content.trim(), 600)
     };
@@ -5122,8 +5146,40 @@ pub struct RowReach {
     pub viewport_top: f32,
     /// The bottom edge of that box.
     pub viewport_bottom: f32,
+    /// The width the box was actually painted at. This is the number the rows
+    /// had to wrap inside, and it is not the one the caller handed to `view`:
+    /// a row is `w_full()` inside this box, so a box narrower than the width
+    /// the row capped itself to wraps the text at the box and not at the cap.
+    pub viewport_width: f32,
     /// How many rows the surface holds.
     pub rows: usize,
+    /// The tallest row drawn, which is the one that decides the column's
+    /// height (#2981). The average row height was the reading that finally
+    /// named this bug: it jumped from 295px to 2,521px while the width moved
+    /// 26px, which no amount of text re-wrapping can do. One row carrying the
+    /// whole difference is the only shape that explains it, and the average
+    /// alone cannot say whether that is true.
+    pub tallest: Option<TallestRow>,
+}
+
+/// The row that decides how tall the column is (#2981).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TallestRow {
+    /// Its index in the surface's children.
+    pub index: usize,
+    /// Its top edge, before the offset moves it.
+    pub top: f32,
+    /// Its bottom edge, before the offset moves it.
+    pub bottom: f32,
+    /// The width it was laid out at.
+    pub width: f32,
+}
+
+impl TallestRow {
+    /// How tall it came out.
+    pub fn height(self) -> f32 {
+        self.bottom - self.top
+    }
 }
 
 impl RowReach {
@@ -5185,9 +5241,20 @@ impl RowReach {
 pub fn row_reach(scroll: &ScrollHandle) -> RowReach {
     let rows = scroll.children_count();
     let mut content_bottom = f32::MIN;
+    let mut tallest: Option<TallestRow> = None;
     for ix in 0..rows {
         if let Some(bounds) = scroll.bounds_for_item(ix) {
-            content_bottom = content_bottom.max(f32::from(bounds.bottom()));
+            let bottom = f32::from(bounds.bottom());
+            content_bottom = content_bottom.max(bottom);
+            let candidate = TallestRow {
+                index: ix,
+                top: f32::from(bounds.top()),
+                bottom,
+                width: f32::from(bounds.size.width),
+            };
+            if tallest.is_none_or(|held| candidate.height() > held.height()) {
+                tallest = Some(candidate);
+            }
         }
     }
     let viewport = scroll.bounds();
@@ -5197,7 +5264,9 @@ pub fn row_reach(scroll: &ScrollHandle) -> RowReach {
         max_offset: f32::from(scroll.max_offset().height),
         viewport_top: f32::from(viewport.top()),
         viewport_bottom: f32::from(viewport.bottom()),
+        viewport_width: f32::from(viewport.size.width),
         rows,
+        tallest,
     }
 }
 
@@ -5276,7 +5345,7 @@ pub fn witness_row_heartbeat(reach: RowReach, turns: usize, content_width: f32) 
     crate::logging::info(&format!(
         "transcript alive: {:?}, {} turns in state, {} rows built, {:.1}px per row, \
          offset {:.1}px, max {:.1}px, content bottom {:.1}px, row width {:.1}px, window \
-         {:.1}..{:.1}px ({:.1}px tall)",
+         {:.1}..{:.1}px ({:.1}px tall), box {:.1}px wide, {}",
         reach.frame(),
         turns,
         reach.rows,
@@ -5287,7 +5356,19 @@ pub fn witness_row_heartbeat(reach: RowReach, turns: usize, content_width: f32) 
         content_width,
         reach.viewport_top,
         reach.viewport_bottom,
-        reach.viewport_height()
+        reach.viewport_height(),
+        reach.viewport_width,
+        match reach.tallest {
+            Some(t) => format!(
+                "tallest row #{} {:.1}..{:.1} ({:.1}px tall, {:.1}px wide)",
+                t.index,
+                t.top,
+                t.bottom,
+                t.height(),
+                t.width
+            ),
+            None => "no row bounds at all".to_string(),
+        }
     ));
 }
 
@@ -5772,7 +5853,9 @@ mod tests {
             max_offset,
             viewport_top: 42.0,
             viewport_bottom: 934.0,
+            viewport_width: 744.0,
             rows,
+            tallest: None,
         }
     }
 
@@ -5857,7 +5940,9 @@ mod tests {
             max_offset: -108.0,
             viewport_top: 42.0,
             viewport_bottom: 42.0,
+            viewport_width: 744.0,
             rows: 26,
+            tallest: None,
         };
         assert_eq!(collapsed.viewport_height(), 0.0);
         assert_eq!(collapsed.frame(), Frame::NoBox);
@@ -8996,5 +9081,48 @@ mod tests {
             "the cut splits the emoji at byte {}",
             cut.len()
         );
+    }
+
+    /// #2981: the black chat. One stored assistant row reached 733,574
+    /// characters, a single `|---|` separator row made `is_deliverable_report`
+    /// true so the row stayed visible while its turn was folded, and the
+    /// full-body path drew it with no cap at all: 8,151 lines, one row 161,920px
+    /// tall inside an 887px pane, the scroll pinned to that row's empty tail.
+    /// The cap is the fix, and it has to hold on the `full` path, which is
+    /// exactly the one the fold keeps visible.
+    #[test]
+    fn the_full_body_path_is_bounded() {
+        let body = (0..MSG_FULL_LINES + 50)
+            .map(|i| format!("line {i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let (cut, hidden) = excerpt_lines(&body, MSG_FULL_LINES);
+        assert_eq!(
+            cut.lines().count(),
+            MSG_FULL_LINES,
+            "the full path draws exactly MSG_FULL_LINES lines"
+        );
+        assert_eq!(hidden, 50, "the remainder is announced, not eaten (#904)");
+
+        let src = include_str!("transcript.rs");
+        let production = src
+            .split("\n#[cfg(test)]\nmod tests")
+            .next()
+            .expect("production source before the test module");
+        assert!(
+            !production.contains("if full {\n        (std::borrow::Cow::Borrowed(content), 0)"),
+            "a row draws a stored body uncapped: the black chat is back (#2981)"
+        );
+        for name in ["fn bubble(", "fn forward_block(", "fn thinking_block("] {
+            let row = production
+                .split(name)
+                .nth(1)
+                .and_then(|rest| rest.split("\nfn ").next())
+                .unwrap_or_else(|| panic!("{name} body"));
+            assert!(
+                row.contains("MSG_FULL_LINES"),
+                "{name} must bound its full-body path (#2981)"
+            );
+        }
     }
 }
