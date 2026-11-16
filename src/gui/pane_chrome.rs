@@ -114,7 +114,16 @@ pub(crate) fn pane_composer_dim(
         // pane's width, clamps to it and ellipsises the rest.
         .w_full()
         .min_w_0()
-        .truncate()
+        // The draft wraps here exactly as it wraps in the focused field
+        // (#3003). It used to truncate, which needs a definite width on the
+        // text child to draw its ellipsis: the child was a bare string, kept
+        // its max-content width, and the pane's clip cut the line mid-word
+        // with no ellipsis at all. The same text then wrapped correctly the
+        // moment the pane took the keyboard, so one box held one draft in two
+        // shapes. Same 22 px line box as the field, so the two states share a
+        // line rhythm as well as a radius.
+        .overflow_hidden()
+        .line_height(px(22.))
         .min_h(px(44.))
         .p_3()
         // Same box, same height, same radius as the focused dock: the dim
@@ -136,7 +145,7 @@ pub(crate) fn pane_composer_dim(
                 cx.notify();
             });
         })
-        .child(shown)
+        .child(div().w_full().min_w_0().child(shown))
         .into_any_element()
 }
 
