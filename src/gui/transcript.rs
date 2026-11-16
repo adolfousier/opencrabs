@@ -4493,11 +4493,7 @@ struct RowActions<'a> {
 /// The row owns no menu card: the open menu is drawn at the window root, at
 /// the point the press landed (#2690), so it is never pushed around by the
 /// row's own frame.
-fn message_row(
-    id: uuid::Uuid,
-    child: Div,
-    actions: RowActions<'_>,
-) -> Stateful<Div> {
+fn message_row(id: uuid::Uuid, child: Div, actions: RowActions<'_>) -> Stateful<Div> {
     let RowActions {
         click,
         press,
