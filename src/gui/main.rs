@@ -4572,9 +4572,43 @@ impl Render for Dashboard {
         // The panes go in before every overlay. gpui paints children in the
         // order they are added, so a pane added after an overlay covers it:
         // the key reference then drew under the chat and under the rail.
+        // A side strip rides the conversation's measure (#2948). The top and
+        // bottom strips are wrapped in `central` (#2590), but a side strip is a
+        // root sibling of the pane column, so it never got that wrapper: it sat
+        // against the window edge while the text was centred at the measure,
+        // and the whole centring slack opened between the two. The strip and
+        // the column are centred as one block instead, so the topics sit beside
+        // the conversation they belong to and the slack falls outside both.
         match topic_side {
-            Some((topic_tabs::Edge::Left, strip)) => root = root.child(strip).child(right),
-            Some((_, strip)) => root = root.child(right).child(strip),
+            Some((edge, strip)) => {
+                // The column pads itself with `px_6` on each side, so its own
+                // width is the measure plus 3rem. Capping it there puts its
+                // children back on the axis they always centred on.
+                let pane_px = chat_measure_px + 3.0 * self.rem;
+                let pane = div()
+                    .flex()
+                    .flex_col()
+                    .flex_1()
+                    .h_full()
+                    .min_w_0()
+                    .min_h_0()
+                    .when(centred_chat, |d| d.max_w(px(pane_px)))
+                    .child(right);
+                let mut row = div()
+                    .flex()
+                    .flex_row()
+                    .flex_1()
+                    .h_full()
+                    .min_w_0()
+                    .min_h_0()
+                    .justify_center();
+                row = if edge == topic_tabs::Edge::Left {
+                    row.child(strip).child(pane)
+                } else {
+                    row.child(pane).child(strip)
+                };
+                root = root.child(row);
+            }
             None => root = root.child(right),
         }
         // One dialog for every delete path, painted above both panes. The
@@ -9456,6 +9490,46 @@ mod tests {
             )
         );
         assert!(DASHBOARD.contains("this.msg_menu_close(cx)"));
+    }
+
+    /// A side strip rides the conversation's measure (#2948). It used to be a
+    /// root sibling of the pane column, so it sat against the window edge while
+    /// the text centred at the measure and the whole centring slack opened
+    /// between the two. The strip and the column centre as one block now.
+    #[test]
+    fn a_side_strip_centres_with_the_pane_it_belongs_to() {
+        let render = dashboard_render(DASHBOARD);
+        let side = render
+            .split("match topic_side {")
+            .nth(1)
+            .expect("the side strip arm")
+            .split("None => root = root.child(right),")
+            .next()
+            .expect("the arm before the no-strip case");
+        assert!(
+            side.contains(".justify_center()"),
+            "the strip and the column centre as one block, not as two siblings"
+        );
+        assert!(
+            !side.contains("root = root.child(strip)"),
+            "the strip is never a root sibling of the pane again"
+        );
+        // The column pads itself with `px_6` a side, so its own width is the
+        // measure plus 3rem. Capping it there puts its children back on the
+        // axis they always centred on.
+        assert!(
+            side.contains("chat_measure_px + 3.0 * self.rem"),
+            "the cap is the measure plus the column's own padding"
+        );
+        assert!(
+            side.contains(".when(centred_chat, |d| d.max_w(px(pane_px)))"),
+            "the cap only applies while the chat is centred, so a narrow pane keeps its width"
+        );
+        assert!(
+            side.contains("row.child(strip).child(pane)")
+                && side.contains("row.child(pane).child(strip)"),
+            "both edges put the strip beside the pane, never above or below it"
+        );
     }
 }
 
