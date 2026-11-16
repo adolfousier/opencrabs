@@ -110,7 +110,16 @@ impl Dashboard {
             cx.stop_propagation();
             this.cycle_topic_edge(cx);
         });
-        Some(topic_strip(&pane_key, topic_tabs::Edge::Top, toggle_edge, tabs).into_any_element())
+        Some(
+            topic_strip(
+                &pane_key,
+                topic_tabs::Edge::Top,
+                toggle_edge,
+                tabs,
+                self.chat_topics_expanded,
+            )
+            .into_any_element(),
+        )
     }
 
     /// The tab strip for the open chat's topic family (#2400, #2480): `All`
@@ -162,7 +171,9 @@ impl Dashboard {
         let shape = topic_bar::chip_shape(self.topic_edge.is_vertical());
         let icon_rems = topic_tabs::style(self.topic_edge.is_vertical()).topic_icon_rems;
         // A wide family folds its tail into one pill, and the open topic keeps
-        // its chip either way (#2762).
+        // its chip either way (#2762). Once the pill is pressed the row draws
+        // the whole family, so `bar_limit` reports the count and nothing is
+        // folded (#2949).
         let chips: Vec<topic_bar::TopicChip> = topics
             .iter()
             .map(|id| topic_bar::TopicChip {
@@ -170,7 +181,8 @@ impl Dashboard {
                 activity: self.topic_is_busy(*id, cx),
             })
             .collect();
-        let plan = topic_bar::bar_plan(root, open, &chips, topic_bar::BAR_TOPICS_SHOWN);
+        let limit = topic_bar::bar_limit(self.chat_topics_expanded, topics.len());
+        let plan = topic_bar::bar_plan(root, open, &chips, limit);
         let mut cells: Vec<AnyElement> = Vec::with_capacity(plan.entries.len() + 1);
         for entry in plan.entries {
             let id = entry.session(root);
@@ -239,7 +251,28 @@ impl Dashboard {
             );
         }
         if let Some(overflow) = plan.overflow {
-            cells.push(overflow_chip(topic_bar::overflow_label(&overflow), shape));
+            // The pill is the expand control (#2949). It used to be a label,
+            // so the topics it counted could not be opened from the chat row
+            // at all, and the rail was the only way in.
+            let expand = cx.listener(|this, _ev: &ClickEvent, _window, cx| {
+                cx.stop_propagation();
+                this.chat_topics_expanded = true;
+                cx.notify();
+            });
+            cells.push(overflow_chip(
+                topic_bar::overflow_label(&overflow),
+                shape,
+                expand,
+            ));
+        } else if self.chat_topics_expanded && topics.len() > topic_bar::BAR_TOPICS_SHOWN {
+            // Open, the same pill folds the row back, the way the rail's `-`
+            // does, so the transcript gets its height back (#2949).
+            let fold = cx.listener(|this, _ev: &ClickEvent, _window, cx| {
+                cx.stop_propagation();
+                this.chat_topics_expanded = false;
+                cx.notify();
+            });
+            cells.push(overflow_chip("\u{2212}".to_string(), shape, fold));
         }
         cells
     }

@@ -206,6 +206,18 @@ pub fn bar_plan(root: Uuid, open: Uuid, chips: &[TopicChip], limit: usize) -> Ba
     }
 }
 
+/// The cap a bar draws its topics under, for the state the reader chose
+/// (#2949). Collapsed folds the family at [`BAR_TOPICS_SHOWN`]. Expanded draws
+/// every topic: the bar wraps and the strip scrolls, so nothing is folded and
+/// the pill turns into the control that folds it back.
+pub fn bar_limit(expanded: bool, topics: usize) -> usize {
+    if expanded {
+        topics.max(1)
+    } else {
+        BAR_TOPICS_SHOWN
+    }
+}
+
 /// The overflow pill's face: how much is folded away, and how much of it is
 /// busy.
 pub fn overflow_label(overflow: &Overflow) -> String {
@@ -218,8 +230,8 @@ pub fn overflow_label(overflow: &Overflow) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        BAR_TOPICS_SHOWN, BarEntry, BarPlan, Overflow, TopicChip, bar_entries, bar_plan,
-        overflow_label,
+        BAR_TOPICS_SHOWN, BarEntry, BarPlan, Overflow, TopicChip, bar_entries, bar_limit,
+        bar_plan, overflow_label,
     };
     use uuid::Uuid;
 
@@ -303,5 +315,22 @@ mod tests {
         let plan = bar_plan(root, root, &chips(&[2, 3], &[]), 0);
         assert_eq!(plan.entries, vec![BarEntry::All, BarEntry::Topic(id(2))]);
         assert_eq!(plan.overflow.map(|o| o.hidden), Some(1));
+    }
+
+    /// The pill is a control (#2949): expanded draws the whole family, so the
+    /// topics it counted are on the row and the reader can pick one. Collapsed
+    /// folds back to the documented cap.
+    #[test]
+    fn an_expanded_bar_draws_every_topic() {
+        assert_eq!(bar_limit(false, 46), BAR_TOPICS_SHOWN);
+        assert_eq!(bar_limit(true, 46), 46);
+        // Nothing to draw is still one topic: `bar_plan` clamps at one, and a
+        // zero here would ask it for a bar with no topic and no pill.
+        assert_eq!(bar_limit(true, 0), 1);
+        let root = id(1);
+        let family = chips(&[2, 3, 4, 5, 6, 7, 8, 9], &[]);
+        let plan = bar_plan(root, root, &family, bar_limit(true, family.len()));
+        assert_eq!(plan.overflow, None);
+        assert_eq!(plan.entries.len(), family.len() + 1);
     }
 }

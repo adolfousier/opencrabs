@@ -253,4 +253,90 @@ mod tests {
         assert_eq!(strip.matches(".border_color(separator)").count(), 2);
         assert!(!strip.contains("\\u{25EB}"));
     }
+
+    /// The chat row's pill is the expand control (#2949). It used to be a
+    /// label: the count printed and the topics it counted could only be opened
+    /// from the rail, which is where the reader was not.
+    #[test]
+    fn the_chat_pill_expands_the_row_and_the_expanded_row_scrolls() {
+        let bar = include_str!("dashboard_topics.rs");
+        let limit = bar
+            .split("let limit = topic_bar::bar_limit(")
+            .nth(1)
+            .expect("the row reads the expand state")
+            .split(';')
+            .next()
+            .expect("the limit call");
+        assert!(limit.contains("self.chat_topics_expanded"));
+        assert!(limit.contains("topics.len()"));
+        let pill = bar
+            .split("if let Some(overflow) = plan.overflow {")
+            .nth(1)
+            .expect("the folded pill")
+            .split("} else if")
+            .next()
+            .expect("the pill body");
+        assert!(
+            pill.contains("this.chat_topics_expanded = true;"),
+            "the pill expands the row instead of printing a count"
+        );
+        assert!(
+            pill.contains("overflow_chip("),
+            "the pill keeps the chip cell"
+        );
+        let fold = bar
+            .split("} else if self.chat_topics_expanded")
+            .nth(1)
+            .expect("the fold-back pill")
+            .split("cells")
+            .next()
+            .expect("the fold body");
+        assert!(
+            fold.contains("this.chat_topics_expanded = false;"),
+            "the open row folds back from the same pill"
+        );
+        let strip = include_str!("topic_bar_view.rs");
+        let row = strip
+            .split("pub(crate) fn topic_strip(")
+            .nth(1)
+            .expect("the strip renderer")
+            .split("/// The most words")
+            .next()
+            .expect("the strip body");
+        assert_eq!(
+            row.matches(".when(scroll,").count(),
+            2,
+            "both edges bound the expanded strip"
+        );
+        assert_eq!(row.matches("overflow_y_scroll()").count(), 2);
+        assert!(row.contains("max_h(rems(CHAT_STRIP_MAX_REMS))"));
+        assert!(row.contains("flex_1().min_h_0().overflow_y_scroll()"));
+        let pill = strip
+            .split("pub(crate) fn overflow_chip(")
+            .nth(1)
+            .expect("the pill renderer");
+        assert!(pill.contains("on_click: impl Fn(&ClickEvent"));
+        assert!(pill.contains(".on_click(on_click)"));
+        assert!(pill.contains(".cursor_pointer()"));
+    }
+
+    /// The rail's chip strip is not bounded (#2949). An earlier pass capped it
+    /// and hid topics the rail already showed, so the owner caught a regression
+    /// nobody asked for. The rail keeps the behaviour it has always had: three
+    /// chips, the pill, and a card that grows with the family.
+    #[test]
+    fn the_rail_chip_strip_stays_unbounded() {
+        let rail = include_str!("rail_view.rs");
+        let strip = rail
+            .split("fn chip_strip(")
+            .nth(1)
+            .expect("the rail chip strip")
+            .split("/// The channel chip")
+            .next()
+            .expect("the strip body");
+        assert!(!strip.contains("max_h("));
+        assert!(!strip.contains("overflow_y_scroll"));
+        assert!(strip.contains("sessions::topic_chips(id, rows)"));
+        assert!(strip.contains(r#"format!("+{hidden}")"#));
+    }
 }

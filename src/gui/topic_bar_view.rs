@@ -20,6 +20,13 @@ use crate::palette;
 use crate::topic_icons;
 use crate::topic_tabs;
 
+/// The most an expanded chat strip draws before it scrolls (#2949). The row
+/// folds its family into a pill, and the pill expands it: past this many rems
+/// of chips the row would push the transcript down by its own length, so it
+/// keeps a fixed height and scrolls instead. Roughly six chip rows, enough to
+/// see where the reader is and still read the conversation under it.
+const CHAT_STRIP_MAX_REMS: f32 = 9.0;
+
 /// The topic row (#2400, #2402): the leading button that moves it and the
 /// tabs. Across the top or bottom it is one row; down a side it is one column.
 ///
@@ -27,11 +34,16 @@ use crate::topic_tabs;
 /// here (#2480): the menu belongs to the conversation, so it lives at the
 /// chat's top right and floats over the transcript instead of growing this
 /// strip by five rows when it opens.
+///
+/// `scroll` bounds the tabs and lets them scroll, which only the expanded
+/// state asks for (#2949). Collapsed, the row is the cap plus a pill and fits
+/// the height it always had.
 pub(crate) fn topic_strip(
     key: &str,
     edge: topic_tabs::Edge,
     toggle_edge: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     tabs: Vec<AnyElement>,
+    scroll: bool,
 ) -> Div {
     // A split draws one strip per pane (#2687), so the control cannot carry a
     // fixed id: two strips sharing one would share their hover state, and a
@@ -79,6 +91,11 @@ pub(crate) fn topic_strip(
                     .flex_col()
                     .items_center()
                     .gap_1()
+                    // Expanded, the column takes what is left of the window
+                    // and scrolls. Without the bound a family of 46 topics ran
+                    // past the bottom edge with no way to reach the tail
+                    // (#2949).
+                    .when(scroll, |d| d.flex_1().min_h_0().overflow_y_scroll())
                     .children(tabs),
             )
     } else {
@@ -105,6 +122,12 @@ pub(crate) fn topic_strip(
                     .flex_wrap()
                     .items_center()
                     .gap_1()
+                    // Expanded, the wrapped rows keep a fixed height and
+                    // scroll, so the family never eats the transcript it sits
+                    // above (#2949).
+                    .when(scroll, |d| {
+                        d.max_h(rems(CHAT_STRIP_MAX_REMS)).overflow_y_scroll()
+                    })
                     .children(tabs),
             )
     }
@@ -212,10 +235,19 @@ pub(crate) fn topic_tab(
         .child(content)
 }
 
-/// The pill standing for the topics a narrow bar folded away (#2762). A label,
-/// not a control: it says how much of the family is off the edge, and how much
-/// of that is busy. Same cell geometry as a chip, so the row keeps one height.
-pub(crate) fn overflow_chip(label: String, shape: topic_bar::ChipShape) -> AnyElement {
+/// The pill standing for the topics a narrow bar folded away (#2762). It says
+/// how much of the family is off the edge, and how much of that is busy, in
+/// the same cell geometry as a chip so the row keeps one height.
+///
+/// It is a control (#2949). The label alone left the folded topics unreachable
+/// from the chat row, the one place the reader sees the count: a press does
+/// nothing, so the only way to those topics was the rail. The caller hands it
+/// the expand, and the fold back once the row is open.
+pub(crate) fn overflow_chip(
+    label: String,
+    shape: topic_bar::ChipShape,
+    on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+) -> AnyElement {
     let vertical = shape == topic_bar::ChipShape::IconAbove;
     let style = topic_tabs::style(vertical);
     div()
@@ -225,6 +257,9 @@ pub(crate) fn overflow_chip(label: String, shape: topic_bar::ChipShape) -> AnyEl
         .justify_center()
         .text_sm()
         .text_color(rgb(palette::current().text_faint))
+        .cursor_pointer()
+        .hover(|d| d.text_color(rgb(topic_tabs::TELEGRAM_ACCENT)))
+        .on_click(on_click)
         .when(vertical, |d| d.size(rems(style.cell_rems)).p_1())
         .when(!vertical, |d| d.flex_row().gap_1().px_2().py_0p5())
         .child(SharedString::from(label))

@@ -961,6 +961,12 @@ struct Dashboard {
     pane_warning: Option<String>,
     /// Which side of the chat the topic row sits on (#2402).
     topic_edge: topic_tabs::Edge,
+    /// Whether the chat's topic row shows its whole family (#2949). The row
+    /// folds past `BAR_TOPICS_SHOWN` and prints a pill; the pill was a label,
+    /// so the folded topics could only be reached from the rail. A press
+    /// expands the row, which then wraps and scrolls, and the same pill folds
+    /// it back.
+    chat_topics_expanded: bool,
     /// The topic being renamed, while the prompt is open for a rename (#2304).
     /// None means the prompt names a new topic.
     topic_rename: Option<uuid::Uuid>,
@@ -4228,7 +4234,13 @@ impl Render for Dashboard {
                 cx.stop_propagation();
                 this.cycle_topic_edge(cx);
             });
-            let strip = topic_strip("window", self.topic_edge, toggle_edge, tabs);
+            let strip = topic_strip(
+                "window",
+                self.topic_edge,
+                toggle_edge,
+                tabs,
+                self.chat_topics_expanded,
+            );
             topic_row = Some((self.topic_edge, strip.into_any_element()));
         }
         let mut right = div()
@@ -5835,6 +5847,7 @@ fn main() {
                                 .and_then(|c| c.gui.topic_tabs)
                                 .as_deref(),
                         ),
+                        chat_topics_expanded: false,
                         topic_rename: None,
                         topic_info: None,
                         themes_hue: 24.47,
