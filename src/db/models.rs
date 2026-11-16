@@ -330,6 +330,10 @@ pub struct Message {
     /// several rows. The live card spans all of them, so the transcript folds
     /// them back into one turn rather than drawing a second card the reader
     /// never saw. Always false on rows the user typed at a turn boundary.
+    ///
+    /// Defaulted so a payload serialized before the flag existed still reads
+    /// as the boundary it was.
+    #[serde(default)]
     pub continuation: bool,
     /// Where a forwarded copy came from (#2608). `None` for every row the
     /// user typed or the agent wrote; `Some` only on rows that were copied

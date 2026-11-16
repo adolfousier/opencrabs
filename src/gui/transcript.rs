@@ -8042,6 +8042,78 @@ mod tests {
         );
     }
 
+    /// A settled card's numbers come back from the row the agent stamped
+    /// (#2985). They used to live only in this process's memory, so a reload
+    /// rebuilt every finished card with a bare clock and no ctx and no rate:
+    /// measured, drawn, and then dropped the moment the window reopened.
+    #[test]
+    fn a_settled_turn_rebuilds_its_numbers_from_its_row() {
+        let mut answer = row("assistant", "Done, the parser is fixed.", 1);
+        answer.input_tokens = Some(73_000);
+        answer.ctx_window = Some(200_000);
+        answer.tokens_per_sec = Some(42.5);
+        answer.tool_calls = Some(14);
+        answer.duration_secs = Some(198);
+        let rows = vec![row("user", "fix the parser", 0), answer];
+
+        let (_, found) = turns(&rows, 2);
+        assert_eq!(found.len(), 1);
+        let metrics = found[0]
+            .metrics
+            .expect("a stamped row rebuilds the reading it measured");
+        assert_eq!(metrics.ctx_used, 73_000);
+        assert_eq!(metrics.ctx_max, 200_000);
+        assert_eq!(metrics.tps, Some(42.5));
+        // The ledger was never written, so the row is the only witness to the
+        // 14 calls the reader watched.
+        assert_eq!(metrics.tool_calls, 14);
+        assert_eq!(found[0].summary.tool_calls, 14);
+        assert_eq!(found[0].summary.duration_secs, 198);
+
+        // A row written before the columns existed has no reading of its own,
+        // and an empty card must not borrow the previous turn's budget.
+        let bare = [row("user", "hi", 0), row("assistant", "hello", 1)];
+        let (_, unread) = turns(&bare, 2);
+        assert!(unread[0].metrics.is_none());
+    }
+
+    /// A message the agent took mid-turn opens no card of its own (#2986). The
+    /// live turn never ended, so the reader watched one busy period; splitting
+    /// here drew a second card and moved the calls that followed onto a turn
+    /// that owned none of them.
+    #[test]
+    fn a_continuation_row_does_not_split_the_turn() {
+        let mut queued = row("user", "also check the lexer", 2);
+        queued.id = uuid::Uuid::new_v4();
+        queued.continuation = true;
+        let rows = vec![
+            row("user", "fix the parser", 0),
+            row("assistant", "Working on it.", 1),
+            queued,
+            row("assistant", "Both done.", 3),
+        ];
+
+        let (_, found) = turns(&rows, 4);
+        assert_eq!(
+            found.len(),
+            1,
+            "a queued message must not open a second card"
+        );
+        let asked = found[0]
+            .blocks
+            .iter()
+            .filter(|b| matches!(b, Block::Msg { role, .. } if role == "user"))
+            .count();
+        assert_eq!(asked, 2, "both of the reader's messages stay in the turn");
+
+        // The mark is what keeps them together: the same rows without it are
+        // the two turns this defect used to draw.
+        let mut unmarked = rows.clone();
+        unmarked[2].continuation = false;
+        let (_, split) = turns(&unmarked, 4);
+        assert_eq!(split.len(), 2);
+    }
+
     #[test]
     fn the_forward_header_names_the_source_and_falls_back_when_unnamed() {
         assert_eq!(
