@@ -64,11 +64,12 @@ pub type Handler = Rc<dyn Fn(Control, &ClickEvent, &mut Window, &mut App)>;
 /// `on_control` is `None` where the platform runs the buttons itself. On
 /// Windows a control area answers the non-client hit test and the platform
 /// clicks the button from `WM_NCLBUTTONUP`: `HTMINBUTTON` minimises,
-/// `HTMAXBUTTON` toggles zoom and `HTCLOSE` posts `WM_CLOSE`
-/// (`gpui-0.2.2/src/platform/windows/events.rs:1038`). A listener here would
-/// consume the mouse-up before that runs, and gpui's `zoom()` on Windows only
-/// ever maximises (`gpui-0.2.2/src/platform/windows/window.rs:782`), so the app
-/// could not restore a zoomed window (#2966).
+/// `HTMAXBUTTON` toggles between `SW_MAXIMIZE` and `SW_NORMAL` and `HTCLOSE`
+/// posts `WM_CLOSE` (`gpui-0.2.2/src/platform/windows/events.rs:1033`). A
+/// listener here would consume the mouse-up before that runs, and gpui's
+/// `zoom()` on Windows only ever maximises
+/// (`gpui-0.2.2/src/platform/windows/window.rs:782`), so the app could not
+/// restore a zoomed window (#2966).
 pub fn cluster(decorations: Decorations, on_control: Option<Handler>) -> Option<Div> {
     let list = controls(decorations);
     if list.is_empty() {

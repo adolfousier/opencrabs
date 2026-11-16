@@ -15,14 +15,15 @@
 //! the suite can execute it.
 //!
 //! Windows arrives at the same place from the other side (#2966). gpui creates
-//! every window with `WS_SYSMENU | WS_THICKFRAME | WS_MINIMIZEBOX |
-//! WS_MAXIMIZEBOX` and never `WS_CAPTION`
-//! (`gpui-0.2.2/src/platform/windows/window.rs:394`), so the OS draws no title
-//! bar and no caption button at all, while `window_decorations()` answers the
-//! trait's default `Server` (`gpui-0.2.2/src/platform.rs:538`) because the
-//! Windows window never overrides it. Such a window is caption-less whichever
-//! way it reports, so `effective_decorations` turns that report into the client
-//! decoration it really is.
+//! every window with `WS_SYSMENU`, adds `WS_THICKFRAME | WS_MAXIMIZEBOX` when
+//! the window is resizable and `WS_MINIMIZEBOX` when it is minimizable, and
+//! never sets `WS_CAPTION` (`gpui-0.2.2/src/platform/windows/window.rs:394`),
+//! so the OS draws no title bar and no caption button at all. Meanwhile
+//! `window_decorations()` answers the trait's default `Server`
+//! (`gpui-0.2.2/src/platform.rs:538`), because the Windows window never
+//! overrides it. Such a window is caption-less whichever way it reports, so
+//! `effective_decorations` turns that report into the client decoration it
+//! really is.
 
 use gpui::{Decorations, Tiling, WindowControlArea};
 
