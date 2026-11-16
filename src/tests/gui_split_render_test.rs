@@ -542,10 +542,16 @@ fn the_window_composer_stands_down_once_the_window_is_split() {
     // The gate keeps the measure wrapper inside it (#2594): the unsplit
     // window still aligns the conversation to one width, and the split leaves
     // stand down. `flat` folds the reflow, so this pins the wrapper itself
-    // rather than the column the editor landed on.
+    // rather than the column the editor landed on. Since #2987 the composer
+    // rides in a dock that the wrapper centres, so the measure is read on the
+    // dock rather than on the editor.
     assert!(
-        gated.contains("central( self.composer.editor.clone()"),
+        gated.contains("col = col.child(central( div() .id(\"composer-dock\")"),
         "the window's composer sits inside the gate, still on the chat measure"
+    );
+    assert!(
+        gated.contains(".child(composer)"),
+        "and the dock holds the composer the swap chose"
     );
     assert!(
         gated.contains(".editing_view(actions.as_ref())")
