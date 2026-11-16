@@ -924,6 +924,12 @@ mod tests {
         assert!(svg.contains("stroke-linejoin=\"round\""));
         assert!(svg.contains("<path"));
         assert!(!svg.contains("<rect"));
+        assert!(svg.contains("M3 12a9 9 0 1 0 2.64-6.36L3 8"));
+        assert!(svg.contains("M3 3v5h5"));
+        assert!(
+            !svg.contains("M21 12a9 9 0 1 1-2.64-6.36L21 8"),
+            "the arrow follows Top to Left to Bottom to Right, not clockwise"
+        );
     }
 
     /// A shortcode written in a message is the emoji, whatever case it was

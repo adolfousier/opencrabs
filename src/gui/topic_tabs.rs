@@ -139,6 +139,14 @@ mod tests {
         concat!(include_str!("topic_bar_view.rs"), include_str!("main.rs"),);
 
     #[test]
+    fn topic_orientation_navigation_runs_counterclockwise() {
+        assert_eq!(Edge::Top.next(), Edge::Left);
+        assert_eq!(Edge::Left.next(), Edge::Bottom);
+        assert_eq!(Edge::Bottom.next(), Edge::Right);
+        assert_eq!(Edge::Right.next(), Edge::Top);
+    }
+
+    #[test]
     fn topic_style_vertical_all_and_topics_share_square_transparent_cells() {
         let all = style(true);
         let topic = style(true);
