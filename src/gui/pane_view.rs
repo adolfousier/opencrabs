@@ -211,11 +211,11 @@ impl PaneView {
         // gets cut. `flex_none` on the column as a whole is what let the
         // strips ask for more height than the pane has and paint past its
         // bottom edge, over the footer and the pane under it.
-        let mut col = div().flex().flex_col().flex_shrink(1).min_h_0().gap_2();
+        let mut col = div().flex().flex_col().flex_shrink().min_h_0().gap_2();
         let mut above = div()
             .flex()
             .flex_col()
-            .flex_shrink(1)
+            .flex_shrink()
             .min_h_0()
             .overflow_hidden()
             .gap_2();
@@ -963,7 +963,7 @@ pub(crate) fn leaf_box(leaf: LeafBox) -> AnyElement {
             div()
                 .flex()
                 .flex_col()
-                .flex_shrink(1)
+                .flex_shrink()
                 .min_h_0()
                 .min_w_0()
                 .overflow_hidden()

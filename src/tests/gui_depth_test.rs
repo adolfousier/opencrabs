@@ -73,7 +73,7 @@ fn a_split_panel_carries_its_own_composer_and_footer() {
         .expect("the panel takes its own chrome");
     assert!(
         chrome_box.contains(".flex_col()")
-            && chrome_box.contains(".flex_shrink(1)")
+            && chrome_box.contains(".flex_shrink()")
             && chrome_box.contains(".min_h_0()")
             && chrome_box.contains(".overflow_hidden()"),
         "the chrome stack gives up height and clips what does not fit (#2980)"

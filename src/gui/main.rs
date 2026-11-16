@@ -4333,7 +4333,7 @@ impl Render for Dashboard {
                 let mut above = div()
                     .flex()
                     .flex_col()
-                    .flex_shrink(1)
+                    .flex_shrink()
                     .min_h_0()
                     .overflow_hidden()
                     .gap_3();
