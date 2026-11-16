@@ -3461,23 +3461,34 @@ fn live_card(
     };
     let (lead, _) = live_status_line(live);
     let lines = live_card_lines(live);
-    // The paragraph the turn last spoke leads the card (#2816). The prose is
-    // what the turn concluded and the calls are only what it ran, so a card
-    // that put the tool block on top read bottom up: the row a reader sees
-    // first named the command and the sentence explaining it sat underneath.
-    // Narration is occasional, so most turns have no paragraph and the head
-    // keeps the top of the card exactly as it was.
-    let prose = if expanded {
-        None
+    // Every paragraph the turn has spoken leads the card, in the order it
+    // spoke them (#2816). The prose is what the turn concluded and the calls
+    // are only what it ran, so a card that put the tool block on top read
+    // bottom up: the row a reader sees first named the command and the
+    // sentence explaining it sat underneath.
+    //
+    // It is every paragraph, not only the newest. A turn narrates between its
+    // calls, and a closed card that previewed one paragraph hid the rest of
+    // what it had just said until the reader opened the fold. The stream is
+    // what the card exists to show; opening it still prints every paragraph
+    // with its full body.
+    //
+    // `collapsed_narration` is the gate: it answers whether the turn has said
+    // anything at all, and a card that has said nothing keeps the top of its
+    // head exactly as it was.
+    let prose: Vec<(usize, String)> = if expanded || collapsed_narration(live).is_none() {
+        Vec::new()
     } else {
-        collapsed_narration(live).and_then(|paragraph| {
-            lines.iter().rev().find_map(|(entry, line)| match line {
-                LiveCardLine::Narration(text) if collapsed_paragraph(text) == paragraph => {
-                    Some((*entry, paragraph.clone()))
+        lines
+            .iter()
+            .filter_map(|(entry, line)| match line {
+                LiveCardLine::Narration(text) => {
+                    let paragraph = collapsed_paragraph(text);
+                    (!paragraph.is_empty()).then(|| (*entry, paragraph))
                 }
                 _ => None,
             })
-        })
+            .collect()
     };
     // The head is another rendering of one exact tool entry, not a separate
     // menu target. Resolve the same running-or-last call used by the label.
@@ -3510,7 +3521,7 @@ fn live_card(
         .px_2()
         // The prose block above the head carries the card's top padding, so
         // the head must not add it twice (#2816).
-        .when(prose.is_none(), |d| d.pt_1())
+        .when(prose.is_empty(), |d| d.pt_1())
         .pb_1()
         .child(
             div()
@@ -3551,12 +3562,12 @@ fn live_card(
         .bg(glass_fill(palette::current().panel))
         .cursor_pointer()
         .hover(|d| d.bg(rgb(palette::current().panel_hi)));
-    // The prose leads (#2816): the paragraph sits above the head row, so the
+    // The prose leads (#2816): every paragraph sits above the head row, so the
     // card reads prose first and the tool block under it, never the reverse.
-    // Narration stays out of the chat history: the collapsed card previews
-    // what the turn just said, and opening the card prints every paragraph in
-    // order.
-    if let Some((entry, paragraph)) = prose {
+    // Narration stays out of the chat history: the closed card streams every
+    // paragraph the turn has spoken, and opening the card prints them in order
+    // with their full bodies.
+    for (entry, paragraph) in prose {
         card = card.child(
             div()
                 .px_2()
@@ -7749,9 +7760,11 @@ mod tests {
         );
     }
 
-    /// #2816: the paragraph the turn spoke leads the card. The head row names
+    /// #2816: the paragraphs the turn spoke lead the card. The head row names
     /// the call, so a card that drew it first read bottom up: the command on
-    /// top and the sentence explaining it underneath.
+    /// top and the sentence explaining it underneath. Every paragraph streams
+    /// there, not only the newest, so a closed card never hides what the turn
+    /// just said inside the fold.
     #[test]
     fn the_collapsed_card_leads_with_the_turns_paragraph() {
         const SRC: &str = include_str!("transcript.rs");
@@ -7763,7 +7776,7 @@ mod tests {
             .expect("the card footer")
             .0;
         let prose = card
-            .find("if let Some((entry, paragraph)) = prose")
+            .find("for (entry, paragraph) in prose")
             .expect("the prose block");
         let head = card.find("card = card.child(head)").expect("the head row");
         assert!(
@@ -7773,6 +7786,10 @@ mod tests {
         assert!(
             card.contains("collapsed_narration(live)"),
             "the card previews the pane's own paragraph, not a second rule"
+        );
+        assert!(
+            card.contains("LiveCardLine::Narration(text)"),
+            "every paragraph the turn spoke is streamed, not only the last one"
         );
     }
 
@@ -8719,8 +8736,10 @@ mod tests {
     }
 
     /// Narration is the card's own summary, never a chat row of its own: the
-    /// collapsed card previews the newest paragraph inside its frame, and the
-    /// body prints every paragraph in order once the card is opened.
+    /// closed card streams every paragraph the turn has spoken inside its
+    /// frame, and the body prints them in order with their full bodies once
+    /// the card is opened. `collapsed_narration` names the newest one, which
+    /// is the gate the card asks before it draws any prose at all.
     #[test]
     fn narration_previews_inside_the_collapsed_card() {
         let mut live = LiveTurn::default();
@@ -8740,7 +8759,7 @@ mod tests {
         assert_eq!(
             collapsed_narration(&live).as_deref(),
             Some("Then I'll check the runner setup."),
-            "the collapsed card previews the newest paragraph only"
+            "the gate names the newest paragraph the turn spoke"
         );
         assert_eq!(
             live.answer(),
