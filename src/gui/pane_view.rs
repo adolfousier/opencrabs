@@ -206,7 +206,20 @@ impl PaneView {
     /// same handle. Nothing here is built by the walk and handed over: the
     /// column, its ids and its handlers all belong to the leaf.
     fn chrome(&mut self, cx: &mut Context<Self>) -> Div {
-        let mut col = div().flex().flex_col().flex_none().gap_2();
+        // The strips share one box that may shrink and clip (#2980), and the
+        // composer is appended after it so the input is never the row that
+        // gets cut. `flex_none` on the column as a whole is what let the
+        // strips ask for more height than the pane has and paint past its
+        // bottom edge, over the footer and the pane under it.
+        let mut col = div().flex().flex_col().flex_shrink(1).min_h_0().gap_2();
+        let mut above = div()
+            .flex()
+            .flex_col()
+            .flex_shrink(1)
+            .min_h_0()
+            .overflow_hidden()
+            .gap_2();
+        let mut above_used = false;
         let Some(window) = self.window.upgrade() else {
             return col;
         };
@@ -250,7 +263,7 @@ impl PaneView {
             // per pane (#2624). The handler stops the event so the press does
             // not also hand the leaf the keyboard.
             let weak = self.window.clone();
-            col = col.child(
+            above = above.child(
                 view.id(SharedString::from(format!("plan-strip-{session}")))
                     .on_mouse_down(
                         MouseButton::Left,
@@ -260,6 +273,7 @@ impl PaneView {
                         },
                     ),
             );
+            above_used = true;
         }
         let queued = agent_bridge::queue_snapshot(session);
         if !queued.is_empty() {
@@ -267,7 +281,7 @@ impl PaneView {
             // not react to a stray tap (#2629).
             let folds = queued.len() > 2;
             let weak = self.window.clone();
-            col = col.child(
+            above = above.child(
                 queue_strip(&queued, queue_expanded)
                     .id(SharedString::from(format!("queue-strip-{session}")))
                     .on_mouse_down(
@@ -283,6 +297,7 @@ impl PaneView {
                         },
                     ),
             );
+            above_used = true;
         }
         // The follow-up offer sits with the queue, above the composer it will
         // send into (#2708).
@@ -305,13 +320,20 @@ impl PaneView {
                     (item, pick)
                 })
                 .collect();
-            col = col.child(options_strip(&rows));
+            above = above.child(options_strip(&rows));
+            above_used = true;
         }
         if let Some(label) = running
             && let Some(area) =
                 window.update(cx, |win, cx| win.task_area(session, label.as_ref(), cx))
         {
-            col = col.child(area);
+            above = above.child(area);
+            above_used = true;
+        }
+        // The strips take their room from the conversation before the input
+        // does, and an empty box adds no row at all (#2980).
+        if above_used {
+            col = col.child(above);
         }
         // The pane holding the keyboard draws the real composer; the others
         // show the draft they hold, dimmed and inert, which is the same
@@ -930,10 +952,23 @@ pub(crate) fn leaf_box(leaf: LeafBox) -> AnyElement {
         );
     // The pane's own plan, queue and composer sit between its transcript and
     // its footer, where the window-level ones sit in an unsplit window
-    // (#2530). `flex_none` keeps every one of them at its own height: a
-    // shrinkable stack lost its top rows first.
+    // (#2530). The stack may shrink, and the strips inside it are the rows
+    // that give the room: they share a box that clips what does not fit, so
+    // the composer keeps its height and nothing is painted past the pane's
+    // bottom edge (#2980). Pinning the whole stack at `flex_none` is what
+    // overflowed the pane onto its footer; making it shrinkable with nothing
+    // to absorb the squeeze is what used to lose its top rows first.
     if let Some(chrome) = chrome {
-        node = node.child(div().flex().flex_col().flex_none().min_w_0().child(chrome));
+        node = node.child(
+            div()
+                .flex()
+                .flex_col()
+                .flex_shrink(1)
+                .min_h_0()
+                .min_w_0()
+                .overflow_hidden()
+                .child(chrome),
+        );
     }
     node.child(pane_footer(
         SharedString::from(format!("pane-footer-{session}")),

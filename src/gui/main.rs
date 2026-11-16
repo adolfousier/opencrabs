@@ -4322,6 +4322,22 @@ impl Render for Dashboard {
                 // hints go back UNDER the input where they were: the owner
                 // called the move above the plan card out.
                 let mut col = right;
+                // The strips that ride between the conversation and the input
+                // share one box that is allowed to shrink and clip (#2980).
+                // Each of them is `flex_none` on its own, so together they
+                // could ask for more height than the window has, and the stack
+                // was painted past the bottom edge, under the composer and off
+                // the screen. Inside this box they give up the room instead,
+                // and the box cuts what does not fit. The composer and the key
+                // hints stay outside it: neither may ever be clipped.
+                let mut above = div()
+                    .flex()
+                    .flex_col()
+                    .flex_shrink(1)
+                    .min_h_0()
+                    .overflow_hidden()
+                    .gap_3();
+                let mut above_used = false;
                 // In a split every pane carries its own plan, queue and
                 // composer (#2530), so the window-level copies stand down:
                 // drawing both would give the chat two composers. An unsplit
@@ -4336,15 +4352,16 @@ impl Render for Dashboard {
                         .editing_view(actions.as_ref())
                         .or_else(|| self.plan.view());
                     if let Some(plan_view) = card {
-                        col = col.child(central(
+                        above = above.child(central(
                             plan_view.into_any_element(),
                             centred_chat,
                             chat_measure_px,
                         ));
+                        above_used = true;
                     }
                     let waiting = self.queued_for_strip();
                     if !waiting.is_empty() {
-                        col = col.child(central(
+                        above = above.child(central(
                             queue_strip(&waiting, self.composer.queue_expanded)
                                 .id("queue-strip-chat")
                                 .on_mouse_down(
@@ -4361,6 +4378,7 @@ impl Render for Dashboard {
                             centred_chat,
                             chat_measure_px,
                         ));
+                        above_used = true;
                     }
                     // The follow-up offer sits where the queue does, directly
                     // above the composer it sends into (#2708).
@@ -4368,11 +4386,12 @@ impl Render for Dashboard {
                         let offers = agent_bridge::options_snapshot(sid);
                         if !offers.is_empty() {
                             let rows = self.option_rows(sid, offers, cx);
-                            col = col.child(central(
+                            above = above.child(central(
                                 options_strip(&rows).into_any_element(),
                                 centred_chat,
                                 chat_measure_px,
                             ));
+                            above_used = true;
                         }
                     }
                     // A detached command sits directly above the editor: the same
@@ -4382,7 +4401,14 @@ impl Render for Dashboard {
                         && let Some(sid) = self.chat_session
                         && let Some(area) = self.task_area(sid, &label, cx)
                     {
-                        col = col.child(central(area, centred_chat, chat_measure_px));
+                        above = above.child(central(area, centred_chat, chat_measure_px));
+                        above_used = true;
+                    }
+                    // The strips take their room from the conversation before
+                    // the composer does: the box goes in above the input, and
+                    // an empty box adds no row at all.
+                    if above_used {
+                        col = col.child(above);
                     }
                     // The unsplit chat uses the same composer swap as a split
                     // leaf (#2924). Without this arm the forward state changed

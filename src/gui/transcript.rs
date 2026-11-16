@@ -1903,6 +1903,18 @@ const RHYTHM_CELL_PAD_Y: f32 = 6.0;
 const MESSAGE_PAD_X: f32 = 16.0;
 const MESSAGE_PAD_Y: f32 = 12.0;
 
+/// The shortest the conversation is ever allowed to be (#2980).
+///
+/// Every strip between the transcript and the input takes its own height: the
+/// plan card, the queue, the follow-up offers and a detached task. They were
+/// all `flex_none`, so when they added up to more than the window the only
+/// shrinkable row in the column, this one, gave up every pixel it had. A
+/// transcript of zero height is a chat that reads as a blank rectangle with a
+/// composer under it, which is what the owner photographed. The floor keeps
+/// the conversation on screen and makes the strips above it take the squeeze
+/// instead, where the box that holds them clips what does not fit.
+pub(crate) const TRANSCRIPT_MIN_H: f32 = 96.0;
+
 /// The width a row may occupy inside a column of `content_width` (#2979).
 ///
 /// The whole column. Rows used to stop at two thirds of it (#2969), and in a
@@ -5053,7 +5065,11 @@ pub fn view(
         .flex()
         .flex_col()
         .flex_1()
-        .min_h_0()
+        // A floor, not zero (#2980): the strips above the composer are all
+        // allowed to ask for their own height, and without this the whole
+        // column was squeezed to nothing and the chat painted as an empty
+        // surface. The floor is what the strips have to leave.
+        .min_h(px(TRANSCRIPT_MIN_H))
         .overflow_y_scroll()
         .track_scroll(scroll)
         .gap_2()

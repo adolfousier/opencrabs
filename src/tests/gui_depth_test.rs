@@ -63,9 +63,20 @@ fn a_split_panel_carries_its_own_composer_and_footer() {
     let chrome_at = leaf
         .find(".child(chrome)")
         .expect("the panel takes its own chrome");
+    // The stack under the transcript may shrink, and it clips: a plan card,
+    // a queue and a set of offers that together outgrow a short pane are cut
+    // inside the pane instead of being painted over its footer and off the
+    // window (#2624, #2980).
+    let chrome_box = leaf
+        .split("if let Some(chrome) = chrome")
+        .nth(1)
+        .expect("the panel takes its own chrome");
     assert!(
-        leaf.contains(".flex_col().flex_none().min_w_0().child(chrome)"),
-        "the chrome keeps its own height inside the pane (#2624)"
+        chrome_box.contains(".flex_col()")
+            && chrome_box.contains(".flex_shrink(1)")
+            && chrome_box.contains(".min_h_0()")
+            && chrome_box.contains(".overflow_hidden()"),
+        "the chrome stack gives up height and clips what does not fit (#2980)"
     );
     let footer_at = leaf
         .find("node.child(pane_footer(")
