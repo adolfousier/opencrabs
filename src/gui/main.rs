@@ -6139,17 +6139,17 @@ fn fold_live(
             live.push_tool(transcript::ToolCall::detached(task_id, label));
         }
         ProgressEvent::DetachedTaskFinished {
-            task_id, success, ..
+            task_id,
+            success,
+            elapsed_secs,
+            ..
         } => {
-            if let Some(call) = live
-                .tools
-                .iter_mut()
-                .rev()
-                .find(|c| c.task_id.as_deref() == Some(task_id.as_str()))
-            {
-                call.done = true;
-                call.success = success;
-            }
+            // The same settle the window's card runs, so a pane, a parked turn
+            // and a rail card keep the runtime too (#2952). This used to drop
+            // elapsed_secs and mark the row done with no duration, which left
+            // two paths settling one event and only one keeping the number.
+            // A finish with no row is not an error: the turn may have settled.
+            transcript::settle_detached(&mut live.tools, &task_id, success, elapsed_secs);
         }
         ProgressEvent::QueuedUserMessage { text } => live.injected.push(text),
         _ => {}
@@ -6366,6 +6366,65 @@ mod tests {
         assert!(!super::busy_repaint_due(2));
         assert!(!super::busy_repaint_due(3));
         assert!(super::busy_repaint_due(8));
+    }
+
+    /// A detached finish keeps its runtime on every surface that folds a live
+    /// turn (#2952). Panes, parked turns and rail cards all fold through here,
+    /// and this arm used to mark the row done while dropping elapsed_secs, so
+    /// only the window's own card ever showed how long the command ran.
+    #[test]
+    fn a_detached_finish_keeps_its_runtime_when_folded() {
+        use crate::transcript;
+        use opencrabs::brain::agent::ProgressEvent;
+
+        let mut live = transcript::LiveTurn::default();
+        let at = std::time::Instant::now();
+        super::fold_live(
+            &mut live,
+            ProgressEvent::DetachedTaskStarted {
+                task_id: "bg-1".to_string(),
+                label: "cargo test".to_string(),
+            },
+            at,
+        );
+        super::fold_live(
+            &mut live,
+            ProgressEvent::DetachedTaskFinished {
+                task_id: "bg-1".to_string(),
+                label: "cargo test".to_string(),
+                success: true,
+                elapsed_secs: 12.5,
+            },
+            at,
+        );
+
+        let row = live
+            .tools
+            .iter()
+            .find(|c| c.task_id.as_deref() == Some("bg-1"))
+            .expect("the start drew a row");
+        assert!(row.done, "the finish must close the row");
+        assert!(row.success, "the finish carries the outcome");
+        assert!(
+            row.description.contains("12.5s"),
+            "the folded row dropped the runtime: {}",
+            row.description
+        );
+
+        // A finish whose row is already gone is not an error: the turn may have
+        // settled and reloaded. It must not invent a row.
+        let before = live.tools.len();
+        super::fold_live(
+            &mut live,
+            ProgressEvent::DetachedTaskFinished {
+                task_id: "bg-unknown".to_string(),
+                label: "cargo test".to_string(),
+                success: false,
+                elapsed_secs: 3.0,
+            },
+            at,
+        );
+        assert_eq!(live.tools.len(), before, "an unmatched finish adds no row");
     }
 
     /// The conversation caps at a readable measure in a single pane, and any
