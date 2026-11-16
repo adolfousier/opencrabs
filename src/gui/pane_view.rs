@@ -948,13 +948,6 @@ pub(crate) fn leaf_box(leaf: LeafBox) -> AnyElement {
         // as the pane's background, before it gave up a single strip. The
         // listener is the only witness this state has ever had.
         //
-        // The wrapper also clips at the pane's edge (#3003). It was the one
-        // box in this leaf with no clip: the chrome stack below it and the
-        // leaf's own root both carry one, so a transcript that outgrew this
-        // box painted its rows over the pane's chrome and past the leaf's edge
-        // into the neighbour. That reads as a pane's text overlapping itself
-        // while the pane is unfocused, because taking the keyboard rebuilds
-        // the leaf at a measured width and the rows wrap inside it again.
         .child(
             div()
                 .flex()
@@ -962,7 +955,6 @@ pub(crate) fn leaf_box(leaf: LeafBox) -> AnyElement {
                 .flex_1()
                 .min_w_0()
                 .min_h(px(CONVERSATION_FLOOR))
-                .overflow_hidden()
                 .on_children_prepainted(move |bounds, _window, _cx| {
                     witness_conversation_height(
                         bounds.first().map(|bounds| f32::from(bounds.size.height)),

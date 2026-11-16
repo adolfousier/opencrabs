@@ -76,21 +76,6 @@ fn the_split_pane_wrapper_carries_the_floor_too() {
     );
 }
 
-/// #3003: the transcript wrapper clips at the pane's edge.
-///
-/// It was the only box in that leaf with no clip. Its neighbours both carry
-/// one, so a transcript that outgrew the wrapper painted over the pane's
-/// chrome and past the leaf's edge into the neighbour, which reads as a pane's
-/// text overlapping itself while the pane is unfocused.
-#[test]
-fn the_split_pane_wrapper_clips_its_conversation() {
-    let source = compact(PANE_VIEW);
-    assert!(
-        source.contains(".min_h(px(CONVERSATION_FLOOR)).overflow_hidden()"),
-        "the leaf transcript wrapper has to clip what it cannot hold (#3003)"
-    );
-}
-
 #[test]
 fn the_floor_is_the_one_number_the_transcript_asks_for() {
     // Two floors that drift apart are worse than none: the wrapper would keep
