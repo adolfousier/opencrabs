@@ -8403,6 +8403,39 @@ impl AgentService {
             let overhead = self.base_context_tokens();
             (context.token_count.saturating_add(overhead as usize)) as i64
         };
+
+        // Calculate tokens per second for channel footer display.
+        //
+        // Numerator: provider-reported output_tokens summed across
+        // every iteration of the tool loop. This is the authoritative
+        // count from the provider's billing pipeline — never the
+        // tiktoken approximation the TUI uses during live streaming
+        // (cl100k_base over-counts Qwen/Kimi/GLM bytes by ~1.5-2×,
+        // which combined with sub-second burst windows showed users
+        // 700-800 tok/s for providers that genuinely run ~100 tok/s).
+        //
+        // Denominator: sum of per-iteration active-streaming windows
+        // populated by `stream_complete` in helpers.rs. Each window
+        // is the wall time between the first and last content delta
+        // of that iteration, with idle gaps >1s excluded — so tool
+        // execution, approval prompts, DB persistence, and the gap
+        // between iterations are all left out. The result is the
+        // model's actual sustained generation rate during streaming,
+        // not output-divided-by-full-turn-wall-clock (which silently
+        // halved the rate on tool-heavy turns).
+        //
+        // Guarded against burst-delivery artifacts: a near-zero active
+        // window (provider dumped the response in one sub-second chunk)
+        // or an implausibly high rate yields None instead of a fantasy
+        // number like the 37203 tok/s observed on a glm-5.1 short reply.
+        let tokens_per_second =
+            compute_streaming_tok_per_sec(total_output_tokens, total_streaming_active_secs);
+
+        // The window the turn ran against, captured before the row is written
+        // so a restarted window can print the card's ctx figure without asking
+        // the session what its current window is (#2985).
+        let turn_ctx_window =
+            self.context_window_for_model(&self.provider_model_for_session(session_id));
         message_service
             .update_message_usage(
                 assistant_db_msg.id,
@@ -8413,6 +8446,9 @@ impl AgentService {
                     cache_creation_tokens: Some(total_cache_creation as i64),
                     cache_read_tokens: Some(total_cache_read as i64),
                     duration_secs: Some(turn_started_at.elapsed().as_secs() as i64),
+                    ctx_window: Some(turn_ctx_window as i64),
+                    tokens_per_sec: tokens_per_second,
+                    tool_calls: Some(tool_calls_completed_this_turn as i64),
                 },
             )
             .await
@@ -8446,33 +8482,6 @@ impl AgentService {
                 session_id,
             ));
         }
-
-        // Calculate tokens per second for channel footer display.
-        //
-        // Numerator: provider-reported output_tokens summed across
-        // every iteration of the tool loop. This is the authoritative
-        // count from the provider's billing pipeline — never the
-        // tiktoken approximation the TUI uses during live streaming
-        // (cl100k_base over-counts Qwen/Kimi/GLM bytes by ~1.5-2×,
-        // which combined with sub-second burst windows showed users
-        // 700-800 tok/s for providers that genuinely run ~100 tok/s).
-        //
-        // Denominator: sum of per-iteration active-streaming windows
-        // populated by `stream_complete` in helpers.rs. Each window
-        // is the wall time between the first and last content delta
-        // of that iteration, with idle gaps >1s excluded — so tool
-        // execution, approval prompts, DB persistence, and the gap
-        // between iterations are all left out. The result is the
-        // model's actual sustained generation rate during streaming,
-        // not output-divided-by-full-turn-wall-clock (which silently
-        // halved the rate on tool-heavy turns).
-        //
-        // Guarded against burst-delivery artifacts: a near-zero active
-        // window (provider dumped the response in one sub-second chunk)
-        // or an implausibly high rate yields None instead of a fantasy
-        // number like the 37203 tok/s observed on a glm-5.1 short reply.
-        let tokens_per_second =
-            compute_streaming_tok_per_sec(total_output_tokens, total_streaming_active_secs);
 
         // The turn is complete and the response is built — NOW (never before)
         // honor a manual provider/model switch the user made mid-turn, so an

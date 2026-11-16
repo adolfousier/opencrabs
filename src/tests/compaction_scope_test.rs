@@ -51,6 +51,10 @@ fn db_row(content: String) -> crate::db::models::Message {
         cache_read_tokens: None,
         thinking: None,
         duration_secs: None,
+        ctx_window: None,
+        tokens_per_sec: None,
+        tool_calls: None,
+        continuation: false,
     }
 }
 

@@ -304,6 +304,33 @@ pub struct Message {
     /// START and updated in place, so its `created_at` matches the triggering
     /// user message and any timestamp subtraction collapses to zero.
     pub duration_secs: Option<i64>,
+    /// The context window the turn ran against, in tokens, stamped at settle.
+    ///
+    /// The settled card prints `ctx_used / ctx_window`, and neither the window
+    /// nor the rate beside it had a column (#2985): they lived in the window
+    /// process's own map, so restarting the app degraded every settled card to
+    /// a bare clock. `ctx_used` needs no column of its own: it is the prompt
+    /// size the provider reported for the turn's final call, already stored as
+    /// `input_tokens`. `None` on rows written before this column existed.
+    pub ctx_window: Option<i64>,
+    /// The turn's own output rate: provider-reported output tokens over the
+    /// summed active streaming windows (#2985). `None` when the provider could
+    /// not measure it, and on rows written before this column existed.
+    pub tokens_per_sec: Option<f64>,
+    /// How many calls the turn made, counted the way the live card counts them
+    /// (#2985). A persisted row can lose its ledger, and without this the
+    /// rebuilt card claimed a turn did no work at all. `None` on rows written
+    /// before this column existed.
+    pub tool_calls: Option<i64>,
+    /// Whether the agent took this user row between tool calls instead of it
+    /// starting a turn (#2986).
+    ///
+    /// The agent opens a fresh assistant row for a continuation so the answer
+    /// sorts below the queued message, which splits one busy period across
+    /// several rows. The live card spans all of them, so the transcript folds
+    /// them back into one turn rather than drawing a second card the reader
+    /// never saw. Always false on rows the user typed at a turn boundary.
+    pub continuation: bool,
     /// Where a forwarded copy came from (#2608). `None` for every row the
     /// user typed or the agent wrote; `Some` only on rows that were copied
     /// out of another session.
@@ -390,6 +417,14 @@ pub fn forwarded_rows(
 
 impl Message {
     pub fn from_row(row: &rusqlite::Row) -> rusqlite::Result<Self> {
+        // A row written before the column existed is a boundary, never a
+        // continuation, so an old transcript keeps splitting where it did
+        // (#2986).
+        let continuation = row
+            .get::<_, Option<i64>>("continuation")
+            .ok()
+            .flatten()
+            .is_some_and(|flag| flag != 0);
         Ok(Message {
             id: uuid_col(row, "id")?,
             session_id: uuid_col(row, "session_id")?,
@@ -405,6 +440,10 @@ impl Message {
             thinking: row.get("thinking").ok().flatten(),
             // `.ok()` so rows from before the column existed still load.
             duration_secs: row.get("duration_secs").ok().flatten(),
+            ctx_window: row.get("ctx_window").ok().flatten(),
+            tokens_per_sec: row.get("tokens_per_sec").ok().flatten(),
+            tool_calls: row.get("tool_calls").ok().flatten(),
+            continuation,
             forward: forward_from_columns(row),
         })
     }
@@ -425,6 +464,10 @@ impl Message {
             cache_read_tokens: None,
             thinking: None,
             duration_secs: None,
+            ctx_window: None,
+            tokens_per_sec: None,
+            tool_calls: None,
+            continuation: false,
             forward: None,
         }
     }

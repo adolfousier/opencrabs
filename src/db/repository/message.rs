@@ -318,8 +318,9 @@ impl MessageRepository {
                     "UPDATE messages
                      SET content = ?1, token_count = ?2, cost = ?3, input_tokens = ?4,
                          cache_creation_tokens = ?5, cache_read_tokens = ?6, thinking = ?7,
-                         duration_secs = ?8
-                     WHERE id = ?9",
+                         duration_secs = ?8, ctx_window = ?9, tokens_per_sec = ?10,
+                         tool_calls = ?11
+                     WHERE id = ?12",
                     params![
                         m.content,
                         m.token_count,
@@ -329,6 +330,9 @@ impl MessageRepository {
                         m.cache_read_tokens,
                         m.thinking,
                         m.duration_secs,
+                        m.ctx_window,
+                        m.tokens_per_sec,
+                        m.tool_calls,
                         m.id.to_string()
                     ],
                 )
@@ -978,10 +982,12 @@ fn insert_message(conn: &rusqlite::Connection, m: &Message) -> rusqlite::Result<
         "INSERT INTO messages (id, session_id, role, content, sequence,
                              created_at, token_count, cost, input_tokens,
                              cache_creation_tokens, cache_read_tokens, thinking,
-                             duration_secs, forwarded_from_session,
+                             duration_secs, ctx_window, tokens_per_sec,
+                             tool_calls, forwarded_from_session,
                              forwarded_from_message, forwarded_from_label,
                              forward_batch_id)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14,
+                 ?15, ?16, ?17, ?18, ?19, ?20)",
         params![
             m.id.to_string(),
             m.session_id.to_string(),
@@ -996,6 +1002,9 @@ fn insert_message(conn: &rusqlite::Connection, m: &Message) -> rusqlite::Result<
             m.cache_read_tokens,
             m.thinking,
             m.duration_secs,
+            m.ctx_window,
+            m.tokens_per_sec,
+            m.tool_calls,
             m.forward.as_ref().map(|f| f.from_session.to_string()),
             m.forward.as_ref().map(|f| f.from_message.to_string()),
             m.forward.as_ref().map(|f| f.label.clone()),

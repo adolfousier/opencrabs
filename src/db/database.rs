@@ -179,6 +179,11 @@ pub(crate) const MIGRATION_SQL: &[&str] = &[
     // existing row takes, so the unknown case is frozen instead of rewritten.
     // Appended last per the list invariant above.
     include_str!("../migrations/20261116000001_add_session_title_source.sql"),
+    // #2985: the rate, the window and the call count a settled card prints.
+    // Three nullable ALTER TABLE ADD COLUMN entries, NULL by design on every
+    // existing row, so no heal pass is needed. Appended last per the list
+    // invariant above.
+    include_str!("../migrations/20261116000002_add_message_turn_metrics.sql"),
 ];
 
 pub(crate) fn build_migrations() -> Migrations<'static> {

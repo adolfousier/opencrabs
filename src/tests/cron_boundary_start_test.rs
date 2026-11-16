@@ -47,6 +47,10 @@ fn row(seq: i32, role: &str, content: &str) -> crate::db::models::Message {
         cache_read_tokens: None,
         thinking: None,
         duration_secs: None,
+        ctx_window: None,
+        tokens_per_sec: None,
+        tool_calls: None,
+        continuation: false,
     }
 }
 

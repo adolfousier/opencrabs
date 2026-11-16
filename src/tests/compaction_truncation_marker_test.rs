@@ -87,6 +87,10 @@ fn loader_anchors_on_a_truncation_marker() {
         cache_read_tokens: None,
         thinking: None,
         duration_secs: None,
+        ctx_window: None,
+        tokens_per_sec: None,
+        tool_calls: None,
+        continuation: false,
     };
 
     let all = vec![
@@ -128,6 +132,10 @@ fn loader_ignores_an_assistant_row_quoting_the_marker() {
         cache_read_tokens: None,
         thinking: None,
         duration_secs: None,
+        ctx_window: None,
+        tokens_per_sec: None,
+        tool_calls: None,
+        continuation: false,
     };
 
     let all = vec![
@@ -186,6 +194,10 @@ fn loader_ignores_a_user_row_quoting_the_marker_mid_text() {
         cache_read_tokens: None,
         thinking: None,
         duration_secs: None,
+        ctx_window: None,
+        tokens_per_sec: None,
+        tool_calls: None,
+        continuation: false,
     };
 
     let all = vec![

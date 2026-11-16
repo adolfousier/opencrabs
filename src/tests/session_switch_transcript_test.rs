@@ -79,6 +79,10 @@ fn persisted(session_id: Uuid, sequence: i32, role: &str, content: &str, at: i64
         cache_read_tokens: None,
         thinking: None,
         duration_secs: None,
+        ctx_window: None,
+        tokens_per_sec: None,
+        tool_calls: None,
+        continuation: false,
     }
 }
 

@@ -102,6 +102,14 @@ impl AgentService {
 
         // Update message with usage info, stashing the server-reported
         // prompt token count so session reload reads it directly.
+        //
+        // The card's ctx figure rides along so a restart still has it (#2985).
+        // The rate stays None: this path never streamed, so it has no active
+        // window to divide by, and the guard that refuses fantasy rates must
+        // not be bypassed with a wall-clock estimate here either. No tool loop
+        // ran, so the call count is a real zero.
+        let turn_ctx_window =
+            self.context_window_for_model(&self.provider_model_for_session(session_id));
         message_service
             .update_message_usage(
                 assistant_db_msg.id,
@@ -112,6 +120,9 @@ impl AgentService {
                     cache_creation_tokens: Some(response.usage.cache_creation_tokens as i64),
                     cache_read_tokens: Some(response.usage.cache_read_tokens as i64),
                     duration_secs: Some(turn_started_at.elapsed().as_secs() as i64),
+                    ctx_window: Some(turn_ctx_window as i64),
+                    tokens_per_sec: None,
+                    tool_calls: Some(0),
                 },
             )
             .await

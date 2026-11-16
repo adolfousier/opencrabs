@@ -120,6 +120,10 @@ fn assistant_row(content: &str) -> DbMessage {
         cache_read_tokens: None,
         thinking: None,
         duration_secs: None,
+        ctx_window: None,
+        tokens_per_sec: None,
+        tool_calls: None,
+        continuation: false,
     }
 }
 

@@ -33,6 +33,10 @@ fn row(role: &str, content: &str, thinking: Option<&str>) -> DbMessage {
         cache_read_tokens: None,
         thinking: thinking.map(String::from),
         duration_secs: None,
+        ctx_window: None,
+        tokens_per_sec: None,
+        tool_calls: None,
+        continuation: false,
     }
 }
 

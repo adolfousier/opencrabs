@@ -69,6 +69,15 @@ pub struct MessageUsage {
     pub cache_read_tokens: Option<i64>,
     /// Wall-clock seconds the turn took, from a monotonic clock (#964).
     pub duration_secs: Option<i64>,
+    /// The context window the turn ran against, in tokens (#2985). Stamped
+    /// with the rate so a restarted window can still print the turn's own ctx
+    /// budget instead of the session's current one.
+    pub ctx_window: Option<i64>,
+    /// The turn's own output rate (#2985).
+    pub tokens_per_sec: Option<f64>,
+    /// How many calls the turn made (#2985), counted the way the live card
+    /// counts them.
+    pub tool_calls: Option<i64>,
 }
 
 /// Service for managing messages
@@ -128,6 +137,10 @@ impl MessageService {
             cache_read_tokens: None,
             thinking: None,
             duration_secs: None,
+            ctx_window: None,
+            tokens_per_sec: None,
+            tool_calls: None,
+            continuation: false,
             // A row written by a turn is never a forward (#2608).
             forward: None,
         };
@@ -181,6 +194,10 @@ impl MessageService {
             cache_read_tokens: None,
             thinking: None,
             duration_secs: None,
+            ctx_window: None,
+            tokens_per_sec: None,
+            tool_calls: None,
+            continuation: false,
             // A row written by a turn is never a forward (#2608).
             forward: None,
         };
@@ -362,6 +379,9 @@ impl MessageService {
             cache_creation_tokens,
             cache_read_tokens,
             duration_secs,
+            ctx_window,
+            tokens_per_sec,
+            tool_calls,
         } = usage;
         let mut message = self.get_message_required(id).await?;
         message.token_count = Some(token_count);
@@ -377,6 +397,19 @@ impl MessageService {
         }
         if cache_read_tokens.is_some() {
             message.cache_read_tokens = cache_read_tokens;
+        }
+        // The card's remaining three numbers (#2985). Written when the turn
+        // measured them, left alone otherwise: a turn that never streamed has
+        // no rate of its own, and writing NULL over a value that was already
+        // there would lose the reading.
+        if ctx_window.is_some() {
+            message.ctx_window = ctx_window;
+        }
+        if tokens_per_sec.is_some() {
+            message.tokens_per_sec = tokens_per_sec;
+        }
+        if tool_calls.is_some() {
+            message.tool_calls = tool_calls;
         }
 
         let repo = MessageRepository::new(self.context.pool());
