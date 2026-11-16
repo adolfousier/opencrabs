@@ -10083,8 +10083,13 @@ mod gui {
             // And the footer is no longer a sibling row of the chat column:
             // that row is what made the composer and the footer read as two
             // unrelated modules.
+            // Stop the region at the window's own test module. The footer pin
+            // used to read to the end of the file, so it matched the needle in
+            // this very assertion and reported the footer back as a sibling
+            // row every time (#2999).
             let chat = DASHBOARD
                 .get(chat_start..)
+                .and_then(|rest| rest.split("\n#[cfg(test)]\nmod tests").next())
                 .expect("the chat arm offset lands on a char boundary");
             assert!(
                 !chat.contains("col.child(central(footer"),
