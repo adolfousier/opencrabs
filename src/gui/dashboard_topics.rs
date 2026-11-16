@@ -221,19 +221,16 @@ impl Dashboard {
             // A busy topic is marked with a dot, the same signal the rail uses
             // for work in flight.
             let activity = chips.iter().any(|chip| chip.id == id && chip.activity);
-            // `All` has the same icon slot and cell geometry as a topic, but
-            // uses Telegram's neutral double-chat symbol instead of pretending
-            // to be another crab-themed topic.
+            // `All` has the same cell geometry as a topic, but its existing
+            // depth artwork is smaller and follows the actual background.
             let (label, picture) = match entry {
                 topic_bar::BarEntry::All => {
-                    let colour = if current {
-                        topic_tabs::TELEGRAM_ACCENT
-                    } else {
-                        crate::palette::current().text_muted
-                    };
+                    let bg = crate::palette::current().bg;
+                    let dark =
+                        opencrabs::config::gui_theme::relative_luminance(bg) < 0.18;
                     (
                         "All".to_string(),
-                        Some(topic_icons::all_icon(icon_rems, colour).into_any_element()),
+                        Some(topic_icons::all_icon(icon_rems, dark).into_any_element()),
                     )
                 }
                 topic_bar::BarEntry::Topic(id) => {
