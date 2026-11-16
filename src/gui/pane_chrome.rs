@@ -23,7 +23,7 @@ use opencrabs::ui_core::pane_tree::DropHalf;
 use opencrabs::ui_core::split;
 use uuid::Uuid;
 
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 
 use crate::{Dashboard, PaneDrag, PaneGhost, logging, palette, transcript};
 
@@ -400,6 +400,7 @@ pub(crate) const CONVERSATION_FLOOR: f32 = transcript::TRANSCRIPT_MIN_H;
 /// height crosses the floor, not per frame.
 pub(crate) fn witness_conversation_height(height: Option<f32>) {
     static LAST: AtomicU32 = AtomicU32::new(u32::MAX);
+    witness_conversation_heartbeat(height);
     let Some(height) = height.filter(|height| height.is_finite()) else {
         return;
     };
@@ -420,6 +421,41 @@ pub(crate) fn witness_conversation_height(height: Option<f32>) {
             "conversation height {height:.0}px: back above the {CONVERSATION_FLOOR:.0}px floor"
         )),
         _ => {}
+    }
+}
+
+/// One line every couple of seconds from the column that holds the chat
+/// (#2981).
+///
+/// The crossing line above writes only when the height passes the floor, so a
+/// wrapper that keeps its floor and still shows nothing stays silent, and that
+/// is the shape a black chat keeps arriving in. This heartbeat names the height
+/// it measured on the child it holds, or says plainly that it held no
+/// prepainted child at all. Read beside the transcript's own heartbeat, the two
+/// lines say which side the surface was lost on: silence here means the column
+/// stopped drawing, silence there with this still ticking means the transcript
+/// left the tree or was skipped, and both ticking with a black window puts the
+/// loss above the column.
+pub(crate) fn witness_conversation_heartbeat(height: Option<f32>) {
+    use std::sync::OnceLock;
+    use std::time::Instant;
+    /// How often the column says it is still drawing itself.
+    const BEAT_MS: u64 = 2_000;
+    static START: OnceLock<Instant> = OnceLock::new();
+    static LAST_MS: AtomicU64 = AtomicU64::new(0);
+    let start = *START.get_or_init(Instant::now);
+    let now = start.elapsed().as_millis() as u64;
+    if now.saturating_sub(LAST_MS.load(Ordering::Relaxed)) < BEAT_MS {
+        return;
+    }
+    LAST_MS.store(now, Ordering::Relaxed);
+    match height.filter(|height| height.is_finite()) {
+        Some(height) => logging::info(&format!(
+            "conversation alive: child {height:.0}px tall, floor {CONVERSATION_FLOOR:.0}px"
+        )),
+        None => logging::info(
+            "conversation alive: no child prepainted, the column drew nothing at all",
+        ),
     }
 }
 
