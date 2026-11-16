@@ -22,7 +22,9 @@ use opencrabs::ui_core::pane_tree::DropHalf;
 use opencrabs::ui_core::split;
 use uuid::Uuid;
 
-use crate::{Dashboard, PaneDrag, PaneGhost, palette};
+use std::sync::atomic::{AtomicU32, Ordering};
+
+use crate::{Dashboard, PaneDrag, PaneGhost, logging, palette, transcript};
 
 /// Whether the window-level footer row stands down (#2641). A split hands
 /// that row to each pane, exactly as the terminal's status bar yields its
@@ -365,26 +367,78 @@ pub(crate) fn chat_measure(pane_width: f32, split: bool) -> f32 {
     }
 }
 
+/// The least height the conversation keeps, whatever the rows under it ask
+/// for (#2985).
+///
+/// The transcript asks for this floor itself, and a bare child of the window's
+/// column honours it. The centred column that wraps it did not: it declared
+/// `min_h_0()`, which throws the floor away, so when the plan card, the queue
+/// strip, the suggested options and a tall draft together outgrew the window,
+/// taffy handed this wrapper zero height and the transcript was clipped out
+/// entirely. The region then painted as the window background: a chat that
+/// goes completely black, no panic, no failed request, nothing in the log.
+pub(crate) const CONVERSATION_FLOOR: f32 = transcript::TRANSCRIPT_MIN_H;
+
+/// One line when the conversation collapses under its floor, and one when it
+/// comes back (#2985).
+///
+/// This window had no witness for that state at all: a black chat raised
+/// nothing, so a report arrived with nothing to read beside it. The listener
+/// runs on every frame the conversation paints, so it writes only when the
+/// height crosses the floor, not per frame.
+pub(crate) fn witness_conversation_height(height: Option<f32>) {
+    static LAST: AtomicU32 = AtomicU32::new(u32::MAX);
+    let Some(height) = height.filter(|height| height.is_finite()) else {
+        return;
+    };
+    let height = height.round();
+    let previous = LAST.swap(height.to_bits(), Ordering::Relaxed);
+    let previous = if previous == u32::MAX {
+        None
+    } else {
+        Some(f32::from_bits(previous))
+    };
+    let collapsed = height < CONVERSATION_FLOOR;
+    match previous {
+        None if collapsed => logging::info(&format!(
+            "conversation height {height:.0}px: under the {CONVERSATION_FLOOR:.0}px floor, \
+             the chat paints as the window background"
+        )),
+        Some(was) if was < CONVERSATION_FLOOR && !collapsed => logging::info(&format!(
+            "conversation height {height:.0}px: back above the {CONVERSATION_FLOOR:.0}px floor"
+        )),
+        _ => {}
+    }
+}
+
 /// The column a single pane draws its conversation in (#2586): the transcript
 /// sits at the measure and the slack goes to the two margins, so the text is
 /// centred in the window instead of stretching to a wall. Only a pane that is
 /// wider than the measure is wrapped, so a narrow window keeps the exact tree
 /// it had, and a split pane is never wrapped because it never takes the cap.
+///
+/// The wrapper carries [`CONVERSATION_FLOOR`] at both levels (#2985). With
+/// `min_h_0()` here the floor the transcript asks for never reached the flex
+/// algorithm above it, and the conversation was the first row to vanish: its
+/// basis is zero, so it took none of the shrink and all of the loss.
 pub(crate) fn chat_measure_column(view: AnyElement, width: f32) -> AnyElement {
     div()
         .flex()
         .flex_row()
         .flex_1()
         .min_w_0()
-        .min_h_0()
+        .min_h(px(CONVERSATION_FLOOR))
         .justify_center()
+        .on_children_prepainted(move |bounds, _window, _cx| {
+            witness_conversation_height(bounds.first().map(|bounds| f32::from(bounds.size.height)));
+        })
         .child(
             div()
                 .flex()
                 .flex_col()
                 .w(px(width))
                 .min_w_0()
-                .min_h_0()
+                .min_h(px(CONVERSATION_FLOOR))
                 .child(view),
         )
         .into_any_element()

@@ -40,8 +40,8 @@ use crate::editor;
 use crate::middle_scroll;
 use crate::palette;
 use crate::pane_chrome::{
-    UNFOCUSED_PANE_OPACITY, drop_indicator, focus_ring_color, pane_composer_dim, pane_footer,
-    pane_header,
+    CONVERSATION_FLOOR, UNFOCUSED_PANE_OPACITY, drop_indicator, focus_ring_color,
+    pane_composer_dim, pane_footer, pane_header, witness_conversation_height,
 };
 use crate::plan_strip;
 use crate::transcript::{self, ClickHandler, CopyDrag, TranscriptState};
@@ -941,13 +941,24 @@ pub(crate) fn leaf_box(leaf: LeafBox) -> AnyElement {
         // nothing in a short pane, while the composer survived because its
         // field has a min size: the plan card vanished exactly where the panes
         // got small.
+        //
+        // The wrapper carries the conversation's floor rather than `min_h_0`
+        // (#2985). A zero floor threw away the min height the transcript asks
+        // for, so a shortened pane lost its whole conversation, which painted
+        // as the pane's background, before it gave up a single strip. The
+        // listener is the only witness this state has ever had.
         .child(
             div()
                 .flex()
                 .flex_col()
                 .flex_1()
                 .min_w_0()
-                .min_h_0()
+                .min_h(px(CONVERSATION_FLOOR))
+                .on_children_prepainted(move |bounds, _window, _cx| {
+                    witness_conversation_height(
+                        bounds.first().map(|bounds| f32::from(bounds.size.height)),
+                    );
+                })
                 .child(body),
         );
     // The pane's own plan, queue and composer sit between its transcript and
