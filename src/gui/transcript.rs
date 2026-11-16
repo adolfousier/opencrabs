@@ -2782,13 +2782,24 @@ fn tools_block(calls: &[ToolCall], selection: Option<&SelectionContext>) -> Div 
                         .text_color(rgb(color))
                         .child(SharedString::from(mark)),
                 )
-                .child(selectable_styled_text(
-                    tool_line(call),
-                    small_style(SMALL_TEXT_SIZE, color),
-                    Vec::new(),
-                    &[],
-                    selection,
-                )),
+                // The text takes the room the mark leaves and is measured
+                // against that width, so it wraps (#2977). Without a width of
+                // its own it sized to max-content, was shaped as one line, and
+                // the row clipped it. Three lines is where a command stops
+                // growing the card, with the ellipse carrying the rest.
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .line_clamp(3)
+                        .child(selectable_styled_text(
+                            tool_line(call),
+                            small_style(SMALL_TEXT_SIZE, color),
+                            Vec::new(),
+                            &[],
+                            selection,
+                        )),
+                ),
         );
     }
     col
@@ -3287,14 +3298,20 @@ fn live_card_line_text(line: &LiveCardLine) -> String {
 /// is what lets a single name be copied out of the ledger.
 fn live_card_line(line: LiveCardLine, selection: Option<&SelectionContext>) -> AnyElement {
     match line {
-        LiveCardLine::Tool { mark, color, text } => selectable_styled_text(
-            format!("{mark} {text}"),
-            small_style(SMALL_TEXT_SIZE, color),
-            Vec::new(),
-            &[],
-            selection,
-        )
-        .into_any_element(),
+        // The live card's tool row wraps like the settled one (#2977): three
+        // lines at the card's width, then the ellipse.
+        LiveCardLine::Tool { mark, color, text } => div()
+            .w_full()
+            .min_w_0()
+            .line_clamp(3)
+            .child(selectable_styled_text(
+                format!("{mark} {text}"),
+                small_style(SMALL_TEXT_SIZE, color),
+                Vec::new(),
+                &[],
+                selection,
+            ))
+            .into_any_element(),
         LiveCardLine::Narration(text) => md_block(
             &text,
             MdLook::body(SMALL_TEXT_SIZE),
@@ -5686,6 +5703,29 @@ mod tests {
             live.contains(".items_start()"),
             "a sent bubble must not be stretched by its row"
         );
+    }
+
+    /// #2977: gpui only wraps a run of text that was measured against a
+    /// definite width (`gpui-0.2.2/src/elements/text.rs`), so a tool row's text
+    /// needs a width of its own before it can break at all. Three lines is
+    /// where a command stops, in the card and in the live card alike.
+    #[test]
+    fn tool_rows_take_a_width_and_wrap_to_three_lines() {
+        let src = include_str!("transcript.rs");
+        let ledger = src
+            .split("fn tools_block(")
+            .nth(1)
+            .and_then(|rest| rest.split("/// One call's drawn text").next())
+            .expect("tool ledger");
+        for needle in [".flex_1()", ".min_w_0()", ".line_clamp(3)"] {
+            assert!(ledger.contains(needle), "tool rows must carry {needle}");
+        }
+        let live = src
+            .split("fn live_card_line(")
+            .nth(1)
+            .and_then(|rest| rest.split("fn live_card(").next())
+            .expect("live card line");
+        assert!(live.contains(".line_clamp(3)"));
     }
 
     /// #2571: only the message surface gets the tighter corner. The shared card
