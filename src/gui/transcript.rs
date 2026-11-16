@@ -5701,7 +5701,11 @@ mod tests {
             for shift in [16u32, 8, 0] {
                 let before = (bg >> shift) & 0xff;
                 let after = (fill >> shift) & 0xff;
-                assert_eq!(after, (before + 3).min(0xff), "channel {shift} of {bg:#08x}");
+                assert_eq!(
+                    after,
+                    (before + 3).min(0xff),
+                    "channel {shift} of {bg:#08x}"
+                );
             }
         }
         // A channel already at the top stays there instead of wrapping.

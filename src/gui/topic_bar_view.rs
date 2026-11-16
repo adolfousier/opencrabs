@@ -131,7 +131,8 @@ pub(crate) fn topic_strip(
                     .flex_row()
                     .items_center()
                     .gap_1()
-                    .flex_nowrap().overflow_x_scroll()
+                    .flex_nowrap()
+                    .overflow_x_scroll()
                     .children(tabs),
             )
             // Outside the scroller, so the fold control sits at the row's end
