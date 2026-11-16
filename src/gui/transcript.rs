@@ -1142,13 +1142,26 @@ pub async fn load_recent(
             };
             let _ = tx.send(result);
         });
-    match spawned {
+    let result = match spawned {
         Ok(_) => match rx.await {
             Ok(result) => result,
             Err(_) => Err("transcript fetch thread dropped its result".into()),
         },
         Err(e) => Err(format!("transcript fetch thread failed to spawn: {e}")),
-    }
+    };
+    result.map_err(|e| read_failed(session_id, e))
+}
+
+/// One line whenever a read comes back with nothing (#2981).
+///
+/// A failed read replaces a whole conversation with a single notice, and that
+/// notice was the only thing on screen, so an occurrence looked like a chat
+/// that went completely black. Nothing logged the failure, which left the
+/// report with no witness beside it. The message is passed through untouched,
+/// so the caller still shows exactly what it showed before.
+fn read_failed(session: uuid::Uuid, error: String) -> String {
+    crate::logging::warn(&format!("transcript read failed for {session}: {error}"));
+    error
 }
 
 /// What a stored session title reads as once the bookkeeping is off it. `All`

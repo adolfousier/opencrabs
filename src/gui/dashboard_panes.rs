@@ -600,6 +600,9 @@ impl Dashboard {
                 pane.update(cx, |pane, cx| {
                     match loaded {
                         Ok((hidden, turns, rows, reactions)) => {
+                            // A read that worked ends the last failure (#2981),
+                            // the same rule the window's reload keeps.
+                            pane.transcript.error = None;
                             pane.transcript.hidden = hidden;
                             pane.transcript.turns = turns;
                             pane.transcript.rows = rows;

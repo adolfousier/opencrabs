@@ -390,6 +390,10 @@ impl Dashboard {
                     let turns = this.claim_pane_metrics(session, turns);
                     if let Some(pane) = this.pane_view(session) {
                         pane.update(cx, |pane, cx| {
+                            // A read that worked ends the last failure (#2981):
+                            // a stale error line would otherwise stand in place
+                            // of this pane's conversation for good.
+                            pane.transcript.error = None;
                             pane.transcript.hidden = hidden;
                             pane.transcript.turns = turns;
                             pane.transcript.reactions = loaded.reactions;

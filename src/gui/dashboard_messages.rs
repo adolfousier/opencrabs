@@ -1218,6 +1218,12 @@ impl Dashboard {
                 }
                 match result {
                     Ok(loaded) => {
+                        // A read that worked is the end of the last failure
+                        // (#2981). Nothing else cleared this, so one transient
+                        // error stayed on the transcript for the rest of the
+                        // session, and the frame it drew was that one line in
+                        // place of the whole conversation.
+                        this.chat_state.transcript.error = None;
                         let (hidden, turns) = transcript::turns_with_origins(
                             &loaded.rows,
                             loaded.total,
