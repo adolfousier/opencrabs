@@ -60,6 +60,8 @@ impl SessionService {
             auto_title_attempted: false,
             project_id: None,
             channel_chat_key: None,
+            // A fresh row carries a placeholder, so the first turn may title it.
+            title_source: crate::db::TitleSource::Template,
         };
 
         repo.create(&session)
@@ -123,6 +125,8 @@ impl SessionService {
             auto_title_attempted: false,
             project_id: None,
             channel_chat_key: None,
+            // A fresh row carries a placeholder, so the first turn may title it.
+            title_source: crate::db::TitleSource::Template,
         };
 
         let (result, created) = repo

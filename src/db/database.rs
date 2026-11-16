@@ -174,6 +174,11 @@ pub(crate) const MIGRATION_SQL: &[&str] = &[
     // picture is the same reaction and the toggle deletes it. Nothing to
     // backfill. Appended last per the list invariant above.
     include_str!("../migrations/20261106000001_add_message_reactions.sql"),
+    // #2956: who chose the title, so the retitle paths stop overwriting a name
+    // the user typed. ALTER TABLE ADD COLUMN with 'manual' as the value every
+    // existing row takes, so the unknown case is frozen instead of rewritten.
+    // Appended last per the list invariant above.
+    include_str!("../migrations/20261116000001_add_session_title_source.sql"),
 ];
 
 pub(crate) fn build_migrations() -> Migrations<'static> {

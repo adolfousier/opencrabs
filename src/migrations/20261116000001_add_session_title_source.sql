@@ -1,0 +1,13 @@
+-- #2956: record who chose a session title, so the auto-title and label-refresh
+-- paths can leave a name the user typed alone.
+--
+-- 'manual'   the user named it (/rename, the rename_session tool, TUI, GUI)
+-- 'auto'     the auto-title model wrote it
+-- 'template' a channel-generated placeholder (DM name, group name, New Chat)
+--
+-- Existing rows take 'manual'. Their real author is unknown, and a user name is
+-- the one thing the retitle must never overwrite, so the unknown case takes the
+-- safe value: a title written before this column existed is frozen rather than
+-- re-titled. A row still sitting on a placeholder is unaffected, because the
+-- first-turn title path keys off the placeholder itself, not this column.
+ALTER TABLE sessions ADD COLUMN title_source TEXT NOT NULL DEFAULT 'manual';

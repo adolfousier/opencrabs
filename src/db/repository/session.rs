@@ -534,7 +534,9 @@ impl SessionRepository {
             .context("Failed to get connection")?
             .interact(move |conn| {
                 conn.execute(
-                    "UPDATE sessions SET title = ?2 WHERE id = ?1",
+                    // The rename prompt is the user choosing the name, so the
+                    // row records that no automatic path may overwrite it (#2956).
+                    "UPDATE sessions SET title = ?2, title_source = 'manual' WHERE id = ?1",
                     params![id_str, title],
                 )
             })
@@ -873,8 +875,8 @@ impl SessionRepository {
             .interact(move |conn| {
                 conn.execute(
                     "INSERT INTO sessions (id, title, model, provider_name, created_at, updated_at,
-                                          archived_at, token_count, total_cost, working_directory, auto_title_attempted, project_id)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                                          archived_at, token_count, total_cost, working_directory, auto_title_attempted, project_id, title_source)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
                     params![
                         s.id.to_string(),
                         s.title,
@@ -888,6 +890,7 @@ impl SessionRepository {
                         s.working_directory,
                         s.auto_title_attempted,
                         s.project_id.map(|id| id.to_string()),
+                        s.title_source.as_str(),
                     ],
                 )
             })
@@ -937,8 +940,8 @@ impl SessionRepository {
                 conn.execute(
                     "INSERT INTO sessions (id, title, model, provider_name, created_at, updated_at,
                                            archived_at, token_count, total_cost, working_directory,
-                                           auto_title_attempted, project_id, channel_chat_key)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+                                           auto_title_attempted, project_id, channel_chat_key, title_source)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
                      ON CONFLICT(channel_chat_key) WHERE channel_chat_key IS NOT NULL AND archived_at IS NULL DO NOTHING",
                     params![
                         cloned.id.to_string(),
@@ -954,6 +957,7 @@ impl SessionRepository {
                         cloned.auto_title_attempted,
                         cloned.project_id.map(|id| id.to_string()),
                         cloned.channel_chat_key,
+                        cloned.title_source.as_str(),
                     ],
                 )
             })
@@ -1007,8 +1011,8 @@ impl SessionRepository {
                     "UPDATE sessions
                      SET title = ?1, model = ?2, provider_name = ?3, updated_at = ?4,
                          archived_at = ?5, token_count = ?6, total_cost = ?7, working_directory = ?8,
-                         auto_title_attempted = ?9, project_id = ?10
-                     WHERE id = ?11",
+                         auto_title_attempted = ?9, project_id = ?10, title_source = ?11
+                     WHERE id = ?12",
                     params![
                         s.title,
                         s.model,
@@ -1020,6 +1024,7 @@ impl SessionRepository {
                         s.working_directory,
                         s.auto_title_attempted,
                         s.project_id.map(|id| id.to_string()),
+                        s.title_source.as_str(),
                         s.id.to_string(),
                     ],
                 )

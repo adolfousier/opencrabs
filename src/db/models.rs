@@ -138,6 +138,46 @@ impl Project {
 
 // ─── Session ─────────────────────────────────────────────────────────────────
 
+/// Who chose the current session title (#2956).
+///
+/// The retitle path used to fire on any channel row, because a row recorded
+/// that a title existed and never who wrote it, so a name the owner typed was
+/// indistinguishable from one the model generated. This says which it was.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TitleSource {
+    /// Typed by the user: `/rename`, the `rename_session` tool, or the TUI and
+    /// GUI rename prompts. No automatic path may overwrite it.
+    Manual,
+    /// Written by the auto-title model. The only value the drift retitle may
+    /// replace.
+    Auto,
+    /// A channel-generated placeholder: a DM name, a group or topic label,
+    /// `New Chat`. The first turn may replace it with a real title.
+    Template,
+}
+
+impl TitleSource {
+    /// The value stored in `sessions.title_source`.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Manual => "manual",
+            Self::Auto => "auto",
+            Self::Template => "template",
+        }
+    }
+
+    /// Parse the stored value. Anything unreadable falls back to `Manual`,
+    /// which freezes the title instead of rewriting it.
+    pub fn parse(raw: &str) -> Self {
+        match raw {
+            "auto" => Self::Auto,
+            "template" => Self::Template,
+            _ => Self::Manual,
+        }
+    }
+}
+
 /// Session model
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Session {
@@ -156,6 +196,9 @@ pub struct Session {
     /// Stable channel identity `[chat:<id>]` extracted from the title
     /// (#1721). NULL for TUI/local sessions; unique across live rows.
     pub channel_chat_key: Option<String>,
+    /// Who chose the current title (#2956). The drift retitle only ever touches
+    /// `Auto`, so a `Manual` row keeps the name the user typed.
+    pub title_source: TitleSource,
 }
 
 impl Session {
@@ -178,6 +221,14 @@ impl Session {
                 .flatten()
                 .and_then(|s| Uuid::parse_str(&s).ok()),
             channel_chat_key: row.get("channel_chat_key")?,
+            title_source: {
+                let raw = row
+                    .get::<_, Option<String>>("title_source")
+                    .ok()
+                    .flatten()
+                    .unwrap_or_else(|| "manual".to_string());
+                TitleSource::parse(&raw)
+            },
         })
     }
 
@@ -202,6 +253,8 @@ impl Session {
             auto_title_attempted: false,
             project_id: None,
             channel_chat_key: None,
+            // A fresh row carries a placeholder, so the first turn may title it.
+            title_source: TitleSource::Template,
         }
     }
 
