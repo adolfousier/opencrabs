@@ -520,6 +520,20 @@ impl LiveTurn {
     /// climbing claims a turn that is still running (#2849).
     pub fn stop(&mut self) {
         self.stopped = true;
+        self.freeze();
+    }
+
+    /// The turn is over: stop the clock where it ended, without claiming the
+    /// turn was stopped (#2954).
+    ///
+    /// `stopped` is the verdict. It drives the stop glyph, the "Stopped" lead
+    /// and the dropped activity row, so a turn that finished normally must
+    /// never set it. Only the clock needs freezing: without this the live card
+    /// kept counting until the reload proved the row had landed, so the number
+    /// the reader watched ran past the span the turn actually took.
+    ///
+    /// The end is set once. A later stop keeps the moment the work ended.
+    pub fn freeze(&mut self) {
         if self.stopped_at.is_none() {
             self.stopped_at = Some(std::time::Instant::now());
         }
@@ -5257,6 +5271,37 @@ mod tests {
         let quiet = TurnMetrics::measured(120, Some(4_000), 200_000, 0.0, 6)
             .expect("tokens alone still make a record");
         assert_eq!(quiet.tps, None);
+    }
+
+    /// A turn that finishes freezes its clock without claiming it was stopped
+    /// (#2954). The live card used to keep counting until the reload proved the
+    /// row had landed, so the span the reader watched ran past the turn's own,
+    /// and `stopped` is the verdict that paints the stop glyph and the
+    /// "Stopped" lead, which a finished turn must never show.
+    #[test]
+    fn freezing_the_clock_does_not_claim_the_turn_was_stopped() {
+        let mut live = LiveTurn::default();
+        live.begin("a question".to_string());
+        // Backdate the start so the clock has a whole span on it.
+        live.started = Some(std::time::Instant::now() - std::time::Duration::from_secs(5));
+        live.freeze();
+        assert!(live.stopped_at.is_some(), "the clock has an end");
+        assert!(!live.stopped, "a finished turn is not a stopped turn");
+        assert!(
+            live.elapsed_secs() >= 5,
+            "the clock reads the turn's own span: {}",
+            live.elapsed_secs()
+        );
+
+        // The end is set once, so a second freeze cannot move it.
+        let end = live.stopped_at;
+        live.freeze();
+        assert_eq!(live.stopped_at, end, "the end is set once");
+
+        // A real stop still claims the verdict, and keeps the earlier end.
+        live.stop();
+        assert!(live.stopped, "a stop is a verdict");
+        assert_eq!(live.stopped_at, end, "a stop after the end keeps the end");
     }
 
     /// Perceived brightness of a packed RGB colour, 0..=255.

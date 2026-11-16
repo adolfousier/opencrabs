@@ -257,6 +257,9 @@ impl Dashboard {
         let (calls, ctx_used, ctx_max) = pane.update(cx, |pane, cx| {
             pane.live.finalize(tokens_per_second);
             pane.live.thinking = false;
+            // The leaf's clock ends with its turn too (#2954), on the same
+            // rule the window keeps: freeze the span, never the verdict.
+            pane.live.freeze();
             pane.busy = false;
             pane.cancel = None;
             // The turn ends where the reader is, not where it ended (#2698).
@@ -1453,6 +1456,12 @@ impl Dashboard {
                     }
                     self.turn.busy = false;
                     self.turn.live.thinking = false;
+                    // The turn ended here, so the clock ends here (#2954). It
+                    // used to run until the reload proved the row had landed,
+                    // which counted the settle wait as part of the turn and
+                    // logged a span longer than the one the card settles with.
+                    // Not `stop`: that is the verdict, and this turn finished.
+                    self.turn.live.freeze();
                     // One line per turn, with the stream's own numbers: a
                     // turn that rendered as one silent dump is diagnosable
                     // from the log (chunks=0 means the provider never
