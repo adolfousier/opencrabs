@@ -54,6 +54,9 @@ actions!(
         DeleteToLineStart,
         SelectLeft,
         SelectRight,
+        /// Word selection, the shift half of `WordLeft` / `WordRight` (#2950).
+        SelectWordLeft,
+        SelectWordRight,
         SelectAll,
         Home,
         End,
@@ -1159,6 +1162,22 @@ impl Editor {
 
     fn select_right(&mut self, _: &SelectRight, _: &mut Window, cx: &mut Context<Self>) {
         self.select_to(self.next_boundary(self.cursor_offset()), cx);
+    }
+
+    // The shift half of the word chords. `alt+left` moves a whole word, and
+    // the same walk extended by shift has to select one, or the composer
+    // answers half of what every other field does: the Seeker, the name
+    // prompts and the TUI all get this from `text_field::editing_chord`, while
+    // the composer's chords live in the gpui keymap and simply had no
+    // alt-shift entry (#2950). `select_to` keeps the anchor and flips
+    // direction on its own, so repeated presses walk back and forth without
+    // dropping the start of the selection.
+    fn select_word_left(&mut self, _: &SelectWordLeft, _: &mut Window, cx: &mut Context<Self>) {
+        self.select_to(previous_word_start(&self.content, self.cursor_offset()), cx);
+    }
+
+    fn select_word_right(&mut self, _: &SelectWordRight, _: &mut Window, cx: &mut Context<Self>) {
+        self.select_to(next_word_end(&self.content, self.cursor_offset()), cx);
     }
 
     fn select_all(&mut self, _: &SelectAll, _: &mut Window, cx: &mut Context<Self>) {
@@ -2702,6 +2721,13 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("ctrl-backspace", DeleteWordBack, None),
         KeyBinding::new("shift-left", SelectLeft, None),
         KeyBinding::new("shift-right", SelectRight, None),
+        // Word selection. gpui compares modifiers exactly, so these need their
+        // own entries: `alt-left` carries no shift and `shift-left` carries no
+        // alt, which left alt+shift+arrow matching nothing at all (#2950).
+        KeyBinding::new("alt-shift-left", SelectWordLeft, None),
+        KeyBinding::new("alt-shift-right", SelectWordRight, None),
+        KeyBinding::new("ctrl-shift-left", SelectWordLeft, None),
+        KeyBinding::new("ctrl-shift-right", SelectWordRight, None),
         KeyBinding::new("cmd-a", SelectAll, None),
         KeyBinding::new("cmd-v", Paste, None),
         KeyBinding::new("cmd-c", Copy, None),
@@ -3331,6 +3357,50 @@ mod tests {
                 "{chord} is not bound"
             );
         }
+    }
+
+    /// Word selection is the shift half of the word walk: the composer has to
+    /// bind the chord AND declare the action, because gpui compares modifiers
+    /// exactly and `alt-left` / `shift-left` match neither (#2950). The Seeker
+    /// and the prompts get this from `text_field::editing_chord`, which the
+    /// composer cannot use: its keys go through the keymap.
+    #[test]
+    fn word_select_chords_reach_a_handler() {
+        let src = include_str!("editor.rs");
+        let bindings = src
+            .split("pub fn bind_keys(")
+            .nth(1)
+            .and_then(|rest| rest.split("// Line math").next())
+            .expect("editor key bindings");
+        for chord in [
+            "alt-shift-left",
+            "alt-shift-right",
+            "ctrl-shift-left",
+            "ctrl-shift-right",
+        ] {
+            assert!(
+                bindings.contains(&format!("KeyBinding::new(\"{chord}\"")),
+                "{chord} is not bound"
+            );
+        }
+        for action in ["SelectWordLeft", "SelectWordRight"] {
+            assert!(
+                src.contains(&format!("        {action},")),
+                "{action} is missing from actions!"
+            );
+            assert!(
+                bindings.contains(&format!(", {action}, None)")),
+                "{action} is bound to nothing"
+            );
+        }
+        assert!(
+            src.contains("fn select_word_left(&mut self, _: &SelectWordLeft,"),
+            "SelectWordLeft has no handler"
+        );
+        assert!(
+            src.contains("fn select_word_right(&mut self, _: &SelectWordRight,"),
+            "SelectWordRight has no handler"
+        );
     }
 
     /// The single-line hint sits in the middle of the composer, with the
