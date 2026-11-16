@@ -399,6 +399,7 @@ pub mod gui_reply_quote_2827_test;
 pub mod gui_session_project_assignment_test;
 pub mod gui_sessions_rail_test;
 pub mod gui_settings_modal_test;
+pub mod gui_settled_fold_test;
 pub mod gui_split_command_session_2672_test;
 pub mod gui_split_render_test;
 pub mod gui_stop_recovery_row_2850_test;
