@@ -74,6 +74,8 @@ fn the_live_turn_sits_where_the_stored_row_will() {
 
 /// The user bubble is a horizontal flex item, so it must shrink to the real
 /// row width. Attachment height is protected by the strip's own shrink guard.
+/// The column declares no width of its own (#2981): the wrapper above it is
+/// what carries the definite width the text wraps at.
 #[test]
 fn the_bubble_shrinks_horizontally_without_shrinking_attachments() {
     let column = body_after(TRANSCRIPT, "fn bubble(\n    role: &str,")
@@ -85,8 +87,12 @@ fn the_bubble_shrinks_horizontally_without_shrinking_attachments() {
         "the bubble can shrink below a planned width that exceeds its row"
     );
     assert!(
-        column.contains(".w_full()"),
-        "the bubble wraps at the row width instead of running past the pane"
+        !column.contains(".w_full()"),
+        "the column declares no width, so the wrapper's definite one wins"
+    );
+    assert!(
+        column.contains(".min_w_0()"),
+        "and it still shrinks instead of running past the pane"
     );
     let strip = TRANSCRIPT
         .split("let mut strip = div()")
@@ -209,15 +215,23 @@ fn both_chrome_rows_clear_the_corner() {
 
 /// A percentage cap is ignored while the row's width is indefinite, which is
 /// exactly the narrow split pane: the bubble then sized to max-content and
-/// `justify_end` pushed its beginning out of the left edge (#2937). The row's
-/// own width is the measure instead: the column fills it and wraps there, and
-/// the only cap is a pixel one the caller passes (#2976, #2978).
+/// `justify_end` pushed its beginning out of the left edge (#2937). The column
+/// therefore declares no width of its own, the wrapper above it supplies the
+/// definite one, and the only cap is a pixel one the caller passes (#2976,
+/// #2978). A full-width declaration on the column was tried in #2979 and
+/// reverted in #2981: a percentage width resolves against a parent whose width
+/// is still indefinite while the row is measured, so the row wrapped far taller
+/// than its text.
 #[test]
 fn the_bubble_is_capped_in_pixels() {
     let bubble = body_after(TRANSCRIPT, "fn bubble(");
     assert!(
-        bubble.contains(".w_full()"),
-        "the bubble takes the width of the row it is painted into"
+        !bubble.contains(".w_full()"),
+        "the bubble column takes its content width, never the row's"
+    );
+    assert!(
+        bubble.contains(".min_w_0()"),
+        "and it can still shrink below a planned width that exceeds its row"
     );
     assert!(
         bubble.contains(".when(row_cap > 0.0, |d| d.max_w(px(row_cap)))"),
