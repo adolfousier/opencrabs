@@ -3403,6 +3403,75 @@ mod tests {
             src.contains("fn select_word_right(&mut self, _: &SelectWordRight,"),
             "SelectWordRight has no handler"
         );
+        for (action, handler) in [
+            ("SelectWordLeft", "select_word_left"),
+            ("SelectWordRight", "select_word_right"),
+        ] {
+            let listener = format!("on_action(cx.listener(Self::{handler}))");
+            assert!(
+                src.contains(&listener),
+                "{action} is never registered ({listener} is missing), \
+                 so the binding is dead"
+            );
+        }
+    }
+
+    /// A binding with an action but no `on_action` listener is dead: gpui
+    /// matches the chord, dispatches the action, and nothing is listening, so
+    /// the key is silently dropped (#2950 shipped exactly that and only a
+    /// dead-code warning on the handlers gave it away). Every action the
+    /// composer binds has to be registered on the same element.
+    #[test]
+    fn every_bound_action_is_registered() {
+        fn snake(name: &str) -> String {
+            let mut out = String::new();
+            for (i, ch) in name.char_indices() {
+                if ch.is_uppercase() {
+                    if i > 0 {
+                        out.push('_');
+                    }
+                    out.extend(ch.to_lowercase());
+                } else {
+                    out.push(ch);
+                }
+            }
+            out
+        }
+
+        let src = include_str!("editor.rs");
+        let bindings = src
+            .split("pub fn bind_keys(")
+            .nth(1)
+            .and_then(|rest| rest.split("// Line math").next())
+            .expect("editor key bindings");
+
+        let mut bound: Vec<&str> = bindings
+            .match_indices("KeyBinding::new(\"")
+            .filter_map(|(at, _)| {
+                let rest = &bindings[at + "KeyBinding::new(\"".len()..];
+                let after_chord = rest.split_once('"')?.1;
+                let action = after_chord.trim_start_matches(", ").split(',').next()?;
+                let action = action.trim();
+                let first = action.chars().next()?;
+                first.is_ascii_uppercase().then_some(action)
+            })
+            .collect();
+        bound.sort_unstable();
+        bound.dedup();
+        assert!(
+            bound.len() > 10,
+            "parsed only {} bindings, the parser broke",
+            bound.len()
+        );
+
+        for action in bound {
+            let listener = format!("on_action(cx.listener(Self::{}))", snake(action));
+            assert!(
+                src.contains(&listener),
+                "{action} is bound but never registered ({listener} is missing), \
+                 so pressing that chord does nothing"
+            );
+        }
     }
 
     /// The single-line hint sits in the middle of the composer, with the
