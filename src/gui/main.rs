@@ -5397,10 +5397,32 @@ impl Render for Dashboard {
         if self.settings_open {
             root = root.child(self.settings_modal(cx));
         }
-        // The auto-scroll marker is the final surface while active. It hides
-        // the cursor without taking pointer moves away from the window root.
+        // The auto-scroll marker is the final surface while active, and it
+        // owns the pointer: gpui gates every mouse listener on the element
+        // being hovered, and this overlay blocks the hit test for everything
+        // beneath it, so a listener left on the root never runs while the
+        // marker is up (#2964). The gesture's three listeners ride the one
+        // element the pointer is over, and stopping propagation in the
+        // capture phase keeps the press from reaching the rows underneath.
         if let Some(gesture) = self.middle_scroll.as_ref() {
-            root = root.child(middle_scroll::overlay(gesture));
+            root = root.child(
+                middle_scroll::overlay(gesture)
+                    .capture_any_mouse_down(cx.listener(
+                        |this, _ev: &MouseDownEvent, _window, cx| {
+                            this.cancel_middle_scroll(cx);
+                            cx.stop_propagation();
+                        },
+                    ))
+                    .on_mouse_move(cx.listener(|this, ev: &MouseMoveEvent, _window, cx| {
+                        this.move_middle_scroll(ev.position, cx);
+                    }))
+                    .on_scroll_wheel(cx.listener(
+                        |this, _ev: &ScrollWheelEvent, _window, cx| {
+                            this.cancel_middle_scroll(cx);
+                            cx.stop_propagation();
+                        },
+                    )),
+            );
         }
         // A stationary pointer still scrolls. Entering the dead zone lets the
         // one outstanding animation callback drain out.

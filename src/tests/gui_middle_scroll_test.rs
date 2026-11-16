@@ -149,6 +149,34 @@ fn upward_departure_does_not_fight_bottom_follow_slack() {
 }
 
 #[test]
+fn the_marker_overlay_owns_the_pointer_it_blocks() {
+    // gpui gates every mouse listener on `hitbox.is_hovered`, and the overlay's
+    // `occlude()` blocks the hit test for everything under it, so a listener on
+    // the window root is dead while the marker is up: the drag never reached the
+    // gesture and only Esc exited (#2964). The listeners ride the overlay, the
+    // one element the pointer is over.
+    let overlay = MAIN
+        .find("middle_scroll::overlay(gesture)")
+        .expect("the marker is rendered from the window root");
+    let wiring = &MAIN[overlay..];
+    let end = wiring
+        .find("self.schedule_middle_scroll_frame(window, cx);")
+        .expect("the frame schedule follows the marker");
+    let wiring = &wiring[..end];
+    assert!(wiring.contains(".capture_any_mouse_down("));
+    assert!(wiring.contains("this.move_middle_scroll(ev.position, cx);"));
+    assert!(wiring.contains(".on_scroll_wheel("));
+    assert!(
+        wiring.contains("cx.stop_propagation();"),
+        "a press on the marker must not reach the rows it covers"
+    );
+    assert!(
+        MIDDLE_SCROLL.contains(".occlude()"),
+        "the marker keeps the transcript underneath inert"
+    );
+}
+
+#[test]
 fn the_anchor_is_a_fixed_circular_direction_marker() {
     assert!(MIDDLE_SCROLL.contains(".id(\"middle-scroll-overlay\")"));
     assert!(MIDDLE_SCROLL.contains(".rounded_full()"));
