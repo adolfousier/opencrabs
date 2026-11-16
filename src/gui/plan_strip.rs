@@ -221,7 +221,7 @@ impl PlanStripState {
 
     /// The plan as a split pane draws it: the task in flight and the next one
     /// or two while there is room, the count and the bar when there is less,
-    /// and a named disclosure with the count in a wall of panes (#2622, #2624).
+    /// and a leading chevron with the count in a wall of panes (#2622, #2624).
     ///
     /// The terminal compacts too (`tui::render::panes::pane_strip_lines`), but
     /// it knows one split width. A window has to survive anything from two
@@ -256,7 +256,7 @@ impl PlanStripState {
             .bg(glass_fill(palette::current().panel))
             .cursor_pointer()
             .hover(|d| d.bg(rgb(palette::current().panel_hi)));
-        for (kind, line) in pane_lines(plan, density, expanded) {
+        for (index, (kind, line)) in pane_lines(plan, density, expanded).into_iter().enumerate() {
             let color = match kind {
                 LineKind::Title | LineKind::Bar | LineKind::Done => palette::current().teal,
                 LineKind::Running => palette::current().text,
@@ -271,16 +271,31 @@ impl PlanStripState {
             // already renders through this shape (#2642); the pane card did not,
             // which is why every pane line was a dot in a wide empty card.
             col = col.child(
-                div().flex().flex_row().w_full().min_w_0().child(
-                    div()
-                        .flex_1()
-                        .min_w_0()
-                        .overflow_hidden()
-                        .truncate()
-                        .text_xs()
-                        .text_color(rgb(color))
-                        .child(SharedString::from(line)),
-                ),
+                div()
+                    .flex()
+                    .flex_row()
+                    .w_full()
+                    .min_w_0()
+                    .when(index == 0, |d| {
+                        d.child(
+                            div()
+                                .flex_shrink_0()
+                                .w(px(16.0))
+                                .text_base()
+                                .text_color(rgb(color))
+                                .child(SharedString::from(plan_chevron(expanded))),
+                        )
+                    })
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .overflow_hidden()
+                            .truncate()
+                            .text_xs()
+                            .text_color(rgb(color))
+                            .child(SharedString::from(line)),
+                    ),
             );
         }
         Some(col)
@@ -381,10 +396,9 @@ pub enum LineKind {
     Done,
 }
 
-/// Name the plan beside the disclosure chevron so the compact card reads as
-/// an expandable summary instead of a static progress indicator.
-fn plan_disclosure(expanded: bool) -> &'static str {
-    if expanded { "▾ Plan" } else { "▸ Plan" }
+/// The single chevron drawn immediately left of a pane's plan summary.
+fn plan_chevron(expanded: bool) -> &'static str {
+    if expanded { "▾" } else { "▸" }
 }
 
 /// The lines a pane draws, split out of the view so the shape is testable
@@ -401,14 +415,7 @@ pub fn pane_lines(
         // Approved design whose checklist is still being seeded, or a seed
         // that failed. Same two states the terminal names.
         return vec![
-            (
-                LineKind::Title,
-                format!(
-                    "{} · {}",
-                    plan_disclosure(expanded),
-                    fit(&plan.title, 32)
-                ),
-            ),
+            (LineKind::Title, fit(&plan.title, 32)),
             (LineKind::Next, CHECKLIST_NOT_SEEDED.to_string()),
         ];
     }
@@ -416,11 +423,7 @@ pub fn pane_lines(
         let mut out = vec![
             (
                 LineKind::Title,
-                format!(
-                    "{} · {} · {done}/{total}",
-                    plan_disclosure(true),
-                    fit(&plan.title, 32)
-                ),
+                format!("{} · {done}/{total}", fit(&plan.title, 32)),
             ),
             (LineKind::Bar, format!("{bar} {percent}%")),
         ];
@@ -449,17 +452,11 @@ pub fn pane_lines(
         None if done == total => "✓ complete".to_string(),
         None => "▸ waiting".to_string(),
     };
-    let progress_line = format!(
-        "{} · {done}/{total} · {bar} {percent}%",
-        plan_disclosure(false)
-    );
+    let progress_line = format!("{done}/{total} · {bar} {percent}%");
     match density {
-        // A wall of panes gets the named disclosure and count. The click
-        // expands it, and anything more leaves no room for conversations.
-        PaneDensity::Bar => vec![(
-            LineKind::Bar,
-            format!("{} · {done}/{total}", plan_disclosure(false)),
-        )],
+        // A wall of panes gets the chevron and count. The click expands it,
+        // and anything more leaves no room for conversations.
+        PaneDensity::Bar => vec![(LineKind::Bar, format!("{done}/{total}"))],
         PaneDensity::Summary => vec![
             (LineKind::Bar, progress_line),
             (LineKind::Running, running_line),
@@ -798,6 +795,12 @@ mod tests {
             body.contains(".cursor_pointer()") && body.contains(".hover("),
             "the active plan card looks clickable in both pane render paths"
         );
+        assert!(
+            body.contains(".when(index == 0")
+                && body.contains("plan_chevron(expanded)")
+                && body.contains(".text_base()"),
+            "a body-sized chevron leads only the plan summary row"
+        );
         let row = body
             .split_once("col = col.child(")
             .expect("pane rows are built in a loop")
@@ -919,7 +922,7 @@ mod tests {
         // asked for: what is running, and the one or two tasks after it.
         let lines = pane_lines(&plan_with(8, 3, Some(4)), PaneDensity::Tasks, false);
         assert_eq!(lines.len(), 4, "summary, running, two next: {lines:?}");
-        assert_eq!(lines[0].1, "▸ Plan · 3/8 · ███░░░░░░░ 37%");
+        assert_eq!(lines[0].1, "3/8 · ███░░░░░░░ 37%");
         assert_eq!(lines[1], (LineKind::Running, "▸ task 4".to_string()));
         assert_eq!(lines[2].0, LineKind::Next);
         assert!(lines[2].1.starts_with("· task 5"), "{:?}", lines[2]);
@@ -931,16 +934,18 @@ mod tests {
     }
 
     #[test]
-    fn a_split_grid_names_the_plan_disclosure() {
-        // Eight panes have no room for task titles or a bar. One named line
-        // carries the count and says that the click expands the rest.
+    fn a_split_grid_separates_the_chevron_from_its_summary() {
+        // The renderer owns the disclosure glyph, while the data keeps only
+        // the readable summary that belongs beside it.
+        assert_eq!(plan_chevron(false), "▸");
+        assert_eq!(plan_chevron(true), "▾");
         let lines = pane_lines(&plan_with(8, 3, Some(4)), PaneDensity::Bar, false);
         assert_eq!(lines.len(), 1, "{lines:?}");
-        assert_eq!(lines[0], (LineKind::Bar, "▸ Plan · 3/8".to_string()));
-        // Four to seven keeps the same disclosure, progress and running task.
+        assert_eq!(lines[0], (LineKind::Bar, "3/8".to_string()));
+        // Four to seven keeps the same progress and running task.
         let summary = pane_lines(&plan_with(8, 3, Some(4)), PaneDensity::Summary, false);
         assert_eq!(summary.len(), 2, "{summary:?}");
-        assert_eq!(summary[0].1, "▸ Plan · 3/8 · ███░░░░░░░ 37%");
+        assert_eq!(summary[0].1, "3/8 · ███░░░░░░░ 37%");
         assert_eq!(summary[1], (LineKind::Running, "▸ task 4".to_string()));
         assert!(
             !summary.iter().any(|(kind, _)| *kind == LineKind::Title),
@@ -967,8 +972,7 @@ mod tests {
         // long plan cannot push the composer out of the pane.
         let lines = pane_lines(&plan_with(20, 3, Some(4)), PaneDensity::Bar, true);
         assert_eq!(lines[0].0, LineKind::Title);
-        assert!(lines[0].1.starts_with("▾ Plan ·"), "{:?}", lines[0]);
-        assert!(lines[0].1.ends_with("· 3/20"), "{:?}", lines[0]);
+        assert_eq!(lines[0].1, "Landing · 3/20");
         assert_eq!(lines[1].0, LineKind::Bar);
         assert_eq!(lines.len(), 8, "header, bar and the six-row window");
         assert!(lines[2].1.starts_with("2. "), "{:?}", lines[2]);
@@ -989,7 +993,7 @@ mod tests {
         seed.status = PlanStatus::Active;
         let lines = pane_lines(&seed, PaneDensity::Tasks, false);
         assert_eq!(lines.len(), 2, "a plan with no checklist is two lines");
-        assert!(lines[0].1.starts_with("▸ Plan ·"), "{:?}", lines[0]);
+        assert_eq!(lines[0].1, "Landing");
         assert!(lines[1].1.contains("checklist not seeded"));
     }
 
