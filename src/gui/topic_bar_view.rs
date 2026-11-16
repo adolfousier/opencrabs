@@ -87,6 +87,10 @@ pub(crate) fn topic_strip(
             .child(leading)
             .child(
                 div()
+                    // A scroll container and a click target are state, so the
+                    // cell carries an id. It follows `key` for the same reason
+                    // the control does: a split draws one strip per pane.
+                    .id(SharedString::from(format!("topic-strip-tabs-{key}")))
                     .flex()
                     .flex_col()
                     .items_center()
@@ -115,6 +119,9 @@ pub(crate) fn topic_strip(
             // narrow window never hides a topic (#2414).
             .child(
                 div()
+                    // Stateful for the expanded scroll, and keyed per pane so
+                    // two strips never share one element's state.
+                    .id(SharedString::from(format!("topic-strip-tabs-{key}")))
                     .flex_1()
                     .min_w_0()
                     .flex()
@@ -251,6 +258,9 @@ pub(crate) fn overflow_chip(
     let vertical = shape == topic_bar::ChipShape::IconAbove;
     let style = topic_tabs::style(vertical);
     div()
+        // A click target is state, so the pill carries an id. The label keeps
+        // it distinct from the fold-back pill the open row draws.
+        .id(SharedString::from(format!("topic-overflow-chip-{label}")))
         .flex()
         .flex_none()
         .items_center()
