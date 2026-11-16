@@ -549,9 +549,12 @@ fn selected_topic_keeps_the_parent_card_focused() {
         chip.contains("gui_theme::mix(pal.track, pal.accent, 40, 100)"),
         "the active topic border is 40% accent, not full-strength"
     );
+    // The chip carries two `if selected {` blocks: the base fill near the top
+    // and the ring below it. Read from the last one, so the padding pinned here
+    // is the ring's and not the fill's (#3006).
     let focused_style = chip
-        .split("if selected {")
-        .nth(1)
+        .rsplit_once("if selected {")
+        .map(|(_, ring)| ring)
         .and_then(|rest| rest.split("if let Some(glyph)").next())
         .expect("focused chip style");
     assert!(
