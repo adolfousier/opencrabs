@@ -47,7 +47,7 @@ fn body_after<'a>(source: &'a str, anchor: &str) -> &'a str {
 /// whose message it draws, because both voices take the same shape.
 #[test]
 fn every_stored_row_starts_at_the_left_margin() {
-    let builder = body_after(TRANSCRIPT, "fn message_row(\n    id: uuid::Uuid,");
+    let builder = body_after(TRANSCRIPT, "fn message_row(");
     assert!(
         !builder.contains("mine: bool"),
         "the row is not told whose message it draws, because both take one shape"
@@ -119,7 +119,7 @@ fn the_bubble_shrinks_horizontally_without_shrinking_attachments() {
 fn the_text_width_stays_definite_through_the_wrappers() {
     for body in [
         body_after(TRANSCRIPT, "fn selectable_row<E: gpui::IntoElement>("),
-        body_after(TRANSCRIPT, "fn message_row(\n    id: uuid::Uuid,"),
+        body_after(TRANSCRIPT, "fn message_row("),
         body_after(TRANSCRIPT, "fn md_block("),
         body_after(TRANSCRIPT, "fn plain_block("),
     ] {
