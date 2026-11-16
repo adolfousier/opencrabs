@@ -4933,6 +4933,10 @@ fn transcript_content_width(outer_width: f32, rem_size: f32) -> f32 {
     (outer_width - rem_size).max(0.0)
 }
 
+// A render entry point, so its arguments are the frame it draws rather than a
+// bundle a caller could assemble differently (#2972). Same shape as the other
+// render fns this tree already allows.
+#[allow(clippy::too_many_arguments)]
 pub fn view(
     state: &TranscriptState,
     scroll: &ScrollHandle,
