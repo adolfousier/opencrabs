@@ -9970,5 +9970,108 @@ mod gui {
                 "with no work at all the last row cannot have moved"
             );
         }
+
+        /// The single-session composer and its key hints are ONE card, not a
+        /// pill parked above a separate footer row.
+        ///
+        /// The scan reads the rendered order, not the presence of a style: a
+        /// `rounded(px(..))` on the composer is invisible to a test that only
+        /// greps for the dock's id, which is how the floating pill shipped in
+        /// the first place. Three things are pinned together: the dock owns
+        /// the surface and the radius, the footer is its child, and the
+        /// composer paints its own card only while nothing docks it (#2987).
+        #[test]
+        fn composer_dock_holds_the_input_and_the_key_hints() {
+            let dock_at = DASHBOARD
+                .find(".id(\"composer-dock\")")
+                .expect("the single-session composer dock must exist");
+            let window = &DASHBOARD[dock_at..];
+            let end = window.find("col\n").expect("the chat column ends the dock");
+            let dock = &window[..end];
+            for rule in [
+                ".child(composer)",
+                ".child(footer.into_any_element())",
+                ".rounded(px(COMPOSER_RADIUS))",
+                ".bg(glass_fill(palette::current().panel))",
+                ".gap_0()",
+            ] {
+                assert!(dock.contains(rule), "the dock lost {rule}");
+            }
+            // The hairline is the only separator inside the card: a second
+            // gap would reopen the space the owner called "flying".
+            assert!(
+                dock.contains(".h(px(1.))"),
+                "the hairline between the input and the key hints is gone"
+            );
+
+            // The composer paints its own card ONLY when nothing docks it. A
+            // focused split pane renders the bare editor (`pane_view.rs`), so
+            // deleting the chrome outright would leave that pane boxless while
+            // its keyboard-less siblings keep theirs. The dock suppresses it
+            // through the flag, and the flag is recomputed per frame because
+            // the window's composer becomes the focused pane's editor on split.
+            let editor = include_str!("editor.rs");
+            assert!(
+                editor.contains(".when(!self.docked, |d| {"),
+                "the composer chrome is no longer conditional on the dock"
+            );
+            for chrome in [".shadow_sm()", ".rounded(px(COMPOSER_RADIUS))"] {
+                let at = editor.find(".when(!self.docked, |d| {").expect("the dock gate");
+                let end = editor[at..].find(".p_3()").expect("the field's padding");
+                assert!(
+                    editor[at..at + end].contains(chrome),
+                    "the undocked composer lost {chrome}"
+                );
+            }
+            assert!(
+                DASHBOARD.contains("editor.docked = self.screen == Screen::Chat && !self.window_is_split();"),
+                "the dock flag must be recomputed per frame, not latched"
+            );
+
+            // The dim composer a keyboard-less pane draws is the same 44px
+            // box, so it follows the same radius or the pane reshapes on
+            // focus loss.
+            let chrome = include_str!("pane_chrome.rs");
+            assert!(
+                chrome.contains(".rounded(px(card::COMPOSER_RADIUS))"),
+                "the dim pane composer no longer shares the dock radius"
+            );
+        }
+
+        /// The bottom topic row belongs ABOVE the composer dock, in
+        /// Telegram's forum arrangement. It used to be appended after the
+        /// composer and before the footer, which trapped it between two
+        /// surfaces it does not belong to.
+        #[test]
+        fn composer_dock_sits_below_the_bottom_topic_row() {
+            // Anchor on the dock, not on `Screen::Chat => {`: the file has two
+            // such match arms (the body builder and the render match), and a
+            // `.nth(1)` silently reads the wrong one when a third appears.
+            let dock = DASHBOARD
+                .find(".id(\"composer-dock\")")
+                .expect("the dock is still drawn");
+            // The topic row is appended to the same chat column, before the
+            // dock. Searching the text in front of the dock is what proves
+            // the order; a whole-file `find` would match an unrelated arm.
+            let before = &DASHBOARD[..dock];
+            let topic = before
+                .rfind("if let Some(strip) = topic_bottom")
+                .expect("the bottom topic row is still drawn");
+            let chat_start = before[..topic]
+                .rfind("Screen::Chat => {")
+                .expect("the topic row belongs to the chat render arm");
+            assert!(
+                chat_start < topic && topic < dock,
+                "the bottom topic row moved below the composer again"
+            );
+            // And the footer is no longer a sibling row of the chat column:
+            // that row is what made the composer and the footer read as two
+            // unrelated modules.
+            let chat = &DASHBOARD[chat_start..];
+            assert!(
+                !chat.contains("col.child(central(footer"),
+                "the footer escaped the dock and became its own row again"
+            );
+        }
     }
 }
