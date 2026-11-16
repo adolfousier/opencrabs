@@ -91,10 +91,15 @@ const MSG_EXCERPT_LINES: usize = 20;
 /// is why a turn card beside it kept painting: a card ends on its own content.
 ///
 /// A blank line carries nothing, so dropping it costs the reader no text and
-/// hides no line behind the excerpt marker. Only the line terminators go: the
-/// last line that carries something keeps every byte of itself.
+/// hides no line behind the excerpt marker.
+///
+/// The whitespace at the very end goes with the blank run. Trimming line
+/// terminators alone stops at the first space, so a body that ended on
+/// `\n   \n   ` kept every blank line it had: each of those lines draws
+/// nothing, the row still lays them out, and the tail stays empty. Only
+/// trailing whitespace goes, so no line that carries a character loses one.
 fn without_trailing_blanks(content: &str) -> &str {
-    content.trim_end_matches(['\n', '\r'])
+    content.trim_end()
 }
 
 /// Cut a body at `max` lines and report how many lines were left out. The cut
@@ -8983,11 +8988,17 @@ mod tests {
             "the blank run goes"
         );
 
-        // A body that carries text keeps every byte of its last line, spaces
-        // included: only line terminators are dropped.
+        // The whitespace at the very end goes too: a body can end on blank
+        // lines that carry only spaces, and trimming terminators alone leaves
+        // them in place, so the row still ends on emptiness.
         assert_eq!(
             without_trailing_blanks("answer with trailing spaces   \n"),
-            "answer with trailing spaces   "
+            "answer with trailing spaces"
+        );
+        assert_eq!(
+            without_trailing_blanks("answer\n   \n\t\n   "),
+            "answer",
+            "a blank run spelled with spaces and tabs goes as well"
         );
 
         // Windows line endings lose both bytes of the terminator.
@@ -9000,5 +9011,6 @@ mod tests {
         // A body made only of blank lines has no last line to keep, so the
         // whole run goes instead of leaving the emptiness behind.
         assert_eq!(without_trailing_blanks("\n\n\n"), "");
+        assert_eq!(without_trailing_blanks("   \n \t\n"), "");
     }
 }
