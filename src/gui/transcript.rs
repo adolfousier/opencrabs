@@ -2807,10 +2807,15 @@ fn tool_ledger_text(calls: &[ToolCall]) -> String {
 }
 
 /// The chevron a fold header leads with: right when the turn is collapsed,
-/// down when it is open. The glyph carries the affordance, so the header no
-/// longer spells out which input folds it.
+/// down when it is open.
 fn fold_chevron(folded: bool) -> &'static str {
     if folded { "\u{25B8}" } else { "\u{25BE}" }
+}
+
+/// Name the content behind the fold so the chevron is not the only clue that
+/// the card opens.
+fn fold_disclosure(folded: bool) -> String {
+    format!("{} Details", fold_chevron(folded))
 }
 
 /// The card a settled turn draws, the live card's own frame (#2632): one
@@ -2853,9 +2858,10 @@ fn settled_card(turn: &Turn, folded: bool, body: Vec<AnyElement>) -> Option<Stat
         )
         .child(
             div()
+                .flex_shrink_0()
                 .text_xs()
-                .text_color(rgb(palette::current().text_muted))
-                .child(SharedString::from(fold_chevron(folded))),
+                .text_color(rgb(palette::current().accent))
+                .child(SharedString::from(fold_disclosure(folded))),
         );
     let mut card = div()
         .id(SharedString::from(format!("card-{}", turn.anchor)))
@@ -3391,9 +3397,10 @@ fn live_card(
     }
     head = head.child(
         div()
+            .flex_shrink_0()
             .text_xs()
-            .text_color(rgb(palette::current().text_muted))
-            .child(SharedString::from(fold_chevron(!expanded))),
+            .text_color(rgb(palette::current().accent))
+            .child(SharedString::from(fold_disclosure(!expanded))),
     );
     let mut card = div()
         .id("live-card")
@@ -6181,12 +6188,12 @@ mod tests {
         assert!(turns[0].header.is_none());
     }
 
-    /// #2328: the chevron carries the affordance, so the header says whether
-    /// the body is open instead of spelling out which input folds it.
+    /// The disclosure names the hidden content and keeps its chevron in sync
+    /// with the body in both directions.
     #[test]
-    fn the_fold_chevron_points_at_the_body_while_collapsed() {
-        assert_eq!(fold_chevron(true), "\u{25B8}");
-        assert_eq!(fold_chevron(false), "\u{25BE}");
+    fn the_fold_disclosure_names_the_details_and_tracks_the_body() {
+        assert_eq!(fold_disclosure(true), "\u{25B8} Details");
+        assert_eq!(fold_disclosure(false), "\u{25BE} Details");
     }
 
     /// #2323: the timer used to vanish on every settled turn because the
