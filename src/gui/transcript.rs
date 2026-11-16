@@ -30,11 +30,12 @@ use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::ops::Range;
 use std::rc::Rc;
+use std::sync::atomic::{AtomicU8, Ordering};
 
 use gpui::{
     AbsoluteLength, AnyElement, App, ClickEvent, Div, HighlightStyle, MouseButton, MouseDownEvent,
     Pixels, Point, ScrollHandle, SharedString, Stateful, Styled, StyledText, TextLayout, TextStyle,
-    Window, div, prelude::*, px, rems, rgb, rgba,
+    Window, div, point, prelude::*, px, rems, rgb, rgba,
 };
 
 use opencrabs::db::Database;
@@ -5057,6 +5058,169 @@ fn transcript_content_width(outer_width: f32, rem_size: f32) -> f32 {
     (outer_width - rem_size).max(0.0)
 }
 
+/// How close two scroll readings have to be before they describe the same
+/// frame. A row that ends within this of the box's top is still showing.
+const SCROLL_SLOP: f32 = 0.5;
+
+/// Which frame the surface is showing (#2981).
+///
+/// A chat that reads as completely black is one of the broken ones, and each
+/// needs a different answer: rows that were never built, rows behind a box with
+/// no height, or rows the offset carried above the box. Naming the frame is
+/// what keeps the witness honest, because the attempts so far each assumed one
+/// of them and none of them said which one it had actually seen.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Frame {
+    /// The surface holds no rows at all: whatever the state says, nothing was
+    /// put in the tree this frame.
+    NoRows,
+    /// Rows were drawn, but the box they are read through has no height: an
+    /// ancestor took it, and the rows are clipped out whatever their offset.
+    /// Correcting the offset here would spin, because no offset puts a row
+    /// inside a box with nothing to put it in (#2985).
+    NoBox,
+    /// Rows were drawn, and every one of them sits above the box's top edge.
+    /// The surface paints its own fill and nothing else.
+    RowsAbove,
+    /// Rows were drawn and at least one reaches the box.
+    RowsInside,
+}
+
+/// Where the transcript's rows ended up, measured from the surface's own child
+/// bounds instead of from its scroll maximum (#2981).
+///
+/// The maximum is derived from the content size the scroll container measured
+/// for itself. The child bounds are the rows themselves, so the furthest one's
+/// bottom is the ground truth that maximum is meant to describe.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RowReach {
+    /// The bottom edge of the furthest drawn row, before the offset moves it.
+    pub content_bottom: f32,
+    /// The offset the surface is drawn at. Negative scrolls down.
+    pub offset: f32,
+    /// The furthest the container believes it can scroll. Negative.
+    pub max_offset: f32,
+    /// The top edge of the box the rows are read through.
+    pub viewport_top: f32,
+    /// The bottom edge of that box.
+    pub viewport_bottom: f32,
+    /// How many rows the surface holds.
+    pub rows: usize,
+}
+
+impl RowReach {
+    /// The furthest row's bottom as the glass sees it.
+    pub fn painted_bottom(self) -> f32 {
+        self.content_bottom + self.offset
+    }
+
+    /// The box's own height.
+    pub fn viewport_height(self) -> f32 {
+        self.viewport_bottom - self.viewport_top
+    }
+
+    /// How much further the container believes it can scroll than the rows
+    /// justify. Positive means the maximum over-measures the content, which is
+    /// the reading that lets an offset park past every row.
+    pub fn over_measure(self) -> f32 {
+        self.bottom_offset() - self.max_offset
+    }
+
+    /// The frame this reading describes.
+    pub fn frame(self) -> Frame {
+        if self.rows == 0 {
+            Frame::NoRows
+        } else if self.viewport_height() <= SCROLL_SLOP {
+            Frame::NoBox
+        } else if self.painted_bottom() < self.viewport_top - SCROLL_SLOP {
+            Frame::RowsAbove
+        } else {
+            Frame::RowsInside
+        }
+    }
+
+    /// Whether every row sits above the box, which is the frame the reader
+    /// reports as a black chat.
+    pub fn is_blank(self) -> bool {
+        self.frame() == Frame::RowsAbove
+    }
+
+    /// The offset that puts the furthest row's bottom on the box's bottom.
+    ///
+    /// The correction is derived from the rows, never from the scroll maximum:
+    /// a maximum that is too large is what produced the blank frame, so
+    /// trusting it again would land in the same place and ask for another
+    /// frame forever.
+    pub fn bottom_offset(self) -> f32 {
+        (self.viewport_bottom - self.content_bottom).min(0.0)
+    }
+}
+
+/// Read where the surface's rows ended up. Called during prepaint, after the
+/// container has refilled its child bounds for this frame.
+///
+/// The bottom is the furthest child's, never the last one's by index: the
+/// container measures its content from that same span, so a bottom taken from
+/// index order alone would describe a shorter column than the one the maximum
+/// was built from, and the correction could scroll a mid-transcript row down to
+/// the box's bottom.
+pub fn row_reach(scroll: &ScrollHandle) -> RowReach {
+    let rows = scroll.children_count();
+    let mut content_bottom = f32::MIN;
+    for ix in 0..rows {
+        if let Some(bounds) = scroll.bounds_for_item(ix) {
+            content_bottom = content_bottom.max(f32::from(bounds.bottom()));
+        }
+    }
+    let viewport = scroll.bounds();
+    RowReach {
+        content_bottom: if rows == 0 { 0.0 } else { content_bottom },
+        offset: f32::from(scroll.offset().y),
+        max_offset: f32::from(scroll.max_offset().height),
+        viewport_top: f32::from(viewport.top()),
+        viewport_bottom: f32::from(viewport.bottom()),
+        rows,
+    }
+}
+
+/// One line when the frame the surface is showing changes (#2981).
+///
+/// The listener runs on every frame the transcript paints, so it writes on the
+/// crossing only, never per frame. Every number it prints is measured, and the
+/// numbers are the point: a chat that reads as black can be rows that were
+/// never built, rows built into a box that has no height, rows the offset
+/// carried out of the box, or rows built at a width that cannot show anything.
+/// Those need four different fixes, and a report that arrives without them is
+/// what let this run to ten attempts.
+pub fn witness_row_reach(reach: RowReach, turns: usize, content_width: f32) {
+    static LAST: AtomicU8 = AtomicU8::new(u8::MAX);
+    let frame = match reach.frame() {
+        Frame::NoRows => 0u8,
+        Frame::NoBox => 1,
+        Frame::RowsAbove => 2,
+        Frame::RowsInside => 3,
+    };
+    if LAST.swap(frame, Ordering::Relaxed) == frame {
+        return;
+    }
+    crate::logging::info(&format!(
+        "transcript frame: {:?}, {} turns in state, {} rows built, offset {:.1}px, max {:.1}px, \
+         over-measure {:.1}px, content bottom {:.1}px, row width {:.1}px, window \
+         {:.1}..{:.1}px ({:.1}px tall)",
+        reach.frame(),
+        turns,
+        reach.rows,
+        reach.offset,
+        reach.max_offset,
+        reach.over_measure(),
+        reach.content_bottom,
+        content_width,
+        reach.viewport_top,
+        reach.viewport_bottom,
+        reach.viewport_height()
+    ));
+}
+
 // A render entry point, so its arguments are the frame it draws rather than a
 // bundle a caller could assemble differently (#2972). Same shape as the other
 // render fns this tree already allows.
@@ -5102,6 +5266,32 @@ pub fn view(
         d.texts.borrow_mut().clear();
     }
     let mut col = div()
+        // The rows are the ground truth for where the bottom is (#2981). A
+        // frame that leaves every row above the box paints as nothing but the
+        // surface's own fill, which is the black chat the reader reports, and
+        // nothing in the window notices: the scroll maximum is what put it
+        // there, so it cannot be the thing that checks. Measuring the rows and
+        // snapping the furthest one onto the box's bottom corrects the frame in
+        // one step, and the extra frame is what shows it, because this one
+        // already planned its bounds.
+        //
+        // Only that one frame is corrected. A surface with no rows has nothing
+        // to snap, and a surface with no height cannot be fixed by an offset at
+        // all, so asking for another frame there would repaint forever without
+        // changing anything.
+        .on_children_prepainted({
+            let reach_scroll = scroll.clone();
+            let turns = state.turns.len();
+            move |_children, window, _cx| {
+                let reach = row_reach(&reach_scroll);
+                witness_row_reach(reach, turns, content_width);
+                if reach.is_blank() {
+                    let x = reach_scroll.offset().x;
+                    reach_scroll.set_offset(point(x, px(reach.bottom_offset())));
+                    window.request_animation_frame();
+                }
+            }
+        })
         .id("transcript")
         .flex()
         .flex_col()
@@ -5480,6 +5670,123 @@ pub fn view(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A reading of the box every case below shares: the transcript sits
+    /// between y 42 and y 934, so the box is 892px tall.
+    fn reach(content_bottom: f32, offset: f32, max_offset: f32, rows: usize) -> RowReach {
+        RowReach {
+            content_bottom,
+            offset,
+            max_offset,
+            viewport_top: 42.0,
+            viewport_bottom: 934.0,
+            rows,
+        }
+    }
+
+    /// The frame the reader reports as a black chat (#2981): the surface keeps
+    /// its fill and its corners, and every row sits above the box, so nothing
+    /// is painted inside it. The reach has to name that frame, and the
+    /// correction has to land the furthest row on the box's bottom without
+    /// reading the scroll maximum that produced the state.
+    #[test]
+    fn a_surface_drawn_past_its_rows_is_the_blank_frame() {
+        let parked = reach(1_042.0, -5_000.0, -5_000.0, 26);
+        assert_eq!(parked.frame(), Frame::RowsAbove);
+        assert!(
+            parked.is_blank(),
+            "every row is above the box, which paints as a black chat"
+        );
+        assert_eq!(
+            parked.bottom_offset(),
+            -108.0,
+            "the furthest row's bottom goes on the box's bottom, not on the bogus maximum"
+        );
+        assert_eq!(
+            parked.over_measure(),
+            4_892.0,
+            "the maximum claimed 4892px of content the rows do not have, which is what let the \
+             offset park past them"
+        );
+        let corrected = RowReach {
+            offset: parked.bottom_offset(),
+            ..parked
+        };
+        assert_eq!(
+            corrected.painted_bottom(),
+            corrected.viewport_bottom,
+            "the corrected frame ends exactly where the box does"
+        );
+        assert_eq!(corrected.frame(), Frame::RowsInside);
+        assert!(!corrected.is_blank());
+    }
+
+    /// A frame that is merely scrolled is not a blank one. Without this the
+    /// correction would fire on every ordinary frame and fight the reader.
+    #[test]
+    fn a_scrolled_frame_is_not_blank() {
+        let reading = reach(1_042.0, -108.0, -108.0, 26);
+        assert_eq!(reading.frame(), Frame::RowsInside);
+        assert!(!reading.is_blank());
+        assert_eq!(
+            reading.over_measure(),
+            0.0,
+            "a maximum that matches the rows is the healthy reading, not a parked one"
+        );
+        // A transcript at its top shows its first row, whatever the rest does.
+        let top = RowReach {
+            offset: 0.0,
+            ..reading
+        };
+        assert!(!top.is_blank());
+        // A row ending on the box's top edge is still that row's last pixel.
+        let flush = reach(42.5, 0.0, 0.0, 1);
+        assert!(!flush.is_blank());
+    }
+
+    /// A surface with nothing drawn is not a blank frame to correct: the empty
+    /// states draw their own line and own the surface until rows arrive. It is
+    /// still worth naming, because it is the other way a chat reads as black.
+    #[test]
+    fn a_surface_with_no_rows_is_left_alone() {
+        let empty = reach(0.0, -9_000.0, -9_000.0, 0);
+        assert_eq!(empty.frame(), Frame::NoRows);
+        assert!(!empty.is_blank());
+    }
+
+    /// Rows behind a box that lost its height are a different frame, and the
+    /// offset cannot reach them (#2985). Correcting here would ask for a frame
+    /// that changes nothing and then ask again.
+    #[test]
+    fn rows_behind_a_heightless_box_are_not_corrected() {
+        let collapsed = RowReach {
+            content_bottom: 1_042.0,
+            offset: -108.0,
+            max_offset: -108.0,
+            viewport_top: 42.0,
+            viewport_bottom: 42.0,
+            rows: 26,
+        };
+        assert_eq!(collapsed.viewport_height(), 0.0);
+        assert_eq!(collapsed.frame(), Frame::NoBox);
+        assert!(
+            !collapsed.is_blank(),
+            "no offset puts a row inside a box with nothing to put it in"
+        );
+    }
+
+    /// Content shorter than the box belongs at the top, so the correction can
+    /// never scroll a short transcript off its own first row.
+    #[test]
+    fn a_short_transcript_lands_at_its_top() {
+        let short = reach(200.0, -900.0, 0.0, 2);
+        assert_eq!(short.bottom_offset(), 0.0);
+        let corrected = RowReach {
+            offset: 0.0,
+            ..short
+        };
+        assert!(!corrected.is_blank());
+    }
 
     /// A stopped turn keeps the numbers it measured, and a turn that never
     /// streamed keeps none (#2953). The record was removed when the stop
