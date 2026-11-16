@@ -30,7 +30,7 @@ use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::ops::Range;
 use std::rc::Rc;
-use std::sync::atomic::{AtomicU64, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicU8, Ordering};
 
 use gpui::{
     AbsoluteLength, AnyElement, App, ClickEvent, Div, HighlightStyle, MouseButton, MouseDownEvent,
@@ -5239,58 +5239,6 @@ pub fn witness_row_reach(reach: RowReach, turns: usize, content_width: f32) {
     ));
 }
 
-/// One line every couple of seconds while the transcript holds rows (#2981).
-///
-/// The frame line above writes only when the frame changes, and that is what
-/// made it blind: a surface whose rows are built, inside the box and still
-/// invisible never changes frame, so the log stayed silent through the black
-/// frame the reader reported. A heartbeat answers the one question the numbers
-/// above cannot. A gap in it means the surface left the tree for that stretch,
-/// so nothing under this function was drawn at all and the fix belongs above
-/// it. Sane numbers straight through the black mean the rows were there and
-/// did not reach the glass, so the mask, the opacity or an ancestor's fill is
-/// what to chase next.
-pub fn witness_row_heartbeat(reach: RowReach, turns: usize, content_width: f32) {
-    use std::sync::OnceLock;
-    use std::time::Instant;
-    /// How often the surface says it is still drawing itself.
-    const BEAT_MS: u64 = 2_000;
-    static START: OnceLock<Instant> = OnceLock::new();
-    static LAST_MS: AtomicU64 = AtomicU64::new(0);
-    let start = *START.get_or_init(Instant::now);
-    let now = start.elapsed().as_millis() as u64;
-    if now.saturating_sub(LAST_MS.load(Ordering::Relaxed)) < BEAT_MS {
-        return;
-    }
-    LAST_MS.store(now, Ordering::Relaxed);
-    // Rows built with no height between them are the frame the four above
-    // cannot name: every child sits inside the box, so the reading looks fine,
-    // and the surface paints its fill with nothing in it. The height per row
-    // is the number that tells them apart from rows that are simply short.
-    let span = reach.content_bottom - reach.viewport_top;
-    let per_row = if reach.rows == 0 {
-        0.0
-    } else {
-        span / reach.rows as f32
-    };
-    crate::logging::info(&format!(
-        "transcript alive: {:?}, {} turns in state, {} rows built, {:.1}px per row, \
-         offset {:.1}px, max {:.1}px, content bottom {:.1}px, row width {:.1}px, window \
-         {:.1}..{:.1}px ({:.1}px tall)",
-        reach.frame(),
-        turns,
-        reach.rows,
-        per_row,
-        reach.offset,
-        reach.max_offset,
-        reach.content_bottom,
-        content_width,
-        reach.viewport_top,
-        reach.viewport_bottom,
-        reach.viewport_height()
-    ));
-}
-
 // A render entry point, so its arguments are the frame it draws rather than a
 // bundle a caller could assemble differently (#2972). Same shape as the other
 // render fns this tree already allows.
@@ -5355,7 +5303,6 @@ pub fn view(
             move |_children, window, _cx| {
                 let reach = row_reach(&reach_scroll);
                 witness_row_reach(reach, turns, content_width);
-                witness_row_heartbeat(reach, turns, content_width);
                 if reach.is_blank() {
                     let x = reach_scroll.offset().x;
                     reach_scroll.set_offset(point(x, px(reach.bottom_offset())));
