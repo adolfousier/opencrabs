@@ -336,7 +336,14 @@ mod tests {
         // sideways, collapsed or expanded (#3002). Gating this on `scroll`
         // left the collapsed row wrapping onto extra lines.
         assert!(!row.contains(".flex_wrap()"));
-        assert!(row.contains(".flex_nowrap().overflow_x_scroll()"));
+        // Compared without whitespace: rustfmt breaks a long chain across
+        // lines, and pinning the joined spelling made the check depend on
+        // how the formatter happened to wrap it.
+        let dense: String = row.chars().filter(|c| !c.is_whitespace()).collect();
+        assert!(
+            dense.contains(".flex_nowrap().overflow_x_scroll()"),
+            "the one-line row never wraps and scrolls sideways"
+        );
         assert_eq!(
             row.matches("overflow_x_scroll()").count(),
             1,
