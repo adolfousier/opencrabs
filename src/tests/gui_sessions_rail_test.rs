@@ -183,7 +183,7 @@ fn the_rail_header_is_compact_opencrabs_branding() {
     );
 }
 
-/// #2969: the mark, the name, the sidebar toggle and the menu share one row.
+/// #2971: the mark, the name, the sidebar toggle and the menu share one row.
 /// The funnel used to sit on a line of its own under the brand, with the whole
 /// rail's width empty beside it, so the first session row started below a band
 /// of nothing.
