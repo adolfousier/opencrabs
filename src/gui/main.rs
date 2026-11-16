@@ -7391,6 +7391,11 @@ mod tests {
         // terminal binds them the same way. Down re-arms only when the page
         // lands on the end, so a row that lands mid-page cannot drag a reader
         // back down a screen they just left.
+        //
+        // #2959: both answers come from `page_landing`, whose arithmetic is
+        // tested in `ui_core::scroll`. Asking whether the clamped offset had
+        // reached the maximum was true by construction, so every key re-armed
+        // and PageUp was snapped straight back to the bottom.
         let src = DASHBOARD;
         let branch = src
             .split("matches!(key, \"pageup\" | \"pagedown\")")
@@ -7398,8 +7403,16 @@ mod tests {
             .and_then(|rest| rest.split("if key == \"k\"").next())
             .expect("the page key branch");
         assert!(
-            branch.contains("let at_end = y >= -max;"),
-            "landing on the end is what gives the follow back"
+            branch.contains("page_landing("),
+            "the landing and whether it is the end come from page_landing"
+        );
+        assert!(
+            branch.contains("match (target, landing.at_end)"),
+            "the follow is decided by the landing page_landing reported"
+        );
+        assert!(
+            !branch.contains("y >= -max"),
+            "a clamped offset always reaches the maximum, so comparing them says the end every time"
         );
         assert!(
             branch.contains("(None, true) => self.rearm_transcript_follow()"),
