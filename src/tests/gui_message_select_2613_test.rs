@@ -109,7 +109,10 @@ fn the_unsplit_chat_renders_the_forward_picker() {
     let chat = MAIN
         .split("if !self.window_is_split() {\n                    let open = self.chat_session;")
         .nth(1)
-        .and_then(|rest| rest.split("if let Some(strip) = topic_bottom").next())
+        // The picker swap is built after the bottom topic row now (#2924), so
+        // the region runs to the composer itself rather than stopping at the
+        // strip that used to come last.
+        .and_then(|rest| rest.split("let composer: AnyElement").next())
         .expect("the unsplit chat composer region");
     assert!(chat.contains("self.forward_pick.is_some()"));
     assert!(chat.contains("self.forward_leaf.is_none()"));
