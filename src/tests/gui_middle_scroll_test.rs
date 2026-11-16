@@ -156,3 +156,26 @@ fn the_anchor_is_a_fixed_circular_direction_marker() {
     assert!(MIDDLE_SCROLL.contains("marker_arrow(\"↑\", delta > 0.0)"));
     assert!(MIDDLE_SCROLL.contains("marker_arrow(\"↓\", delta < 0.0)"));
 }
+
+#[test]
+fn the_held_middle_button_reaches_the_window() {
+    // gpui's macOS view answers the middle button's press and release but not
+    // its drag, and AppKit drops a drag a view has no selector for. Without
+    // this the pointer never moves off the anchor and nothing scrolls (#2964).
+    assert!(MIDDLE_SCROLL.contains("sel!(otherMouseDragged:)"));
+    assert!(MIDDLE_SCROLL.contains("msg_send![this, mouseDragged: event]"));
+    assert!(
+        MIDDLE_SCROLL.contains("class.instance_method(drag).is_some()"),
+        "a gpui that grows the selector itself must not be patched twice"
+    );
+    let opened = MAIN
+        .find("failed to open the gpui window")
+        .expect("the window is opened from this file");
+    let installed = MAIN
+        .find("middle_scroll::install_drag_bridge()")
+        .expect("the gesture installs itself onto the view the window registers");
+    assert!(
+        installed > opened,
+        "the view class only exists once the window is open"
+    );
+}

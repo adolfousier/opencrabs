@@ -6101,6 +6101,10 @@ fn main() {
             },
         )
         .expect("failed to open the gpui window");
+        // gpui registers its view class with the window, and that class has no
+        // handler for the middle button's drag, so the gesture is installed
+        // onto it here (#2964).
+        middle_scroll::install_drag_bridge();
         // The window exists: only now may the GUI claim the profile and preempt
         // the running TUI/daemon. Claiming before open_window meant a window
         // that failed to open left the user with no surface at all (#2784).

@@ -207,6 +207,75 @@ fn apply_delta(scroll: &ScrollHandle, follow: &mut Follow, delta: f32) -> AutoSc
     landing
 }
 
+/// gpui 0.2.2's macOS view implements `otherMouseDown:` and `otherMouseUp:` but
+/// not `otherMouseDragged:`, and AppKit only delivers a drag to a view that
+/// implements the matching selector. The middle button's press therefore
+/// reaches the window while the drag itself is dropped: the pointer never
+/// leaves the anchor, `auto_scroll_delta` keeps reading zero, and the marker
+/// sits where it was planted (#2964).
+///
+/// `PlatformInput::from_native` already maps `NSOtherMouseDragged` to a mouse
+/// move carrying `pressed_button: Some(Middle)`, so the event only needs a
+/// selector to arrive through. gpui mints the class while the first window
+/// opens, which is why this runs right after `open_window`.
+#[cfg(target_os = "macos")]
+pub(super) fn install_drag_bridge() {
+    use objc2::ffi;
+    use objc2::runtime::{AnyClass, AnyObject, Sel};
+    use objc2::{msg_send, sel};
+    use std::sync::Once;
+
+    // The view class gpui registers for every macOS window.
+    const VIEW: &std::ffi::CStr = c"GPUIView";
+
+    // Hands the drag to the handler gpui already wrote. That handler reads the
+    // event's own type, so a middle-button drag arrives as a middle-button move
+    // and the root listener sees the pointer travel.
+    unsafe extern "C-unwind" fn forward_drag(this: &AnyObject, _: Sel, event: *mut AnyObject) {
+        // SAFETY: AppKit passes the press's event for the duration of the call.
+        let Some(event) = (unsafe { event.as_ref() }) else {
+            return;
+        };
+        // SAFETY: `this` is gpui's view, which implements `mouseDragged:`.
+        let _: () = unsafe { msg_send![this, mouseDragged: event] };
+    }
+
+    static ONCE: Once = Once::new();
+    ONCE.call_once(|| {
+        let Some(class) = AnyClass::get(VIEW) else {
+            super::logging::warn("middle-drag bridge: gpui's macOS view class is not registered");
+            return;
+        };
+        let drag = sel!(otherMouseDragged:);
+        // A class that already answers the selector needs nothing, and adding
+        // it twice would be refused anyway.
+        if class.instance_method(drag).is_some() {
+            return;
+        }
+        let Some(source) = class.instance_method(sel!(mouseDragged:)) else {
+            super::logging::warn("middle-drag bridge: gpui's view has no mouseDragged: handler");
+            return;
+        };
+        // The signature is borrowed from the handler this forwards to, so a
+        // change on gpui's side cannot leave the two disagreeing.
+        let types = unsafe { ffi::method_getTypeEncoding(std::ptr::from_ref(source)) };
+        let imp: ffi::Imp = unsafe {
+            std::mem::transmute::<_, ffi::Imp>(
+                forward_drag as unsafe extern "C-unwind" fn(&AnyObject, Sel, *mut AnyObject),
+            )
+        };
+        let added =
+            unsafe { ffi::class_addMethod(std::ptr::from_ref(class).cast_mut(), drag, imp, types) };
+        if !added.as_bool() {
+            super::logging::warn("middle-drag bridge: AppKit refused otherMouseDragged:");
+        }
+    });
+}
+
+/// Every other backend already delivers the drag with a pressed button.
+#[cfg(not(target_os = "macos"))]
+pub(super) fn install_drag_bridge() {}
+
 fn marker_arrow(glyph: &'static str, active: bool) -> Div {
     let palette = palette::current();
     div()
