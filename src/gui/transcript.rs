@@ -268,9 +268,10 @@ pub enum Block {
 /// turn header deliberately does not (#744 keeps ctx out of the terminal
 /// header): the context the turn ran with, and its output rate.
 ///
-/// In memory only (#2324 D3): after a restart there is no record for the
-/// turn, so the card shows no metrics instead of borrowing the session's
-/// current number, which would be a lie about what that turn cost.
+/// The numbers are stamped onto the turn's assistant row at settle (#2985),
+/// so a restarted window rebuilds the same card from the database. A turn
+/// whose settle never wrote anything (a stop drops the turn future) has no
+/// stamped row to read, and the live map still answers for it.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct TurnMetrics {
     /// Prompt tokens the model saw on the turn's final call.
@@ -318,6 +319,33 @@ impl TurnMetrics {
         })
     }
 
+    /// The numbers a turn's own rows carry, or `None` when they carry none
+    /// (#2985).
+    ///
+    /// The newest assistant row is the one the agent stamped when the turn
+    /// settled, so it speaks for the whole turn and an unstamped one is not
+    /// filled from an older row: that is how a rebuilt card ended up printing
+    /// one turn's count over another turn's calls. A NULL window means the
+    /// turn has no record, which is the answer a row predating the column and
+    /// a turn that never reached its settle both give. The same rule the ACP
+    /// replay already applies to usage, for the same reason.
+    pub fn from_row(rows: &[Message]) -> Option<Self> {
+        let settled = rows.iter().rev().find(|m| m.role == "assistant")?;
+        // The prompt size the provider reported for the turn's final call, the
+        // same figure the live card measured its ctx against.
+        let ctx_used = u32::try_from(settled.input_tokens?).ok()?;
+        let ctx_max = u32::try_from(settled.ctx_window?).ok()?;
+        Some(Self {
+            ctx_used,
+            ctx_max,
+            // A stored zero is not a rate, for the same reason `measured`
+            // refuses one: the guard that refused it live must not be undone
+            // by a round trip through the database.
+            tps: settled.tokens_per_sec.filter(|t| *t > 0.0),
+            tool_calls: usize::try_from(settled.tool_calls.unwrap_or_default()).unwrap_or(0),
+        })
+    }
+
     /// The card's ctx segment, built by the same formatter the Telegram
     /// footer uses (`format_ctx_footer`), so the two surfaces cannot drift
     /// into different spellings of the same number (#2324 D2).
@@ -340,8 +368,10 @@ pub struct Turn {
     /// What the turn did: its calls, failures and wall time. The footer prints
     /// these next to the ctx budget, the way the live card does (#2632).
     pub summary: TurnSummary,
-    /// The turn's own ctx and rate, when this process settled it and still
-    /// remembers. Drawn after the header, in the Telegram card's wording.
+    /// The turn's own ctx, rate and call count, read from the row the agent
+    /// stamped at settle or, for a turn that never settled, from what this
+    /// process still remembers (#2985). Drawn after the header, in the
+    /// Telegram card's wording.
     pub metrics: Option<TurnMetrics>,
     /// Stable identity across reloads, the same key the TUI uses (#2155):
     /// role plus the second the turn opened. The expanded set is keyed by it
@@ -1283,8 +1313,10 @@ fn row_blocks(m: &Message, forward: Option<ForwardMark>) -> Vec<Block> {
 /// Returns the count of rows the window hid, and the turns in order.
 ///
 /// `metrics` carries the per-turn ctx and rate this process still remembers,
-/// keyed by turn anchor (#2324): a turn keeps them across reloads of the same
-/// session and forgets them only when the process does.
+/// keyed by turn anchor (#2324). It is the fallback, not the source: a turn
+/// whose assistant row was stamped at settle rebuilds its numbers from that
+/// row, so a restart no longer degrades every settled card to a bare clock
+/// (#2985). The map only answers for a turn that never reached a settle.
 ///
 /// `origins` is the per-row provenance of a merged `All` view (#2762): it maps
 /// a row id to the topic that row lives in, so every turn carries the label its
@@ -1357,7 +1389,11 @@ pub fn turns_with_origins(
         // (the boundary above forbids it), so the first row speaks for the
         // whole turn (#2762).
         let origin = origins.get(&rows[s].id).cloned();
-        let metrics = metrics.get(&anchor).copied();
+        // The rows are the record: a turn's numbers survive a restart because
+        // the agent stamped them at settle (#2985). The live map is the
+        // fallback for a turn that never reached its settle, which is what a
+        // stop leaves behind.
+        let metrics = TurnMetrics::from_row(&rows[s..e]).or_else(|| metrics.get(&anchor).copied());
         let mut summary = TurnSummary::default();
         for b in &blocks {
             match b {
@@ -3014,9 +3050,9 @@ fn answered_after_the_last_failure(turn: &Turn) -> bool {
 /// One settled turn's footer, wording and order taken from the Telegram flow
 /// footer (#2632): the calls it made, what they cost in context, and the
 /// clock. The live card prints the same line before the turn settles, so
-/// finishing changes the verb and nothing else (#2638). The clock and the ctx
-/// segment are dropped when this process has no record for the turn instead of
-/// borrowing the session's current number (#2324 D3).
+/// finishing changes the verb and nothing else (#2638). The ctx segment is
+/// dropped when the turn has no record at all, in its row or in this process,
+/// instead of borrowing the session's current number (#2324 D3, #2985).
 fn turn_footer_text(turn: &Turn) -> Option<String> {
     let summary = turn.summary;
     let mut parts: Vec<String> = Vec::new();
