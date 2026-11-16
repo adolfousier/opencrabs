@@ -221,7 +221,7 @@ fn apply_delta(scroll: &ScrollHandle, follow: &mut Follow, delta: f32) -> AutoSc
 #[cfg(target_os = "macos")]
 pub(super) fn install_drag_bridge() {
     use objc2::ffi;
-    use objc2::runtime::{AnyClass, AnyObject, Sel};
+    use objc2::runtime::{AnyClass, AnyObject, Imp, Sel};
     use objc2::{msg_send, sel};
     use std::sync::Once;
 
@@ -259,8 +259,8 @@ pub(super) fn install_drag_bridge() {
         // The signature is borrowed from the handler this forwards to, so a
         // change on gpui's side cannot leave the two disagreeing.
         let types = unsafe { ffi::method_getTypeEncoding(std::ptr::from_ref(source)) };
-        let imp: ffi::Imp = unsafe {
-            std::mem::transmute::<_, ffi::Imp>(
+        let imp: Imp = unsafe {
+            std::mem::transmute::<_, Imp>(
                 forward_drag as unsafe extern "C-unwind" fn(&AnyObject, Sel, *mut AnyObject),
             )
         };
