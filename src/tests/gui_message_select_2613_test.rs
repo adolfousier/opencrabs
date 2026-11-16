@@ -221,8 +221,10 @@ fn live_menu_gates_stored_only_actions_and_copies_the_pressed_row() {
 /// own ephemeral action rows, but no persisted identity and no pick box.
 #[test]
 fn only_stored_messages_can_be_picked() {
+    // The module's own tests quote the name in a `.split(...)` anchor, so the
+    // bare string counts twice. A definition starts a line.
     assert_eq!(
-        TRANSCRIPT.matches("fn message_row(").count(),
+        TRANSCRIPT.matches("\nfn message_row(").count(),
         1,
         "one builder draws the pickable row"
     );
