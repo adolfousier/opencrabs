@@ -343,9 +343,6 @@ pub struct Turn {
     /// The turn's own ctx and rate, when this process settled it and still
     /// remembers. Drawn after the header, in the Telegram card's wording.
     pub metrics: Option<TurnMetrics>,
-    /// Last call description and whether it succeeded, shown under a folded
-    /// header so a collapsed turn still says what it did.
-    pub preview: Option<(String, bool)>,
     /// Stable identity across reloads, the same key the TUI uses (#2155):
     /// role plus the second the turn opened. The expanded set is keyed by it
     /// so an opened turn survives a transcript reload.
@@ -1395,15 +1392,10 @@ pub fn turns_with_origins(
             .filter(|&i| !visible_when_folded(&blocks[i], final_idx, i))
             .count();
         let header = format_turn_header(summary, steps);
-        let preview = blocks.iter().rev().find_map(|b| match b {
-            Block::Tools { calls } => calls.last().map(|c| (c.description.clone(), c.success)),
-            _ => None,
-        });
         out.push(Turn {
             header,
             summary,
             metrics,
-            preview,
             anchor,
             blocks,
             final_idx,
@@ -2883,7 +2875,6 @@ fn tool_ledger_text(calls: &[ToolCall]) -> String {
 /// turn ends. `None` for a turn that did no work, which earns no card (#758).
 fn settled_card(
     turn: &Turn,
-    folded: bool,
     body: Vec<AnyElement>,
     max_width: f32,
 ) -> Option<Stateful<Div>> {
@@ -2943,25 +2934,6 @@ fn settled_card(
         .cursor_pointer()
         .hover(|d| d.bg(rgb(palette::current().panel_hi)))
         .child(head);
-    if folded && let Some((description, success)) = &turn.preview {
-        let color = if *success {
-            palette::current().text_muted
-        } else {
-            palette::current().red
-        };
-        card = card.child(
-            div()
-                .px_2()
-                .pb_1()
-                .text_xs()
-                .italic()
-                .text_color(rgb(color))
-                .child(SharedString::from(format!(
-                    "\u{2514}\u{2500} {}",
-                    fit(description.trim(), 160)
-                ))),
-        );
-    }
     if !body.is_empty() {
         card = card.child(
             div()
@@ -5370,7 +5342,7 @@ pub fn view(
         }
         col = col.children(pre);
         if carded
-            && let Some(card) = settled_card(turn, folded, body, row_cap)
+            && let Some(card) = settled_card(turn, body, row_cap)
         {
             // The listener is per turn and used exactly here, so it is taken
             // out of the map instead of cloned.
@@ -6387,11 +6359,6 @@ mod tests {
                 && header.contains("2 tool calls")
                 && header.contains("1 failed"),
             "the header is the TUI's grammar, got {header:?}"
-        );
-        assert_eq!(
-            turn.preview.as_ref().map(|(d, ok)| (d.as_str(), *ok)),
-            Some(("read_file: src/main.rs", false)),
-            "a folded turn previews its last call"
         );
 
         let shown: Vec<bool> = turn
@@ -7490,7 +7457,6 @@ mod tests {
                 tps: Some(58.0),
                 tool_calls: 1,
             }),
-            preview: None,
             anchor: "a".into(),
             blocks: Vec::new(),
             final_idx: None,
@@ -7524,7 +7490,6 @@ mod tests {
                 ..Default::default()
             },
             metrics: None,
-            preview: None,
             anchor: "b".into(),
             blocks: Vec::new(),
             final_idx: None,
@@ -7539,7 +7504,6 @@ mod tests {
             header: Some("x".into()),
             summary: TurnSummary::default(),
             metrics: None,
-            preview: None,
             anchor: "c".into(),
             blocks: Vec::new(),
             final_idx: None,
@@ -7559,7 +7523,6 @@ mod tests {
                 ..Default::default()
             },
             metrics: None,
-            preview: None,
             anchor: "d".into(),
             blocks: vec![Block::Tools {
                 calls: vec![ToolCall {
@@ -7617,7 +7580,6 @@ mod tests {
                     ..Default::default()
                 },
                 metrics: None,
-                preview: None,
                 anchor: "f".into(),
                 blocks,
                 final_idx: None,
@@ -8077,7 +8039,6 @@ mod tests {
             header: None,
             summary: TurnSummary::default(),
             metrics: None,
-            preview: None,
             anchor: format!("{question}@{time}"),
             blocks: vec![Block::Msg {
                 role: "user".into(),
@@ -8153,7 +8114,6 @@ mod tests {
             header: None,
             summary: TurnSummary::default(),
             metrics: None,
-            preview: None,
             anchor: format!("audit the repo config@{original}"),
             blocks: vec![Block::Msg {
                 role: "user".into(),
