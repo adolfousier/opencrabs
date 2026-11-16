@@ -12,6 +12,7 @@
 //! cached behind a fake model: the file's mtime is the cache key, and a
 //! rewitten plan redraws on the next frame.
 
+use super::icon::disclosure_icon;
 use crate::palette;
 use crate::transcript::{
     ClickHandler, SMALL_TEXT_SIZE, SelectionContext, selectable_styled_text, small_style,
@@ -282,9 +283,7 @@ impl PlanStripState {
                             div()
                                 .flex_shrink_0()
                                 .w(px(16.0))
-                                .text_base()
-                                .text_color(rgb(color))
-                                .child(SharedString::from(plan_chevron(expanded))),
+                                .child(disclosure_icon(expanded, color, 1.0)),
                         )
                     })
                     .child(
@@ -402,11 +401,6 @@ pub enum LineKind {
     Running,
     Next,
     Done,
-}
-
-/// The single chevron drawn immediately left of a pane's plan summary.
-fn plan_chevron(expanded: bool) -> &'static str {
-    if expanded { "▾" } else { "▸" }
 }
 
 /// The lines a pane draws, split out of the view so the shape is testable
@@ -829,9 +823,8 @@ mod tests {
         );
         assert!(
             body.contains(".when(index == 0")
-                && body.contains("plan_chevron(expanded)")
-                && body.contains(".text_base()"),
-            "a body-sized chevron leads only the plan summary row"
+                && body.contains("disclosure_icon(expanded, color, 1.0)"),
+            "a full-size vector arrow leads only the plan summary row"
         );
         let row = body
             .split_once("col = col.child(")
@@ -1014,11 +1007,9 @@ mod tests {
     }
 
     #[test]
-    fn a_split_grid_separates_the_chevron_from_its_summary() {
-        // The renderer owns the disclosure glyph, while the data keeps only
+    fn a_split_grid_separates_the_disclosure_arrow_from_its_summary() {
+        // The renderer owns the disclosure arrow, while the data keeps only
         // the readable summary that belongs beside it.
-        assert_eq!(plan_chevron(false), "▸");
-        assert_eq!(plan_chevron(true), "▾");
         let lines = pane_lines(&plan_with(8, 3, Some(4)), PaneDensity::Bar, false);
         assert_eq!(lines.len(), 1, "{lines:?}");
         assert_eq!(lines[0], (LineKind::Bar, "3/8".to_string()));
