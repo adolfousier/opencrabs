@@ -12,7 +12,7 @@
 
 use crate::palette;
 use crate::topic_icons::CRAB_ICONS;
-use opencrabs::ui_core::card::{CARD_RADIUS, glass_fill};
+use opencrabs::ui_core::card::{COMPOSER_RADIUS, glass_fill};
 use opencrabs::ui_core::commands::gui_completions;
 use opencrabs::ui_core::composer::{self, ComposerDraft, SharedHistory, lock_history};
 use opencrabs::ui_core::input_history::{
@@ -344,6 +344,12 @@ pub struct Editor {
     /// it must not read as the message itself. `None` for an ordinary send.
     reply: Option<ReplyAttachment>,
     placeholder: SharedString,
+    /// Set by the single-session chat, which wraps this field in a dock that
+    /// also holds the key hints (#2987). The dock owns the surface, the border
+    /// and the radius there, so the field paints none of them and the two do
+    /// not stack into a pill inside a card. A split pane renders the editor
+    /// bare, so it leaves this false and keeps its own card.
+    pub(crate) docked: bool,
     selected_range: Range<usize>,
     selection_reversed: bool,
     marked_range: Option<Range<usize>>,
@@ -471,6 +477,7 @@ impl Editor {
             attachments: Vec::new(),
             reply: None,
             placeholder: "Talk to the crab…".into(),
+            docked: false,
             selected_range: 0..0,
             selection_reversed: false,
             marked_range: None,
@@ -2451,13 +2458,23 @@ impl Render for Editor {
             .on_mouse_up(MouseButton::Left, cx.listener(Self::on_mouse_up))
             .on_mouse_up_out(MouseButton::Left, cx.listener(Self::on_mouse_up))
             .on_mouse_move(cx.listener(Self::on_mouse_move))
-            // One step above the chat, with a shadow, so the input reads as a
-            // surface of its own in both themes.
-            .bg(glass_fill(palette::current().panel))
-            .shadow_sm()
-            .border_1()
-            .border_color(rgb(palette::current().panel_hi))
-            .rounded(px(CARD_RADIUS))
+            // The composer owns its own card by default: a focused split pane
+            // renders this element directly (`pane_view.rs`), with nothing
+            // around it, so the surface, the hairline border and the radius
+            // have to live here or a focused pane loses its box while its
+            // keyboard-less siblings keep theirs.
+            //
+            // The single-session chat is the one caller that wraps the editor
+            // in a dock shared with the key hints (#2987). That wrapper sets
+            // `docked`, which suppresses this chrome, because two cards would
+            // paint the old floating pill inside the new one.
+            .when(!self.docked, |d| {
+                d.bg(glass_fill(palette::current().panel))
+                    .shadow_sm()
+                    .border_1()
+                    .border_color(rgb(palette::current().panel_hi))
+                    .rounded(px(COMPOSER_RADIUS))
+            })
             .p_3()
             .line_height(px(22.))
             .text_size(px(14.))

@@ -151,7 +151,7 @@ use opencrabs::ui_core::commands as slash;
 // The Seeker engine: ranking, keywords and state, shared with the terminal
 // so both clients print the same rows in the same order (#2458). Named `find`
 // because `palette` here is the window's colour table.
-use opencrabs::ui_core::card::{CARD_RADIUS, glass_fill};
+use opencrabs::ui_core::card::{CARD_RADIUS, COMPOSER_RADIUS, glass_fill};
 use opencrabs::ui_core::palette::{
     self as find, Channel, PaletteAction, PaletteItem, PaletteKind, PaletteState,
 };
@@ -2724,6 +2724,16 @@ impl Render for Dashboard {
                             .justify_between()
                             .gap_3()
                             .w_full()
+                            // The single-session dock owns this row now: it is
+                            // the bottom half of the composer card, under the
+                            // hairline. It needs its own padding because the
+                            // chat column's `gap_3` no longer separates it
+                            // from the input, and a bare text row would sit
+                            // on the card's rounded bottom edge. The split
+                            // arm above yields an empty row, so a pane footer
+                            // keeps the chrome it already had.
+                            .px_3()
+                            .py_2()
                             // The Seeker opens with a chord nothing on
                             // screen named (#2747). The hint is permanent and
                             // clickable: a hover tooltip is invisible to
@@ -4264,6 +4274,16 @@ impl Render for Dashboard {
             );
             topic_row = Some((self.topic_edge, strip.into_any_element()));
         }
+        // The dock owns the chrome, so the field must not paint a second card
+        // inside it. A split pane renders the same editor bare and keeps its own
+        // card, which is why this is a flag on the field and not a deleted style
+        // (#2987). It is recomputed on every frame rather than latched: the
+        // window's composer IS the focused pane's editor once the chat splits
+        // (`dashboard_panes.rs`), so a sticky flag would strip the box off the
+        // pane the moment it took the chat over.
+        self.composer.editor.update(cx, |editor, _cx| {
+            editor.docked = self.screen == Screen::Chat && !self.window_is_split();
+        });
         let mut right = div()
             .relative()
             .flex()
@@ -4404,6 +4424,13 @@ impl Render for Dashboard {
                     // The unsplit chat uses the same composer swap as a split
                     // leaf (#2924). Without this arm the forward state changed
                     // but its destination picker was never rendered here.
+                    // The bottom topic row sits immediately ABOVE the dock,
+                    // in Telegram's forum arrangement. It is never between
+                    // the composer and the footer, because the footer now
+                    // lives inside the same card as the composer.
+                    if let Some(strip) = topic_bottom {
+                        col = col.child(central(strip, centred_chat, chat_measure_px));
+                    }
                     let composer_replacement =
                         if self.forward_pick.is_some() && self.forward_leaf.is_none() {
                             Some(self.forward_picker(cx))
@@ -4412,8 +4439,11 @@ impl Render for Dashboard {
                         } else {
                             None
                         };
-                    if let Some(view) = composer_replacement {
-                        col = col.child(central(view, centred_chat, chat_measure_px));
+                    let composer: AnyElement = if let Some(view) = composer_replacement {
+                        // The forward picker and the select bar stand in for the
+                        // input, and they keep the dock so the key hints stay put
+                        // instead of jumping to a separate row (#2924).
+                        view
                     } else {
                         // The slash-command list sits over the input while a name is
                         // not being spelled, the terminal's own placement. The name
@@ -4439,17 +4469,36 @@ impl Render for Dashboard {
                                 ));
                             }
                         }
-                        col = col.child(central(
-                            self.composer.editor.clone().into_any_element(),
-                            centred_chat,
-                            chat_measure_px,
-                        ));
-                    }
+                        self.composer.editor.clone().into_any_element()
+                    };
+                    // The dock owns the composer: surface, border, radius and
+                    // the hairline above the key hints. The composer itself
+                    // paints none of them any more, so a single session reads
+                    // as one card instead of a floating pill parked above a
+                    // separate footer row (#2987). The column has no gap: the only
+                    // separation inside the card is the 1px hairline.
+                    col = col.child(central(
+                        div()
+                            .id("composer-dock")
+                            .flex()
+                            .flex_col()
+                            .gap_0()
+                            .bg(glass_fill(palette::current().panel))
+                            .border_1()
+                            .border_color(rgb(palette::current().panel_hi))
+                            .rounded(px(COMPOSER_RADIUS))
+                            .overflow_hidden()
+                            .child(composer)
+                            .child(
+                                div().w_full().h(px(1.)).bg(rgb(palette::current().panel_hi)),
+                            )
+                            .child(footer.into_any_element())
+                            .into_any_element(),
+                        centred_chat,
+                        chat_measure_px,
+                    ));
                 }
-                if let Some(strip) = topic_bottom {
-                    col = col.child(central(strip, centred_chat, chat_measure_px));
-                }
-                col.child(central(footer, centred_chat, chat_measure_px))
+                col
             }
             Screen::Usage => right.child(footer),
             Screen::Files => right.child(footer),

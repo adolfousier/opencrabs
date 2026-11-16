@@ -17,6 +17,7 @@ use gpui::{
     AnyElement, App, ClickEvent, CursorStyle, IntoElement, MouseButton, MouseDownEvent,
     SharedString, Window, div, prelude::*, px, relative, rgb, rgba,
 };
+use opencrabs::ui_core::card;
 use opencrabs::ui_core::card::{CARD_RADIUS, glass_fill};
 use opencrabs::ui_core::pane_tree::DropHalf;
 use opencrabs::ui_core::split;
@@ -116,7 +117,9 @@ pub(crate) fn pane_composer_dim(
         .truncate()
         .min_h(px(44.))
         .p_3()
-        .rounded(px(CARD_RADIUS))
+        // Same box, same height, same radius as the focused dock: the dim
+        // row must not change shape when the keyboard leaves the pane (#2987).
+        .rounded(px(card::COMPOSER_RADIUS))
         .bg(glass_fill(palette::current().panel))
         .border_1()
         .border_color(rgb(palette::current().panel_hi))
