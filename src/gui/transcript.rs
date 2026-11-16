@@ -82,82 +82,6 @@ const WINDOW: usize = 200;
 /// visible in a folded turn always draws in full (#2855).
 const MSG_EXCERPT_LINES: usize = 20;
 
-/// Lines the full-body path draws before it hands the rest to the reader
-/// (#2981). `full` exists so an answer stays readable in a folded turn (#2855),
-/// but it was uncapped, and one stored row reached 733,574 characters in the
-/// largest local session. A single `|---|` separator row made
-/// `is_deliverable_report` true, which kept that row visible while its turn was
-/// folded, so the uncapped path laid the whole thing out as 8,151 lines. The
-/// row measured 161,920px inside an 887px pane, the scroll pinned to the bottom
-/// of it, and the visible slice was that row's empty tail: a black chat for the
-/// length of the turn. A real report fits well inside this budget, and the rest
-/// is announced rather than silently eaten (#904).
-const MSG_FULL_LINES: usize = 400;
-
-/// What one painted line of body text costs, in pixels (#2981).
-///
-/// This is measured, not chosen: the witness log caught a row at 8,422.5px
-/// drawing exactly `MSG_FULL_LINES` lines, and 8422.5 / 400 = 21.06. The cap
-/// below turns a box height into lines with this number, so the budget can
-/// never again be a line count that outgrows the pane it is painted into.
-const FULL_BODY_LINE_H: f32 = 21.06;
-
-/// The least a full body draws, however short its box (#2981). A budget below
-/// this would leave a row holding a caption and nothing worth reading, so the
-/// clip, not the budget, is what keeps a tiny box honest.
-const FULL_BODY_MIN_LINES: usize = 12;
-
-/// How much of a full body one row may draw (#2981).
-///
-/// The first version of this cap was a fixed line count, and a line is not a
-/// unit of height: 400 of them measured 8,422px inside an 871px box, the scroll
-/// pinned to the bottom of that row, and the visible slice was its empty tail.
-/// A black chat, from one row. The budget now comes from the box the row is
-/// painted into, and the text is clipped to that height too, so no row can
-/// outgrow its pane whatever the line height or the wrapping turns out to be.
-#[derive(Clone, Copy, Debug)]
-struct FullBody {
-    /// Source lines the excerpt keeps.
-    lines: usize,
-    /// The tallest the drawn text may be, in pixels. `None` until the box has
-    /// been measured, which leaves the fixed cap as the only bound.
-    max_h: Option<f32>,
-}
-
-impl FullBody {
-    /// The budget for a box `box_height` tall.
-    fn for_box(box_height: f32) -> Self {
-        if !box_height.is_finite() || box_height <= 0.0 {
-            return Self {
-                lines: MSG_FULL_LINES,
-                max_h: None,
-            };
-        }
-        let room = (box_height / FULL_BODY_LINE_H).floor() as usize;
-        Self {
-            lines: room.max(FULL_BODY_MIN_LINES).min(MSG_FULL_LINES),
-            // Two lines of slack: the "N more lines hidden" notice is drawn
-            // below the text and has to stay visible, and a clip that lands
-            // mid-line looks like a bug rather than a fold.
-            max_h: Some((box_height - 2.0 * FULL_BODY_LINE_H).max(FULL_BODY_LINE_H)),
-        }
-    }
-
-    /// A full body's text, clipped to the box (#2981). Without this a short
-    /// box with heavily wrapped lines still lays out past the pane.
-    fn clip(self, text: Div) -> Div {
-        match self.max_h {
-            Some(h) => div()
-                .min_w_0()
-                .w_full()
-                .max_h(px(h))
-                .overflow_hidden()
-                .child(text),
-            None => text,
-        }
-    }
-}
-
 /// Cut a body at `max` lines and report how many lines were left out. The cut
 /// is always announced with its own count: a silent one reads as eaten content
 /// (the #904 trap).
@@ -169,22 +93,11 @@ fn excerpt_lines(content: &str, max: usize) -> (std::borrow::Cow<'_, str>, usize
         }
         seen += 1;
         if seen == max {
-            let mut hidden = content[i + 1..].lines().count();
+            let hidden = content[i + 1..].lines().count();
             if hidden == 0 {
                 return (std::borrow::Cow::Borrowed(content), 0);
             }
-            // A cut that lands inside a run of blank lines draws a row whose
-            // bottom is empty, and a scroll pinned to the bottom of that row
-            // shows exactly the emptiness: one stored body carried hundreds of
-            // blank lines after its ledger, which is what the reader saw as a
-            // black chat (#2981). The blanks are dropped and counted with the
-            // rest of the hidden lines, so the row always ends on content.
-            let mut cut = &content[..i];
-            while let Some(rest) = cut.strip_suffix('\n') {
-                cut = rest;
-                hidden += 1;
-            }
-            return (std::borrow::Cow::Borrowed(cut), hidden);
+            return (std::borrow::Cow::Borrowed(&content[..i]), hidden);
         }
     }
     (std::borrow::Cow::Borrowed(content), 0)
@@ -2536,16 +2449,14 @@ fn bubble(
     handlers: &HashMap<String, ClickHandler>,
     selection: Option<&SelectionContext>,
     full: bool,
-    body: FullBody,
 ) -> Div {
     // The cut happens on the raw source, before anything walks it (#2805): a
     // folded non-answer body reads its first rows and the rest is one click
     // away, so `strip_markers` and the markdown parse only ever see the excerpt
     // instead of the tens of kilobytes a single stored row can carry. Answers
-    // arrive with `full = true` and read the budget their box can hold, never a
-    // fixed line count: the copy path is what reads the block in full (#2981).
+    // arrive with `full = true`; the copy path always reads the whole block.
     let (content, hidden) = if full {
-        excerpt_lines(content, body.lines)
+        (std::borrow::Cow::Borrowed(content), 0)
     } else {
         excerpt_lines(content, MSG_EXCERPT_LINES)
     };
@@ -2621,7 +2532,7 @@ fn bubble(
         // is a heading and a single Enter is still a line break. The harness
         // notices (error, stopped, model change) stay plain: they are one-line
         // status text, not a document.
-        let drawn = match role {
+        col = col.child(match role {
             "assistant" => md_block(
                 text,
                 MdLook::body(PLAIN_TEXT_SIZE),
@@ -2635,10 +2546,7 @@ fn bubble(
                 selection,
             ),
             _ => plain_block(text, PLAIN_TEXT_SIZE, selection),
-        };
-        // Only the full path can outgrow the box (#2981); the excerpt path is
-        // already a fixed twenty lines.
-        col = col.child(if full { body.clip(drawn) } else { drawn });
+        });
     }
     if !paths.is_empty() {
         col = col.child(history_attachments(&paths, attachment_width, handlers));
@@ -2673,15 +2581,13 @@ fn forward_block(
     handlers: &HashMap<String, ClickHandler>,
     selection: Option<&SelectionContext>,
     full: bool,
-    body: FullBody,
 ) -> Div {
     // A forwarded non-answer body carries the same excerpt rule (#2805): a
     // pasted report is exactly the shape that made a frame expensive, so the
     // cut lands on the source before anything walks it. A forwarded answer
-    // that the fold keeps visible still arrives here with `full = true`, and
-    // takes the budget its box can hold (#2981).
+    // that the fold keeps visible still arrives here with `full = true`.
     let (content, hidden) = if full {
-        excerpt_lines(content, body.lines)
+        (std::borrow::Cow::Borrowed(content), 0)
     } else {
         excerpt_lines(content, MSG_EXCERPT_LINES)
     };
@@ -2723,13 +2629,12 @@ fn forward_block(
         // A forward is somebody else's message, usually hand-typed in another
         // channel, so it parses with `Verbatim`: their line breaks are part of
         // what they wrote and a forwarded list stays a list.
-        let drawn = md_block(
+        col = col.child(md_block(
             &text,
             MdLook::body(PLAIN_TEXT_SIZE),
             markdown::MdFlow::Verbatim,
             selection,
-        );
-        col = col.child(if full { body.clip(drawn) } else { drawn });
+        ));
     }
     if !paths.is_empty() {
         col = col.child(history_attachments(&paths, attachment_width, handlers));
@@ -2913,33 +2818,21 @@ fn fold_cell(folded: usize, side: f32) -> AnyElement {
 /// box of its own: a nested surface rounder than the card that holds it read as
 /// a second widget inside the first, and the caption above the rows said only
 /// what the italic type already says (#2639, #2640).
-fn thinking_block(content: &str, full: bool, body: FullBody) -> Div {
+fn thinking_block(content: &str, full: bool) -> Div {
     // The 600-character preview still applies before the parse, so a long
     // reasoning run cannot take over the pane. `Prose` keeps it a paragraph:
     // reasoning is model text, not something a person typed with Enter.
-    //
-    // `full` is bounded too (#2981). Expanding a turn asks for its working-out,
-    // not for an unbounded wall: one stored row carried 315,010 characters of
-    // reasoning, which drawn whole is 3,500 lines. The TUI caps narration even
-    // when expanded (`NARRATION_EXCERPT_LINES`), and this is the same budget
-    // with the same announced cut, sized to the box that paints it.
     let shown = if full {
-        let (cut, hidden) = excerpt_lines(content.trim(), body.lines);
-        if hidden > 0 {
-            format!("{cut}\n\n\u{2026} +{hidden} more lines hidden")
-        } else {
-            cut.into_owned()
-        }
+        content.trim().to_string()
     } else {
         fit(content.trim(), 600)
     };
-    let drawn = md_block(
+    md_block(
         &shown,
         MdLook::thinking(SMALL_TEXT_SIZE),
         markdown::MdFlow::Prose,
         None,
-    );
-    if full { body.clip(drawn) } else { drawn }
+    )
 }
 
 /// A tool ledger: each call with its status mark. The turn header already
@@ -3695,9 +3588,7 @@ fn live_card_footer(live: &LiveTurn, ctx: (Option<u32>, u32)) -> Option<String> 
 }
 
 /// One block, drawn. The fold decides WHETHER a block renders; this decides
-/// only what it looks like. `body` is how much of a full body its box can hold
-/// (#2981), so a tall row can never outgrow the pane that paints it.
-#[allow(clippy::too_many_arguments)]
+/// only what it looks like.
 fn block_view(
     block: &Block,
     content_width: f32,
@@ -3705,7 +3596,6 @@ fn block_view(
     handlers: &HashMap<String, ClickHandler>,
     selection: Option<&SelectionContext>,
     full: bool,
-    body: FullBody,
 ) -> Div {
     match block {
         Block::Msg {
@@ -3722,7 +3612,6 @@ fn block_view(
             handlers,
             selection,
             full,
-            body,
         ),
         Block::Msg {
             role,
@@ -3738,9 +3627,8 @@ fn block_view(
             handlers,
             selection,
             full,
-            body,
         ),
-        Block::Thinking { content } => thinking_block(content, false, body),
+        Block::Thinking { content } => thinking_block(content, false),
         Block::Tools { calls } => tools_block(calls, selection),
         Block::CompletedPlan { message_id, plan } => div()
             .flex()
@@ -3885,7 +3773,6 @@ fn live_block(
     content_width: f32,
     row_cap: f32,
     handlers: &HashMap<String, ClickHandler>,
-    body: FullBody,
 ) -> Option<AnyElement> {
     let text = block_text(block);
     let d = drag.filter(|_| !text.trim().is_empty())?;
@@ -3906,7 +3793,6 @@ fn live_block(
                 handlers,
                 Some(&selection),
                 true,
-                body,
             ),
         )
         .into_any_element(),
@@ -3958,8 +3844,6 @@ struct LiveInteraction<'a> {
 
 /// The body of one of the user's own live rows, or the field that replaces it
 /// while its rewrite is open (#2925).
-// The row's shape, its content and the box budget it draws inside (#2981).
-#[allow(clippy::too_many_arguments)]
 fn live_row_body(
     slot: LiveSlot,
     drag: Option<&Rc<CopyDrag>>,
@@ -3968,7 +3852,6 @@ fn live_row_body(
     row_cap: f32,
     handlers: &HashMap<String, ClickHandler>,
     edit_row: Option<&InlineEditView>,
-    body: FullBody,
 ) -> AnyElement {
     if let Some(editing) = edit_row.filter(|editing| editing.id == live_edit_id(slot)) {
         return inline_edit_box(editing).into_any_element();
@@ -3977,10 +3860,9 @@ fn live_row_body(
     // text has to copy like any other: while the transcript is short of a
     // finished turn the live card is the only copy of the answer the user can
     // see, so it is the only copy there is to drag.
-    match live_block(drag, block, content_width, row_cap, handlers, body) {
+    match live_block(drag, block, content_width, row_cap, handlers) {
         Some(row) => row,
-        None => block_view(block, content_width, row_cap, handlers, None, true, body)
-            .into_any_element(),
+        None => block_view(block, content_width, row_cap, handlers, None, true).into_any_element(),
     }
 }
 
@@ -4077,7 +3959,6 @@ fn live_view(
     live_click: Option<&ClickHandler>,
     handlers: &HashMap<String, ClickHandler>,
     interaction: LiveInteraction<'_>,
-    body: FullBody,
 ) -> Div {
     let LiveInteraction {
         drag,
@@ -4107,7 +3988,6 @@ fn live_view(
                 row_cap,
                 handlers,
                 edit_row,
-                body,
             ),
             press.get(&LiveRow::User(LiveSlot::Question)),
             edit.get(&LiveSlot::Question),
@@ -4144,7 +4024,6 @@ fn live_view(
                 row_cap,
                 handlers,
                 edit_row,
-                body,
             ),
             press.get(&LiveRow::User(slot)),
             edit.get(&slot),
@@ -4180,9 +4059,9 @@ fn live_view(
             forward: None,
         };
         col = col.child(
-            match live_block(drag, &block, content_width, row_cap, handlers, body) {
+            match live_block(drag, &block, content_width, row_cap, handlers) {
                 Some(row) => row,
-                None => block_view(&block, content_width, row_cap, handlers, None, true, body)
+                None => block_view(&block, content_width, row_cap, handlers, None, true)
                     .into_any_element(),
             },
         );
@@ -5243,40 +5122,8 @@ pub struct RowReach {
     pub viewport_top: f32,
     /// The bottom edge of that box.
     pub viewport_bottom: f32,
-    /// The width the box was actually painted at. This is the number the rows
-    /// had to wrap inside, and it is not the one the caller handed to `view`:
-    /// a row is `w_full()` inside this box, so a box narrower than the width
-    /// the row capped itself to wraps the text at the box and not at the cap.
-    pub viewport_width: f32,
     /// How many rows the surface holds.
     pub rows: usize,
-    /// The tallest row drawn, which is the one that decides the column's
-    /// height (#2981). The average row height was the reading that finally
-    /// named this bug: it jumped from 295px to 2,521px while the width moved
-    /// 26px, which no amount of text re-wrapping can do. One row carrying the
-    /// whole difference is the only shape that explains it, and the average
-    /// alone cannot say whether that is true.
-    pub tallest: Option<TallestRow>,
-}
-
-/// The row that decides how tall the column is (#2981).
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct TallestRow {
-    /// Its index in the surface's children.
-    pub index: usize,
-    /// Its top edge, before the offset moves it.
-    pub top: f32,
-    /// Its bottom edge, before the offset moves it.
-    pub bottom: f32,
-    /// The width it was laid out at.
-    pub width: f32,
-}
-
-impl TallestRow {
-    /// How tall it came out.
-    pub fn height(self) -> f32 {
-        self.bottom - self.top
-    }
 }
 
 impl RowReach {
@@ -5338,20 +5185,9 @@ impl RowReach {
 pub fn row_reach(scroll: &ScrollHandle) -> RowReach {
     let rows = scroll.children_count();
     let mut content_bottom = f32::MIN;
-    let mut tallest: Option<TallestRow> = None;
     for ix in 0..rows {
         if let Some(bounds) = scroll.bounds_for_item(ix) {
-            let bottom = f32::from(bounds.bottom());
-            content_bottom = content_bottom.max(bottom);
-            let candidate = TallestRow {
-                index: ix,
-                top: f32::from(bounds.top()),
-                bottom,
-                width: f32::from(bounds.size.width),
-            };
-            if tallest.is_none_or(|held| candidate.height() > held.height()) {
-                tallest = Some(candidate);
-            }
+            content_bottom = content_bottom.max(f32::from(bounds.bottom()));
         }
     }
     let viewport = scroll.bounds();
@@ -5361,9 +5197,7 @@ pub fn row_reach(scroll: &ScrollHandle) -> RowReach {
         max_offset: f32::from(scroll.max_offset().height),
         viewport_top: f32::from(viewport.top()),
         viewport_bottom: f32::from(viewport.bottom()),
-        viewport_width: f32::from(viewport.size.width),
         rows,
-        tallest,
     }
 }
 
@@ -5442,7 +5276,7 @@ pub fn witness_row_heartbeat(reach: RowReach, turns: usize, content_width: f32) 
     crate::logging::info(&format!(
         "transcript alive: {:?}, {} turns in state, {} rows built, {:.1}px per row, \
          offset {:.1}px, max {:.1}px, content bottom {:.1}px, row width {:.1}px, window \
-         {:.1}..{:.1}px ({:.1}px tall), box {:.1}px wide, {}",
+         {:.1}..{:.1}px ({:.1}px tall)",
         reach.frame(),
         turns,
         reach.rows,
@@ -5453,19 +5287,7 @@ pub fn witness_row_heartbeat(reach: RowReach, turns: usize, content_width: f32) 
         content_width,
         reach.viewport_top,
         reach.viewport_bottom,
-        reach.viewport_height(),
-        reach.viewport_width,
-        match reach.tallest {
-            Some(t) => format!(
-                "tallest row #{} {:.1}..{:.1} ({:.1}px tall, {:.1}px wide)",
-                t.index,
-                t.top,
-                t.bottom,
-                t.height(),
-                t.width
-            ),
-            None => "no row bounds at all".to_string(),
-        }
+        reach.viewport_height()
     ));
 }
 
@@ -5513,11 +5335,6 @@ pub fn view(
     if let Some(d) = &drag {
         d.texts.borrow_mut().clear();
     }
-    // How much of a full body any one row may draw (#2981). This is the box the
-    // transcript is painted into, so a row can never be taller than the pane
-    // that holds it. A first paint has no bounds yet, and `for_box` answers
-    // that with the old fixed cap, which is still a bound.
-    let budget = FullBody::for_box(f32::from(scroll.bounds().size.height));
     let mut col = div()
         // The rows are the ground truth for where the bottom is (#2981). A
         // frame that leaves every row above the box paints as nothing but the
@@ -5647,7 +5464,6 @@ pub fn view(
             &attachment_handlers,
             None,
             true,
-            budget,
         ));
     }
     // The turns past the drawn window wait behind their own marker (#2805),
@@ -5748,7 +5564,7 @@ pub fn view(
                     selectable = Some(ordinal);
                     let selection = SelectionContext::new(d, ordinal);
                     match block {
-                        Block::Thinking { content } => thinking_block(content, full, budget),
+                        Block::Thinking { content } => thinking_block(content, full),
                         _ => block_view(
                             block,
                             content_width,
@@ -5756,12 +5572,11 @@ pub fn view(
                             &attachment_handlers,
                             Some(&selection),
                             full_body,
-                            budget,
                         ),
                     }
                 }
                 _ => match block {
-                    Block::Thinking { content } => thinking_block(content, full, budget),
+                    Block::Thinking { content } => thinking_block(content, full),
                     _ => block_view(
                         block,
                         content_width,
@@ -5769,7 +5584,6 @@ pub fn view(
                         &attachment_handlers,
                         None,
                         full_body,
-                        budget,
                     ),
                 },
             };
@@ -5896,7 +5710,6 @@ pub fn view(
                 edit: &live_edit,
                 edit_row: edit_row.as_ref(),
             },
-            budget,
         ));
     }
     // Releasing the mouse ends the drag and copies the selected range (#2383,
@@ -5959,9 +5772,7 @@ mod tests {
             max_offset,
             viewport_top: 42.0,
             viewport_bottom: 934.0,
-            viewport_width: 744.0,
             rows,
-            tallest: None,
         }
     }
 
@@ -6046,9 +5857,7 @@ mod tests {
             max_offset: -108.0,
             viewport_top: 42.0,
             viewport_bottom: 42.0,
-            viewport_width: 744.0,
             rows: 26,
-            tallest: None,
         };
         assert_eq!(collapsed.viewport_height(), 0.0);
         assert_eq!(collapsed.frame(), Frame::NoBox);
@@ -9186,106 +8995,6 @@ mod tests {
             body.is_char_boundary(cut.len()),
             "the cut splits the emoji at byte {}",
             cut.len()
-        );
-    }
-
-    /// #2981: the cut never lands on a run of blank lines. One stored body
-    /// carried hundreds of blank lines after its ledger, and a row whose
-    /// excerpt ends there draws an empty bottom. A scroll pinned to the bottom
-    /// of that row then shows nothing at all, which is the black chat.
-    #[test]
-    fn the_excerpt_never_ends_on_blank_lines() {
-        let (cut, hidden) = excerpt_lines("line 1\n\n\n\n\ntail", 1);
-        assert_eq!(&*cut, "line 1", "the blanks are dropped from the excerpt");
-        assert_eq!(hidden, 5, "the dropped blanks are counted, not eaten");
-    }
-
-    /// #2981: the black chat. One stored assistant row reached 733,574
-    /// characters, a single `|---|` separator row made `is_deliverable_report`
-    /// true so the row stayed visible while its turn was folded, and the
-    /// full-body path drew it with no cap at all: 8,151 lines, one row 161,920px
-    /// tall inside an 887px pane, the scroll pinned to that row's empty tail.
-    /// The cap is the fix, and it has to hold on the `full` path, which is
-    /// exactly the one the fold keeps visible.
-    #[test]
-    fn the_full_body_path_is_bounded() {
-        let body = (0..MSG_FULL_LINES + 50)
-            .map(|i| format!("line {i}"))
-            .collect::<Vec<_>>()
-            .join("\n");
-        let (cut, hidden) = excerpt_lines(&body, MSG_FULL_LINES);
-        assert_eq!(
-            cut.lines().count(),
-            MSG_FULL_LINES,
-            "the full path draws exactly MSG_FULL_LINES lines"
-        );
-        assert_eq!(hidden, 50, "the remainder is announced, not eaten (#904)");
-
-        let src = include_str!("transcript.rs");
-        let production = src
-            .split("\n#[cfg(test)]\nmod tests")
-            .next()
-            .expect("production source before the test module");
-        assert!(
-            !production.contains("if full {\n        (std::borrow::Cow::Borrowed(content), 0)"),
-            "a row draws a stored body uncapped: the black chat is back (#2981)"
-        );
-        for name in ["fn bubble(", "fn forward_block(", "fn thinking_block("] {
-            let row = production
-                .split(name)
-                .nth(1)
-                .and_then(|rest| rest.split("\nfn ").next())
-                .unwrap_or_else(|| panic!("{name} body"));
-            assert!(
-                row.contains("body.lines"),
-                "{name} must bound its full-body path by the box (#2981)"
-            );
-            assert!(
-                row.contains("body.clip("),
-                "{name} must clip a full body to the box it is painted into (#2981)"
-            );
-        }
-    }
-
-    /// #2981: the budget comes from the box, not from a line count. Four
-    /// hundred lines measured 8,422px inside an 871px pane, the scroll pinned
-    /// to the bottom of that one row, and the reader got a black chat. A budget
-    /// derived from the box cannot outgrow it, whatever a line turns out to
-    /// cost.
-    #[test]
-    fn the_full_body_budget_fits_its_box() {
-        let roomy = FullBody::for_box(871.0);
-        assert_eq!(
-            roomy.lines,
-            (871.0f32 / FULL_BODY_LINE_H).floor() as usize,
-            "the box decides the line budget"
-        );
-        assert!(
-            roomy.lines < MSG_FULL_LINES,
-            "an 871px pane holds far fewer than the old 400 lines"
-        );
-        let clipped = roomy.max_h.expect("a measured box clips its body");
-        assert!(
-            clipped < 871.0 && clipped > 800.0,
-            "the clip fills the box and leaves room for the hidden-lines notice"
-        );
-
-        // A box too short for the minimum still gets the minimum, and the clip
-        // is what keeps that honest instead of a budget of two lines.
-        let cramped = FullBody::for_box(60.0);
-        assert_eq!(cramped.lines, FULL_BODY_MIN_LINES);
-        assert!(
-            cramped.max_h.expect("a measured box clips") >= FULL_BODY_LINE_H,
-            "a clip under one line would hide the body entirely"
-        );
-
-        // No bounds yet on the first paint: the old fixed cap is the only bound
-        // there is, and it is still a bound.
-        let unmeasured = FullBody::for_box(0.0);
-        assert_eq!(unmeasured.lines, MSG_FULL_LINES);
-        assert!(
-            unmeasured.max_h.is_none(),
-            "an unmeasured box cannot clip, and must not pretend to"
         );
     }
 }
