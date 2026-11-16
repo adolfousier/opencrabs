@@ -2469,11 +2469,10 @@ fn bubble(
     // The column keeps the default shrink on purpose. The cap below is a
     // planned width, and a plan can ask for more than the box the row is
     // painted into; a column that refuses to shrink then keeps its full
-    // max-content size, `justify_end` pushes the excess out of the left edge,
-    // and the row loses the start of its own line. That is #2937 all over
-    // again, which is why the layout, not the plan, has the last word here: a
-    // plan wider than the row is corrected by shrinking instead of painting
-    // past it.
+    // max-content size and paints past the row it belongs to. That is #2937
+    // all over again, which is why the layout, not the plan, has the last word
+    // here: a plan wider than the row is corrected by shrinking instead of
+    // painting past it.
     let max_width = if row_cap > 0.0 {
         row_cap
     } else {
@@ -3893,18 +3892,9 @@ fn live_user_row(
         // the containing block.
         row = row.relative().group(group.clone());
     }
-    row = row.child(
-        div()
-            .flex_1()
-            .min_w_0()
-            .flex()
-            .flex_row()
-            .justify_end()
-            // No cross-axis stretch, so a sent bubble hugs its text instead of
-            // painting its surface down the row's full height (#2976).
-            .items_start()
-            .child(child),
-    );
+    // The same block body a stored row uses, so the sent message keeps the
+    // left margin and does not jump sideways when it persists (#2981).
+    row = row.child(div().flex_1().min_w_0().child(child));
     if let Some(handler) = edit {
         let handler = handler.clone();
         let palette = palette::current();
@@ -4452,8 +4442,7 @@ fn selectable_text_segment(
 ///
 /// They travel together because the caller builds every one of them from the
 /// same per-row maps, and passing them loose made the builder eight arguments
-/// wide, past clippy's limit. `mine` stays out of here: it decides the row's
-/// layout, not its affordances.
+/// wide, past clippy's limit.
 struct RowActions<'a> {
     /// Left click on the body: opens the row, or toggles it in select mode.
     click: Option<&'a ClickHandler>,
@@ -4478,10 +4467,6 @@ struct RowActions<'a> {
 fn message_row(
     id: uuid::Uuid,
     child: Div,
-    // Whether this row is the reader's own. His row hugs the right edge and
-    // the answer keeps the left margin, so a conversation reads as two voices
-    // instead of one left column.
-    mine: bool,
     actions: RowActions<'_>,
 ) -> Stateful<Div> {
     let RowActions {
@@ -4527,22 +4512,15 @@ fn message_row(
     }
     // The body is stateful so the row can carry its own click listener: gpui
     // hangs `on_click` off a stateful element, not a bare `Div`.
+    // The body stays a block box, which is the shape it had before the
+    // right-align work (#2935). It hands the bubble the whole column, so every
+    // row starts at the left margin and wraps at the pane. Making it a flex
+    // row pushed the excess out of the left edge instead (#2981).
     let mut body = div()
         .id(SharedString::from(format!("msg-body-{id}")))
         .flex_1()
         .min_w_0()
         .child(child);
-    if mine {
-        // The body becomes a row of one pushed to its end. A bare `div()` is a
-        // block box, so it hands the bubble the whole column and every message
-        // starts at the left margin, whatever its role.
-        //
-        // `items_start` keeps that row from stretching its child. The cross
-        // axis defaults to `stretch`, so the bubble was painting its surface
-        // down to the row's height and left blank space under its last line
-        // (#2976).
-        body = body.flex().flex_row().justify_end().items_start();
-    }
     if let Some(handler) = click {
         let handler = handler.clone();
         body = body
@@ -5571,7 +5549,6 @@ pub fn view(
                             Some(editing) => inline_edit_box(editing),
                             None => child,
                         },
-                        role.as_str() == "user",
                         RowActions {
                             click: message_click.get(id),
                             press: message_press.get(id),
@@ -5596,17 +5573,13 @@ pub fn view(
                         reactions.get(id).map_or(&[][..], Vec::as_slice),
                         &reaction_click,
                     ) {
-                        Some(chips) => {
-                            let mut column =
-                                div().flex().flex_col().w_full().child(row).child(chips);
-                            if role.as_str() == "user" {
-                                // The chips belong to the bubble above them,
-                                // so they follow its right edge instead of
-                                // stranding at the left margin.
-                                column = column.items_end();
-                            }
-                            column.into_any_element()
-                        }
+                        Some(chips) => div()
+                            .flex()
+                            .flex_col()
+                            .w_full()
+                            .child(row)
+                            .child(chips)
+                            .into_any_element(),
                         None => row,
                     }
                 }
@@ -6182,6 +6155,11 @@ mod tests {
     /// width is still indefinite while the row is measured, and the row then
     /// wrapped far taller than its text. The pre-#2935 shape had no width
     /// declaration on this column and this test keeps it that way.
+    ///
+    /// The row body is a block box again too. The right-align work made it a
+    /// flex row pushed to its end, so a row wider than the pane lost its own
+    /// start at the left edge and the reader scrolled through blank height
+    /// (#2981).
     #[test]
     fn the_bubble_max_is_the_pixel_cap_and_nothing_after_it() {
         let src = include_str!("transcript.rs");
@@ -6212,8 +6190,8 @@ mod tests {
             .and_then(|rest| rest.split("fn inline_edit_box(").next())
             .expect("message row");
         assert!(
-            row.contains(".justify_end().items_start()"),
-            "a user row must not stretch the bubble down the row's height"
+            !row.contains("justify_end") && !row.contains("mine"),
+            "a stored row keeps the left margin and its body stays a block box"
         );
         let live = src
             .split("fn live_user_row(")
@@ -6221,8 +6199,8 @@ mod tests {
             .and_then(|rest| rest.split("fn live_view(").next())
             .expect("live user row");
         assert!(
-            live.contains(".items_start()"),
-            "a sent bubble must not be stretched by its row"
+            !live.contains("justify_end"),
+            "a sent row keeps the left margin too"
         );
     }
 
