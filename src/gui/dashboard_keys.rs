@@ -750,28 +750,34 @@ impl Dashboard {
         if self.screen == Screen::Chat {
             let key = ev.keystroke.key.as_str();
             if matches!(key, "pageup" | "pagedown") {
-                let page = px(f32::from(window.viewport_size().height) * 0.8);
+                let page = f32::from(window.viewport_size().height) * 0.8;
                 let up = key == "pageup";
-                let dy = if up { page } else { -page };
                 // The page keys act on the pane the caret is on, so a split
                 // scrolls the transcript the accent names rather than the
                 // chat underneath it (#2475, #2472).
                 let target = self
                     .pane_focus
                     .filter(|id| self.pane_states.contains_key(id));
-                let (x, y, max) = match target.and_then(|id| self.pane_states.get(&id)) {
+                // Where the page lands, and whether that landing is the end of
+                // the content, comes from the scroll module's page rule so both
+                // answers use the arithmetic the wheel and the growth check
+                // already share. Asking the question of the clamped offset
+                // answered "yes" every time, and PageUp raised the offset only to
+                // be snapped straight back down by the same handler (#2959).
+                let (x, landing) = match target.and_then(|id| self.pane_states.get(&id)) {
                     Some(pane) => {
                         let pane = pane.read(cx);
                         let offset = pane.scroll.offset();
-                        let max = pane.scroll.max_offset().height;
-                        (offset.x, (offset.y + dy).min(px(0.0)).max(-max), max)
+                        let max = f32::from(pane.scroll.max_offset().height);
+                        (offset.x, page_landing(f32::from(offset.y), max, page, up))
                     }
                     None => {
                         let offset = self.chat_state.scroll.offset();
-                        let max = self.chat_state.scroll.max_offset().height;
-                        (offset.x, (offset.y + dy).min(px(0.0)).max(-max), max)
+                        let max = f32::from(self.chat_state.scroll.max_offset().height);
+                        (offset.x, page_landing(f32::from(offset.y), max, page, up))
                     }
                 };
+                let y = px(landing.offset);
                 match target {
                     Some(id) => {
                         if let Some(pane) = self.pane_states.get(&id) {
@@ -788,8 +794,7 @@ impl Dashboard {
                 // and down gives it back only once it lands on the end, so a
                 // row that lands mid-page never drags the reader back down
                 // (#2698).
-                let at_end = y >= -max;
-                match (target, at_end) {
+                match (target, landing.at_end) {
                     (Some(id), true) => self.rearm_pane_follow(id, cx),
                     (Some(id), false) => self.release_pane_follow(id, cx),
                     (None, true) => self.rearm_transcript_follow(),

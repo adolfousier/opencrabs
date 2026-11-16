@@ -138,7 +138,9 @@ use opencrabs::ui_core::model_layout;
 use opencrabs::ui_core::model_selector::{FetchRequest, ProviderSelectorState};
 use opencrabs::ui_core::pane_tree::{DropHalf, PaneTree};
 use opencrabs::ui_core::rail;
-use opencrabs::ui_core::scroll::{Follow, scrolled_from_top, wheel_releases_follow};
+use opencrabs::ui_core::scroll::{
+    Follow, page_landing, scrolled_from_top, wheel_releases_follow,
+};
 use opencrabs::ui_core::split::{self, Layout};
 use opencrabs::ui_core::text_field::{self, TextField};
 use opencrabs::ui_core::topic_bar;

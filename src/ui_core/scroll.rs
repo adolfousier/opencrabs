@@ -61,6 +61,49 @@ pub fn wheel_releases_follow(dy: f32) -> bool {
     dy.is_finite() && dy > 0.0
 }
 
+/// Where a page key leaves one transcript, and whether that landing gives the
+/// follow back (#2959).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PageLanding {
+    /// The offset to write, on GPUI's own scale: zero at the top, `-max_offset`
+    /// at the bottom.
+    pub offset: f32,
+    /// Whether the landing sits at the bottom, which is the only thing that
+    /// gives the follow back.
+    pub at_end: bool,
+}
+
+/// Turn one page from `offset`, toward the top of the content when `up`.
+///
+/// The window used to clamp the offset and then ask whether the clamped value
+/// had reached the bottom. The clamp guarantees it has, so the answer was
+/// always yes: PageUp raised the offset and the same handler snapped it
+/// straight back down, and PageDown only looked like it worked because the
+/// reader was already at the end (#2959). The landing is decided here instead,
+/// on the rules the wheel and the growth check already use, so the decision can
+/// be tested without a window.
+///
+/// `max_offset` is how far the content can scroll, as a positive distance. An
+/// unmeasured viewport has no page to turn: the offset is left alone and the
+/// landing never claims the bottom, the same reading `at_bottom` gives a
+/// non-finite measurement.
+pub fn page_landing(offset: f32, max_offset: f32, page: f32, up: bool) -> PageLanding {
+    if !offset.is_finite() || !max_offset.is_finite() {
+        return PageLanding {
+            offset,
+            at_end: false,
+        };
+    }
+    let max = max_offset.max(0.0);
+    let page = if page.is_finite() { page.max(0.0) } else { 0.0 };
+    let dy = if up { page } else { -page };
+    let offset = (offset + dy).min(0.0).max(-max);
+    PageLanding {
+        offset,
+        at_end: at_bottom(scrolled_from_top(offset), max),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -97,6 +140,63 @@ mod tests {
     fn an_unmeasured_viewport_never_yanks_the_reader() {
         assert!(!at_bottom(f32::NAN, 100.0));
         assert!(!at_bottom(0.0, f32::INFINITY));
+    }
+
+    #[test]
+    fn a_page_up_leaves_the_bottom_and_does_not_give_it_back() {
+        // #2959: from the bottom, a page up has to land above the end. A
+        // landing that still reads as the end is re-armed by the handler and
+        // the reader is snapped straight back down, which is what "page up
+        // does not scroll" looked like.
+        let landing = page_landing(-1000.0, 1000.0, 800.0, true);
+        assert_eq!(landing.offset, -200.0);
+        assert!(!landing.at_end);
+    }
+
+    #[test]
+    fn a_page_down_that_reaches_the_end_gives_the_follow_back() {
+        let landing = page_landing(-200.0, 1000.0, 800.0, false);
+        assert_eq!(landing.offset, -1000.0);
+        assert!(landing.at_end);
+    }
+
+    #[test]
+    fn a_page_down_that_lands_mid_page_keeps_the_reader_where_they_are() {
+        // #2698: the re-arm is for a landing on the end only, so a page down
+        // that stops a screen short cannot drag a reader back down.
+        let landing = page_landing(-1000.0, 4000.0, 800.0, false);
+        assert_eq!(landing.offset, -1800.0);
+        assert!(!landing.at_end);
+    }
+
+    #[test]
+    fn a_page_never_scrolls_past_either_end() {
+        let top = page_landing(0.0, 1000.0, 800.0, true);
+        assert_eq!(top.offset, 0.0);
+        assert!(!top.at_end);
+        let bottom = page_landing(-1000.0, 1000.0, 800.0, false);
+        assert_eq!(bottom.offset, -1000.0);
+        assert!(bottom.at_end);
+    }
+
+    #[test]
+    fn content_that_fits_has_nowhere_to_page() {
+        // No scroll range means the bottom by definition, so both keys leave
+        // the reader exactly where they are and cost them nothing.
+        let up = page_landing(0.0, 0.0, 800.0, true);
+        assert_eq!(up.offset, 0.0);
+        assert!(up.at_end);
+        assert!(page_landing(0.0, 0.0, 800.0, false).at_end);
+    }
+
+    #[test]
+    fn an_unmeasured_viewport_turns_no_page() {
+        let landing = page_landing(f32::NAN, 1000.0, 800.0, true);
+        assert!(landing.offset.is_nan());
+        assert!(!landing.at_end);
+        let landing = page_landing(-100.0, f32::INFINITY, 800.0, true);
+        assert_eq!(landing.offset, -100.0);
+        assert!(!landing.at_end);
     }
 }
 
