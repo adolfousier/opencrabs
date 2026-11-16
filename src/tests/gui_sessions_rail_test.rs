@@ -15,6 +15,7 @@ const RAIL_VIEW: &str = include_str!("../gui/rail_view.rs");
 const DASH_RAIL: &str = include_str!("../gui/dashboard_rail.rs");
 const DASH_TOPICS: &str = include_str!("../gui/dashboard_topics.rs");
 const MAIN: &str = include_str!("../gui/main.rs");
+const ICON: &str = include_str!("../gui/icon.rs");
 
 fn block<'a>(source: &'a str, start: &str, end: &str) -> &'a str {
     let (_, tail) = source.split_once(start).expect("source block starts");
@@ -251,12 +252,40 @@ fn collapsed_rail_keeps_the_logo_above_a_working_reopen_button() {
     ] {
         assert!(rail.contains(needle), "collapsed rail misses {needle}");
     }
-    let logo = rail.find("icon::banner_logo()").expect("real logo");
+    let logo = rail.find("icon::banner_logo()").expect("shared app icon");
     let toggle = rail.find(".child(toggle)").expect("toggle below logo");
     assert!(logo < toggle, "the logo is the top item");
     assert!(
         !rail.contains("\"OpenCrabs\""),
         "the thin rail has no expanded text label"
+    );
+    assert!(
+        SESSIONS.contains("pub const COLLAPSED_RAIL_REM: f32 = 2.25;"),
+        "the 28px icon has only 4px of horizontal space on either side"
+    );
+
+    let icon = block(ICON, "pub fn banner_logo()", "/// The pencil");
+    for needle in [
+        "LOGO_PNG.to_vec()",
+        ".w(rems(1.75))",
+        ".h(rems(1.75))",
+        ".rounded(px(5.0))",
+        ".object_fit(ObjectFit::Cover)",
+    ] {
+        assert!(icon.contains(needle), "shared app icon misses {needle}");
+    }
+    assert!(
+        ICON.contains("\"/src/assets/icon.png\""),
+        "both rail states use the filled app icon from assets"
+    );
+    assert!(
+        !ICON.contains("opencrabs-logo-no-bg.png"),
+        "the shared sidebar renderer cannot fall back to the transparent mark"
+    );
+    let header = block(SESSIONS, "fn brand_header(", "#[cfg(test)]");
+    assert!(
+        header.contains("icon::banner_logo()"),
+        "expanded and collapsed rails share the same logo renderer"
     );
 
     let element = block(

@@ -7,13 +7,11 @@
 
 use gpui::{Image, ImageFormat, IntoElement, ObjectFit, Styled, StyledImage, img, px, rems};
 
-/// The canonical brand mark, embedded at compile time so the binary has no
-/// runtime dependency on the checkout it was built from. Hard rule: the
-/// meme/brand image must be the real OpenCrabs logo, never a generated crab.
-pub const LOGO_PNG: &[u8] = include_bytes!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/src/assets/opencrabs-logo-no-bg.png"
-));
+/// The canonical filled app icon, embedded at compile time so the binary has
+/// no runtime dependency on the checkout it was built from. Every sidebar
+/// state uses this same asset, never a generated or transparent substitute.
+pub const LOGO_PNG: &[u8] =
+    include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/assets/icon.png"));
 
 /// The shipped macOS app icon (multi-resolution .icns). This is the file the
 /// owner named: the Dock must show it, not a single PNG scaled up to Dock
@@ -22,8 +20,7 @@ pub const LOGO_PNG: &[u8] = include_bytes!(concat!(
 pub const APP_ICON_ICNS: &[u8] =
     include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/assets/icon.icns"));
 
-/// The crab logo for the window banner: contained so the aspect ratio is
-/// never stretched, with the slight corner radius the owner asked for.
+/// The filled app icon for every sidebar state, clipped to a rounded square.
 pub fn banner_logo() -> impl IntoElement {
     img(std::sync::Arc::new(Image::from_bytes(
         ImageFormat::Png,
@@ -32,7 +29,7 @@ pub fn banner_logo() -> impl IntoElement {
     .w(rems(1.75))
     .h(rems(1.75))
     .rounded(px(5.0))
-    .object_fit(ObjectFit::Contain)
+    .object_fit(ObjectFit::Cover)
 }
 
 /// The pencil the transcript's edit button draws (#2826). Embedded for the

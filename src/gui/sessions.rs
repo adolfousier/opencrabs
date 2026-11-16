@@ -1421,8 +1421,8 @@ pub fn pin_mark(favorited: bool) -> (bool, u32) {
 /// Full rail cards use one media size for stored pictures, platform marks and
 /// initials placeholders.
 pub const RAIL_MARK_REMS: f32 = 1.75;
-/// The closed rail keeps only its brand mark and reopen button (#2982).
-pub const COLLAPSED_RAIL_REM: f32 = 3.5;
+/// The closed rail fits its 28px mark with 4px on either side (#2982).
+pub const COLLAPSED_RAIL_REM: f32 = 2.25;
 const RAIL_CHANNEL_BADGE_REMS: f32 = 0.75;
 const RAIL_CHANNEL_GLYPH_REMS: f32 = 0.45;
 
