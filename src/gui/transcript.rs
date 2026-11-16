@@ -2812,12 +2812,6 @@ fn fold_chevron(folded: bool) -> &'static str {
     if folded { "\u{25B8}" } else { "\u{25BE}" }
 }
 
-/// Name the content behind the fold so the chevron is not the only clue that
-/// the card opens.
-fn fold_disclosure(folded: bool) -> String {
-    format!("{} Details", fold_chevron(folded))
-}
-
 /// The card a settled turn draws, the live card's own frame (#2632): one
 /// rounded box holding the head row, the working-out rows when the turn is
 /// open, and the footer that keeps the count, the ctx and the clock after the
@@ -2843,6 +2837,14 @@ fn settled_card(turn: &Turn, folded: bool, body: Vec<AnyElement>) -> Option<Stat
         .pb_1()
         .child(
             div()
+                .flex_shrink_0()
+                .w(px(16.0))
+                .text_base()
+                .text_color(rgb(accent))
+                .child(SharedString::from(fold_chevron(folded))),
+        )
+        .child(
+            div()
                 .text_xs()
                 .text_color(rgb(palette::current().text_muted))
                 .child(SharedString::from(glyph)),
@@ -2855,13 +2857,6 @@ fn settled_card(turn: &Turn, folded: bool, body: Vec<AnyElement>) -> Option<Stat
                 .truncate()
                 .text_color(rgb(accent))
                 .child(SharedString::from(verb)),
-        )
-        .child(
-            div()
-                .flex_shrink_0()
-                .text_xs()
-                .text_color(rgb(palette::current().accent))
-                .child(SharedString::from(fold_disclosure(folded))),
         );
     let mut card = div()
         .id(SharedString::from(format!("card-{}", turn.anchor)))
@@ -3380,6 +3375,14 @@ fn live_card(
         .pb_1()
         .child(
             div()
+                .flex_shrink_0()
+                .w(px(16.0))
+                .text_base()
+                .text_color(rgb(palette::current().accent))
+                .child(SharedString::from(fold_chevron(!expanded))),
+        )
+        .child(
+            div()
                 .text_xs()
                 .text_color(rgb(palette::current().text_muted))
                 .child(SharedString::from(frame)),
@@ -3395,13 +3398,6 @@ fn live_card(
             press,
         )));
     }
-    head = head.child(
-        div()
-            .flex_shrink_0()
-            .text_xs()
-            .text_color(rgb(palette::current().accent))
-            .child(SharedString::from(fold_disclosure(!expanded))),
-    );
     let mut card = div()
         .id("live-card")
         .flex()
@@ -6188,12 +6184,11 @@ mod tests {
         assert!(turns[0].header.is_none());
     }
 
-    /// The disclosure names the hidden content and keeps its chevron in sync
-    /// with the body in both directions.
+    /// The chevron alone carries the disclosure state in both directions.
     #[test]
-    fn the_fold_disclosure_names_the_details_and_tracks_the_body() {
-        assert_eq!(fold_disclosure(true), "\u{25B8} Details");
-        assert_eq!(fold_disclosure(false), "\u{25BE} Details");
+    fn the_fold_chevron_tracks_the_body() {
+        assert_eq!(fold_chevron(true), "\u{25B8}");
+        assert_eq!(fold_chevron(false), "\u{25BE}");
     }
 
     /// #2323: the timer used to vanish on every settled turn because the
