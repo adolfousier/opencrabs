@@ -191,6 +191,25 @@ impl Link {
     }
 }
 
+/// One icon button in the rail header (#2969).
+///
+/// The padding is the hit box: an icon alone is a 16px target, and the header
+/// row is the one place in the rail where a miss costs a whole repaint of the
+/// list underneath it.
+fn header_button(id: &'static str, glyph: impl IntoElement) -> Stateful<Div> {
+    div()
+        .id(id)
+        .flex()
+        .flex_none()
+        .items_center()
+        .justify_center()
+        .p_1()
+        .rounded_sm()
+        .cursor_pointer()
+        .hover(|d| d.bg(rgb(palette::current().panel_hi)))
+        .child(glyph)
+}
+
 impl RailView {
     pub(crate) fn new(dashboard: WeakEntity<crate::Dashboard>, scroll: gpui::ScrollHandle) -> Self {
         Self {
@@ -294,13 +313,15 @@ impl Render for RailView {
             .as_ref()
             .map(|footer| self.footer_chip(footer, cx));
         let control = self.filter_control(cx);
+        let actions = self.header_buttons(cx);
         rail_root().child(sessions::rail(
             &self.frame.head,
             rows,
             self.frame.width_rem,
             &self.scroll,
             footer,
-            Some(control),
+            Some(actions),
+            control,
         ))
     }
 }
@@ -526,11 +547,14 @@ impl RailView {
         .into_any_element()
     }
 
-    /// The rail filter menu (#2719, #2787): one funnel button top-right. Click
-    /// opens the plan-state chips plus the cron/RSI toggle; click again closes
-    /// them. The funnel wears the accent while a non-default filter hides rows,
+    /// The buttons the rail header carries (#2969): the sidebar toggle and the
+    /// menu, side by side at the end of the brand row. One line of chrome, so
+    /// the rail's first row starts where the brand ends instead of under a
+    /// band of empty width.
+    ///
+    /// The menu button wears the accent while a non-default filter hides rows,
     /// so a closed panel never silently filters.
-    fn filter_control(&self, cx: &mut Context<Self>) -> AnyElement {
+    fn header_buttons(&self, cx: &mut Context<Self>) -> AnyElement {
         let rail_filter = self.frame.filter;
         let pal = palette::current();
         let link = self.dashboard.clone();
@@ -540,68 +564,91 @@ impl RailView {
                 link.act(cx, move |dash, cx| dash.rail_toggle_filter_menu(cx));
             })
         };
-        let mut control = div()
-            .id("rail-filter-menu")
+        let hide_rail = {
+            let link = self.dashboard.clone();
+            cx.listener(move |_rail, _ev: &ClickEvent, _window, cx| {
+                link.act(cx, move |dash, cx| dash.toggle_rail(cx));
+            })
+        };
+        div()
+            .id("rail-header-buttons")
             .flex()
-            .flex_col()
-            .items_end()
+            .flex_row()
+            .flex_none()
+            .items_center()
             .gap_0p5()
+            .child(header_button(
+                "rail-header-sidebar",
+                sessions::sidebar_icon(1.0, pal.text_muted),
+            )
+            .on_click(hide_rail))
             .child(
-                div()
-                    .id("rail-filter-toggle")
-                    .flex()
-                    .flex_none()
-                    .items_center()
-                    .justify_center()
-                    .p_1()
-                    .rounded_sm()
-                    .cursor_pointer()
-                    .hover(|d| d.bg(rgb(pal.panel_hi)))
-                    .child(sessions::filter_icon(
+                header_button(
+                    "rail-filter-toggle",
+                    sessions::menu_icon(
                         1.0,
                         if sessions::filter_is_active(&rail_filter) {
                             pal.accent
                         } else {
                             pal.text_muted
                         },
-                    ))
-                    .on_click(toggle),
-            );
-        if self.frame.filter_open {
-            let plan_chips: [(&'static str, &'static str, sessions::PlanFilter); 4] = [
-                ("rail-filter-all", "all", sessions::PlanFilter::All),
-                ("rail-filter-active", "active", sessions::PlanFilter::Active),
-                ("rail-filter-done", "done", sessions::PlanFilter::Done),
-                (
-                    "rail-filter-noplan",
-                    "no plan",
-                    sessions::PlanFilter::NoPlan,
-                ),
-            ];
-            let mut chips = div().flex().flex_row().items_center().gap_0p5();
-            for (id, label, plan) in plan_chips {
-                let pick = {
-                    let link = link.clone();
-                    cx.listener(move |_rail, _ev: &ClickEvent, _window, cx| {
-                        link.act(cx, move |dash, cx| dash.rail_set_plan_filter(plan, cx));
-                    })
-                };
-                chips = chips.child(
-                    sessions::filter_chip(id, label, rail_filter.plan == plan).on_click(pick),
-                );
-            }
-            let auto = {
+                    ),
+                )
+                .on_click(toggle),
+            )
+            .into_any_element()
+    }
+
+    /// The rail filter menu (#2719, #2787): the chip row the header's menu
+    /// button opens, the plan-state chips plus the cron/RSI toggle. It sits
+    /// directly under the brand row and paints only while the panel is open.
+    fn filter_control(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        if !self.frame.filter_open {
+            return None;
+        }
+        let rail_filter = self.frame.filter;
+        let link = self.dashboard.clone();
+        let plan_chips: [(&'static str, &'static str, sessions::PlanFilter); 4] = [
+            ("rail-filter-all", "all", sessions::PlanFilter::All),
+            ("rail-filter-active", "active", sessions::PlanFilter::Active),
+            ("rail-filter-done", "done", sessions::PlanFilter::Done),
+            (
+                "rail-filter-noplan",
+                "no plan",
+                sessions::PlanFilter::NoPlan,
+            ),
+        ];
+        let mut chips = div().flex().flex_row().items_center().gap_0p5();
+        for (id, label, plan) in plan_chips {
+            let pick = {
                 let link = link.clone();
                 cx.listener(move |_rail, _ev: &ClickEvent, _window, cx| {
-                    link.act(cx, move |dash, cx| dash.rail_toggle_automation(cx));
+                    link.act(cx, move |dash, cx| dash.rail_set_plan_filter(plan, cx));
                 })
             };
             chips = chips.child(
-                sessions::filter_chip("rail-filter-auto", "auto", rail_filter.show_automation)
-                    .on_click(auto),
+                sessions::filter_chip(id, label, rail_filter.plan == plan).on_click(pick),
             );
-            control = control.child(chips);
         }
-        control.into_any_element()
+        let auto = {
+            let link = link.clone();
+            cx.listener(move |_rail, _ev: &ClickEvent, _window, cx| {
+                link.act(cx, move |dash, cx| dash.rail_toggle_automation(cx));
+            })
+        };
+        chips = chips.child(
+            sessions::filter_chip("rail-filter-auto", "auto", rail_filter.show_automation)
+                .on_click(auto),
+        );
+        Some(
+            div()
+                .id("rail-filter-menu")
+                .flex()
+                .flex_col()
+                .items_end()
+                .gap_0p5()
+                .child(chips)
+                .into_any_element(),
+        )
     }
 }

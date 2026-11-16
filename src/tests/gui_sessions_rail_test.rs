@@ -31,7 +31,7 @@ fn session_rows_paint_edge_to_edge_without_card_chrome() {
     );
     assert!(row.contains(".p_2()"), "the title keeps its internal inset");
 
-    let rail_root = block(SESSIONS, "pub fn rail(", ".child(brand_header())");
+    let rail_root = block(SESSIONS, "pub fn rail(", ".child(brand_header(rail_actions))");
     assert!(
         !rail_root.contains(".p_2()") && !rail_root.contains(".gap_1()"),
         "the rail adds no outer gutter or gap around its rows"
@@ -173,13 +173,63 @@ fn rail_card_media_is_large_dual_and_the_title_is_bold() {
 
 #[test]
 fn the_rail_header_is_compact_opencrabs_branding() {
-    let header = block(SESSIONS, "fn brand_header()", "#[cfg(test)]");
+    let header = block(SESSIONS, "fn brand_header(", "#[cfg(test)]");
     assert!(header.contains("icon::banner_logo()"));
     assert!(header.contains(".child(\"OpenCrabs\")"));
     assert!(header.contains(".text_sm()"));
     assert!(
         !SESSIONS.contains("SESSIONS · {}"),
         "the brand replaces the redundant session counter"
+    );
+}
+
+/// #2969: the mark, the name, the sidebar toggle and the menu share one row.
+/// The funnel used to sit on a line of its own under the brand, with the whole
+/// rail's width empty beside it, so the first session row started below a band
+/// of nothing.
+#[test]
+fn the_rail_header_holds_its_buttons_inline() {
+    let header = block(SESSIONS, "fn brand_header(", "#[cfg(test)]");
+    assert!(
+        header.contains(".flex_row()"),
+        "the header is one row, not a stack"
+    );
+    assert!(
+        header.contains("let mut row = div()") && header.contains("row = row.child(actions)"),
+        "the view's buttons are appended to the brand row itself"
+    );
+    assert!(
+        header.contains(".flex_1()"),
+        "the name takes the slack, so the buttons sit against the right edge"
+    );
+    assert!(
+        SESSIONS.contains("if let Some(control) = filter_control"),
+        "the panel is seated only while it is open, so a closed menu paints no row"
+    );
+    let buttons = block(
+        RAIL_VIEW,
+        "fn header_buttons(&self, cx: &mut Context<Self>) -> AnyElement {",
+        "fn filter_control(",
+    );
+    assert!(
+        buttons.contains("sessions::sidebar_icon("),
+        "the header carries the sidebar toggle"
+    );
+    assert!(
+        buttons.contains("sessions::menu_icon("),
+        "the header carries the three-dot menu"
+    );
+    assert!(
+        buttons.contains("dash.rail_toggle_filter_menu(cx)"),
+        "the menu button opens the same panel the funnel did"
+    );
+    assert!(
+        buttons.contains("dash.toggle_rail(cx)"),
+        "the toggle uses the existing rail toggle path"
+    );
+    assert!(
+        RAIL_VIEW.contains("fn header_button(id: &'static str, glyph: impl IntoElement)"),
+        "both header buttons share one hit box"
     );
 }
 

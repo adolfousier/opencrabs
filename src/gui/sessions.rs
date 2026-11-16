@@ -2253,15 +2253,34 @@ pub fn on_click(
     row.on_click(handler)
 }
 
-const RAIL_FILTER_SVG: &[u8] = include_bytes!(concat!(
+const RAIL_MENU_SVG: &[u8] = include_bytes!(concat!(
     env!("CARGO_MANIFEST_DIR"),
-    "/src/assets/rail-filter.svg"
+    "/src/assets/rail-menu.svg"
 ));
 
-/// The rail's funnel button (#2787). An embedded vector stays crisp at any
-/// size and takes the palette colour the same way the orientation icon does.
-pub fn filter_icon(size: f32, colour: u32) -> impl IntoElement {
-    let svg = String::from_utf8_lossy(RAIL_FILTER_SVG)
+const RAIL_SIDEBAR_SVG: &[u8] = include_bytes!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/src/assets/rail-sidebar.svg"
+));
+
+/// The rail header's menu button (#2969). Three dots rather than the funnel the
+/// header carried before: the funnel named one of the things the menu holds
+/// (the plan filter) and read as a search affordance for everything else. An
+/// embedded vector stays crisp at any size and takes the palette colour the
+/// same way the orientation icon does.
+pub fn menu_icon(size: f32, colour: u32) -> impl IntoElement {
+    rail_glyph(RAIL_MENU_SVG, size, colour)
+}
+
+/// The rail header's sidebar toggle (#2969): the panel outline every editor
+/// draws for the same control.
+pub fn sidebar_icon(size: f32, colour: u32) -> impl IntoElement {
+    rail_glyph(RAIL_SIDEBAR_SVG, size, colour)
+}
+
+/// One embedded rail glyph in `colour`, sized in rems.
+fn rail_glyph(source: &[u8], size: f32, colour: u32) -> impl IntoElement {
+    let svg = String::from_utf8_lossy(source)
         .replace("#8a8a8a", &format!("#{colour:06x}"))
         .into_bytes();
     img(Arc::new(Image::from_bytes(ImageFormat::Svg, svg)))
@@ -2327,6 +2346,9 @@ pub fn rail(
     width_rem: f32,
     scroll: &ScrollHandle,
     footer: Option<AnyElement>,
+    // The header's buttons (#2969), built by the view with their handlers and
+    // seated at the end of the brand row. None until the view supplies them.
+    rail_actions: Option<AnyElement>,
     // The filter menu (#2719), built by the view with its click handlers and
     // pinned to the top-right of the rail. None until the view supplies it.
     filter_control: Option<AnyElement>,
@@ -2343,7 +2365,7 @@ pub fn rail(
         .h_full()
         .bg(rgb(palette::current().panel))
         .py_2()
-        .child(brand_header());
+        .child(brand_header(rail_actions));
 
     // The filter menu rides top-right, just under the brand (#2719). The
     // element carries its own gaps and clicks; the rail only seats it.
@@ -2390,8 +2412,15 @@ pub fn rail(
 }
 
 /// A compact brand header instead of a second session counter.
-fn brand_header() -> Div {
-    div()
+///
+/// The mark, the name, and then everything the rail can do, in one row
+/// (#2969). The funnel used to sit on a line of its own under this header with
+/// the whole rail's width of empty space beside it, so a rail of twelve rows
+/// paid a band of nothing before the first one. `actions` is the view's own
+/// button row: the sidebar toggle and the menu, already carrying their
+/// handlers.
+fn brand_header(actions: Option<AnyElement>) -> Div {
+    let mut row = div()
         .w_full()
         .flex()
         .flex_row()
@@ -2404,10 +2433,16 @@ fn brand_header() -> Div {
         .child(icon::banner_logo())
         .child(
             div()
+                .flex_1()
+                .min_w_0()
                 .text_sm()
                 .text_color(rgb(palette::current().text_title))
                 .child("OpenCrabs"),
-        )
+        );
+    if let Some(actions) = actions {
+        row = row.child(actions);
+    }
+    row
 }
 
 #[cfg(test)]
@@ -4022,29 +4057,39 @@ mod tests {
         }));
     }
 
-    /// The funnel contract (#2787): the chip row paints only while the panel
-    /// is open, the funnel click toggles it, the accent follows the filter,
+    /// The filter contract (#2787, #2969): the chip row paints only while the
+    /// panel is open, the header's menu button toggles it, the accent follows
+    /// the filter,
     /// and both Escape and a rail close shut the panel. The find query is a
     /// separate surface and stays untouched by the panel's Escape.
     #[test]
-    fn rail_filter_panel_opens_from_the_funnel_only() {
+    fn rail_filter_panel_opens_from_the_menu_only() {
         // The menu is built by the rail's own view now (#2933), which reads
         // the state off its frame and asks the window to change it.
         let rail_source = include_str!("rail_view.rs");
         let control = rail_source
-            .split("fn filter_control(&self, cx: &mut Context<Self>) -> AnyElement {")
+            .split("fn filter_control(&self, cx: &mut Context<Self>) -> Option<AnyElement> {")
             .nth(1)
             .expect("filter control block")
-            .split("control.into_any_element()")
+            .split("Some(")
             .next()
             .expect("control before it is boxed");
         assert!(
-            control.contains("if self.frame.filter_open {"),
+            control.contains("if !self.frame.filter_open {"),
             "the chip row paints only while the panel is open"
         );
+        // #2969 moved the button into the header row and kept the panel here,
+        // so the accent rule is asserted on the button that now wears it.
+        let buttons = rail_source
+            .split("fn header_buttons(&self, cx: &mut Context<Self>) -> AnyElement {")
+            .nth(1)
+            .expect("header buttons block")
+            .split("fn filter_control(")
+            .next()
+            .expect("buttons before the panel");
         assert!(
-            control.contains("sessions::filter_is_active(&rail_filter)"),
-            "the funnel wears the accent while a non-default filter hides rows"
+            buttons.contains("sessions::filter_is_active(&rail_filter)"),
+            "the menu button wears the accent while a non-default filter hides rows"
         );
         let toggle = include_str!("dashboard_rail.rs")
             .split("pub(crate) fn rail_toggle_filter_menu(")
@@ -4058,8 +4103,8 @@ mod tests {
             "the funnel click toggles the panel"
         );
         assert!(
-            control.contains("dash.rail_toggle_filter_menu(cx)"),
-            "and the funnel in the view is what asks for it"
+            buttons.contains("dash.rail_toggle_filter_menu(cx)"),
+            "and the header button in the view is what asks for it"
         );
         let main_source = include_str!("main.rs");
         let state_source = include_str!("sessions.rs");
