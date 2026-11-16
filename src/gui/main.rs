@@ -9984,9 +9984,13 @@ mod gui {
             let dock_at = DASHBOARD
                 .find(".id(\"composer-dock\")")
                 .expect("the single-session composer dock must exist");
-            let window = &DASHBOARD[dock_at..];
+            let window = DASHBOARD
+                .get(dock_at..)
+                .expect("the dock offset lands on a char boundary");
             let end = window.find("col\n").expect("the chat column ends the dock");
-            let dock = &window[..end];
+            let dock = window
+                .get(..end)
+                .expect("the chat column ends on a char boundary");
             for rule in [
                 ".child(composer)",
                 ".child(footer.into_any_element())",
@@ -10018,9 +10022,14 @@ mod gui {
                 let at = editor
                     .find(".when(!self.docked, |d| {")
                     .expect("the dock gate");
-                let end = editor[at..].find(".p_3()").expect("the field's padding");
+                let gate = editor
+                    .get(at..)
+                    .expect("the dock gate offset lands on a char boundary");
+                let end = gate.find(".p_3()").expect("the field's padding");
                 assert!(
-                    editor[at..at + end].contains(chrome),
+                    gate.get(..end)
+                        .expect("the field padding ends on a char boundary")
+                        .contains(chrome),
                     "the undocked composer lost {chrome}"
                 );
             }
@@ -10056,11 +10065,15 @@ mod gui {
             // The topic row is appended to the same chat column, before the
             // dock. Searching the text in front of the dock is what proves
             // the order; a whole-file `find` would match an unrelated arm.
-            let before = &DASHBOARD[..dock];
+            let before = DASHBOARD
+                .get(..dock)
+                .expect("the dock offset lands on a char boundary");
             let topic = before
                 .rfind("if let Some(strip) = topic_bottom")
                 .expect("the bottom topic row is still drawn");
-            let chat_start = before[..topic]
+            let chat_start = before
+                .get(..topic)
+                .expect("the topic row offset lands on a char boundary")
                 .rfind("Screen::Chat => {")
                 .expect("the topic row belongs to the chat render arm");
             assert!(
@@ -10070,7 +10083,9 @@ mod gui {
             // And the footer is no longer a sibling row of the chat column:
             // that row is what made the composer and the footer read as two
             // unrelated modules.
-            let chat = &DASHBOARD[chat_start..];
+            let chat = DASHBOARD
+                .get(chat_start..)
+                .expect("the chat arm offset lands on a char boundary");
             assert!(
                 !chat.contains("col.child(central(footer"),
                 "the footer escaped the dock and became its own row again"

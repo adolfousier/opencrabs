@@ -3465,7 +3465,7 @@ mod tests {
         let mut bound: Vec<&str> = bindings
             .match_indices("KeyBinding::new(\"")
             .filter_map(|(at, _)| {
-                let rest = &bindings[at + "KeyBinding::new(\"".len()..];
+                let rest = bindings.get(at + "KeyBinding::new(\"".len()..)?;
                 let after_chord = rest.split_once('"')?.1;
                 let action = after_chord.trim_start_matches(", ").split(',').next()?;
                 let action = action.trim();

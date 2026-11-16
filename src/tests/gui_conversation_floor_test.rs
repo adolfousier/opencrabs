@@ -25,9 +25,15 @@ fn fn_body<'a>(src: &'a str, needle: &str) -> &'a str {
     let at = src
         .find(needle)
         .unwrap_or_else(|| panic!("{needle} not found"));
-    let indent = at - src[..at].rfind('\n').map(|n| n + 1).unwrap_or(0);
+    let head = src
+        .get(..at)
+        .expect("the needle offset lands on a char boundary");
+    let indent = at - head.rfind('\n').map(|n| n + 1).unwrap_or(0);
     let close = format!("\n{}}}", " ".repeat(indent));
-    src[at..].split(&close).next().unwrap_or(&src[at..])
+    let tail = src
+        .get(at..)
+        .expect("the needle offset lands on a char boundary");
+    tail.split(&close).next().unwrap_or(tail)
 }
 
 #[test]

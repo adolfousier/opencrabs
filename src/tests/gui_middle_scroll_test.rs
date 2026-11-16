@@ -159,11 +159,15 @@ fn the_marker_overlay_owns_the_pointer_it_blocks() {
     let overlay = MAIN
         .find("middle_scroll::overlay(gesture)")
         .expect("the marker is rendered from the window root");
-    let wiring = &MAIN[overlay..];
+    let wiring = MAIN
+        .get(overlay..)
+        .expect("the marker offset lands on a char boundary");
     let end = wiring
         .find("self.schedule_middle_scroll_frame(window, cx);")
         .expect("the frame schedule follows the marker");
-    let wiring = &wiring[..end];
+    let wiring = wiring
+        .get(..end)
+        .expect("the schedule offset lands on a char boundary");
     assert!(wiring.contains(".capture_any_mouse_down("));
     assert!(wiring.contains("this.move_middle_scroll(ev.position, cx);"));
     assert!(wiring.contains(".on_scroll_wheel("));
