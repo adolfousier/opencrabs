@@ -2454,7 +2454,7 @@ mod tests {
         placeholder_colour, placeholder_initial, preview_line, rail_cost, rail_filter_allows,
         rail_menu_entries, rail_stamp, strip_budgets,
     };
-    use opencrabs::db::models::Session;
+    use opencrabs::db::models::{Session, TitleSource};
     use opencrabs::db::repository::ContentSearchRow;
     use opencrabs::db::repository::PREVIEW_CHARS;
 
@@ -2710,7 +2710,7 @@ mod tests {
             auto_title_attempted: false,
             project_id: None,
             channel_chat_key: None,
-            title_source: crate::db::TitleSource::Manual,
+            title_source: TitleSource::Manual,
         }
     }
 

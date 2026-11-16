@@ -3,7 +3,7 @@
 //! The speed and landing rules execute without a window. The GUI has no
 //! headless mouse harness, so the remaining checks pin the real event wiring.
 
-use opencrabs::ui_core::scroll::{
+use crate::ui_core::scroll::{
     AUTO_SCROLL_MAX_SPEED_PX_PER_SEC, auto_scroll_delta, auto_scroll_landing,
 };
 
