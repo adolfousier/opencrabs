@@ -2392,6 +2392,9 @@ fn bubble_has_surface(role: &str) -> bool {
 /// roles so a folded history holds one rhythm, and only the user message
 /// carries a surface behind them. That surface takes `MESSAGE_RADIUS`, so the
 /// message corners stay tighter than the cards around them (#2571).
+// A render call: the eight arguments are the row's shape and its content, so a
+// bundle would only move the same state one call away (#2972).
+#[allow(clippy::too_many_arguments)]
 fn bubble(
     role: &str,
     content: &str,
@@ -2518,6 +2521,8 @@ fn bubble(
 /// continuing the same bar without repeating the header. That is the Telegram
 /// shape the owner asked for, and it is what makes a forward distinguishable
 /// from something the reader typed into this session.
+// Same shape as `bubble`: a forwarded row's mark, text and frame (#2972).
+#[allow(clippy::too_many_arguments)]
 fn forward_block(
     mark: &ForwardMark,
     content: &str,
@@ -3918,6 +3923,8 @@ fn live_user_row(
 /// answer as markdown, notices in amber. Nothing here folds: the turn has no
 /// settled answer yet, and hiding the working-out would blank the pane
 /// exactly when the user wants to see that something is happening.
+// The running turn's frame, its content and its interaction handlers (#2972).
+#[allow(clippy::too_many_arguments)]
 fn live_view(
     live: &LiveTurn,
     content_width: f32,
