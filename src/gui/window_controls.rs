@@ -1,5 +1,5 @@
-//! The window controls the app draws itself when the compositor draws none
-//! (#2813).
+//! The window controls the app draws itself when the platform draws none
+//! (#2813, #2966).
 //!
 //! This half is the drawing: it needs a `Window` and the view's own `cx`, so it
 //! lives in the GUI binary. The decision of which controls a window has to draw
@@ -8,6 +8,8 @@
 //!
 //! The controls are an overlay and not a title row on purpose: the owner
 //! removed the chat screen's title row in #2596 and does not want it back.
+
+use std::rc::Rc;
 
 use gpui::{App, ClickEvent, Decorations, Div, Stateful, Window, div, prelude::*, rgb};
 /// The window's own `match` names the controls, so the type is re-exported
@@ -49,20 +51,29 @@ pub fn button(control: Control) -> Stateful<Div> {
         .child(label)
 }
 
+/// A control's click, type-erased so a window whose platform runs the buttons
+/// itself can pass `None` without naming a closure type.
+pub type Handler = Rc<dyn Fn(Control, &ClickEvent, &mut Window, &mut App)>;
+
 /// The cluster for a window, or `None` when the platform draws its own.
 ///
 /// Absolute, in the top-right corner, above the header's own padding: the
 /// header is a row of the window and the controls belong to the frame, so they
 /// do not take a slot in any screen's layout.
-pub fn cluster(
-    decorations: Decorations,
-    on_control: impl Fn(Control, &ClickEvent, &mut Window, &mut App) + 'static,
-) -> Option<Div> {
+///
+/// `on_control` is `None` where the platform runs the buttons itself. On
+/// Windows a control area answers the non-client hit test and the platform
+/// clicks the button from `WM_NCLBUTTONUP`: `HTMINBUTTON` minimises,
+/// `HTMAXBUTTON` toggles zoom and `HTCLOSE` posts `WM_CLOSE`
+/// (`gpui-0.2.2/src/platform/windows/events.rs:1038`). A listener here would
+/// consume the mouse-up before that runs, and gpui's `zoom()` on Windows only
+/// ever maximises (`gpui-0.2.2/src/platform/windows/window.rs:782`), so the app
+/// could not restore a zoomed window (#2966).
+pub fn cluster(decorations: Decorations, on_control: Option<Handler>) -> Option<Div> {
     let list = controls(decorations);
     if list.is_empty() {
         return None;
     }
-    let on_control = std::rc::Rc::new(on_control);
     let mut row = div()
         .flex()
         .flex_row()
@@ -73,10 +84,11 @@ pub fn cluster(
         .right_0()
         .p(gpui::px(6.0));
     for control in list.iter().copied() {
-        let on_control = on_control.clone();
-        row = row.child(
-            button(control).on_click(move |ev, window, cx| on_control(control, ev, window, cx)),
-        );
+        let mut element = button(control);
+        if let Some(on_control) = on_control.clone() {
+            element = element.on_click(move |ev, window, cx| on_control(control, ev, window, cx));
+        }
+        row = row.child(element);
     }
     Some(row)
 }

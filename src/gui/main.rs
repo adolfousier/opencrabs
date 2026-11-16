@@ -190,6 +190,7 @@ use opencrabs::ui_core::usage::data::Period;
 use opencrabs::ui_core::usage::input::{self, DashboardState, UsageKeyOutcome};
 use opencrabs::ui_core::usage::loader::usage_view;
 use opencrabs::ui_core::usage::view_model::UsageViewModel;
+use opencrabs::ui_core::window_controls::{PLATFORM_DRAWS_CAPTION, effective_decorations};
 
 /// What the window has to draw: the loaded view, or the reason it could not.
 enum LoadState {
@@ -5258,16 +5259,20 @@ impl Render for Dashboard {
         // The window controls are the frame's, not a screen's (#2813): drawn
         // over the top-right corner so no screen's layout owns them, and before
         // the menus and modals below so a scrim that owns the pointer also owns
-        // the buttons.
-        if let Some(cluster) =
-            window_controls::cluster(window.window_decorations(), |control, _ev, window, cx| {
-                match control {
-                    window_controls::Control::Minimize => window.minimize_window(),
-                    window_controls::Control::Maximize => window.zoom_window(),
-                    window_controls::Control::Close => cx.quit(),
-                }
-            })
-        {
+        // the buttons. Windows has no caption to inherit, so the same cluster
+        // is drawn there and the platform runs its clicks (#2966).
+        let decorations =
+            effective_decorations(window.window_decorations(), PLATFORM_DRAWS_CAPTION);
+        #[cfg(target_os = "windows")]
+        let on_control: Option<window_controls::Handler> = None;
+        #[cfg(not(target_os = "windows"))]
+        let on_control: Option<window_controls::Handler> =
+            Some(Rc::new(|control, _ev, window, cx| match control {
+                window_controls::Control::Minimize => window.minimize_window(),
+                window_controls::Control::Maximize => window.zoom_window(),
+                window_controls::Control::Close => cx.quit(),
+            }));
+        if let Some(cluster) = window_controls::cluster(decorations, on_control) {
             root = root.child(cluster);
         }
         // Both context menus live here, at the window root, never inside the

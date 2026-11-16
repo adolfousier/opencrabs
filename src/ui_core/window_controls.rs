@@ -13,8 +13,18 @@
 //! the three controls itself. The drawing needs a window, so it lives in the
 //! GUI binary (`src/gui/window_controls.rs`); the decision lives here, where
 //! the suite can execute it.
+//!
+//! Windows arrives at the same place from the other side (#2966). gpui creates
+//! every window with `WS_SYSMENU | WS_THICKFRAME | WS_MINIMIZEBOX |
+//! WS_MAXIMIZEBOX` and never `WS_CAPTION`
+//! (`gpui-0.2.2/src/platform/windows/window.rs:394`), so the OS draws no title
+//! bar and no caption button at all, while `window_decorations()` answers the
+//! trait's default `Server` (`gpui-0.2.2/src/platform.rs:538`) because the
+//! Windows window never overrides it. Such a window is caption-less whichever
+//! way it reports, so `effective_decorations` turns that report into the client
+//! decoration it really is.
 
-use gpui::{Decorations, WindowControlArea};
+use gpui::{Decorations, Tiling, WindowControlArea};
 
 /// One control a cluster can draw, in the order it paints.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -40,6 +50,30 @@ pub fn controls(decorations: Decorations) -> &'static [Control] {
                 &[Control::Minimize, Control::Maximize, Control::Close]
             }
         }
+    }
+}
+
+/// Whether the platform draws a caption of its own for a window that reports
+/// server-side decorations.
+///
+/// macOS and the X11 and Wayland servers do. Windows does not, whatever the
+/// window reports: see the module doc (#2966).
+pub const PLATFORM_DRAWS_CAPTION: bool = !cfg!(target_os = "windows");
+
+/// The decorations a window actually has, once the platform's own caption is
+/// accounted for.
+///
+/// `reported` is what the platform answers. Where the platform draws no caption
+/// at all, a `Server` report describes a title bar that does not exist, so it
+/// becomes a client decoration and the app draws the controls itself. Every
+/// other report is passed through untouched: a client report is already the
+/// answer, tiling included.
+pub fn effective_decorations(reported: Decorations, platform_draws_caption: bool) -> Decorations {
+    match reported {
+        Decorations::Server if !platform_draws_caption => Decorations::Client {
+            tiling: Tiling::default(),
+        },
+        other => other,
     }
 }
 
