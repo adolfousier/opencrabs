@@ -534,8 +534,16 @@ fn selected_topic_keeps_the_parent_card_focused() {
 
     let chip = block(SESSIONS, "pub fn topic_chip(", "pub fn count_chip(");
     assert!(
-        chip.contains(".border_1().border_color(rgb(pal.accent))"),
-        "the active topic keeps its 1px accent outline"
+        chip.contains(".border_1()"),
+        "the active topic uses a 1px border"
+    );
+    assert!(
+        chip.contains("gui_theme::mix(pal.track, pal.accent, 40, 100)"),
+        "the active topic border is 40% accent, not full-strength"
+    );
+    assert!(
+        chip.contains(".px_2p5()") && chip.contains(".py_1()"),
+        "the active topic has extra padding so the ring is not flush"
     );
     assert!(
         !chip.contains(".border_2()") && !chip.contains(".box_shadow("),

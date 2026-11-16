@@ -1759,9 +1759,15 @@ pub fn topic_chip(
     };
     let mut chip = chip.hover(|d| d.bg(rgb(pal.panel_hi)));
     // The ring is the "you are here" mark on the focused chip (#2792): a
-    // 1px accent outline over the track fill, never a colour field.
+    // subtle 1px accent outline over the track fill, never a colour field.
+    // The border is 40% accent so it does not scream; the extra 1px inner
+    // padding keeps the border from sitting flush against the text.
     if selected {
-        chip = chip.border_1().border_color(rgb(pal.accent));
+        chip = chip
+            .border_1()
+            .border_color(rgb(gui_theme::mix(pal.track, pal.accent, 40, 100)))
+            .px_2p5()
+            .py_1();
     }
     if let Some(glyph) = live {
         chip = chip.child(
