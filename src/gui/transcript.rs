@@ -1903,16 +1903,39 @@ const RHYTHM_CELL_PAD_Y: f32 = 6.0;
 const MESSAGE_PAD_X: f32 = 16.0;
 const MESSAGE_PAD_Y: f32 = 12.0;
 
-/// A row never fills the transcript, whatever its role (#2969). One card
-/// running edge to edge turns the chat into a page: the reader cannot tell his
-/// own words from the answer at a glance, and the longest row sets the rhythm
-/// for everything beside it. Two thirds is the width every chat client settles
-/// on, and the remaining third is the margin that names the speaker.
+/// A row never fills the transcript in a single-pane window, whatever its role
+/// (#2969). One card running edge to edge turns the chat into a page: the
+/// reader cannot tell his own words from the answer at a glance, and the
+/// longest row sets the rhythm for everything beside it. Two thirds is the
+/// width every chat client settles on, and the remaining third is the margin
+/// that names the speaker.
+///
+/// This is a single-pane rule only (#2978). A split window hands every pane a
+/// share of the same width, so a pane is already the measure and its rows take
+/// the whole of it; two thirds of a half is a column one glyph wide.
 const MESSAGE_MAX_FRACTION: f32 = 2.0 / 3.0;
 
 /// The width one message row may occupy inside a column of `content_width`.
+///
+/// Callers pass zero instead of this when the window is split: a zero cap
+/// means "the row's own width", which is the pane.
 fn message_max_width(content_width: f32) -> f32 {
     (content_width * MESSAGE_MAX_FRACTION).max(0.0)
+}
+
+/// The cap a row takes, given the width the transcript was planned against and
+/// whether the window is a single pane (#2978).
+///
+/// A single pane keeps two thirds. A split gets zero, which every row reads as
+/// "keep your own width": the pane there is already a share of the window, and
+/// capping a share again is what left the bubble 64 px wide with its text
+/// wrapped one glyph per line.
+fn row_cap_for(content_width: f32, cap_rows: bool) -> f32 {
+    if cap_rows {
+        message_max_width(content_width)
+    } else {
+        0.0
+    }
 }
 
 /// The message surface carries a tighter corner than the cards around it, so a
@@ -2384,6 +2407,7 @@ fn bubble(
     content: &str,
     time: &str,
     content_width: f32,
+    row_cap: f32,
     handlers: &HashMap<String, ClickHandler>,
     selection: Option<&SelectionContext>,
     full: bool,
@@ -2412,26 +2436,32 @@ fn bubble(
     // again, which is why the layout, not the plan, has the last word here: a
     // plan wider than the row is corrected by shrinking instead of painting
     // past it.
-    let attachment_width = (message_max_width(content_width) - 2.0 * MESSAGE_PAD_X).max(0.0);
+    let max_width = if row_cap > 0.0 { row_cap } else { content_width };
+    let attachment_width = (max_width - 2.0 * MESSAGE_PAD_X).max(0.0);
     let mut col = div()
         .flex()
         .flex_col()
         .gap_1()
         .min_w_0()
-        // The right-aligned body makes this column a flex item, so without a
-        // cap a long message would paint one line past the pane instead of
-        // wrapping. The cap has to be pixels: a percentage max resolves against
-        // a parent whose width is still indefinite while the row is measured
-        // for a narrow split, so it is ignored exactly where it matters. It
-        // stops at two thirds of the planned width so no bubble ever runs the
-        // whole pane (#2969).
+        // The only max on the column, and only when the caller passes a cap.
+        // It has to be pixels: a percentage max resolves against a parent
+        // whose width is still indefinite while the row is measured for a
+        // narrow split, so it is ignored exactly where it matters. `max_w`
+        // and `max_w_full` also write the same field
+        // (`gpui-macros-0.2.2/src/styles.rs`, both land on `max_size.width`),
+        // so a percentage max after this line silently replaced the cap and
+        // handed the row back its max-content line (#2976).
         //
-        // This is the only max on the column, and it must stay the only one
-        // (#2976). `max_w` and `max_w_full` write the same field
-        // (`gpui-macros-0.2.2/src/styles.rs`, both land on `max_size.width`), so
-        // a `max_w_full` after this line silently replaced the cap with a
-        // percentage and handed the row back its max-content line.
-        .when(content_width > 0.0, |d| d.max_w(px(message_max_width(content_width))))
+        // A split window passes no cap at all (#2978). Every pane there is
+        // already a share of the window, and two thirds of a half is a column
+        // one glyph wide, so the row's own width is the measure: `w_full`
+        // makes the column fill it and the text wraps at the box actually
+        // painted, not at a number computed a frame earlier. Two thirds is the
+        // single-pane rule, where the window is wide enough to want the margin
+        // that names the speaker (#2969), and there the bubble keeps hugging
+        // its own text.
+        .when(row_cap > 0.0, |d| d.max_w(px(row_cap)))
+        .when(row_cap <= 0.0, |d| d.w_full())
         .px(px(MESSAGE_PAD_X))
         .py(px(MESSAGE_PAD_Y));
     if bubble_has_surface(role) {
@@ -2507,6 +2537,7 @@ fn forward_block(
     content: &str,
     _time: &str,
     content_width: f32,
+    row_cap: f32,
     handlers: &HashMap<String, ClickHandler>,
     selection: Option<&SelectionContext>,
     full: bool,
@@ -2522,17 +2553,21 @@ fn forward_block(
     };
     let paths = marker_paths(&content);
     let text = strip_markers(&content);
-    let attachment_width = (message_max_width(content_width) - 2.0 * MESSAGE_PAD_X).max(0.0);
+    let max_width = if row_cap > 0.0 { row_cap } else { content_width };
+    let attachment_width = (max_width - 2.0 * MESSAGE_PAD_X).max(0.0);
     let mut col = div()
         .flex()
         .flex_col()
         .gap_1()
         .min_w_0()
         .flex_shrink_0()
-        // A forward is a row like any other, so it stops at two thirds too
-        // (#2969). The bar on its left marks the source; the freed margin is
-        // what keeps a pasted report from reading as the reader's own page.
-        .when(content_width > 0.0, |d| d.max_w(px(message_max_width(content_width))))
+        .w_full()
+        // A forward is a row like any other, so it stops where the bubble
+        // stops: two thirds in a single-pane window, the pane's own width in a
+        // split (#2969, #2978). The bar on its left marks the source; the
+        // freed margin is what keeps a pasted report from reading as the
+        // reader's own page.
+        .when(row_cap > 0.0, |d| d.max_w(px(row_cap)))
         .pl(px(FORWARD_BAR_GAP))
         .pr(px(MESSAGE_PAD_X))
         .py(px(MESSAGE_PAD_Y))
@@ -2894,9 +2929,10 @@ fn settled_card(
         .flex_col()
         .w_full()
         // A history card is a row in the transcript like a message, so it
-        // stops at two thirds of the column too (#2969). Full width made every
-        // finished turn read as a band across the pane, which is what buried
-        // the conversation between them.
+        // takes the same cap (#2969): two thirds in a single-pane window, the
+        // pane's own width in a split, where no cap arrives at all (#2978).
+        // Full width in one pane made every finished turn read as a band
+        // across it, which is what buried the conversation between them.
         .when(max_width > 0.0, |d| d.max_w(px(max_width)))
         .min_w_0()
         .flex_shrink_0()
@@ -3443,8 +3479,9 @@ fn live_card(
         .flex()
         .flex_col()
         .w_full()
-        // The live card follows the same two thirds rule as the settled one
-        // (#2969), so a turn does not change width the moment it finishes.
+        // The live card follows the same rule as the settled one (#2969), so a
+        // turn does not change width the moment it finishes: two thirds in one
+        // pane, the pane's full width in a split (#2978).
         .when(max_width > 0.0, |d| d.max_w(px(max_width)))
         .min_w_0()
         .flex_shrink_0()
@@ -3526,6 +3563,7 @@ fn live_card_footer(live: &LiveTurn, ctx: (Option<u32>, u32)) -> Option<String> 
 fn block_view(
     block: &Block,
     content_width: f32,
+    row_cap: f32,
     handlers: &HashMap<String, ClickHandler>,
     selection: Option<&SelectionContext>,
     full: bool,
@@ -3541,6 +3579,7 @@ fn block_view(
             content,
             time,
             content_width,
+            row_cap,
             handlers,
             selection,
             full,
@@ -3555,6 +3594,7 @@ fn block_view(
             content,
             time,
             content_width,
+            row_cap,
             handlers,
             selection,
             full,
@@ -3565,13 +3605,13 @@ fn block_view(
             .flex()
             .flex_col()
             .min_w_0()
+            .w_full()
             // A plan card is a row that draws outside the turn's card, so it
-            // takes the same two thirds cap as a message (#2969). Left alone it
-            // ran the pane edge to edge, which is what made a finished plan
-            // read as another band across the conversation.
-            .when(content_width > 0.0, |d| {
-                d.max_w(px(message_max_width(content_width)))
-            })
+            // takes the same cap as a message (#2969): two thirds in a
+            // single-pane window, the pane's own width in a split (#2978).
+            // Left alone it ran the pane edge to edge, which is what made a
+            // finished plan read as another band across the conversation.
+            .when(row_cap > 0.0, |d| d.max_w(px(row_cap)))
             .child(crate::plan_strip::completed_plan_card(
                 *message_id,
                 plan,
@@ -3705,6 +3745,7 @@ fn live_block(
     drag: Option<&Rc<CopyDrag>>,
     block: &Block,
     content_width: f32,
+    row_cap: f32,
     handlers: &HashMap<String, ClickHandler>,
 ) -> Option<AnyElement> {
     let text = block_text(block);
@@ -3719,7 +3760,14 @@ fn live_block(
         selectable_row(
             d,
             ordinal,
-            block_view(block, content_width, handlers, Some(&selection), true),
+            block_view(
+                block,
+                content_width,
+                row_cap,
+                handlers,
+                Some(&selection),
+                true,
+            ),
         )
         .into_any_element(),
     )
@@ -3775,6 +3823,7 @@ fn live_row_body(
     drag: Option<&Rc<CopyDrag>>,
     block: &Block,
     content_width: f32,
+    row_cap: f32,
     handlers: &HashMap<String, ClickHandler>,
     edit_row: Option<&InlineEditView>,
 ) -> AnyElement {
@@ -3785,9 +3834,9 @@ fn live_row_body(
     // text has to copy like any other: while the transcript is short of a
     // finished turn the live card is the only copy of the answer the user can
     // see, so it is the only copy there is to drag.
-    match live_block(drag, block, content_width, handlers) {
+    match live_block(drag, block, content_width, row_cap, handlers) {
         Some(row) => row,
-        None => block_view(block, content_width, handlers, None, true).into_any_element(),
+        None => block_view(block, content_width, row_cap, handlers, None, true).into_any_element(),
     }
 }
 
@@ -3876,6 +3925,7 @@ fn live_user_row(
 fn live_view(
     live: &LiveTurn,
     content_width: f32,
+    row_cap: f32,
     expanded: bool,
     ctx: (Option<u32>, u32),
     live_click: Option<&ClickHandler>,
@@ -3907,6 +3957,7 @@ fn live_view(
                 drag,
                 &block,
                 content_width,
+                row_cap,
                 handlers,
                 edit_row,
             ),
@@ -3937,7 +3988,7 @@ fn live_view(
         };
         col = col.child(live_user_row(
             slot,
-            live_row_body(slot, drag, &block, content_width, handlers, edit_row),
+            live_row_body(slot, drag, &block, content_width, row_cap, handlers, edit_row),
             press.get(&LiveRow::User(slot)),
             edit.get(&slot),
         ));
@@ -3951,7 +4002,10 @@ fn live_view(
     // "OpenCrabs is thinking" over a spinner on a session that never sent
     // anything (#2895). The notices above still draw; the card does not.
     if live.has_turn_content() {
-        let card = live_card(live, expanded, ctx, drag, press, message_max_width(content_width));
+        // The live card is a row of the same conversation, so it takes the
+        // same cap the settled rows take: two thirds in a single-pane window,
+        // the pane's own width in a split (#2969, #2978).
+        let card = live_card(live, expanded, ctx, drag, press, row_cap);
         col = col.child(match live_click {
             Some(click) => {
                 let click = click.clone();
@@ -3969,9 +4023,10 @@ fn live_view(
             message_id: None,
             forward: None,
         };
-        col = col.child(match live_block(drag, &block, content_width, handlers) {
+        col = col.child(match live_block(drag, &block, content_width, row_cap, handlers) {
             Some(row) => row,
-            None => block_view(&block, content_width, handlers, None, true).into_any_element(),
+            None => block_view(&block, content_width, row_cap, handlers, None, true)
+                .into_any_element(),
         });
     }
     col
@@ -4977,10 +5032,18 @@ pub fn view(
     busy: bool,
     content_width: f32,
     rem_size: f32,
+    cap_rows: bool,
     mut handlers: HashMap<String, ClickHandler>,
     hooks: ViewHooks,
 ) -> Stateful<Div> {
     let content_width = transcript_content_width(content_width, rem_size);
+    // Two thirds is the single-pane rule (#2969). A split window hands each
+    // pane a share of the same width, so a pane is already the measure and its
+    // rows take the whole of it: two thirds of a half left a bubble a column
+    // one glyph wide, with the rest of the pane empty (#2978). A zero cap is
+    // the way every row says "no cap" without a second flag travelling beside
+    // it.
+    let row_cap = row_cap_for(content_width, cap_rows);
     let ViewHooks {
         attachments: attachment_handlers,
         drag,
@@ -5079,6 +5142,7 @@ pub fn view(
                 hidden: state.hidden,
             },
             content_width,
+            row_cap,
             &attachment_handlers,
             None,
             true,
@@ -5186,6 +5250,7 @@ pub fn view(
                         _ => block_view(
                             block,
                             content_width,
+                            row_cap,
                             &attachment_handlers,
                             Some(&selection),
                             full_body,
@@ -5194,7 +5259,14 @@ pub fn view(
                 }
                 _ => match block {
                     Block::Thinking { content } => thinking_block(content, full),
-                    _ => block_view(block, content_width, &attachment_handlers, None, full_body),
+                    _ => block_view(
+                        block,
+                        content_width,
+                        row_cap,
+                        &attachment_handlers,
+                        None,
+                        full_body,
+                    ),
                 },
             };
             // A stored row carries its own menu anchor and pick box (#2613).
@@ -5296,7 +5368,7 @@ pub fn view(
         }
         col = col.children(pre);
         if carded
-            && let Some(card) = settled_card(turn, folded, body, message_max_width(content_width))
+            && let Some(card) = settled_card(turn, folded, body, row_cap)
         {
             // The listener is per turn and used exactly here, so it is taken
             // out of the map instead of cloned.
@@ -5311,6 +5383,7 @@ pub fn view(
         col = col.child(live_view(
             live,
             content_width,
+            row_cap,
             state.live_expanded,
             (ctx_used, ctx_max),
             live_click.as_ref(),
@@ -5665,11 +5738,41 @@ mod tests {
         assert!(bubble.contains(".px(px(MESSAGE_PAD_X))"));
         assert!(bubble.contains(".py(px(MESSAGE_PAD_Y))"));
         assert!(bubble.contains("glass_fill(message_surface(role))"));
-        assert!(bubble.contains("message_max_width(content_width) - 2.0 * MESSAGE_PAD_X"));
+        assert!(bubble.contains("(max_width - 2.0 * MESSAGE_PAD_X).max(0.0)"));
         assert!(bubble.contains("history_attachments(&paths, attachment_width, handlers)"));
         const {
             assert!(USER_TEXT_SIZE > PLAIN_TEXT_SIZE);
         }
+    }
+
+    /// #2978: a split window's rows take the pane's whole width. The cap is a
+    /// single-pane rule, so the flag alone decides whether one is handed out:
+    /// two thirds of the planned width when the window is one pane, and no cap
+    /// at all when it is split, where the pane is already a share of the
+    /// window and capping it again left the bubble 64 px wide with its text
+    /// wrapped one glyph per line.
+    #[test]
+    fn a_split_row_takes_no_cap_and_a_single_pane_keeps_two_thirds() {
+        assert_eq!(
+            row_cap_for(600.0, true),
+            message_max_width(600.0),
+            "a single pane keeps the two thirds cap"
+        );
+        assert_eq!(
+            row_cap_for(600.0, true),
+            400.0,
+            "two thirds of the planned width, to the pixel"
+        );
+        assert_eq!(
+            row_cap_for(600.0, false),
+            0.0,
+            "a split hands out no cap, so the row keeps its own width"
+        );
+        assert_eq!(
+            row_cap_for(0.0, true),
+            0.0,
+            "an unmeasured window caps at nothing rather than going negative"
+        );
     }
 
     /// #2976: `max_w` and `max_w_full` are the same setter, both writing
@@ -5678,6 +5781,10 @@ mod tests {
     /// usable cap: a percentage max is ignored while a row is measured, so the
     /// column sized to max-content and painted one endless line. The cap must
     /// be the only max on that column, and a user row must not stretch it.
+    ///
+    /// #2978: the cap is the caller's, and it is absent in a split window,
+    /// where the row's own width is the measure. The column fills that width
+    /// either way, so the text wraps at the box actually painted.
     #[test]
     fn the_bubble_max_is_the_pixel_cap_and_nothing_after_it() {
         let src = include_str!("transcript.rs");
@@ -5686,7 +5793,8 @@ mod tests {
             .nth(1)
             .and_then(|rest| rest.split("/// A forwarded copy").next())
             .expect("message bubble renderer");
-        assert!(bubble.contains("max_w(px(message_max_width(content_width)))"));
+        assert!(bubble.contains(".w_full()"));
+        assert!(bubble.contains(".when(row_cap > 0.0, |d| d.max_w(px(row_cap)))"));
         // Comments in the body name the helper that used to follow the cap, so
         // the scan reads code lines only.
         let code = bubble

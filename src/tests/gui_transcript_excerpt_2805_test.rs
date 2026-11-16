@@ -96,7 +96,7 @@ fn a_folded_turn_bounds_working_out_without_cutting_the_answer() {
         "the selectable answer path receives the answer-aware fullness"
     );
     assert!(
-        view.contains("block_view(block, content_width, &attachment_handlers, None, full_body)"),
+        view.contains("&attachment_handlers,\n                        None,\n                        full_body,"),
         "the plain answer path receives the answer-aware fullness"
     );
     assert!(

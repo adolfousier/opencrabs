@@ -85,8 +85,8 @@ fn the_bubble_shrinks_horizontally_without_shrinking_attachments() {
         "the bubble can shrink below a planned width that exceeds its row"
     );
     assert!(
-        column.contains(".max_w_full()"),
-        "the bubble wraps at the column width instead of running past the pane"
+        column.contains(".w_full()"),
+        "the bubble wraps at the row width instead of running past the pane"
     );
     let strip = TRANSCRIPT
         .split("let mut strip = div()")
@@ -202,29 +202,40 @@ fn both_chrome_rows_clear_the_corner() {
 
 /// A percentage cap is ignored while the row's width is indefinite, which is
 /// exactly the narrow split pane: the bubble then sized to max-content and
-/// `justify_end` pushed its beginning out of the left edge. The pixel cap comes
-/// from the width the row was planned against, so no pass can ignore it
-/// (#2937).
+/// `justify_end` pushed its beginning out of the left edge (#2937). The row's
+/// own width is the measure instead: the column fills it and wraps there, and
+/// the only cap is a pixel one the caller passes (#2976, #2978).
 #[test]
 fn the_bubble_is_capped_in_pixels() {
     let bubble = body_after(TRANSCRIPT, "fn bubble(");
     assert!(
-        bubble.contains("d.max_w(px(message_max_width(content_width)))"),
-        "the bubble is capped in pixels, from the planned row width"
+        bubble.contains(".w_full()"),
+        "the bubble takes the width of the row it is painted into"
     );
-    let cap = bubble
-        .find("d.max_w(px(message_max_width(content_width)))")
-        .expect("the pixel cap is present");
-    let percent = bubble
-        .find(".max_w_full()")
-        .expect("the percentage cap stays as a second belt");
-    assert!(cap < percent, "the pixel cap is what holds in a tight pane");
+    assert!(
+        bubble.contains(".when(row_cap > 0.0, |d| d.max_w(px(row_cap)))"),
+        "the only cap is the pixel one the caller passes"
+    );
+    let code = bubble
+        .lines()
+        .map(|line| line.split_once("//").map_or(line, |(code, _)| code))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        !code.contains("max_w_full"),
+        "a percentage max would overwrite the pixel cap on the same field"
+    );
 }
 
-/// A row never fills the transcript (#2969). The cap is a fraction of the
-/// planned width, applied to the message bubble, the forwarded row, the
-/// settled turn card and the live one, so no row of any kind runs edge to
-/// edge and the widest one sets no rhythm for the rest.
+/// A row never fills the transcript in a single-pane window (#2969). The cap
+/// is a fraction of the planned width, applied to the message bubble, the
+/// forwarded row, the settled turn card and the live one, so no row of any
+/// kind runs edge to edge and the widest one sets no rhythm for the rest.
+///
+/// A split window is exempt (#2978): every pane there is already a share of
+/// the width, and two thirds of a half left a bubble a column one glyph wide
+/// with the rest of the pane empty. `view` passes a zero cap there, and a zero
+/// cap means the row keeps its own width.
 #[test]
 fn no_row_fills_the_transcript() {
     assert!(
@@ -236,6 +247,18 @@ fn no_row_fills_the_transcript() {
         helper.contains("content_width * MESSAGE_MAX_FRACTION"),
         "the cap is a fraction of the planned width, not a second number"
     );
+    let view = body_after(TRANSCRIPT, "pub fn view(");
+    assert!(
+        view.contains("let row_cap = row_cap_for(content_width, cap_rows);"),
+        "the cap is decided by the flag the caller passes, not by the width alone"
+    );
+    let helper = body_after(TRANSCRIPT, "fn row_cap_for(");
+    assert!(
+        helper.contains("if cap_rows {")
+            && helper.contains("message_max_width(content_width)")
+            && helper.contains("} else {\n        0.0\n    }"),
+        "a split window passes no cap at all, and a single pane passes two thirds"
+    );
     for (name, anchor) in [
         ("the bubble", "fn bubble("),
         ("the forwarded row", "fn forward_block("),
@@ -244,11 +267,16 @@ fn no_row_fills_the_transcript() {
     ] {
         let body = body_after(TRANSCRIPT, anchor);
         assert!(
-            body.contains("max_w(px(message_max_width(content_width)))")
-                || body.contains("max_w(px(max_width))"),
-            "{name} takes the two thirds cap"
+            body.contains(".when(row_cap > 0.0, |d| d.max_w(px(row_cap)))")
+                || body.contains(".when(max_width > 0.0, |d| d.max_w(px(max_width)))"),
+            "{name} takes the cap the caller passes, and no cap when there is none"
         );
     }
+    let plan = body_after(TRANSCRIPT, "fn block_view(");
+    assert!(
+        plan.contains(".when(row_cap > 0.0, |d| d.max_w(px(row_cap)))"),
+        "the finished plan card takes the same cap as the rows beside it"
+    );
 }
 
 /// The planned width is the transcript's outer measure, but its root spends

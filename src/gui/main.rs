@@ -2626,6 +2626,11 @@ impl Render for Dashboard {
                     self.turn.busy,
                     measure,
                     f32::from(window.rem_size()),
+                    // Two thirds is the single-pane rule (#2969). A split
+                    // window gives every pane its share of the width, so the
+                    // rows there take the whole pane and the cap is skipped
+                    // (#2978).
+                    !split_window,
                     fold_handlers,
                     transcript::ViewHooks {
                         attachments: attachment_handlers,
