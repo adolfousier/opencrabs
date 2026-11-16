@@ -416,6 +416,10 @@ impl RailView {
     ) -> Stateful<Div> {
         let id = row.card.id;
         let limit = if chips.expanded { chips.kids.len() } else { 3 };
+        // Read before the built chips shadow this list: only the expanded strip
+        // is bounded and scrollable (#2949). The collapsed card shows three
+        // chips and the pill, which fit one line.
+        let scrolling = chips.expanded && chips.kids.len() > 3;
         // Each chip is measured as it is built: the strip places the chips
         // itself so the first row can stop short of the pin while the rows
         // below keep the full card width (#2809).
@@ -450,7 +454,9 @@ impl RailView {
         }
         let hidden = chips.kids.len().saturating_sub(limit);
         if hidden > 0 {
-            let label = SharedString::from(format!("+{hidden}"));
+            // The chevron makes the pill read as a control rather than a
+            // count of what is already on screen (#2949).
+            let label = SharedString::from(format!("+{hidden} \u{25BE}"));
             let width = sessions::count_chip_width(window, &label);
             let expand = {
                 let link = self.dashboard.clone();
@@ -484,7 +490,7 @@ impl RailView {
             .into_iter()
             .map(|count| chips.by_ref().take(count).collect())
             .collect();
-        sessions::topic_chips(id, rows)
+        sessions::topic_chips(id, rows, scrolling)
     }
 
     /// The channel chip: the notice, the installer's error and the one action.
@@ -603,5 +609,60 @@ impl RailView {
             control = control.child(chips);
         }
         control.into_any_element()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    /// The overflow pill offers the expand, and only the expanded strip
+    /// scrolls (#2949). The flag reads the chip list before the built chips
+    /// shadow it: read after, it would measure a list that no longer exists.
+    #[test]
+    fn the_pill_offers_the_expand_and_the_expanded_strip_scrolls() {
+        let source = include_str!("rail_view.rs");
+        let strip = source
+            .split("fn chip_strip(")
+            .nth(1)
+            .expect("the chip strip")
+            .split("/// The channel chip")
+            .next()
+            .expect("the strip before the channel chip");
+        let scrolling_at = strip
+            .find("let scrolling =")
+            .expect("the strip reads the scroll flag");
+        let shadow_at = strip
+            .find("let mut chips = els.into_iter()")
+            .expect("the built chips shadow the list");
+        assert!(
+            scrolling_at < shadow_at,
+            "the flag reads the field, so it is computed before the shadow"
+        );
+        assert!(
+            strip.contains("chips.expanded && chips.kids.len() > 3"),
+            "only an expanded strip with more than one row scrolls"
+        );
+        assert!(
+            strip.contains("sessions::topic_chips(id, rows, scrolling)"),
+            "the strip is told whether to bound itself"
+        );
+        assert!(
+            strip.contains(r#"\u{25BE}"#),
+            "the pill carries the chevron that marks it as a control, not a count"
+        );
+        let expand = strip
+            .split("let expand = {")
+            .nth(1)
+            .expect("the pill's click handler")
+            .split("};")
+            .next()
+            .expect("the handler body");
+        assert!(
+            expand.contains("dash.rail_expand_chips(id, cx)"),
+            "the pill expands the strip when it is clicked"
+        );
+        assert!(
+            expand.contains("cx.stop_propagation();"),
+            "the pill never lets the click open the card behind it"
+        );
     }
 }

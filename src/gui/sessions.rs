@@ -1845,12 +1845,23 @@ pub fn pack_rows(widths: &[f32], gap: f32, first: f32, rest: f32) -> Vec<usize> 
     rows
 }
 
+/// The most an expanded strip draws before it scrolls (#2949). Eight chip rows
+/// and the gaps between them: past this the strip grows the card by its own
+/// height and pushes every card under it out of the rail.
+const CHIP_STRIP_MAX_REMS: f32 = 13.0;
+
 /// The chip strip under a parent card's title. The caller packs the chips into
 /// rows, so the first row can stop short of the pin while the rows below take
 /// the full card width (#2809). A row never holds one chip per line: the chips
 /// ride inline under the title, the way Telegram stacks its topics. The parent
-/// id keys the strip so two parents never share an element id.
-pub fn topic_chips(id: uuid::Uuid, rows: Vec<Vec<Stateful<Div>>>) -> Stateful<Div> {
+/// id keys the strip so two parents never share an element id. `scroll` bounds
+/// the strip and lets it scroll, which only the expanded state asks for
+/// (#2949).
+pub fn topic_chips(
+    id: uuid::Uuid,
+    rows: Vec<Vec<Stateful<Div>>>,
+    scroll: bool,
+) -> Stateful<Div> {
     let mut strip = div()
         .id(SharedString::from(format!("topic-chips-{id}")))
         .flex()
@@ -1858,6 +1869,13 @@ pub fn topic_chips(id: uuid::Uuid, rows: Vec<Vec<Stateful<Div>>>) -> Stateful<Di
         .gap_1()
         .w_full()
         .min_w_0();
+    // A collapsed card never scrolls: three chips and a pill fit one line. The
+    // expanded strip is capped instead (#2949), the way the icon picker is
+    // (#2824). Without the cap a card with 46 topics takes the whole rail and
+    // nothing can reach the rows under it.
+    if scroll {
+        strip = strip.max_h(rems(CHIP_STRIP_MAX_REMS)).overflow_y_scroll();
+    }
     for chips in rows {
         let mut line = div()
             .flex()
@@ -2363,8 +2381,8 @@ fn brand_header() -> Div {
 #[cfg(test)]
 mod tests {
     use super::{
-        Database, FindMatch, MenuKind, PlanFilter, RailChip, RailFilter, SessionsState,
-        accent_bar_visible, chip_order_key, chip_width_at, filter_is_active, fit,
+        CHIP_STRIP_MAX_REMS, Database, FindMatch, MenuKind, PlanFilter, RailChip, RailFilter,
+        SessionsState, accent_bar_visible, chip_order_key, chip_width_at, filter_is_active, fit,
         icon_write_needed, load_sessions, merge_find_results, pack_rows, palette, pin_mark,
         preview_line, rail_cost, rail_filter_allows, rail_menu_entries, rail_stamp, strip_budgets,
     };
@@ -2477,6 +2495,51 @@ mod tests {
         assert!(
             (focused - plain - 2.0).abs() < 0.001,
             "the focus ring is a pixel a side: {focused}"
+        );
+    }
+
+    /// Only the expanded strip is bounded and scrollable (#2949). A collapsed
+    /// card shows three chips and a pill, which fit one line, so it never
+    /// scrolls; an expanded card with 46 topics used to grow the rail until
+    /// every card under it was out of reach.
+    #[test]
+    fn only_the_expanded_strip_scrolls() {
+        let source = include_str!("sessions.rs");
+        let strip = source
+            .split("pub fn topic_chips(")
+            .nth(1)
+            .expect("chip strip renderer")
+            .split("pub fn row(")
+            .next()
+            .expect("strip source before the row renderer");
+        let gate = strip
+            .split("if scroll {")
+            .nth(1)
+            .expect("the strip bounds itself only when asked")
+            .split('}')
+            .next()
+            .expect("the gated block");
+        assert!(
+            gate.contains(".max_h(rems(CHIP_STRIP_MAX_REMS))"),
+            "the expanded strip is capped in rems, so it scales with the text"
+        );
+        assert!(
+            gate.contains(".overflow_y_scroll()"),
+            "the capped strip scrolls instead of clipping the rows it holds"
+        );
+        let before_gate = strip
+            .split("if scroll {")
+            .next()
+            .expect("the strip before the gate");
+        assert!(
+            !before_gate.contains("overflow_y_scroll()") && !before_gate.contains(".max_h("),
+            "the collapsed strip carries neither a cap nor a scroll container"
+        );
+        // Eight chip rows plus the gaps. Below this the window is too short to
+        // show a topic or two; above it the strip takes the rail back.
+        assert!(
+            (6.0..=30.0).contains(&CHIP_STRIP_MAX_REMS),
+            "the cap leaves a usable window of chips: {CHIP_STRIP_MAX_REMS} rems"
         );
     }
 
