@@ -2770,7 +2770,13 @@ fn thinking_block(content: &str, full: bool) -> Div {
 /// is a row in one list, with no panel of its own: a fill and a radius rounder
 /// than the card around it turned three bash calls into three widgets (#2639).
 fn tools_block(calls: &[ToolCall], selection: Option<&SelectionContext>) -> Div {
-    let mut col = div().flex().flex_col().gap_0p5().min_w_0();
+    // The list takes the card's width (#2977). A flex container with no width
+    // of its own measures its children with no definite width available, and
+    // gpui shapes text with no definite width as ONE line, so every call was
+    // drawn on a single row and clipped. The column and each row say their
+    // width out loud, so the text is measured against the room it is painted
+    // into and wraps there.
+    let mut col = div().flex().flex_col().gap_0p5().w_full().min_w_0();
     for call in calls {
         let (mark, color) = tool_mark(call);
         // The status mark is a glyph, not part of the copy text, so it is drawn
@@ -2780,10 +2786,13 @@ fn tools_block(calls: &[ToolCall], selection: Option<&SelectionContext>) -> Div 
             div()
                 .flex()
                 .flex_row()
+                .items_start()
                 .gap_1()
+                .w_full()
                 .min_w_0()
                 .child(
                     div()
+                        .flex_shrink_0()
                         .text_xs()
                         .text_color(rgb(color))
                         .child(SharedString::from(mark)),
@@ -2792,19 +2801,25 @@ fn tools_block(calls: &[ToolCall], selection: Option<&SelectionContext>) -> Div 
                 // against that width, so it wraps (#2977). Without a width of
                 // its own it sized to max-content, was shaped as one line, and
                 // the row clipped it. Three lines is where a command stops
-                // growing the card, with the ellipse carrying the rest.
+                // growing the card, with the ellipse carrying the rest. The
+                // segment carries the width too: the text is one flex item
+                // deep inside two containers, and each level that stays
+                // content sized hands the shaper no width at all.
                 .child(
                     div()
                         .flex_1()
                         .min_w_0()
                         .line_clamp(3)
-                        .child(selectable_styled_text(
-                            tool_line(call),
-                            small_style(SMALL_TEXT_SIZE, color),
-                            Vec::new(),
-                            &[],
-                            selection,
-                        )),
+                        .child(
+                            selectable_styled_text(
+                                tool_line(call),
+                                small_style(SMALL_TEXT_SIZE, color),
+                                Vec::new(),
+                                &[],
+                                selection,
+                            )
+                            .w_full(),
+                        ),
                 ),
         );
     }
@@ -3303,18 +3318,23 @@ fn live_card_line_text(line: &LiveCardLine) -> String {
 fn live_card_line(line: LiveCardLine, selection: Option<&SelectionContext>) -> AnyElement {
     match line {
         // The live card's tool row wraps like the settled one (#2977): three
-        // lines at the card's width, then the ellipse.
+        // lines at the card's width, then the ellipse. The segment carries the
+        // width as well, for the same reason the settled row does: a flex item
+        // measured with no definite width is shaped as one endless line.
         LiveCardLine::Tool { mark, color, text } => div()
             .w_full()
             .min_w_0()
             .line_clamp(3)
-            .child(selectable_styled_text(
-                format!("{mark} {text}"),
-                small_style(SMALL_TEXT_SIZE, color),
-                Vec::new(),
-                &[],
-                selection,
-            ))
+            .child(
+                selectable_styled_text(
+                    format!("{mark} {text}"),
+                    small_style(SMALL_TEXT_SIZE, color),
+                    Vec::new(),
+                    &[],
+                    selection,
+                )
+                .w_full(),
+            )
             .into_any_element(),
         LiveCardLine::Narration(text) => md_block(
             &text,
