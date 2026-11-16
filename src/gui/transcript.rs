@@ -6439,9 +6439,17 @@ mod tests {
     /// Both card states use the vector arrow instead of a tiny text triangle.
     #[test]
     fn the_fold_header_uses_the_vector_disclosure_arrow() {
+        // Read the file up to its own test module. The whole-file scan counted
+        // this assertion's own needle as a third call site and found
+        // `fn fold_chevron(` inside the line that forbids it, so the pin
+        // failed on itself instead of on the card (#2998).
         let source = include_str!("transcript.rs");
-        assert_eq!(source.matches("disclosure_icon(").count(), 3);
-        assert!(!source.contains("fn fold_chevron("));
+        let body = source
+            .split("\n#[cfg(test)]\nmod tests")
+            .next()
+            .expect("the test module marker is still in the file");
+        assert_eq!(body.matches("disclosure_icon(").count(), 2);
+        assert!(!body.contains("fn fold_chevron("));
     }
 
     /// #2323: the timer used to vanish on every settled turn because the
