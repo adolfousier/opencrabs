@@ -26,8 +26,8 @@ pub fn banner_logo() -> impl IntoElement {
         ImageFormat::Png,
         LOGO_PNG.to_vec(),
     )))
-    .w(rems(1.75))
-    .h(rems(1.75))
+    .w(rems(1.5))
+    .h(rems(1.5))
     .rounded(px(5.0))
     .object_fit(ObjectFit::Cover)
 }

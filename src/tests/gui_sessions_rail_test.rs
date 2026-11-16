@@ -264,15 +264,15 @@ fn collapsed_rail_keeps_the_logo_above_a_working_reopen_button() {
         "the thin rail has no expanded text label"
     );
     assert!(
-        SESSIONS.contains("pub const COLLAPSED_RAIL_REM: f32 = 2.25;"),
-        "the 28px icon has only 4px of horizontal space on either side"
+        SESSIONS.contains("pub const COLLAPSED_RAIL_REM: f32 = 2.0;"),
+        "the 24px icon has only 4px of horizontal space on either side"
     );
 
     let icon = block(ICON, "pub fn banner_logo()", "/// The pencil");
     for needle in [
         "LOGO_PNG.to_vec()",
-        ".w(rems(1.75))",
-        ".h(rems(1.75))",
+        ".w(rems(1.5))",
+        ".h(rems(1.5))",
         ".rounded(px(5.0))",
         ".object_fit(ObjectFit::Cover)",
     ] {

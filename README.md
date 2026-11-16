@@ -783,7 +783,7 @@ The window runs the terminal's whole slash-command surface, not a subset, and ad
 
 `/whisper` installs and launches the same WhisperCrabs binary the terminal uses (the install path is not reimplemented here), and `/cowork` composes the tool turn, so neither one asks the model to guess at a shell command.
 
-`ctrl+k` opens the command palette: every command the window knows, plus every channel, session, skill and screen, filtered as you type. `ctrl+g` opens the session files browser. Picking a row and pressing the key land in the same place, because the palette routes through the same toggles. The chat, usage and files footers name the Seeker door and `ctrl+s · sidebar`, so both are discoverable without reading anything. Both sidebar states use the same filled OpenCrabs app icon with 5px rounded corners. Closing the sidebar leaves a 36px rail with that icon above a reopen button; session rows, filters and the resize handle stay hidden until the rail expands again.
+`ctrl+k` opens the command palette: every command the window knows, plus every channel, session, skill and screen, filtered as you type. `ctrl+g` opens the session files browser. Picking a row and pressing the key land in the same place, because the palette routes through the same toggles. The chat, usage and files footers name the Seeker door and `ctrl+s · sidebar`, so both are discoverable without reading anything. Both sidebar states use the same 24px filled OpenCrabs app icon with 5px rounded corners. Closing the sidebar leaves a 32px rail with that icon above a reopen button; session rows, filters and the resize handle stay hidden until the rail expands again.
 
 #### Skills screen
 
