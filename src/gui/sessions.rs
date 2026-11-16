@@ -1445,17 +1445,20 @@ fn placeholder_colour(id: uuid::Uuid) -> u32 {
     PLACEHOLDER_COLOURS[index]
 }
 
-/// A same-size avatar for a session with neither stored artwork nor a platform
-/// mark. Reserving this slot keeps every title on the same vertical rhythm.
+/// A same-size rounded square for a session with neither stored artwork nor a
+/// platform mark. The explicit flex display makes the alignment center the one
+/// initial instead of leaving it at the content edge of a block container.
 fn initial_placeholder(id: uuid::Uuid, label: &str) -> AnyElement {
     let base = placeholder_colour(id);
     let highlight = gui_theme::mix(base, 0xffffff, 18, 100);
     div()
+        .flex()
         .flex_none()
         .size(rems(RAIL_MARK_REMS))
-        .rounded_full()
+        .rounded_md()
         .items_center()
         .justify_center()
+        .text_center()
         .bg(linear_gradient(
             135.0,
             linear_color_stop(rgb(highlight), 0.0),

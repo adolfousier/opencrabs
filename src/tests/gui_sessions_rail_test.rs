@@ -119,16 +119,31 @@ fn rail_card_media_is_large_dual_and_the_title_is_bold() {
         "/// The card's quiet stamp",
     );
     for needle in [
+        ".flex()",
         ".size(rems(RAIL_MARK_REMS))",
-        ".rounded_full()",
+        ".rounded_md()",
+        ".items_center()",
+        ".justify_center()",
+        ".text_center()",
         "placeholder_colour(id)",
         "placeholder_initial(label)",
     ] {
         assert!(
             placeholder.contains(needle),
-            "the fallback is a stable, colored, same-size initials circle: {needle}"
+            "the fallback is a centered initial inside a stable rounded square: {needle}"
         );
     }
+    assert!(
+        !placeholder.contains(".rounded_full()"),
+        "the session placeholder is a rounded square, not a circle"
+    );
+    assert_eq!(
+        placeholder
+            .matches(".child(SharedString::from(placeholder_initial(label)))")
+            .count(),
+        1,
+        "exactly one initial is mounted inside the placeholder"
+    );
     assert!(
         !media.contains(".when_some(platform_mark,") && !media.contains(".gap_2()"),
         "the side-by-side double-icon group is gone"
