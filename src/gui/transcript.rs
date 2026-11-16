@@ -16,6 +16,7 @@
 //! Phase-0 lessons still bind: 4 MB fetch thread, no migrations, char-safe
 //! truncation everywhere (#2271).
 
+use super::icon::disclosure_icon;
 use crate::palette;
 use crate::topic_icons;
 use opencrabs::services::message::{CompletedPlanPayload, PLAN_COMPLETED_ROLE, TURN_STOPPED_ROLE};
@@ -2823,12 +2824,6 @@ fn tool_ledger_text(calls: &[ToolCall]) -> String {
         .join("\n")
 }
 
-/// The chevron a fold header leads with: right when the turn is collapsed,
-/// down when it is open.
-fn fold_chevron(folded: bool) -> &'static str {
-    if folded { "\u{25B8}" } else { "\u{25BE}" }
-}
-
 /// The card a settled turn draws, the live card's own frame (#2632): one
 /// rounded box holding the head row, the working-out rows when the turn is
 /// open, and the footer that keeps the count, the ctx and the clock after the
@@ -2861,9 +2856,7 @@ fn settled_card(
             div()
                 .flex_shrink_0()
                 .w(px(16.0))
-                .text_base()
-                .text_color(rgb(accent))
-                .child(SharedString::from(fold_chevron(folded))),
+                .child(disclosure_icon(!folded, accent, 1.0)),
         )
         .child(
             div()
@@ -3405,9 +3398,7 @@ fn live_card(
             div()
                 .flex_shrink_0()
                 .w(px(16.0))
-                .text_base()
-                .text_color(rgb(palette::current().accent))
-                .child(SharedString::from(fold_chevron(!expanded))),
+                .child(disclosure_icon(expanded, palette::current().accent, 1.0)),
         )
         .child(
             div()
@@ -6221,11 +6212,12 @@ mod tests {
         assert!(turns[0].header.is_none());
     }
 
-    /// The chevron alone carries the disclosure state in both directions.
+    /// Both card states use the vector arrow instead of a tiny text triangle.
     #[test]
-    fn the_fold_chevron_tracks_the_body() {
-        assert_eq!(fold_chevron(true), "\u{25B8}");
-        assert_eq!(fold_chevron(false), "\u{25BE}");
+    fn the_fold_header_uses_the_vector_disclosure_arrow() {
+        let source = include_str!("transcript.rs");
+        assert_eq!(source.matches("disclosure_icon(").count(), 3);
+        assert!(!source.contains("fn fold_chevron("));
     }
 
     /// #2323: the timer used to vanish on every settled turn because the

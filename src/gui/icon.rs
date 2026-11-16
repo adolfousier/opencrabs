@@ -81,6 +81,33 @@ pub fn copy_icon(colour: u32, size: f32) -> impl IntoElement {
     .object_fit(ObjectFit::Contain)
 }
 
+/// A full-size vector disclosure arrow. Text triangles leave most of their
+/// glyph box empty and render as tiny specks; these rounded strokes use the
+/// whole 24-pixel viewBox, like the disclosure control on Telegram.
+fn disclosure_svg(expanded: bool, colour: u32) -> Vec<u8> {
+    let path = if expanded {
+        r#"<path d="m6 9 6 6 6-6"/>"#
+    } else {
+        r#"<path d="m9 6 6 6-6 6"/>"#
+    };
+    format!(
+        r#"<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 24 24" fill="none" stroke="#{colour:06x}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">{path}</svg>"#
+    )
+    .into_bytes()
+}
+
+/// The disclosure arrow in `colour`, sized in rems.
+pub fn disclosure_icon(expanded: bool, colour: u32, size: f32) -> impl IntoElement {
+    img(std::sync::Arc::new(Image::from_bytes(
+        ImageFormat::Svg,
+        disclosure_svg(expanded, colour),
+    )))
+    .w(rems(size))
+    .h(rems(size))
+    .flex_none()
+    .object_fit(ObjectFit::Contain)
+}
+
 /// Set the Dock icon from the embedded `.icns`. macOS only: the Dock is an
 /// AppKit concept, and the ugly "exec" block is macOS's generic-executable
 /// icon. Runs on the main thread, right after `Application::run` starts.
@@ -108,3 +135,22 @@ pub fn apply_dock_icon() {
 /// Non-macOS: no Dock, nothing to set. The banner logo still shows.
 #[cfg(not(target_os = "macos"))]
 pub fn apply_dock_icon() {}
+
+#[cfg(test)]
+mod tests {
+    use super::disclosure_svg;
+
+    #[test]
+    fn the_disclosure_arrow_is_a_full_size_rounded_vector() {
+        let collapsed = String::from_utf8(disclosure_svg(false, 0x12ab34)).unwrap();
+        let expanded = String::from_utf8(disclosure_svg(true, 0x12ab34)).unwrap();
+        assert!(collapsed.contains(r#"<path d="m9 6 6 6-6 6"/>"#));
+        assert!(expanded.contains(r#"<path d="m6 9 6 6 6-6"/>"#));
+        for svg in [collapsed, expanded] {
+            assert!(svg.contains("stroke=\"#12ab34\""));
+            assert!(svg.contains("stroke-width=\"2.2\""));
+            assert!(svg.contains("stroke-linecap=\"round\""));
+            assert!(svg.contains("viewBox=\"0 0 24 24\""));
+        }
+    }
+}
