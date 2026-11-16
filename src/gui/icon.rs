@@ -81,9 +81,18 @@ pub fn copy_icon(colour: u32, size: f32) -> impl IntoElement {
     .object_fit(ObjectFit::Contain)
 }
 
+/// GPUI 0.2.2 decodes an in-memory SVG to RGBA but uploads it as BGRA. Its
+/// other image formats swap the red and blue channels first; the SVG arm does
+/// not. Cancel that swap here so the colour the caller passes is the colour
+/// the window paints instead of turning orange accents blue.
+fn gpui_svg_colour(colour: u32) -> u32 {
+    (colour & 0x00ff00) | ((colour & 0xff0000) >> 16) | ((colour & 0x0000ff) << 16)
+}
+
 /// Telegram's disclosure control: one rounded, full-size downward chevron.
 /// The control opens and closes the card; it does not change direction.
 fn disclosure_svg(colour: u32) -> Vec<u8> {
+    let colour = gpui_svg_colour(colour);
     format!(
         r##"<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 24 24" fill="none"><path d="m6 9 6 6 6-6" stroke="#{colour:06x}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>"##
     )
@@ -139,7 +148,8 @@ mod tests {
         let svg = String::from_utf8(disclosure_svg(0x12ab34)).unwrap();
         assert!(svg.contains(r#"d="m6 9 6 6 6-6""#));
         assert!(!svg.contains(r#"d="m9 6 6 6-6 6""#));
-        assert!(svg.contains("stroke=\"#12ab34\""));
+        // GPUI uploads SVG without its usual RGBA-to-BGRA conversion.
+        assert!(svg.contains("stroke=\"#34ab12\""));
         assert!(svg.contains("stroke-width=\"2.2\""));
         assert!(svg.contains("stroke-linecap=\"round\""));
         assert!(svg.contains("viewBox=\"0 0 24 24\""));
