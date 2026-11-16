@@ -549,9 +549,18 @@ fn selected_topic_keeps_the_parent_card_focused() {
         chip.contains("gui_theme::mix(pal.track, pal.accent, 40, 100)"),
         "the active topic border is 40% accent, not full-strength"
     );
+    let focused_style = chip
+        .split("if selected {")
+        .nth(1)
+        .and_then(|rest| rest.split("if let Some(glyph)").next())
+        .expect("focused chip style");
     assert!(
-        chip.contains(".px_2p5()") && chip.contains(".py_1()"),
-        "the active topic has extra padding so the ring is not flush"
+        focused_style.contains(".px_2p5()"),
+        "the active topic keeps horizontal space inside the ring"
+    );
+    assert!(
+        focused_style.contains(".py_0p5()") && !focused_style.contains(".py_1()"),
+        "the active topic uses the standard 2px vertical padding"
     );
     assert!(
         !chip.contains(".border_2()") && !chip.contains(".box_shadow("),
