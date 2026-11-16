@@ -334,15 +334,22 @@ impl SessionsState {
         self.rail_target()
     }
 
-    /// Whether a card owns the open conversation (#3006). Opening All selects
-    /// the parent itself; opening a topic selects its child id, so the direct
-    /// parent keeps the same accent bar. Cursor is deliberately not an input.
-    pub fn card_selected(&self, id: uuid::Uuid) -> bool {
-        self.selected == Some(id)
-            || self
-                .selected
+    /// Whether a card owns the focused conversation (#3006). Focusing All
+    /// names the parent itself; focusing a topic names its child id, so the
+    /// direct parent keeps the same accent bar. Cursor is not an input.
+    pub fn card_selected(&self, id: uuid::Uuid, focused: Option<uuid::Uuid>) -> bool {
+        focused == Some(id)
+            || focused
                 .and_then(|selected| self.parents.get(&selected))
                 .is_some_and(|parent| *parent == id)
+    }
+
+    /// Whether a topic chip owns the focused pane (#3006). The chat leaf's
+    /// stored selection is deliberately absent: in a split it names another
+    /// pane as soon as the caret moves. The rail cursor remains a separate
+    /// keyboard preview mark.
+    pub fn chip_selected(&self, id: uuid::Uuid, focused: Option<uuid::Uuid>) -> bool {
+        focused == Some(id) || self.cursor == Some(id)
     }
 
     /// Which conversation owns a parent card's activity/preview line (#2804).
@@ -3643,7 +3650,7 @@ mod tests {
     /// #3006: All and every child topic keep their owning card focused.
     /// A sibling topic and an unrelated parent never inherit that state.
     #[test]
-    fn card_selection_covers_all_and_only_the_open_topics_parent() {
+    fn card_selection_covers_all_and_only_the_focused_topics_parent() {
         let parent = uuid::Uuid::from_u128(101);
         let topic = uuid::Uuid::from_u128(102);
         let sibling = uuid::Uuid::from_u128(103);
@@ -3656,23 +3663,57 @@ mod tests {
             (other_topic, other_parent),
         ]);
 
-        state.selected = Some(parent);
-        assert!(state.card_selected(parent), "All selects the parent");
-        assert!(!state.card_selected(other_parent));
+        assert!(
+            state.card_selected(parent, Some(parent)),
+            "All selects the parent"
+        );
+        assert!(!state.card_selected(other_parent, Some(parent)));
 
-        state.selected = Some(topic);
-        assert!(state.card_selected(parent), "the topic's parent stays lit");
-        assert!(state.card_selected(topic), "the open topic stays selected");
-        assert!(!state.card_selected(sibling), "a sibling does not light");
-        assert!(!state.card_selected(other_parent));
+        assert!(
+            state.card_selected(parent, Some(topic)),
+            "the topic's parent stays lit"
+        );
+        assert!(
+            state.card_selected(topic, Some(topic)),
+            "the focused topic stays selected"
+        );
+        assert!(
+            !state.card_selected(sibling, Some(topic)),
+            "a sibling does not light"
+        );
+        assert!(!state.card_selected(other_parent, Some(topic)));
 
-        state.selected = Some(other_topic);
-        assert!(state.card_selected(other_parent));
-        assert!(!state.card_selected(parent));
+        assert!(state.card_selected(other_parent, Some(other_topic)));
+        assert!(!state.card_selected(parent, Some(other_topic)));
 
-        state.selected = None;
-        assert!(!state.card_selected(parent));
-        assert!(!state.card_selected(other_parent));
+        assert!(!state.card_selected(parent, None));
+        assert!(!state.card_selected(other_parent, None));
+    }
+
+    /// #3006: a split can show several topics from one parent. The focused
+    /// chip ring follows the caret; the chat leaf's stored selection must not
+    /// pin the first topic after focus moves.
+    #[test]
+    fn chip_selection_follows_the_focused_split_pane() {
+        let parent = uuid::Uuid::from_u128(101);
+        let first = uuid::Uuid::from_u128(102);
+        let second = uuid::Uuid::from_u128(103);
+        let mut state = SessionsState::default();
+        state.parents.extend([(first, parent), (second, parent)]);
+        state.selected = Some(first);
+
+        assert!(state.chip_selected(first, Some(first)));
+        assert!(!state.chip_selected(second, Some(first)));
+
+        assert!(!state.chip_selected(first, Some(second)));
+        assert!(state.chip_selected(second, Some(second)));
+        assert!(!state.chip_selected(first, None));
+
+        state.cursor = Some(first);
+        assert!(
+            state.chip_selected(first, Some(second)),
+            "the keyboard cursor keeps its independent preview mark"
+        );
     }
 
     /// The bar is the open conversation's mark, never the cursor's: all

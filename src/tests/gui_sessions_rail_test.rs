@@ -524,8 +524,16 @@ fn rail_pin_toggles_without_opening_the_card() {
 fn selected_topic_keeps_the_parent_card_focused() {
     let rows = block(DASH_RAIL, "for s in rail_order {", "let footer =");
     assert!(
-        rows.contains("let selected = self.sessions.card_selected(id);"),
-        "card focus resolves both All and a selected child topic"
+        rows.contains("let selected = self.sessions.card_selected(id, focused_session);"),
+        "card focus resolves both All and the focused child topic"
+    );
+    assert!(
+        rows.contains("selected: self.sessions.chip_selected(kid.id, focused_session),"),
+        "the chip reads the pane holding the caret, not the stored chat selection"
+    );
+    assert!(
+        DASH_RAIL.contains("let focused_session = self.split_focus().or(self.chat_session);"),
+        "split focus falls back to the chat leaf in a single conversation"
     );
     assert!(
         !rows.contains("let selected = self.sessions.selected == Some(id);"),

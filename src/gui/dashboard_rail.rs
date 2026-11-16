@@ -667,6 +667,10 @@ impl Dashboard {
         } else {
             Vec::new()
         };
+        // Focus follows the pane holding the caret, not only the chat leaf.
+        // Without this, the first topic opened in a split keeps the rail ring
+        // after another pane takes focus (#3006).
+        let focused_session = self.split_focus().or(self.chat_session);
         let mut rows: Vec<rail_view::RailRow> = Vec::with_capacity(rail_order.len());
         for s in rail_order {
             let id = s.id;
@@ -674,7 +678,7 @@ impl Dashboard {
             if chip_children.contains(&id) {
                 continue;
             }
-            let selected = self.sessions.card_selected(id);
+            let selected = self.sessions.card_selected(id, focused_session);
             let cursored = self.sessions.cursor == Some(id);
             let favorite = self.sessions.is_favorite(id);
             let indented = indented_ids.contains(&id);
@@ -710,8 +714,7 @@ impl Dashboard {
                                 id: kid.id,
                                 title: SharedString::from(kid.title.clone()),
                                 mark,
-                                selected: self.sessions.selected == Some(kid.id)
-                                    || self.sessions.cursor == Some(kid.id),
+                                selected: self.sessions.chip_selected(kid.id, focused_session),
                                 plan: plan_progress.get(&kid.id).copied(),
                             }
                         })
