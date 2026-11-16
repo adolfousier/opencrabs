@@ -578,6 +578,33 @@ fn an_unfocused_composer_is_dimmed_and_hands_the_keyboard_back() {
     );
 }
 
+/// #3003: the dim composer wraps its draft exactly as the focused field does.
+///
+/// It used to truncate, and a truncate needs a definite width on the text child
+/// to draw its ellipsis. The child was a bare string, kept its max-content
+/// width, and the pane's clip cut the line mid-word instead. Taking the
+/// keyboard then wrapped the same text, so one draft had two shapes.
+#[test]
+fn an_unfocused_composer_wraps_its_draft_instead_of_clipping_it() {
+    let dim = flat(pane_composer_dim());
+    assert!(
+        !dim.contains(".truncate()"),
+        "a truncated draft cannot wrap, and its ellipsis never draws (#3003)"
+    );
+    assert!(
+        dim.contains(".overflow_hidden()"),
+        "the draft is clipped at the pane's edge, not left to paint past it"
+    );
+    assert!(
+        dim.contains(".line_height(px(22.))"),
+        "the dim row takes the focused field's line box"
+    );
+    assert!(
+        dim.contains(".child(div().w_full().min_w_0().child(shown))"),
+        "the draft needs a width of its own before it can break at all"
+    );
+}
+
 #[test]
 fn a_leaf_draws_its_chrome_above_its_own_footer() {
     let walk = flat(PANE_VIEW);
