@@ -386,6 +386,7 @@ pub mod gui_message_copy_2750_test;
 pub mod gui_message_edit_2826_test;
 pub mod gui_message_reaction_2825_test;
 pub mod gui_message_select_2613_test;
+pub mod gui_middle_scroll_test;
 pub mod gui_modal_shell_test;
 pub mod gui_models_modal_layout_test;
 pub mod gui_overlay_layer_test;

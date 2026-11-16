@@ -4832,6 +4832,9 @@ pub struct ViewHooks {
     /// The wheel over the transcript, minted by the owning view so a tick up
     /// releases its follow and a tick down re-arms it (#2698).
     pub wheel: Option<ScrollHandler>,
+    /// Middle-click starts auto-scroll on this transcript (#2964). The owner
+    /// supplies its session so a split leaf cannot move the window's chat.
+    pub middle_click: Option<PressHandler>,
     /// Left click per stored message row, keyed by message id. Select mode
     /// mints one per row so a click toggles it; outside the mode the map is
     /// empty and every row stays inert (#2613).
@@ -4911,6 +4914,7 @@ pub fn view(
         attachments: attachment_handlers,
         drag,
         wheel,
+        middle_click,
         ctx_used,
         ctx_max,
         live_click,
@@ -4952,6 +4956,14 @@ pub fn view(
     // decides whether a tick releases its follow or gives it back (#2698).
     if let Some(wheel) = wheel {
         col = col.on_scroll_wheel(move |ev, window, cx| wheel(ev, window, cx));
+    }
+    // The scroll container owns this gesture, so a middle press on a row or
+    // on empty transcript space lands on the same anchor (#2964).
+    if let Some(middle_click) = middle_click {
+        col = col.on_mouse_down(MouseButton::Middle, move |ev, window, cx| {
+            middle_click(ev, window, cx);
+            cx.stop_propagation();
+        });
     }
     // A press on the transcript's background closes the open message menu
     // (#2613). Rows that handle their own press and the menu card itself stop

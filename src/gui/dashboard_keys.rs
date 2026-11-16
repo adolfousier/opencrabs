@@ -12,6 +12,10 @@ impl Dashboard {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // Any deliberate keyboard input retires pointer auto-scroll first. The
+        // key still reaches its normal owner, so Esc and page keys keep their
+        // existing behavior instead of being swallowed by the marker (#2964).
+        self.cancel_middle_scroll(cx);
         // The settings modal owns every key while it is open, on every screen
         // (#2878): an armed credential edit must not leak a typed character
         // into the composer, and the rows' arrows belong to the modal alone.

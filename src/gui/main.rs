@@ -60,6 +60,7 @@ mod markdown;
 mod menu;
 mod mission_control;
 mod mission_control_view;
+mod middle_scroll;
 mod modal_shell;
 mod model_fetch;
 mod model_picker;
@@ -1123,6 +1124,13 @@ struct Dashboard {
     /// it on every frame. Written in exactly one place, `set_chat_session`, so
     /// it cannot drift from the owner it mirrors.
     chat_session: Option<Uuid>,
+    /// The one middle-click auto-scroll gesture in this window (#2964). Its
+    /// target owns the scroll state; this value owns only pointer and timing.
+    middle_scroll: Option<middle_scroll::MiddleScroll>,
+    /// Whether GPUI already has the next auto-scroll frame queued. This stays
+    /// set through cancellation until that callback arrives, preventing a new
+    /// gesture from starting a second animation loop beside the old one.
+    middle_scroll_frame_pending: bool,
     /// When the first Ctrl+C armed the quit window (#2308). `None` means no
     /// press is waiting, and the next one only clears and arms again.
     ctrl_c_pending: Option<std::time::Instant>,
@@ -2076,6 +2084,9 @@ pub(crate) fn busy_repaint_due(tick: u64) -> bool {
 
 impl Render for Dashboard {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // Advance from whatever repaint came in. The animation receipt is
+        // cleared only by its own callback, not by an unrelated repaint.
+        self.tick_middle_scroll(cx);
         // Native alpha and the root's opacity are two halves of the same
         // setting (#2922). Change the platform mode only when it flips; the
         // opacity itself is cheap to paint on every frame.
@@ -2192,9 +2203,13 @@ impl Render for Dashboard {
         // tree is built so the snap lands in this frame's layout, and judged
         // from each viewport's own offset so a reader parked in history is
         // never yanked back down.
-        self.follow_chat();
+        if !self.middle_scroll_controls_chat() {
+            self.follow_chat();
+        }
         for session in self.panes.as_ref().map(|t| t.leaves()).unwrap_or_default() {
-            self.follow_pane(session, cx);
+            if !self.middle_scroll_controls_pane(session) {
+                self.follow_pane(session, cx);
+            }
         }
         // The rail is an overlay only while it holds the keys. A path that
         // focuses the composer directly (a drop, a pasted image, the
@@ -2530,6 +2545,16 @@ impl Render for Dashboard {
                 this.release_transcript_follow();
                 cx.notify();
             }));
+        let middle_click: transcript::PressHandler =
+            Rc::new(cx.listener(|this, ev: &MouseDownEvent, _window, cx| {
+                if let Some(session) = this.chat_session {
+                    this.middle_scroll_down(
+                        middle_scroll::MiddleScrollTarget::Chat(session),
+                        ev.position,
+                        cx,
+                    );
+                }
+            }));
 
         // The transcript plans its attachment tiles from the width the pane
         // actually has, read from the live viewport rather than a constant, so
@@ -2606,6 +2631,7 @@ impl Render for Dashboard {
                         attachments: attachment_handlers,
                         drag: Some(self.copy_drag.clone()),
                         wheel: Some(wheel),
+                        middle_click: Some(middle_click),
                         ctx_used: self.turn.ctx_tokens,
                         ctx_max: self.ctx_max,
                         live_click: Some(live_click.clone()),
@@ -4435,7 +4461,17 @@ impl Render for Dashboard {
             // the platform font and would pin it.
             .font_family(fonts::current_ui())
             .track_focus(&self.focus)
+            // Capture exits even when a focused editor would consume the key
+            // before the dashboard's bubble handler sees it (#2964).
+            .capture_key_down(cx.listener(|this, _ev: &KeyDownEvent, _window, cx| {
+                this.cancel_middle_scroll(cx);
+            }))
             .on_key_down(cx.listener(Self::on_key))
+            // Capture sees the second middle-click before the marker's
+            // full-window hitbox, and every other press exits too (#2964).
+            .capture_any_mouse_down(cx.listener(|this, _ev: &MouseDownEvent, _window, cx| {
+                this.cancel_middle_scroll(cx);
+            }))
             // A context menu closes when its row is left alone: any left
             // press in the window dismisses it, the rail rows do the same
             // in their own press listener first (#2354).
@@ -4465,9 +4501,15 @@ impl Render for Dashboard {
                     this.close_composer_menus(cx);
                 }),
             )
+            // While the marker owns the hit test, the transcript never sees
+            // the wheel. The root still does, so the wheel exits cleanly.
+            .on_scroll_wheel(cx.listener(|this, _ev: &ScrollWheelEvent, _window, cx| {
+                this.cancel_middle_scroll(cx);
+            }))
             // The drag lives on the root so it survives the pointer leaving
             // the handle: a 4px column cannot track a fast drag on its own.
             .on_mouse_move(cx.listener(|this, ev: &MouseMoveEvent, _window, cx| {
+                this.move_middle_scroll(ev.position, cx);
                 if this.dragging_rail
                     && let Some((from_x, from_w)) = this.drag_from
                 {
@@ -5336,6 +5378,14 @@ impl Render for Dashboard {
         if self.settings_open {
             root = root.child(self.settings_modal(cx));
         }
+        // The auto-scroll marker is the final surface while active. It hides
+        // the cursor without taking pointer moves away from the window root.
+        if let Some(gesture) = self.middle_scroll.as_ref() {
+            root = root.child(middle_scroll::overlay(gesture));
+        }
+        // A stationary pointer still scrolls. Entering the dead zone lets the
+        // one outstanding animation callback drain out.
+        self.schedule_middle_scroll_frame(window, cx);
         root
     }
 }
@@ -5924,6 +5974,8 @@ fn main() {
                             follow: Follow::new(),
                         },
                         chat_session: initial_session,
+                        middle_scroll: None,
+                        middle_scroll_frame_pending: false,
                         ctrl_c_pending: None,
                         // Registered by `main` once the window exists: it needs
                         // a handle on this view to judge the press (#2308).

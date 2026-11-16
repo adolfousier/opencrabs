@@ -720,6 +720,8 @@ Prefer windows and buttons over the TUI? [MonoCode](https://github.com/hardbeat9
 
 A launch opens the conversation you were last in, on both surfaces, because the GUI and the terminal read and write the same `last_session` pointer. A first run, or a pointer at a conversation that has since been deleted, falls back to the newest session on the rail.
 
+Middle-click a transcript to start Telegram-style auto-scroll. The circular marker stays at the click point; pointer distance above or below it sets direction and speed, and scrolling continues while the pointer is stationary. This works independently in the main chat and split panes. Middle-click again, press another mouse button, use the wheel, or press a key to stop.
+
 Opening the window claims the profile the way the terminal does: whichever surface is running owns it, GUI, TUI or daemon, one at a time. The window therefore serves the channels and runs the scheduled jobs, so Telegram, Discord, Slack, WhatsApp and Trello answer while only the window is open, a scheduled job fires on time, and a key rotation or an allowlist edit reaches the running bots without a restart. A background instance holding the profile is shut down on start, exactly as the terminal already preempts the daemon, and the transcript names the process it took over.
 
 #### Composer drafts and history

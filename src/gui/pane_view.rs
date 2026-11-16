@@ -37,6 +37,7 @@ use crate::agent_bridge;
 use crate::chat_leaf;
 use crate::composer_view::{command_popup_view, emoji_popup_view, options_strip, queue_strip};
 use crate::editor;
+use crate::middle_scroll;
 use crate::palette;
 use crate::pane_chrome::{
     UNFOCUSED_PANE_OPACITY, drop_indicator, focus_ring_color, pane_composer_dim, pane_footer,
@@ -366,9 +367,9 @@ impl Render for PaneView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let weak = self.window.clone();
         let session = self.session;
-        // A second handle for the row pencils (#2826): the wheel closure below
-        // takes `weak` by move, and both are built in this same frame.
+        // Separate weak handles for the closures built in this same frame.
         let edit_window = self.window.clone();
+        let middle_window = self.window.clone();
         let wheel = move |ev: &ScrollWheelEvent, _window: &mut Window, cx: &mut App| {
             if !wheel_releases_follow(wheel_dy(&ev.delta)) {
                 return;
@@ -378,6 +379,17 @@ impl Render for PaneView {
                 cx.notify();
             });
         };
+        let middle_click: transcript::PressHandler = Rc::new(
+            move |ev: &MouseDownEvent, _window: &mut Window, cx: &mut App| {
+                let _ = middle_window.update(cx, |this, cx| {
+                    this.middle_scroll_down(
+                        middle_scroll::MiddleScrollTarget::Pane(session),
+                        ev.position,
+                        cx,
+                    );
+                });
+            },
+        );
         let Some(window) = self.window.upgrade() else {
             return div().into_any_element();
         };
@@ -635,6 +647,7 @@ impl Render for PaneView {
                 // `drag: None`.
                 drag: Some(self.copy_drag.clone()),
                 wheel: Some(Rc::new(wheel)),
+                middle_click: Some(middle_click),
                 live_click: Some(live_click),
                 older: Some(older_click),
                 // Every tile in this leaf opens its own file (#2914).
