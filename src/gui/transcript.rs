@@ -30,7 +30,7 @@ use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::ops::Range;
 use std::rc::Rc;
-use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 
 use gpui::{
     AbsoluteLength, AnyElement, App, ClickEvent, Div, HighlightStyle, MouseButton, MouseDownEvent,
@@ -81,6 +81,21 @@ const WINDOW: usize = 200;
 /// is what asks for the whole thing. A final or deliverable answer that stays
 /// visible in a folded turn always draws in full (#2855).
 const MSG_EXCERPT_LINES: usize = 20;
+
+/// Drop the blank lines a body ends on, before anything reads its length.
+///
+/// A stored body can carry hundreds of blank lines after its last line of
+/// text. Nothing draws them, but the row still lays them out, so the row ends
+/// on emptiness and a scroll pinned to its bottom shows the empty tail instead
+/// of the message. That is what the reader saw as a black chat (#2981), and it
+/// is why a turn card beside it kept painting: a card ends on its own content.
+///
+/// A blank line carries nothing, so dropping it costs the reader no text and
+/// hides no line behind the excerpt marker. Only the line terminators go: the
+/// last line that carries something keeps every byte of itself.
+fn without_trailing_blanks(content: &str) -> &str {
+    content.trim_end_matches(['\n', '\r'])
+}
 
 /// Cut a body at `max` lines and report how many lines were left out. The cut
 /// is always announced with its own count: a silent one reads as eaten content
@@ -2455,6 +2470,14 @@ fn bubble(
     // away, so `strip_markers` and the markdown parse only ever see the excerpt
     // instead of the tens of kilobytes a single stored row can carry. Answers
     // arrive with `full = true`; the copy path always reads the whole block.
+    //
+    // The blank run at the end goes before the cut either way. One stored body
+    // carried hundreds of blank lines after its last line of text, which draws
+    // a row whose bottom is empty, and a scroll pinned to that bottom shows the
+    // emptiness instead of the message. That is what the reader saw as a black
+    // chat (#2981). A blank line carries nothing, so dropping it costs the
+    // reader no text and hides no line behind the marker.
+    let content = without_trailing_blanks(content);
     let (content, hidden) = if full {
         (std::borrow::Cow::Borrowed(content), 0)
     } else {
@@ -2583,6 +2606,12 @@ fn forward_block(
     // pasted report is exactly the shape that made a frame expensive, so the
     // cut lands on the source before anything walks it. A forwarded answer
     // that the fold keeps visible still arrives here with `full = true`.
+    //
+    // The blank run at the end goes first, for the reason in
+    // `without_trailing_blanks`: a forwarded body is a stored body too, and a
+    // row that ends on empty lines shows its emptiness when the scroll sits at
+    // the bottom (#2981).
+    let content = without_trailing_blanks(content);
     let (content, hidden) = if full {
         (std::borrow::Cow::Borrowed(content), 0)
     } else {
@@ -5188,13 +5217,25 @@ pub fn row_reach(scroll: &ScrollHandle) -> RowReach {
 /// what let this run to ten attempts.
 pub fn witness_row_reach(reach: RowReach, turns: usize, content_width: f32) {
     static LAST: AtomicU8 = AtomicU8::new(u8::MAX);
+    // A transcript with turns in state and one row built still reads as
+    // `RowsInside` whenever that row reaches the box, so a change-only log
+    // wrote nothing through every occurrence of the black chat this line
+    // exists to name. Starvation is its own crossing, guarded separately so a
+    // surface that stays starved writes once rather than once per frame.
+    static STARVED: AtomicBool = AtomicBool::new(false);
     let frame = match reach.frame() {
         Frame::NoRows => 0u8,
         Frame::NoBox => 1,
         Frame::RowsAbove => 2,
         Frame::RowsInside => 3,
     };
-    if LAST.swap(frame, Ordering::Relaxed) == frame {
+    let changed = LAST.swap(frame, Ordering::Relaxed) != frame;
+    let starved = turns > 0 && reach.rows <= 1;
+    // The swap always runs: short-circuiting it would leave the flag latched on
+    // after the first occurrence, and the second one would write nothing.
+    let was_starved = STARVED.swap(starved, Ordering::Relaxed);
+    let entered_starved = starved && !was_starved;
+    if !changed && !entered_starved {
         return;
     }
     crate::logging::info(&format!(
@@ -8931,5 +8972,37 @@ mod tests {
             "the cut splits the emoji at byte {}",
             cut.len()
         );
+    }
+
+    #[test]
+    fn without_trailing_blanks_drops_the_empty_tail_and_keeps_the_text() {
+        // The shape that made a row end on emptiness (#2981): a body whose last
+        // line of text is followed by a long run of blank lines. Nothing in the
+        // run is drawn, but the row still laid it out, so a scroll at the
+        // bottom showed the tail instead of the message.
+        let tail = format!("the last line of the answer{}", "\n".repeat(300));
+        assert_eq!(
+            without_trailing_blanks(&tail),
+            "the last line of the answer",
+            "the blank run goes"
+        );
+
+        // A body that carries text keeps every byte of its last line, spaces
+        // included: only line terminators are dropped.
+        assert_eq!(
+            without_trailing_blanks("answer with trailing spaces   \n"),
+            "answer with trailing spaces   "
+        );
+
+        // Windows line endings lose both bytes of the terminator.
+        assert_eq!(without_trailing_blanks("answer\r\n\r\n"), "answer");
+
+        // Nothing to drop is not a reason to change anything.
+        assert_eq!(without_trailing_blanks("answer"), "answer");
+        assert_eq!(without_trailing_blanks(""), "");
+
+        // A body made only of blank lines has no last line to keep, so the
+        // whole run goes instead of leaving the emptiness behind.
+        assert_eq!(without_trailing_blanks("\n\n\n"), "");
     }
 }
