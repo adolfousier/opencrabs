@@ -2485,20 +2485,18 @@ fn bubble(
         .flex_col()
         .gap_1()
         .min_w_0()
-        // The column fills the row it is painted into (#2979). Without a width
-        // of its own the column sized to max-content, which made gpui shape the
-        // text as one endless line, or, measured against a width the row did
-        // not have, collapse to a single glyph. `w_full` makes the text wrap at
-        // the box actually painted, not at a number computed a frame earlier.
+        // The column declares no width of its own, which is the shape it had
+        // before the right-align work (#2935). The full-width declaration
+        // (#2979) was the one line that shape never had: a percentage width
+        // resolves against a parent whose width is still indefinite while the
+        // row is measured for a narrow pane, so it is the same hazard a
+        // percentage max carried (#2976), only in the other direction. A
+        // column that takes the row's width instead of its content can measure
+        // against a box the row never had, and a row measured that way wraps
+        // far taller than its text (#2981).
         //
-        // The max stays, and it has to be pixels: a percentage max resolves
-        // against a parent whose width is still indefinite while the row is
-        // measured, so it is ignored exactly where it matters. `max_w` and
-        // `max_w_full` also write the same field
-        // (`gpui-macros-0.2.2/src/styles.rs`, both land on `max_size.width`),
-        // so a percentage max after this line silently replaced the cap and
-        // handed the row back its max-content line (#2976).
-        .w_full()
+        // The cap is pixels and it stays: it resolves against the width the
+        // row was planned against, so no layout pass can ignore it.
         .when(row_cap > 0.0, |d| d.max_w(px(row_cap)))
         .px(px(MESSAGE_PAD_X))
         .py(px(MESSAGE_PAD_Y));
@@ -6173,8 +6171,13 @@ mod tests {
     /// be the only max on that column, and a user row must not stretch it.
     ///
     /// #2978: the cap is the caller's, and it is absent in a split window,
-    /// where the row's own width is the measure. The column fills that width
-    /// either way, so the text wraps at the box actually painted.
+    /// where the row's own width is the measure.
+    ///
+    /// #2981: the column must declare no width at all. #2979 added a
+    /// full-width declaration to it, a percentage width on a parent whose
+    /// width is still indefinite while the row is measured, and the row then
+    /// wrapped far taller than its text. The pre-#2935 shape had no width
+    /// declaration on this column and this test keeps it that way.
     #[test]
     fn the_bubble_max_is_the_pixel_cap_and_nothing_after_it() {
         let src = include_str!("transcript.rs");
@@ -6183,7 +6186,10 @@ mod tests {
             .nth(1)
             .and_then(|rest| rest.split("/// A forwarded copy").next())
             .expect("message bubble renderer");
-        assert!(bubble.contains(".w_full()"));
+        assert!(
+            !bubble.contains(".w_full()"),
+            "the bubble column takes its content width, never the row's"
+        );
         assert!(bubble.contains(".when(row_cap > 0.0, |d| d.max_w(px(row_cap)))"));
         // Comments in the body name the helper that used to follow the cap, so
         // the scan reads code lines only.
