@@ -2856,7 +2856,7 @@ fn settled_card(
             div()
                 .flex_shrink_0()
                 .w(px(16.0))
-                .child(disclosure_icon(!folded, accent, 1.0)),
+                .child(disclosure_icon(palette::current().accent, 1.0)),
         )
         .child(
             div()
@@ -3398,7 +3398,7 @@ fn live_card(
             div()
                 .flex_shrink_0()
                 .w(px(16.0))
-                .child(disclosure_icon(expanded, palette::current().accent, 1.0)),
+                .child(disclosure_icon(palette::current().accent, 1.0)),
         )
         .child(
             div()

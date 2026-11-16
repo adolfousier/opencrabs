@@ -283,7 +283,7 @@ impl PlanStripState {
                             div()
                                 .flex_shrink_0()
                                 .w(px(16.0))
-                                .child(disclosure_icon(expanded, color, 1.0)),
+                                .child(disclosure_icon(palette::current().accent, 1.0)),
                         )
                     })
                     .child(
@@ -823,8 +823,8 @@ mod tests {
         );
         assert!(
             body.contains(".when(index == 0")
-                && body.contains("disclosure_icon(expanded, color, 1.0)"),
-            "a full-size vector arrow leads only the plan summary row"
+                && body.contains("disclosure_icon(palette::current().accent, 1.0)"),
+            "Telegram's accent-coloured arrow leads only the plan summary row"
         );
         let row = body
             .split_once("col = col.child(")
