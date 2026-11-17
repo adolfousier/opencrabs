@@ -4115,11 +4115,14 @@ mod criteria_quote_tests {
                 CriteriaPolicy::Downgrade,
                 CriteriaPolicy::Off,
             ] {
-                let err = check(criterion, policy)
-                    .expect_err("a criterion no shell can lex is refused");
+                let err =
+                    check(criterion, policy).expect_err("a criterion no shell can lex is refused");
                 let msg = format!("{err}");
                 assert!(msg.contains("unbalanced"), "{criterion}: {msg}");
-                assert!(msg.contains(criterion), "{criterion}: {msg}");
+                // The refusal quotes the criterion the way Rust prints a string,
+                // so a criterion that carries a quote comes back escaped. Match
+                // that form rather than the raw text (#2852).
+                assert!(msg.contains(&format!("{criterion:?}")), "{criterion}: {msg}");
             }
         }
     }
@@ -4153,4 +4156,3 @@ mod criteria_quote_tests {
         assert_eq!(quote_imbalance("echo \"hi"), Some("double"));
     }
 }
-
