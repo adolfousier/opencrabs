@@ -3041,12 +3041,16 @@ fn image_format_extension(format: ImageFormat) -> &'static str {
 /// once would leave the message pointing at nothing.
 fn write_clipboard_image(image: &(ImageFormat, Vec<u8>)) -> Option<PathBuf> {
     let (format, bytes) = image;
+    // Nanoseconds and the process id, never milliseconds alone: two runs on
+    // one machine paste in the same millisecond, land on one name, and the
+    // first to clean up deletes the bytes the other one still reads (#3010).
     let stamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .ok()?
-        .as_millis();
+        .as_nanos();
     let path = std::env::temp_dir().join(format!(
-        "opencrabs-paste-{stamp}.{}",
+        "opencrabs-paste-{}-{stamp}.{}",
+        std::process::id(),
         image_format_extension(*format)
     ));
     std::fs::write(&path, bytes).ok()?;
@@ -3961,6 +3965,21 @@ mod tests {
             "a clipboard paste never writes into the checkout"
         );
         let _ = std::fs::remove_file(&path);
+    }
+
+    /// Two pastes in one millisecond must not share a path: the second write
+    /// would replace the first, and one cleanup would delete the bytes the
+    /// other side still reads (#3010).
+    #[test]
+    fn two_clipboard_pastes_land_on_two_paths() {
+        let bytes = b"\x89PNG\r\n\x1a\nfake".to_vec();
+        let first = write_clipboard_image(&(ImageFormat::Png, bytes.clone()))
+            .expect("the first paste reaches a file");
+        let second = write_clipboard_image(&(ImageFormat::Png, bytes))
+            .expect("the second paste reaches a file");
+        assert_ne!(first, second, "two pastes must not share one file");
+        let _ = std::fs::remove_file(&first);
+        let _ = std::fs::remove_file(&second);
     }
 
     /// The format the clipboard reports decides the suffix, so a browser
