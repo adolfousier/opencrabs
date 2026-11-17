@@ -1997,6 +1997,27 @@ mod sidebar_action_tests {
         assert!(body.contains("self.set_rail_open(open, cx)"));
         assert!(!body.contains("self.rail_open = !self.rail_open"));
     }
+
+    /// A drag-close takes the same transition as the toggle (#2845). The drag
+    /// used to write the flag directly, so a hidden filter, the open chip panel
+    /// and the keyboard focus all survived a rail that was no longer drawn, and
+    /// reopening with ctrl+s showed the stale filter.
+    #[test]
+    fn a_drag_close_takes_the_same_transition_as_the_toggle() {
+        let src = DASHBOARD;
+        // Assembled at run time: this module is part of the text it scans, and
+        // a contiguous literal here would match itself.
+        let direct = ["this.rail_open", "=", "false"].join(" ");
+        let transition = concat!("this.set_rail_open(", "false, cx);");
+        assert!(
+            !src.contains(&direct),
+            "a close path writes the rail flag directly instead of the transition"
+        );
+        assert!(
+            src.contains(transition),
+            "the drag close goes through set_rail_open"
+        );
+    }
 }
 
 /// How tall one wheel "line" is when the platform reports the tick in lines
@@ -4596,8 +4617,12 @@ impl Render for Dashboard {
                     let next = (from_w + dx) / this.rem;
                     if next < RAIL_MIN_REM {
                         // Dragged past the floor: close it, the same gesture
-                        // the owner asked for instead of leaving a sliver.
-                        this.rail_open = false;
+                        // the owner asked for instead of leaving a sliver. The
+                        // close goes through the one transition, so a hidden
+                        // filter, an open chip panel and the keyboard focus do
+                        // not outlive a rail that is no longer drawn (#2845).
+                        // A drag and ctrl+s now close the same way.
+                        this.set_rail_open(false, cx);
                         this.dragging_rail = false;
                         this.drag_from = None;
                     } else {
