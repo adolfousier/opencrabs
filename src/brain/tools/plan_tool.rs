@@ -4122,7 +4122,10 @@ mod criteria_quote_tests {
                 // The refusal quotes the criterion the way Rust prints a string,
                 // so a criterion that carries a quote comes back escaped. Match
                 // that form rather than the raw text (#2852).
-                assert!(msg.contains(&format!("{criterion:?}")), "{criterion}: {msg}");
+                assert!(
+                    msg.contains(&format!("{criterion:?}")),
+                    "{criterion}: {msg}"
+                );
             }
         }
     }
