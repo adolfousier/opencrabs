@@ -35,7 +35,7 @@ use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
 use gpui::{
     AbsoluteLength, AnyElement, App, ClickEvent, Div, HighlightStyle, MouseButton, MouseDownEvent,
     Pixels, Point, ScrollHandle, SharedString, Stateful, Styled, StyledText, TextLayout, TextStyle,
-    Window, div, point, prelude::*, px, rems, rgb, rgba,
+    Window, canvas, div, point, prelude::*, px, rems, rgb, rgba,
 };
 
 use opencrabs::db::Database;
@@ -5289,6 +5289,47 @@ pub fn row_reach(scroll: &ScrollHandle) -> RowReach {
     }
 }
 
+/// Measure the children's heights, newest last, in one pass over the bounds the
+/// container already refilled this frame.
+pub fn row_shape(scroll: &ScrollHandle) -> RowShape {
+    // The last child is the paint witness this same build appends, one pixel
+    // tall, so the shape is measured over the rows above it.
+    let rows = scroll.children_count().saturating_sub(1);
+    let mut shape = RowShape::default();
+    for ix in 0..rows {
+        if let Some(bounds) = scroll.bounds_for_item(ix) {
+            let height = f32::from(bounds.size.height);
+            shape.tallest = shape.tallest.max(height);
+            if height > 200.0 {
+                shape.tall += 1;
+            }
+            if ix + 3 >= rows {
+                let slot = rows.saturating_sub(1) - ix;
+                if slot < 3 {
+                    shape.tail[slot] = height;
+                }
+            }
+        }
+    }
+    shape
+}
+
+/// How the built rows are shaped, measured from the container's own children.
+///
+/// Heights, not positions: the reach already prints where the rows are, and a
+/// frame full of rows that are each one line tall cannot produce a black chat
+/// while a single row stretched over the whole surface can.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct RowShape {
+    /// The tallest child, in pixels.
+    pub tallest: f32,
+    /// How many children are taller than 200px, which is far past any single
+    /// line of prose and past the excerpt the transcript caps a settled card at.
+    pub tall: usize,
+    /// The heights of the last three children, newest first.
+    pub tail: [f32; 3],
+}
+
 /// One line when the frame the surface is showing changes (#2981).
 ///
 /// The listener runs on every frame the transcript paints, so it writes on the
@@ -5298,7 +5339,7 @@ pub fn row_reach(scroll: &ScrollHandle) -> RowReach {
 /// carried out of the box, or rows built at a width that cannot show anything.
 /// Those need four different fixes, and a report that arrives without them is
 /// what let this run to ten attempts.
-pub fn witness_row_reach(reach: RowReach, turns: usize, content_width: f32) {
+pub fn witness_row_reach(reach: RowReach, turns: usize, content_width: f32, rows: RowShape) {
     static LAST: AtomicU8 = AtomicU8::new(u8::MAX);
     // A transcript with turns in state and one row built still reads as
     // `RowsInside` whenever that row reaches the box, so a change-only log
@@ -5365,6 +5406,52 @@ pub fn witness_row_reach(reach: RowReach, turns: usize, content_width: f32) {
         reach.viewport_height(),
         reach.viewport_right - reach.viewport_left
     ));
+    // A row's box says where it paints; only its height says whether there is
+    // anything inside it. A card stretched to most of the surface and a card
+    // with one line of text are the same three words in the log above, and the
+    // difference is the whole bug.
+    let ink = palette::current();
+    crate::logging::info(&format!(
+        "transcript rows: tallest {:.1}px, {} over 200px, last three {:.1}/{:.1}/{:.1}px, \
+         ink {:#08x} on {:#08x}",
+        rows.tallest, rows.tall, rows.tail[0], rows.tail[1], rows.tail[2], ink.text, ink.bg
+    ));
+}
+
+/// Where the transcript's last child actually reaches the glass (#2981).
+///
+/// The reach reads the container's own child bounds, and those can be right
+/// while the paint walk puts the rows somewhere else. The surface paints its own
+/// fill, so a transcript whose children never reach the glass still photographs
+/// as a healthy box: three of tonight's readings said `RowsInside` over a region
+/// with no ink in it at all. This canvas is the last child, one pixel tall, and
+/// it writes the box it was painted into. No line means no child of the
+/// transcript was painted; a line outside the box means the rows are translated
+/// somewhere the reader cannot see; a line inside it means the rows are painted
+/// and the emptiness is their content.
+fn row_paint_witness() -> impl IntoElement {
+    canvas(
+        |_bounds, _window, _cx| (),
+        |bounds, (), _window, _cx| {
+            static LAST_MS: AtomicU64 = AtomicU64::new(0);
+            let now_ms = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |elapsed| elapsed.as_millis() as u64);
+            if now_ms.saturating_sub(LAST_MS.load(Ordering::Relaxed)) < 2_000 {
+                return;
+            }
+            LAST_MS.store(now_ms, Ordering::Relaxed);
+            crate::logging::info(&format!(
+                "transcript row paint: box {:.1}..{:.1}px by {:.1}..{:.1}px",
+                f32::from(bounds.left()),
+                f32::from(bounds.right()),
+                f32::from(bounds.top()),
+                f32::from(bounds.bottom())
+            ));
+        },
+    )
+    .w_full()
+    .h(px(1.0))
 }
 
 // A render entry point, so its arguments are the frame it draws rather than a
@@ -5430,7 +5517,8 @@ pub fn view(
             let turns = state.turns.len();
             move |_children, window, _cx| {
                 let reach = row_reach(&reach_scroll);
-                witness_row_reach(reach, turns, content_width);
+                let shape = row_shape(&reach_scroll);
+                witness_row_reach(reach, turns, content_width, shape);
                 if reach.is_blank() {
                     let x = reach_scroll.offset().x;
                     reach_scroll.set_offset(point(x, px(reach.bottom_offset())));
@@ -5782,6 +5870,7 @@ pub fn view(
             },
         ));
     }
+    col = col.child(row_paint_witness());
     // Releasing the mouse ends the drag and copies the selected range (#2383,
     // #2529). A click that never moved selects nothing, so it copies nothing
     // and says nothing. A copy that landed drops the highlight and tells the

@@ -2649,7 +2649,14 @@ impl Render for Dashboard {
                     },
                 )
                 .into_any_element();
-                let primary = if measure < primary_width {
+                // TEMPORARY (#2981): this wrapper is the one element a split
+                // never touches and a single pane always does, so it runs
+                // switched off here until the black chat is named. The split
+                // panes are clean and the single pane is not, and this is the
+                // only line that differs between them. Restore before the fix
+                // lands.
+                let wrapped = std::env::var_os("OC_MEASURE_COLUMN").is_some();
+                let primary = if wrapped && measure < primary_width {
                     chat_measure_column(primary, measure)
                 } else {
                     primary
