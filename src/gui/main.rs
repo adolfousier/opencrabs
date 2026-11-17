@@ -6652,7 +6652,10 @@ mod tests {
         let ledger = DASHBOARD
             .find("let db_path = ledger_path();")
             .expect("the window still resolves its ledger");
-        assert!(parse < ledger, "the flag has to be answered before the ledger");
+        assert!(
+            parse < ledger,
+            "the flag has to be answered before the ledger"
+        );
     }
 
     /// A live turn repaints on every fourth poll tick, not on every one. The
