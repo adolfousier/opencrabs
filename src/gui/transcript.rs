@@ -3492,33 +3492,36 @@ fn live_card(
     };
     let (lead, _) = live_status_line(live);
     let lines = live_card_lines(live);
-    // Every paragraph the turn has spoken leads the card, in the order it
-    // spoke them (#2816). The prose is what the turn concluded and the calls
-    // are only what it ran, so a card that put the tool block on top read
-    // bottom up: the row a reader sees first named the command and the
-    // sentence explaining it sat underneath.
+    // The paragraph the newest intermediate opened with leads the card
+    // (#2816). The prose is what the turn concluded and the calls are only what
+    // it ran, so a card that put the tool block on top read bottom up: the row a
+    // reader sees first named the command and the sentence explaining it sat
+    // underneath.
     //
-    // It is every paragraph, not only the newest. A turn narrates between its
-    // calls, and a closed card that previewed one paragraph hid the rest of
-    // what it had just said until the reader opened the fold. The stream is
-    // what the card exists to show; opening it still prints every paragraph
-    // with its full body.
+    // It is one paragraph, not the whole stream (#3008). A turn narrates
+    // between its calls, and drawing every paragraph it had ever spoken turned
+    // one card into a wall of prose that grew with the turn. The preview is the
+    // intermediate that is happening now: it shows that paragraph and replaces
+    // it when the next one arrives, so the card stays one sentence tall while
+    // the turn runs and the reader still sees it speaking.
     //
-    // `collapsed_narration` is the gate: it answers whether the turn has said
-    // anything at all, and a card that has said nothing keeps the top of its
-    // head exactly as it was.
-    let prose: Vec<(usize, String)> = if expanded || collapsed_narration(live).is_none() {
+    // `collapsed_narration` is the gate and the text both: it answers whether
+    // the turn has said anything at all, and a card that has said nothing keeps
+    // the top of its head exactly as it was.
+    let prose: Vec<(usize, String)> = if expanded {
         Vec::new()
     } else {
+        let newest = collapsed_narration(live);
         lines
             .iter()
-            .filter_map(|(entry, line)| match line {
-                LiveCardLine::Narration(text) => {
-                    let paragraph = collapsed_paragraph(text);
-                    (!paragraph.is_empty()).then_some((*entry, paragraph))
+            .rev()
+            .find_map(|(entry, line)| match line {
+                LiveCardLine::Narration(text) if Some(collapsed_paragraph(text)) == newest => {
+                    Some((*entry, collapsed_paragraph(text)))
                 }
                 _ => None,
             })
+            .into_iter()
             .collect()
     };
     // What the card was handed, written when it changes. A closed card that
@@ -3878,8 +3881,8 @@ fn live_block(
     )
 }
 
-/// How much of the newest narration the collapsed card previews. The preview is
-/// a summary line, not the paragraph: the body carries the full text once the
+/// How much of one narration the collapsed card previews. The preview is a
+/// summary line, not the paragraph: the body carries the full text once the
 /// card is opened.
 const COLLAPSED_NARRATION_CHARS: usize = 280;
 
@@ -3890,7 +3893,8 @@ const COLLAPSED_NARRATION_CHARS: usize = 280;
 /// card is expanded.
 ///
 /// The session rail reads it too (#2816): a card's live line leads with the
-/// paragraph the turn last spoke, so both surfaces clip the prose the same way.
+/// paragraph the newest intermediate opened with, so both surfaces clip the
+/// prose the same way.
 pub(crate) fn collapsed_narration(live: &LiveTurn) -> Option<String> {
     live.narration()
         .last()
@@ -3900,6 +3904,12 @@ pub(crate) fn collapsed_narration(live: &LiveTurn) -> Option<String> {
 
 /// One paragraph flattened to a single line and clipped (#2731).
 ///
+/// The paragraph is the first one the narration holds, not the whole text. A
+/// turn that spoke several paragraphs used to preview all of them run together
+/// on one line, so the card led with a wall of prose and the sentence the turn
+/// actually opened with was buried in it. Every intermediate now previews the
+/// paragraph it started with.
+///
 /// gpui's line_clamp shapes each newline-separated line against the budget left
 /// over from the lines before it, and subtracts with overflow when an earlier
 /// line already wrapped past the clamp, aborting the window. A single source
@@ -3907,8 +3917,23 @@ pub(crate) fn collapsed_narration(live: &LiveTurn) -> Option<String> {
 /// run to one space removes the trigger. The rail shares the rule (#2816) so a
 /// card and the pane never clip the same sentence differently.
 pub(crate) fn collapsed_paragraph(text: &str) -> String {
-    let flat = text.split_whitespace().collect::<Vec<_>>().join(" ");
-    fit(&flat, COLLAPSED_NARRATION_CHARS)
+    let mut first = String::new();
+    for line in text.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            // A blank line ends the paragraph. Leading blanks are skipped so a
+            // narration that opens with one still previews its first sentence.
+            if !first.is_empty() {
+                break;
+            }
+            continue;
+        }
+        if !first.is_empty() {
+            first.push(' ');
+        }
+        first.push_str(line);
+    }
+    fit(&first, COLLAPSED_NARRATION_CHARS)
 }
 
 /// Pointer state shared by every exact live entry.
@@ -8814,10 +8839,11 @@ mod tests {
     }
 
     /// Narration is the card's own summary, never a chat row of its own: the
-    /// closed card streams every paragraph the turn has spoken inside its
-    /// frame, and the body prints them in order with their full bodies once
-    /// the card is opened. `collapsed_narration` names the newest one, which
-    /// is the gate the card asks before it draws any prose at all.
+    /// closed card previews the first paragraph of the intermediate that is
+    /// happening now and replaces it when the next one arrives, and the body
+    /// prints every paragraph in order with its full body once the card is
+    /// opened. `collapsed_narration` names the newest one, which is the gate
+    /// the card asks before it draws any prose at all.
     #[test]
     fn narration_previews_inside_the_collapsed_card() {
         let mut live = LiveTurn::default();
@@ -8890,6 +8916,36 @@ mod tests {
         assert!(
             !preview.contains("  "),
             "whitespace runs collapse to a single space"
+        );
+    }
+
+    /// The preview is the paragraph the narration opened with, not every
+    /// paragraph run together (#3008). A turn narrates between its calls, and a
+    /// preview that flattened all of them spent its budget on a wall of prose:
+    /// the card led with three paragraphs smeared onto one line and the first
+    /// sentence was the only part of it a reader could place.
+    #[test]
+    fn a_collapsed_preview_is_the_first_paragraph_only() {
+        let mut live = LiveTurn::default();
+        live.begin("go".into());
+        live.push_narration(
+            "Reading the pane now.\nAnd a second line of it.\n\nThe tail paragraph \
+             the preview must never reach.",
+        );
+        let preview = collapsed_narration(&live).expect("a preview");
+        assert_eq!(
+            preview, "Reading the pane now. And a second line of it.",
+            "the paragraph's own lines join, and the next paragraph stays out"
+        );
+
+        // A narration that opens with blank lines still previews its first
+        // sentence rather than nothing at all.
+        let mut padded = LiveTurn::default();
+        padded.begin("go".into());
+        padded.push_narration("\n\n  Leading blanks first.\n\nSecond paragraph.");
+        assert_eq!(
+            collapsed_narration(&padded).as_deref(),
+            Some("Leading blanks first.")
         );
     }
 
