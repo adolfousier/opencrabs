@@ -118,8 +118,8 @@ use crate::overlays::{
     topic_prompt_overlay, update_prompt_overlay, warning_overlay,
 };
 use crate::pane_chrome::{
-    central, chat_measure, chat_measure_column, pane_composer_dim, rotation_chord, split_chord,
-    split_pane_width, window_footer_yields,
+    central, chat_measure, pane_composer_dim, rotation_chord, split_chord, split_pane_width,
+    window_footer_yields,
 };
 use crate::pane_layout::{PanesCtx, pane_element};
 use crate::pane_view::PaneView;
@@ -2647,24 +2647,24 @@ impl Render for Dashboard {
                         copy: message_copy.clone(),
                         copied: self.copied_row(),
                     },
-                )
-                .into_any_element();
-                // TEMPORARY (#2981): this wrapper is the one element a split
-                // never touches and a single pane always does, so it runs
-                // switched off here until the black chat is named. The split
-                // panes are clean and the single pane is not, and this is the
-                // only line that differs between them. Restore before the fix
-                // lands.
-                let wrapped = std::env::var_os("OC_MEASURE_COLUMN").is_some();
-                let primary = if wrapped && measure < primary_width {
-                    chat_measure_column(primary, measure)
+                );
+                // The conversation takes the measure and the column centres it
+                // (#2586). The cap goes on the transcript itself instead of on
+                // a wrapper element: that wrapper was the one node a single
+                // pane had and a split never did, and it is what the black
+                // chat came from (#2981). Nothing here adds an element to the
+                // surface's tree, it only gives the surface its width. The
+                // width is set while the view is still its own type, because
+                // an erased element takes no style.
+                let primary = if centred_chat {
+                    primary.w(px(measure)).into_any_element()
                 } else {
-                    primary
+                    primary.into_any_element()
                 };
                 // The panes come from the tree (#2472): one leaf is the
                 // window as it was, and each split adds a divider and the
                 // panes its children hold.
-                let body = self.panes_body(primary.into_any_element(), pane_width, true, cx);
+                let body = self.panes_body(primary, pane_width, true, cx);
                 (
                     div()
                         .flex()
@@ -2672,6 +2672,11 @@ impl Render for Dashboard {
                         .flex_1()
                         .min_h_0()
                         .gap_2()
+                        // A capped surface is centred by its parent, so the
+                        // slack falls to both margins and the chrome under it
+                        // keeps the same axis. A split never reaches this: its
+                        // measure is its own width.
+                        .when(centred_chat, |d| d.items_center())
                         .child(body)
                         .into_any_element(),
                     if window_footer_yields(pane_count) {
@@ -6632,7 +6637,11 @@ mod tests {
             .split_once("let primary = transcript::view(")
             .expect("primary Chat transcript call exists");
         let (call, _) = primary
-            .split_once(".into_any_element();")
+            // The call ends at the erase site, which now sits in the width
+            // branch rather than on the call itself (#2981): a semicolon no
+            // longer follows the call, and matching one runs the slice past
+            // unrelated code.
+            .split_once(".into_any_element()")
             .expect("primary Chat transcript call ends");
         assert!(
             call.contains("measure,"),
@@ -6660,7 +6669,8 @@ mod tests {
             .split_once("let primary = transcript::view(")
             .expect("primary Chat transcript call exists");
         let (call, _) = after
-            .split_once(".into_any_element();")
+            // The erase site, for the same reason as the test above (#2981).
+            .split_once(".into_any_element()")
             .expect("primary Chat transcript call ends");
         assert!(
             call.contains(&["drag: Some(self.copy_", "drag.clone()),"].concat()),

@@ -1,16 +1,26 @@
-//! The conversation never collapses to nothing (#2985).
+//! The conversation keeps its floor and its measure (#2985, #2981).
 //!
 //! The window has no headless harness, so these checks read source.
 //!
-//! The bug they pin: the wrappers around the transcript declared `min_h_0()`,
-//! which throws away the floor the transcript asks for. A flex item with a zero
-//! basis takes none of the shrink and all of the loss, so when the plan card,
-//! the queue strip, the suggested options and a tall draft together outgrew the
-//! window, the conversation was handed zero height and clipped out. The region
-//! then painted as the window background: a chat that goes completely black.
-//! Nothing failed and nothing logged, because a layout that legally resolves to
-//! zero is not an error, which is why the report arrived with no evidence
-//! beside it. Both wrappers and the witness that watches them are pinned here.
+//! Two bugs are pinned here, both about the wrapper that used to sit between a
+//! single pane and the transcript.
+//!
+//! The first: that wrapper declared `min_h_0()`, which throws away the floor
+//! the transcript asks for. A flex item with a zero basis takes none of the
+//! shrink and all of the loss, so when the plan card, the queue strip, the
+//! suggested options and a tall draft together outgrew the window, the
+//! conversation was handed zero height and clipped out. The region then painted
+//! as the window background: a chat that goes completely black. Nothing failed
+//! and nothing logged, because a layout that legally resolves to zero is not an
+//! error.
+//!
+//! The second: the wrapper was also the one node a single pane had and a split
+//! never did, and a single pane drew a black chat through it while the split
+//! panes beside it were clean (#2981). It is gone now. The cap rides on the
+//! transcript itself and the column centres it, so the surface keeps the tree
+//! it is drawn in and still lands on the axis the chrome under it uses.
+
+use crate::tests::gui_dashboard_source::DASHBOARD;
 
 const PANE_CHROME: &str = include_str!("../gui/pane_chrome.rs");
 const PANE_VIEW: &str = include_str!("../gui/pane_view.rs");
@@ -19,7 +29,7 @@ const PANE_VIEW: &str = include_str!("../gui/pane_view.rs");
 /// at the same indent.
 ///
 /// The scans below have to look inside a single function: `min_h_0()` is right
-/// in dozens of places in this tree and wrong in exactly the two wrappers this
+/// in dozens of places in this tree and wrong in exactly the wrapper this
 /// module is about, so a file-wide search would be meaningless.
 fn fn_body<'a>(src: &'a str, needle: &str) -> &'a str {
     let at = src
@@ -36,31 +46,48 @@ fn fn_body<'a>(src: &'a str, needle: &str) -> &'a str {
     tail.split(&close).next().unwrap_or(tail)
 }
 
-#[test]
-fn the_measure_column_carries_the_floor_at_both_levels() {
-    let body = fn_body(PANE_CHROME, "pub(crate) fn chat_measure_column");
-    // The outer flex item and the inner column: the floor has to survive both
-    // levels, because the inner one alone is still inside a parent that may
-    // have been handed zero.
-    assert_eq!(
-        body.matches(".min_h(px(CONVERSATION_FLOOR))").count(),
-        2,
-        "the outer row and the inner column both need the conversation floor"
-    );
-    assert!(
-        !body.contains(".min_h_0()"),
-        "a zero floor discards the transcript's own min height (#2985)"
-    );
-}
-
 /// The source with every space and newline removed.
 ///
 /// A builder chain is one expression however the formatter wrapped it, so the
 /// chain is compared without its whitespace. Comments lose their line breaks
 /// too, which is why the markers below stay short enough that no comment in
-/// these two files can accidentally spell one.
+/// these files can accidentally spell one.
 fn compact(src: &str) -> String {
     src.chars().filter(|c| !c.is_whitespace()).collect()
+}
+
+#[test]
+fn the_single_pane_caps_the_surface_and_centres_it() {
+    // #2981: the cap is the transcript's own width now, and the column that
+    // holds it centres it. The surface is drawn in the tree it always had, so
+    // there is no extra flex level for a single pane to lose its rows in.
+    let flat = compact(DASHBOARD);
+    assert!(
+        flat.contains(
+            "letprimary=ifcentred_chat{primary.w(px(measure)).into_any_element()}else{primary.into_any_element()};"
+        ),
+        "the capped surface takes the measure as its own width"
+    );
+    assert!(
+        flat.contains(".when(centred_chat,|d|d.items_center())"),
+        "the column centres the capped surface, or the chat reads left of its own chrome"
+    );
+}
+
+#[test]
+fn the_wrapper_that_blacked_the_single_pane_is_gone() {
+    // #2981: a single pane drew a black chat through this wrapper while the
+    // split panes beside it were clean, and the wrapper was the only element
+    // that differed between them. A wrapper that comes back without a fix for
+    // that is the same black screen again.
+    assert!(
+        !PANE_CHROME.contains("pub(crate) fn chat_measure_column"),
+        "the single pane's measure wrapper is back"
+    );
+    assert!(
+        !PANE_CHROME.contains("fn paint_witness"),
+        "the wrapper's paint witness outlived the wrapper it watched"
+    );
 }
 
 #[test]
@@ -88,19 +115,21 @@ fn the_floor_is_the_one_number_the_transcript_asks_for() {
 }
 
 #[test]
-fn the_collapse_witness_watches_both_paths() {
+fn the_collapse_witness_still_watches_the_split_pane() {
     assert!(
         PANE_CHROME.contains("pub(crate) fn witness_conversation_height"),
         "the witness exists, so a black chat leaves a line behind"
     );
-    let body = fn_body(PANE_CHROME, "pub(crate) fn chat_measure_column");
+    let leaf = fn_body(PANE_VIEW, "pub(crate) fn leaf_box");
     assert!(
-        body.contains("witness_conversation_height("),
-        "the single pane reports its conversation height"
-    );
-    assert!(
-        PANE_VIEW.contains(".on_children_prepainted(move |bounds, _window, _cx| {")
-            && PANE_VIEW.contains("witness_conversation_height("),
+        leaf.contains("witness_conversation_height("),
         "the split pane reports its conversation height"
+    );
+    // The single pane needs no second witness: the transcript reads its own
+    // box and its own rows every frame it paints, and names the frame in the
+    // log when they disagree (#2981).
+    assert!(
+        !PANE_VIEW.contains("chat_measure_column"),
+        "the split pane never took the measure wrapper, and still must not"
     );
 }
