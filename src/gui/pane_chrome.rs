@@ -15,7 +15,7 @@
 
 use gpui::{
     AnyElement, App, ClickEvent, CursorStyle, IntoElement, MouseButton, MouseDownEvent,
-    SharedString, Window, div, prelude::*, px, relative, rgb, rgba,
+    SharedString, Window, canvas, div, prelude::*, px, relative, rgb, rgba,
 };
 use opencrabs::ui_core::card;
 use opencrabs::ui_core::card::{CARD_RADIUS, glass_fill};
@@ -23,7 +23,7 @@ use opencrabs::ui_core::pane_tree::DropHalf;
 use opencrabs::ui_core::split;
 use uuid::Uuid;
 
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 
 use crate::{Dashboard, PaneDrag, PaneGhost, logging, palette, transcript};
 
@@ -451,9 +451,46 @@ pub(crate) fn chat_measure_column(view: AnyElement, width: f32) -> AnyElement {
                 .w(px(width))
                 .min_w_0()
                 .min_h(px(CONVERSATION_FLOOR))
-                .child(view),
+                .child(view)
+                .child(paint_witness()),
         )
         .into_any_element()
+}
+
+/// One line every two seconds while the conversation reaches the paint walk
+/// (#2981).
+///
+/// A surface can keep a healthy box and still paint nothing, and a paint that
+/// never ran is a different bug from a paint that was clipped away. This canvas
+/// rides in the same walk as the conversation, draws nothing a reader can see,
+/// and writes the box it was given: if a blackout comes with no line, the walk
+/// never reached the conversation at all.
+fn paint_witness() -> impl IntoElement {
+    canvas(
+        |_bounds, _window, _cx| (),
+        |bounds, (), _window, _cx| {
+            static LAST_MS: AtomicU64 = AtomicU64::new(0);
+            let now_ms = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |elapsed| elapsed.as_millis() as u64);
+            if now_ms.saturating_sub(LAST_MS.load(Ordering::Relaxed)) < 2_000 {
+                return;
+            }
+            LAST_MS.store(now_ms, Ordering::Relaxed);
+            logging::info(&format!(
+                "conversation paint: box {:.1}..{:.1}px by {:.1}..{:.1}px",
+                f32::from(bounds.left()),
+                f32::from(bounds.right()),
+                f32::from(bounds.top()),
+                f32::from(bounds.bottom())
+            ));
+        },
+    )
+    .absolute()
+    .top_0()
+    .left_0()
+    .w(px(2.0))
+    .h(px(2.0))
 }
 
 /// The same centred column for the chat's chrome (#2588): the plan card, the

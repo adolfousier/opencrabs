@@ -30,7 +30,7 @@ use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::ops::Range;
 use std::rc::Rc;
-use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
 
 use gpui::{
     AbsoluteLength, AnyElement, App, ClickEvent, Div, HighlightStyle, MouseButton, MouseDownEvent,
@@ -3212,6 +3212,37 @@ pub fn live_slot_sequence(live: &LiveTurn, rows: &[Message], slot: LiveSlot) -> 
         .map(|row| row.sequence)
 }
 
+/// One line when the card's own shape changes (#2981).
+///
+/// The counts are the whole question a missing narration asks: paragraphs in
+/// state, paragraphs drawn above the head, and whether the card is open. A
+/// closed card with narration in state and no prose drawn is a bug in this
+/// function; a closed card with zero narration and reasoning on the entry list
+/// is a provider that narrated into the wrong field, and no amount of drawing
+/// would show it.
+fn witness_card_shape(live: &LiveTurn, expanded: bool, prose: usize) {
+    static LAST: AtomicU64 = AtomicU64::new(u64::MAX);
+    let narration = live.narration().count().min(255) as u64;
+    let reasoning = live
+        .entries
+        .iter()
+        .filter(|entry| matches!(entry, LiveEntry::Reasoning(_)))
+        .count()
+        .min(255) as u64;
+    let tools = live.tools.len().min(255) as u64;
+    let prose = prose.min(255) as u64;
+    let shape =
+        narration | (reasoning << 8) | (tools << 16) | (prose << 24) | (u64::from(expanded) << 32);
+    if LAST.swap(shape, Ordering::Relaxed) == shape {
+        return;
+    }
+    crate::logging::info(&format!(
+        "live card: {narration} narration in state, {reasoning} reasoning, \
+         {tools} tool calls, {prose} paragraphs drawn above the head, expanded \
+         {expanded}"
+    ));
+}
+
 /// The card's body as data: every entry in order, resolved against the rows it
 /// names. The original entry index travels with the line so a menu acts on the
 /// exact row that was pressed, even when a stale tool index draws nothing.
@@ -3490,6 +3521,12 @@ fn live_card(
             })
             .collect()
     };
+    // What the card was handed, written when it changes. A closed card that
+    // draws no prose can be a turn that never narrated, a turn whose
+    // paragraphs arrived as reasoning, or a card that dropped them, and those
+    // are three different answers. The report only ever says "the narration is
+    // gone", so the card says the rest itself.
+    witness_card_shape(live, expanded, prose.len());
     // The head is another rendering of one exact tool entry, not a separate
     // menu target. Resolve the same running-or-last call used by the label.
     let activity_entry = if live.stopped {
@@ -5139,6 +5176,13 @@ pub struct RowReach {
     pub viewport_top: f32,
     /// The bottom edge of that box.
     pub viewport_bottom: f32,
+    /// The left edge of that box. A surface whose box lost its width paints
+    /// nothing at all: the fill quad has no width to draw, and the rows are
+    /// clipped by the surface's own overflow mask, which is that same box. The
+    /// region then reads as the window background (#2981).
+    pub viewport_left: f32,
+    /// The right edge of that box.
+    pub viewport_right: f32,
     /// How many rows the surface holds.
     pub rows: usize,
 }
@@ -5214,6 +5258,8 @@ pub fn row_reach(scroll: &ScrollHandle) -> RowReach {
         max_offset: f32::from(scroll.max_offset().height),
         viewport_top: f32::from(viewport.top()),
         viewport_bottom: f32::from(viewport.bottom()),
+        viewport_left: f32::from(viewport.left()),
+        viewport_right: f32::from(viewport.right()),
         rows,
     }
 }
@@ -5247,13 +5293,38 @@ pub fn witness_row_reach(reach: RowReach, turns: usize, content_width: f32) {
     // after the first occurrence, and the second one would write nothing.
     let was_starved = STARVED.swap(starved, Ordering::Relaxed);
     let entered_starved = starved && !was_starved;
-    if !changed && !entered_starved {
+    // A frame that reads healthy can still be a blackout (#2981): these
+    // numbers are written on a crossing, so a surface that kept the same frame
+    // while it painted nothing wrote nothing at all, and every report of the
+    // bug arrived without the one number that names it. A running turn beats
+    // every two seconds instead, and a box that has gone non-finite says so
+    // rather than printing a value nobody can compare.
+    static LAST_BEAT_MS: AtomicU64 = AtomicU64::new(0);
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_millis() as u64);
+    let beat = turns > 0 && now_ms.saturating_sub(LAST_BEAT_MS.load(Ordering::Relaxed)) >= 2_000;
+    if !changed && !entered_starved && !beat {
         return;
     }
+    LAST_BEAT_MS.store(now_ms, Ordering::Relaxed);
+    let finite = [
+        reach.offset,
+        reach.max_offset,
+        reach.content_bottom,
+        content_width,
+        reach.viewport_top,
+        reach.viewport_bottom,
+        reach.viewport_left,
+        reach.viewport_right,
+    ]
+    .iter()
+    .all(|value| value.is_finite());
     crate::logging::info(&format!(
-        "transcript frame: {:?}, {} turns in state, {} rows built, offset {:.1}px, max {:.1}px, \
-         over-measure {:.1}px, content bottom {:.1}px, row width {:.1}px, window \
-         {:.1}..{:.1}px ({:.1}px tall)",
+        "transcript frame{}: {:?}, {} turns in state, {} rows built, offset {:.1}px, max {:.1}px, \
+         over-measure {:.1}px, content bottom {:.1}px, row width {:.1}px, box \
+         {:.1}..{:.1}px by {:.1}..{:.1}px ({:.1}px tall, {:.1}px wide)",
+        if finite { "" } else { " (non-finite)" },
         reach.frame(),
         turns,
         reach.rows,
@@ -5262,9 +5333,12 @@ pub fn witness_row_reach(reach: RowReach, turns: usize, content_width: f32) {
         reach.over_measure(),
         reach.content_bottom,
         content_width,
+        reach.viewport_left,
+        reach.viewport_right,
         reach.viewport_top,
         reach.viewport_bottom,
-        reach.viewport_height()
+        reach.viewport_height(),
+        reach.viewport_right - reach.viewport_left
     ));
 }
 
@@ -5747,6 +5821,8 @@ mod tests {
             max_offset,
             viewport_top: 42.0,
             viewport_bottom: 934.0,
+            viewport_left: 300.0,
+            viewport_right: 1_300.0,
             rows,
         }
     }
@@ -5832,6 +5908,8 @@ mod tests {
             max_offset: -108.0,
             viewport_top: 42.0,
             viewport_bottom: 42.0,
+            viewport_left: 300.0,
+            viewport_right: 1_300.0,
             rows: 26,
         };
         assert_eq!(collapsed.viewport_height(), 0.0);
