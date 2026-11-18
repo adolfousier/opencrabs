@@ -30,7 +30,6 @@ use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::ops::Range;
 use std::rc::Rc;
-use std::sync::atomic::{AtomicU64, Ordering};
 
 use gpui::{
     AbsoluteLength, AnyElement, App, ClickEvent, Div, HighlightStyle, MouseButton, MouseDownEvent,
@@ -3212,37 +3211,6 @@ pub fn live_slot_sequence(live: &LiveTurn, rows: &[Message], slot: LiveSlot) -> 
         .map(|row| row.sequence)
 }
 
-/// One line when the card's own shape changes (#2981).
-///
-/// The counts are the whole question a missing narration asks: paragraphs in
-/// state, paragraphs drawn above the head, and whether the card is open. A
-/// closed card with narration in state and no prose drawn is a bug in this
-/// function; a closed card with zero narration and reasoning on the entry list
-/// is a provider that narrated into the wrong field, and no amount of drawing
-/// would show it.
-fn witness_card_shape(live: &LiveTurn, expanded: bool, prose: usize) {
-    static LAST: AtomicU64 = AtomicU64::new(u64::MAX);
-    let narration = live.narration().count().min(255) as u64;
-    let reasoning = live
-        .entries
-        .iter()
-        .filter(|entry| matches!(entry, LiveEntry::Reasoning(_)))
-        .count()
-        .min(255) as u64;
-    let tools = live.tools.len().min(255) as u64;
-    let prose = prose.min(255) as u64;
-    let shape =
-        narration | (reasoning << 8) | (tools << 16) | (prose << 24) | (u64::from(expanded) << 32);
-    if LAST.swap(shape, Ordering::Relaxed) == shape {
-        return;
-    }
-    crate::logging::info(&format!(
-        "live card: {narration} narration in state, {reasoning} reasoning, \
-         {tools} tool calls, {prose} paragraphs drawn above the head, expanded \
-         {expanded}"
-    ));
-}
-
 /// The card's body as data: every entry in order, resolved against the rows it
 /// names. The original entry index travels with the line so a menu acts on the
 /// exact row that was pressed, even when a stale tool index draws nothing.
@@ -3524,12 +3492,6 @@ fn live_card(
             .into_iter()
             .collect()
     };
-    // What the card was handed, written when it changes. A closed card that
-    // draws no prose can be a turn that never narrated, a turn whose
-    // paragraphs arrived as reasoning, or a card that dropped them, and those
-    // are three different answers. The report only ever says "the narration is
-    // gone", so the card says the rest itself.
-    witness_card_shape(live, expanded, prose.len());
     // The head is another rendering of one exact tool entry, not a separate
     // menu target. Resolve the same running-or-last call used by the label.
     let activity_entry = if live.stopped {
